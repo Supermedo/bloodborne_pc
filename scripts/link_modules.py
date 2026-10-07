@@ -10,9 +10,11 @@ libSceLibcInternal are served by libc.prx's same-NID exports: the internal
 library is not shipped with the game and exposes the same functions.
 Output: out/boot-linked.bin (format BBPROBE5) and out/link.json.
 """
+import bisect
 import collections
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 from prepare import parse_self, span, unpack
@@ -20,6 +22,9 @@ from link_libc import encode_id
 
 DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
+RED_ZONE_SITES = Path(__file__).resolve().parent.parent / 'patches' / 'redzone.json'
+LEA_DOWN = bytes.fromhex('488d642480')        # lea rsp, [rsp-0x80]
+LEA_UP = bytes.fromhex('488da42480000000')    # lea rsp, [rsp+0x80]
 
 
 def module(path):
@@ -89,7 +94,40 @@ def patch_fs_loads(image, ph, base):
     return patched
 
 
-def link(game, out, module_names=DEFAULT_MODULES):
+def protect_red_zones(image, sites, base, skip=()):
+    """Run guest stores of red-zone leaf functions with rsp 128 bytes lower (Windows).
+
+    Where Windows saves extended state in the compact XSAVE layout (Intel 12th gen and later),
+    an exception's frame holds the AVX registers up to 0x28 bytes below rsp, over the System V
+    red zone where leaf functions keep live locals (PS4 and Linux leave those 128 bytes alone).
+    A store that faults on a page the GPU tracker write-protected is resumed with the locals
+    overwritten: the attack-trail writer at 0x28ce7b0 then loads NULL from [rsp-0x60]. Each site
+    (tools/redzone_sites.py: offset, original bytes, instruction lengths, negative = store)
+    jumps to a copy at `base` where the stores run below the red zone. Sites whose bytes
+    differ or that overlap a relocation (`skip`: sorted targets) stay as they are. Returns
+    the copies and the number of sites redirected."""
+    code = bytearray()
+    applied = 0
+    for offset, original, lengths in sites:
+        original = bytes.fromhex(original)
+        end = offset + len(original)
+        near = bisect.bisect_right(skip, offset - 8)
+        if image[offset:end] != original or (near < len(skip) and skip[near] < end):
+            continue
+        here = base + len(code)
+        pos = offset
+        for length in lengths:
+            body = image[pos:pos + abs(length)]
+            code += LEA_DOWN + body + LEA_UP if length < 0 else body
+            pos += abs(length)
+        code += b'\xe9' + struct.pack('<i', end - (base + len(code) + 5))
+        code += b'\xcc' * (-len(code) % 16)
+        image[offset:end] = b'\xe9' + struct.pack('<i', here - (offset + 5)) + b'\xcc' * (len(original) - 5)
+        applied += 1
+    return bytes(code), applied
+
+
+def link(game, out, module_names=DEFAULT_MODULES, red_zones=os.name == 'nt'):
     main = module(game / 'eboot.bin')
     raw = (out / 'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)
@@ -196,6 +234,14 @@ def link(game, out, module_names=DEFAULT_MODULES):
                           tls_relocations=tls_relocations, exports=count, sha256=m['sha256']))
         base = (base + modsize + 65535) & ~65535
 
+    red_zone_sites = 0
+    if red_zones and RED_ZONE_SITES.is_file():
+        sites = json.loads(RED_ZONE_SITES.read_text())['sites']
+        code, red_zone_sites = protect_red_zones(image, sites, base, sorted(r[0] for r in relocs))
+        if code:
+            image.extend(bytes(base - len(image)) + code)
+            segments.append((base, len(code), 5))
+
     bindings, unresolved = [], []
     for identity, index in identities.items():
         found = exports.get(identity)
@@ -235,12 +281,13 @@ def link(game, out, module_names=DEFAULT_MODULES):
         f.write(image)
     report = dict(modules=[{k: (hex(v) if k in ('base', 'init', 'tls_address') else v) for k, v in t.items()} for t in table],
                   bindings=len(bindings), imports=len(names), fs_loads_patched=fs_patched,
+                  red_zone_sites=red_zone_sites,
                   main_tls=dict(zip(('vaddr', 'filesz', 'memsz', 'align'), main_tls_values)),
                   unresolved_imports=unresolved)
     (out / 'link.json').write_text(json.dumps(report, indent=2) + '\n')
     summary = ', '.join(f"{t['file']}@{t['base']:#x}" for t in table)
     print(f'Linked modules: {summary}; {len(bindings)} native bindings, {len(unresolved)} imports left to the host runtime, '
-          f'fs->gs patched={fs_patched}')
+          f'fs->gs patched={fs_patched}, red-zone-safe stores at {red_zone_sites} sites')
 
 
 if __name__ == '__main__':
