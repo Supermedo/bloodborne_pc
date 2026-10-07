@@ -213,6 +213,14 @@ if (WIN32)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
+if (WIN32)
+    add_executable(file-windows-test EXCLUDE_FROM_ALL ../tests/test_file_windows.c ../src/compat_win.c)
+    set_target_properties(file-windows-test PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
+    target_compile_options(file-windows-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(file-windows-test PRIVATE ../src)
+    target_link_libraries(file-windows-test PRIVATE bcrypt -pthread)
+endif()
+
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
