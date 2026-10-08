@@ -79,8 +79,8 @@ and NVIDIA driver 615.71.09.
 Like the Windows zip, the AppImage contains everything the game needs (the launcher, FSR 4 and
 DLSS): no internet, no packages and no build tools, on any distribution.
 
-1. Download `Bloodborne-bbport-x86_64.AppImage` from
-   [Releases](https://github.com/TwoToneEddy/bloodborne_pc/releases).
+1. Download `Bloodborne-bbport-x86_64.AppImage` from the newest `linux-v` release on
+   [Releases](https://github.com/Supermedo/bloodborne_pc/releases).
 2. Make it executable (`chmod +x Bloodborne-bbport-x86_64.AppImage`, or in the file manager's
    properties) and start it.
 3. Choose your game folder (the one with `eboot.bin`) and press **PLAY**.
@@ -114,7 +114,7 @@ On Arch-based systems (CachyOS, EndeavourOS, Arch) one script installs the packa
 pacman (it asks for sudo), builds the game, builds the DLSS bridge on GeForce RTX systems, runs
 a DLSS self-test and adds the launcher to the application menu:
 
-    git clone --recursive -b linux_port https://github.com/TwoToneEddy/bloodborne_pc
+    git clone --recursive https://github.com/Supermedo/bloodborne_pc
     cd bloodborne_pc
     bash packaging/linux/setup-arch.sh
 
@@ -150,7 +150,7 @@ libraries of a pinned nixpkgs, and packs them with their whole library closure. 
 machine needs internet, git, curl, readelf (binutils) and Nix: an installed `nix`, or the
 single-file [nix-portable](https://github.com/DavHau/nix-portable) at
 `~/.local/bin/nix-portable` (no root needed; its store goes to `~/.nix-portable`, several GB).
-Run it in a separate checkout (`git worktree add ../bloodborne_pc-release linux_port`): its
+Run it in a separate checkout (`git worktree add --detach ../bloodborne_pc-release`): its
 `out/` then holds binaries that only run inside the AppImage. Upload the AppImage to a GitHub
 release.
 
