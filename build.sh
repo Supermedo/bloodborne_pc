@@ -33,8 +33,9 @@ MINGW*|MSYS*)
         # Exercise the optional bridge in the renderer tests when it was built.
         if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
             cp out/bbport_dlss.dll out/nvngx_dlss.dll out/gpu/
+            if [[ -f out/nvngx_dlssg.dll ]]; then cp out/nvngx_dlssg.dll out/gpu/; fi
         else
-            rm -f out/gpu/bbport_dlss.dll out/gpu/nvngx_dlss.dll
+            rm -f out/gpu/bbport_dlss.dll out/gpu/nvngx_dlss.dll out/gpu/nvngx_dlssg.dll
         fi
         ninja -C out/gpu bb-tests > out/test-build.log 2>&1 || {
             tail -50 out/test-build.log >&2; exit 1;

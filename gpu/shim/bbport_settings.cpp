@@ -37,6 +37,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                 v.upscaler = u;
             }
         }
+    } else if (key == "frame_generation") {
+        v.frame_generation = value == "fsr"    ? FrameGenerationFsr
+                             : value == "dlss" ? FrameGenerationDlss
+                                               : FrameGenerationOff;
     } else if (key == "preset") {
         v.preset = std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
@@ -142,11 +146,16 @@ void Load() {
             if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
         }
     }
-    const std::pair<const char*, const char*> env_keys[] = {
-        {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
-        {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
-        {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
-        {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+    const std::pair<const char *, const char *> env_keys[] = {
+        {"BB_FRAME_GENERATION", "frame_generation"},
+        {"BB_FSR_SHARPNESS", "sharpness"},
+        {"BB_JITTER", "jitter"},
+        {"BB_REACTIVE", "reactive"},
+        {"BB_REACTIVE_SCALE", "reactive_scale"},
+        {"BB_REACTIVE_THRESHOLD", "reactive_threshold"},
+        {"BB_REACTIVE_MAX", "reactive_max"},
+        {"BB_UPSCALE_PRESET", "preset"},
+        {"BB_OBJECT_MOTION", "object_motion"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -236,6 +245,9 @@ void Save() {
     put("reactive_max", fixed(v.reactive_max, 2));
     put("debug_view", std::to_string(v.debug_view.load()));
     put("show_fps", flag(v.show_fps));
+    put("frame_generation", v.frame_generation == FrameGenerationFsr    ? "fsr"
+                            : v.frame_generation == FrameGenerationDlss ? "dlss"
+                                                                        : "off");
     put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
     put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
     // Read by patches.py at start.

@@ -209,6 +209,9 @@ void Menu() {
     }
     ImGui::Text(BbSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)"),
                 frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f, frame_ms_avg);
+    if (s.frame_generation_active && s.frame_generation_render_ms > 0)
+        ImGui::Text(BbSettings::MenuText("FG 2x | Render: %.0f FPS", "FG 2x | Рендер: %.0f FPS"),
+                    1000.f / s.frame_generation_render_ms.load());
 
     ImGui::SeparatorText(BbSettings::MenuText("Temporal upscaler", "Временной апскейлер"));
     const char* upscalers[] = {
@@ -287,6 +290,28 @@ void Menu() {
             "когда отбросить прошлые кадры. Меняются сразу, без перезапуска."));
     }
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
+    static const char *fg_names[] = {"Off", "FSR 3.1.6 x2", "DLSS Frame Generation x2"};
+    int fg = s.frame_generation;
+    if (ImGui::BeginCombo(BbSettings::MenuText("Frame generation", "Генерация кадров"),
+                          fg_names[fg])) {
+        for (int i = 0; i < BbSettings::FrameGenerationCount; ++i) {
+            const bool available = i == 0 || (upscaler_on && (i == BbSettings::FrameGenerationFsr
+                                                                  ? s.fsr_fg_supported.load()
+                                                                  : s.dlss_fg_supported.load()));
+            ImGui::BeginDisabled(!available);
+            if (ImGui::Selectable(fg_names[i], i == fg))
+                Store(s.frame_generation, i, true);
+            ImGui::EndDisabled();
+        }
+        ImGui::EndCombo();
+    }
+    if (const auto *problem = s.frame_generation_problem.load())
+        ImGui::TextWrapped("%s", problem);
+    if (s.frame_generation != BbSettings::FrameGenerationOff)
+        Hint(BbSettings::MenuText("SDR gameplay only. Frame generation adds display frames; "
+                                  "simulation/input rate stays unchanged.",
+                                  "Только игра в SDR. Добавляет кадры вывода; частота симуляции и "
+                                  "ввода остаётся прежней."));
     const bool taa = s.upscaler == BbSettings::UpscalerTaa;
     ImGui::BeginDisabled(!upscaler_on);
     ImGui::BeginDisabled(taa);
@@ -590,6 +615,9 @@ void FpsCounter() {
                 : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
                 : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
                                                          : "");
+    if (s.frame_generation_active && s.frame_generation_render_ms > 0)
+        ImGui::Text(BbSettings::MenuText("FG 2x | Render: %.0f FPS", "FG 2x | Рендер: %.0f FPS"),
+                    1000.f / s.frame_generation_render_ms.load());
     ImGui::End();
 }
 

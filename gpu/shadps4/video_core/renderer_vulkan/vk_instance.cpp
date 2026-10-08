@@ -12,6 +12,7 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -193,6 +194,8 @@ Instance::~Instance() {
         dlss->Shutdown();
     }
     ImGui::Core::Shutdown(GetDevice());
+    (void)GetDevice().waitIdle();
+    Breadcrumbs::Shutdown(*this);
     vmaDestroyAllocator(allocator);
 }
 

@@ -170,7 +170,7 @@ TWEAKS = [
 INI_FLAGS = {'sharpen', 'object_motion', 'show_fps', *(k for k, _t, _o in EFFECTS + EXTRAS + CHEATS + TWEAKS)}
 INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': '0.50',
                 'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080', 'model_lod': '0',
-                'live_resolution': 'auto',
+                'live_resolution': 'auto', 'frame_generation': 'off',
                 **{key: '1' if on else '0' for key, _t, on in EFFECTS + EXTRAS + CHEATS + TWEAKS}}
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
@@ -195,6 +195,9 @@ UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('off', ('Off', 'Выключен'))]
 PRESETS = [('0', ('Native AA (×1.0)',)), ('1', ('Quality (×1.5)',)), ('2', ('Balanced (×1.7)',)),
            ('3', ('Performance (×2)',)), ('4', ('Ultra Performance (×3)',))]
+FRAME_GENERATION = [('off', ('Off', 'Выключена')),
+                    ('dlss', ('DLSS Frame Generation ×2 (RTX 40+)', 'DLSS генерация кадров ×2 (RTX 40+)')),
+                    ('fsr', ('FSR 3.1 Frame Generation ×2', 'FSR 3.1 генерация кадров ×2'))]
 OUTPUTS = [('1280x720', ('1280 × 720 (Steam Deck)',)), ('1920x1080', ('1920 × 1080',)),
            ('2560x1440', ('2560 × 1440',)), ('3840x2160', ('3840 × 2160 (4K)',))]
 LIVE = [('auto', ('Auto (by graphics card)', 'Авто (по видеокарте)')), ('0', ('Off (faster)', 'Выключена (быстрее)')),
@@ -808,13 +811,21 @@ class Launcher:
                  _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
                    'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
         self.row(f, _('Output resolution', 'Разрешение вывода'), self.choice(f, 'output_res', 'ini', OUTPUTS),
-                 _('What the upscaler produces; the HUD is drawn at this size too.',
-                   'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
+                 _('What the upscaler produces; the HUD is drawn at this size too. Match your monitor '
+                   '(2560x1440 for 1440p) to avoid an additional stretch of the reconstructed image.',
+                   'Что выдаёт апскейлер; интерфейс рисуется в этом же размере. Выберите разрешение монитора '
+                   '(2560x1440 для 1440p), чтобы готовая картинка не растягивалась повторно.'))
         self.row(f, _('Live resolution changes', 'Смена разрешения на лету'), self.choice(f, 'live_resolution', 'ini', LIVE),
                  _('Off: outputs other than 1080p are set by a patch at start (fastest; changing them in the '
                    'game restarts it). On: change output and preset in the game without a restart, at a cost.',
                    'Выкл.: разрешения кроме 1080p задаются патчем при запуске (быстрее). Вкл.: менять в игре '
                    'без перезапуска, но медленнее.'))
+        self.row(f, _('Frame generation', 'Генерация кадров'),
+                 self.choice(f, 'frame_generation', 'ini', FRAME_GENERATION),
+                 _('Requires a temporal upscaler, object motion vectors and SDR. Works with DLSS, FSR or TAA. '
+                   'DLSS requires nvngx_dlssg.dll and RTX 40+. FSR also works on other GPUs.',
+                   'Нужны временной апскейлер, векторы движения и SDR. Работает с DLSS, FSR и TAA. '
+                   'Для DLSS нужны nvngx_dlssg.dll и RTX 40+. FSR работает и на других видеокартах.'))
         self.check(f, 'sharpen', 'ini', _('Sharpening (RCAS)', 'Резкость (RCAS)'))
         holder = ttk.Frame(f)
         ttk.Scale(holder, from_=0.0, to=2.0, variable=self.var('sharpness', 'ini'), length=300).pack(side='left')

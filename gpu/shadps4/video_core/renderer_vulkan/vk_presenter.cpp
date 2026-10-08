@@ -13,6 +13,7 @@
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "bbport_overlay.h"
+#include "bbport_settings.h"
 #include "bbport_timeline.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -36,8 +37,12 @@
 #include <span>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <vector>
 #include <vk_mem_alloc.h>
+#ifdef _WIN32
+extern "C" void compat_sleep_ns(uint64_t ns);
+#endif
 #ifdef MemoryBarrier
 #undef MemoryBarrier // bbport: winnt.h macro (through fmt), clashes with vk::MemoryBarrier
 #endif
@@ -157,7 +162,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
     BbOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
-
+    frame_generation = std::make_unique<FrameGeneration>(instance, draw_scheduler);
 }
 
 Presenter::~Presenter() {
@@ -165,12 +170,14 @@ Presenter::~Presenter() {
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();
+    frame_generation.reset();
     Check(draw_scheduler.CommandBuffer().reset());
     Check(present_scheduler.CommandBuffer().reset());
     Check(flip_scheduler.CommandBuffer().reset());
 
     const vk::Device device = instance.GetDevice();
     for (auto& frame : present_frames) {
+        frame.generation.reset();
         vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
         device.destroyImageView(frame.image_view);
         device.destroyFence(frame.present_done);
@@ -493,6 +500,94 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         }
     });
 
+    if (display.generation &&
+        BbSettings::Get().frame_generation != BbSettings::FrameGenerationOff && !frame->is_hdr) {
+        frame_generation->EnsureOutput(frame->generation, frame->width, frame->height,
+                                       swapchain.GetSurfaceFormat().format);
+        // Run the same output passes on the pre-HUD snapshot as on the final color.
+        // Their difference is then a coverage mask for preserving the game's HUD.
+        auto source = display.generation->color.resource;
+        const auto device = instance.GetDevice();
+        // Decode the snapshot exactly like the game's final display buffer.
+        // Otherwise the output pass applies gamma twice and the HUD mask
+        // incorrectly covers the entire scene.
+        auto snapshot_format = source.format;
+        if (view_info.format == vk::Format::eR8G8B8A8Srgb ||
+            view_info.format == vk::Format::eB8G8R8A8Srgb) {
+            if (source.format == vk::Format::eR8G8B8A8Unorm)
+                snapshot_format = vk::Format::eR8G8B8A8Srgb;
+            if (source.format == vk::Format::eB8G8R8A8Unorm)
+                snapshot_format = vk::Format::eB8G8R8A8Srgb;
+        }
+        const vk::ImageViewUsageCreateInfo snapshot_usage{.usage =
+                                                              vk::ImageUsageFlagBits::eSampled};
+        const auto snapshot_view = Check(device.createImageView(
+            {.pNext = &snapshot_usage,
+             .image = source.image,
+             .viewType = vk::ImageViewType::e2D,
+             .format = snapshot_format,
+             .components = {vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity,
+                            vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eOne},
+             .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}));
+        draw_scheduler.DeferOperation(
+            [device, snapshot_view] { device.destroyImageView(snapshot_view); });
+        source.view = snapshot_view;
+        const auto destination = frame->generation->hudless.resource;
+        draw_scheduler.Record([this, frame, source, destination, fsr = fsr_settings,
+                               pp = pp_settings](vk::CommandBuffer cmd) {
+            std::scoped_lock lock{passes_mutex};
+            const std::array barriers{
+                vk::ImageMemoryBarrier2{
+                    .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                    .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+                    .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+                    .dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+                    .oldLayout = vk::ImageLayout::eGeneral,
+                    .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                    .image = source.image,
+                    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}},
+                vk::ImageMemoryBarrier2{
+                    .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                    .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                    .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+                    .oldLayout = vk::ImageLayout::eUndefined,
+                    .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                    .image = destination.image,
+                    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}};
+            cmd.pipelineBarrier2(
+                {.imageMemoryBarrierCount = 2, .pImageMemoryBarriers = barriers.data()});
+            Frame hudless{};
+            hudless.width = frame->width;
+            hudless.height = frame->height;
+            hudless.image = destination.image;
+            hudless.image_view = destination.view;
+            hudless.is_hdr = frame->is_hdr;
+            const auto input = fsr_pass.Render(cmd, source.view, {source.width, source.height},
+                                               {frame->width, frame->height}, fsr, frame->is_hdr);
+            pp_pass.Render(cmd, input, {source.width, source.height}, hudless, pp);
+            auto restore = barriers[0];
+            restore.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            restore.srcAccessMask = vk::AccessFlagBits2::eMemoryRead;
+            restore.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            restore.dstAccessMask =
+                vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+            restore.oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+            restore.newLayout = vk::ImageLayout::eGeneral;
+            cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &restore});
+        });
+        frame_generation->Record(draw_scheduler.CommandBuffer(),
+                                 {frame->image, frame->image_view,
+                                  swapchain.GetSurfaceFormat().format,
+                                  vk::ImageAspectFlagBits::eColor, frame->width, frame->height},
+                                 display.generation, frame->generation);
+    } else {
+        if (frame->generation)
+            frame->generation->dispatched = false;
+        frame_generation->Invalidate();
+        if (BbSettings::Get().frame_generation != BbSettings::FrameGenerationOff && frame->is_hdr)
+            BbSettings::Get().frame_generation_problem = "Frame generation requires SDR output";
+    }
+
     if (frame_dump) {
         const auto cmdbuf = draw_scheduler.CommandBuffer();
         const vk::MemoryBarrier2 done{.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
@@ -609,6 +704,40 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
 }
 
 void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
+    auto &settings = BbSettings::Get();
+    settings.frame_generation_active = false;
+    if (!is_reusing_frame && is_game_frame && frame->generation && frame->generation->dispatched &&
+        settings.frame_generation != BbSettings::FrameGenerationOff && window.GetWidth() &&
+        window.GetHeight()) {
+        // Wait on the GPU timeline without touching the draw scheduler's producer state.
+        // Pacing CPU calls before interpolation finishes would queue both presents in a burst.
+        const vk::SemaphoreWaitInfo wait{.semaphoreCount = 1,
+                                         .pSemaphores = &frame->ready_semaphore,
+                                         .pValues = &frame->ready_tick};
+        Check(instance.GetDevice().waitSemaphores(wait, std::numeric_limits<u64>::max()));
+        if (!*static_cast<const u32 *>(frame->generation->disable_data)) {
+            Frame generated = *frame;
+            generated.image = frame->generation->generated.resource.image;
+            generated.image_view = frame->generation->generated.resource.view;
+            generated.present_done = *frame->generation->present_done;
+            settings.frame_generation_active = true;
+            settings.frame_generation_render_ms = frame->generation->input->frame_ms;
+            PresentSingleFrame(&generated, true, false);
+            const auto half = std::chrono::duration<double, std::milli>(
+                std::clamp(frame->generation->input->frame_ms * .5, 2.0, 33.333));
+#ifdef _WIN32
+            // The normal Windows sleep can round an 8 ms interval to 15.6 ms.
+            // Reuse the runtime's high-resolution waitable timer for frame pacing.
+            compat_sleep_ns(u64(half.count() * 1'000'000));
+#else
+            std::this_thread::sleep_for(half);
+#endif
+        }
+    }
+    PresentSingleFrame(frame, is_reusing_frame, is_game_frame);
+}
+
+void Presenter::PresentSingleFrame(Frame *frame, bool is_reusing_frame, bool is_game_frame) {
     // Free the frame for reuse
     const auto free_frame = [&] {
         if (!is_reusing_frame) {
@@ -686,7 +815,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                 .subresourceRange = color_range,
             },
             vk::ImageMemoryBarrier{
-                .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+                .srcAccessMask = vk::AccessFlagBits::eMemoryWrite,
                 .dstAccessMask = vk::AccessFlagBits::eTransferRead,
                 .oldLayout = vk::ImageLayout::eGeneral,
                 .newLayout = vk::ImageLayout::eTransferSrcOptimal,
@@ -822,6 +951,15 @@ Frame* Presenter::GetRenderFrame() {
         if (result == vk::Result::eTimeout) {
             continue;
         }
+    }
+
+    // A resize can skip the real present after its generated companion was
+    // submitted. That companion owns a separate fence and must finish as well.
+    if (frame->generation) {
+        Check(device.waitForFences(*frame->generation->present_done, false,
+                                   std::numeric_limits<u64>::max()));
+        frame->generation->input.reset();
+        frame->generation->dispatched = false;
     }
 
     if (frame->width != expected_frame_width || frame->height != expected_frame_height ||

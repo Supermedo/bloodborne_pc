@@ -10,6 +10,7 @@
 // BB_RENDER_RES retains the older startup-patched guest-resolution path.
 
 #pragma once
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 
 #include <array>
 #include <chrono>
@@ -124,6 +125,7 @@ public:
         vk::Image image;
         vk::Format format;
         u32 width, height;
+        std::shared_ptr<FrameGenerationInput> generation;
     };
     bool DisplayOverride(VAddr address, Display& display);
     /// BB_PRESENT_DUMP_TRIGGER: whether this presented frame is to be saved (consumes the trigger).
@@ -149,6 +151,8 @@ private:
 
     void Run();
     void RunScaled();
+    void CaptureGeneration(vk::Image depth, vk::Format depth_format, u32 w, u32 h, float frame_ms,
+                           bool reset);
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
     void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);
@@ -196,6 +200,9 @@ private:
     SceneTargets& scene_targets;
     int applied_preset = -1;
     int applied_upscaler = -1;
+    int applied_frame_generation = -1;
+    std::vector<std::shared_ptr<FrameGenerationInput>> generation_pool;
+    std::shared_ptr<FrameGenerationInput> generation_input, display_generation_input;
     bool dispatched_last_frame = false;
     bool last_active = false, last_jitter = false;
 
@@ -253,6 +260,7 @@ private:
         vk::Format format{};
         u32 width = 0, height = 0;
         bool valid = false;
+        std::shared_ptr<FrameGenerationInput> generation;
     };
     std::mutex display_mutex;
     int present_dump_remaining = 0, present_dump_index = 0;

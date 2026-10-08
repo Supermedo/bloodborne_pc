@@ -32,6 +32,7 @@ int main() {
     assert(s.upscaler == BbSettings::UpscalerFsr3 && !s.show_fps && s.menu_x < 0.0f);
     s.show_fps = true;
     s.upscaler = BbSettings::UpscalerFsr411;
+    s.frame_generation = BbSettings::FrameGenerationDlss;
     s.menu_x = 0.625f;
     s.menu_y = 0.125f;
     BbSettings::Save();
@@ -43,11 +44,13 @@ int main() {
                       "fullscreen_hint=1\n") == 0);
     assert(saved.find("menu_pos=0.6250,0.1250\n") != std::string::npos);
     assert(saved.find("upscaler=fsr3") == std::string::npos);
+    assert(saved.find("frame_generation=dlss\n") != std::string::npos);
 
     s.menu_x = -1.0f;
     s.menu_y = -1.0f;
     BbSettings::Load();
     assert(s.menu_x == 0.625f && s.menu_y == 0.125f && s.upscaler == BbSettings::UpscalerFsr411);
+    assert(s.frame_generation == BbSettings::FrameGenerationDlss);
     unlink(path);
     std::puts("PASS: settings save keeps other keys, menu position");
 }

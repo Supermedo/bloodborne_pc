@@ -240,6 +240,21 @@ void Dlss::ReleaseFeature() {
     }
 }
 
+bool Dlss::FrameGenerationAvailable() const {
+    return impl->available && impl->api->FrameGenerationAvailable();
+}
+bool Dlss::CreateFrameGeneration(vk::CommandBuffer command, u32 w, u32 h, vk::Format format) {
+    return FrameGenerationAvailable() &&
+           impl->api->CreateFrameGeneration(command, w, h, VkFormat(format));
+}
+bool Dlss::GenerateFrame(vk::CommandBuffer command, const BbDlssGenerate &frame) {
+    return FrameGenerationAvailable() && impl->api->GenerateFrame(command, &frame);
+}
+void Dlss::ReleaseFrameGeneration() {
+    if (impl->api)
+        impl->api->ReleaseFrameGeneration();
+}
+
 void Dlss::Shutdown() {
     impl->available = false;
     impl->feature.reset();
@@ -252,6 +267,10 @@ void Dlss::Shutdown() {
 #else
 
 struct Dlss::Impl {};
+bool Dlss::FrameGenerationAvailable() const { return false; }
+bool Dlss::CreateFrameGeneration(vk::CommandBuffer, u32, u32, vk::Format) { return false; }
+bool Dlss::GenerateFrame(vk::CommandBuffer, const BbDlssGenerate &) { return false; }
+void Dlss::ReleaseFrameGeneration() {}
 Dlss::Dlss() = default;
 Dlss::~Dlss() = default;
 Dlss* Dlss::Get() {

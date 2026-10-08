@@ -18,6 +18,12 @@ inline bool IsFsr4(int upscaler) {
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 enum class MenuLanguage { English, Russian };
+enum FrameGeneration : int {
+    FrameGenerationOff,
+    FrameGenerationFsr,
+    FrameGenerationDlss,
+    FrameGenerationCount
+};
 
 /// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
 /// menu label, default (the game's own behaviour).
@@ -60,6 +66,11 @@ struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
     std::atomic<int> upscaler{UpscalerFsr3};
     std::atomic<int> preset{NativeAA};
+    std::atomic<int> frame_generation{FrameGenerationOff};
+    std::atomic<bool> fsr_fg_supported{false}, dlss_fg_supported{false};
+    std::atomic<const char *> frame_generation_problem{nullptr};
+    std::atomic<bool> frame_generation_active{false};
+    std::atomic<float> frame_generation_render_ms{0};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.3f};
     std::atomic<bool> jitter{true};

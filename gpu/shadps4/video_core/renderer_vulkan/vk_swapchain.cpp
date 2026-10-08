@@ -85,6 +85,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
 
     SetupImages();
     RefreshSemaphores();
+    frame_index = image_index = 0;
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
@@ -120,6 +121,10 @@ bool Swapchain::AcquireNextImage() {
     case vk::Result::eSuccess:
         break;
     case vk::Result::eSuboptimalKHR:
+        // A suboptimal acquire still signals the semaphore and owns an image.
+        // Consume it in the normal submission before recreating the swapchain.
+        needs_recreation = true;
+        return true;
     case vk::Result::eErrorSurfaceLostKHR:
     case vk::Result::eErrorOutOfDateKHR:
     case vk::Result::eErrorUnknown:

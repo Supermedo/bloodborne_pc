@@ -7,6 +7,7 @@
 
 #include <array>
 #include <vector>
+#include "../../../dlss_bridge/bbport_frame_camera.h"
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -66,6 +67,7 @@ public:
     /// bbport: the matrices and jitter of the motion of this frame, printed with an upscaler dump
     /// (BB_DUMP_TRIGGER) for offline checks of the vectors.
     void PrintState(int frame) const;
+    BbFrameCamera FrameCamera() const;
 
     /// Records the motion vector pass (Scheduler::Record): `depth_view` (depth aspect, General
     /// layout) into `motion_view` (RG16F storage, General), pixels, previous minus current.

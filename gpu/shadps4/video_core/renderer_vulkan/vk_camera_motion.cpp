@@ -19,6 +19,82 @@
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
+BbFrameCamera CameraMotion::FrameCamera() const {
+    using Mat = std::array<float, 16>;
+    const auto multiply = [](const Mat &a, const Mat &b) {
+        Mat c{};
+        for (int r = 0; r < 4; ++r)
+            for (int k = 0; k < 4; ++k)
+                for (int col = 0; col < 4; ++col)
+                    c[r * 4 + col] += a[r * 4 + k] * b[k * 4 + col];
+        return c;
+    };
+    const auto inverse = [](const Mat &a) {
+        float rows[4][8]{};
+        for (int r = 0; r < 4; ++r) {
+            for (int c = 0; c < 4; ++c)
+                rows[r][c] = a[r * 4 + c];
+            rows[r][4 + r] = 1;
+        }
+        for (int c = 0; c < 4; ++c) {
+            int pivot = c;
+            for (int r = c + 1; r < 4; ++r)
+                if (std::abs(rows[r][c]) > std::abs(rows[pivot][c]))
+                    pivot = r;
+            for (int k = 0; k < 8; ++k)
+                std::swap(rows[c][k], rows[pivot][k]);
+            const float divisor = rows[c][c];
+            for (float &x : rows[c])
+                x /= divisor;
+            for (int r = 0; r < 4; ++r)
+                if (r != c) {
+                    const float f = rows[r][c];
+                    for (int k = 0; k < 8; ++k)
+                        rows[r][k] -= f * rows[c][k];
+                }
+        }
+        Mat result{};
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c)
+                result[r * 4 + c] = rows[r][c + 4];
+        return result;
+    };
+    const auto projection = [](const std::array<float, 4> &p) {
+        return Mat{p[0], 0, 0, 0, 0, p[1], 0, 0, 0, 0, p[2], p[3], 0, 0, 1, 0};
+    };
+    const auto affine = [](const std::array<float, 12> &a) {
+        Mat result{};
+        std::copy(a.begin(), a.end(), result.begin());
+        result[15] = 1;
+        return result;
+    };
+    const Mat p = projection(current.proj), inv_p = inverse(p);
+    const Mat previous_clip =
+        multiply(multiply(multiply(projection(previous.proj), affine(previous.view)),
+                          affine(current.inv_view)),
+                 inv_p);
+    const auto transpose = [](float *out, const Mat &in) {
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c)
+                out[r * 4 + c] = in[c * 4 + r];
+    };
+    BbFrameCamera result{};
+    transpose(result.view_to_clip, p);
+    transpose(result.clip_to_view, inv_p);
+    transpose(result.clip_to_previous, previous_clip);
+    transpose(result.previous_to_clip, inverse(previous_clip));
+    for (int i = 0; i < 3; ++i) {
+        result.position[i] = current.inv_view[i * 4 + 3];
+        result.right[i] = current.inv_view[i * 4];
+        result.up[i] = current.inv_view[i * 4 + 1];
+        result.forward[i] = current.inv_view[i * 4 + 2];
+    }
+    std::copy(jitter.begin(), jitter.end(), result.jitter);
+    result.near_plane = Near();
+    result.far_plane = 3000;
+    result.vertical_fov = VerticalFov();
+    return result;
+}
 
 namespace {
 

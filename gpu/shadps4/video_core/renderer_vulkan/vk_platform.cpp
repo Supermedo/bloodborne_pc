@@ -195,9 +195,10 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
         break;
     }
 
-    if (window_type != Frontend::WindowSystemType::Headless) {
-        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-    }
+    // The renderer enables VK_KHR_swapchain on its device, including GPU-only
+    // tests. Its VK_KHR_surface instance dependency is required even when no
+    // native window or surface will be created.
+    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
 
     if (EmulatorSettings.IsHdrAllowed()) {
         extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);

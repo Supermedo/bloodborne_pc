@@ -15,6 +15,8 @@ class Instance;
 }
 
 namespace Vulkan::Breadcrumbs {
+/// Release the device-owned marker buffer after all schedulers have finished.
+void Shutdown(const Instance &instance);
 
 enum class Kind : u8 { Pass, Draw, DrawIndexed, DrawIndirect, Dispatch, DispatchIndirect };
 

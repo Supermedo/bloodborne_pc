@@ -218,6 +218,15 @@ void DumpPrograms(const Stream& stream, u64 id) {
 
 } // Anonymous namespace
 
+void Shutdown(const Instance &instance) {
+    enabled = false;
+    if (marker_buffer)
+        vmaDestroyBuffer(instance.GetAllocator(), marker_buffer, marker_allocation);
+    marker_buffer = nullptr;
+    marker_allocation = nullptr;
+    markers = args = nullptr;
+}
+
 u32 NewStream(const Instance& instance, const char* name) {
     std::call_once(init_once, [&] { Init(instance); });
     const u32 index = num_streams.fetch_add(1, std::memory_order_relaxed);
