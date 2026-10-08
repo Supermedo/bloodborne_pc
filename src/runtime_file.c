@@ -210,11 +210,12 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     HostStat s;
     Listing *dir=NULL;
     int host=-1;
-    if (!host_stat(path,&s) && S_ISDIR(s.st_mode)) {
+    int stat_error=host_stat(path,&s) ? errno : 0;
+    if (!stat_error && S_ISDIR(s.st_mode)) {
         if (flags&3) return -EISDIR;
         if (!(dir=list_directory(path))) return -EACCES;
     } else if (flags&0x20000) {
-        e=errno==ENOENT ? ENOENT : ENOTDIR;
+        e=stat_error ? stat_error : ENOTDIR;
         if (e==ENOENT) { ++missing; printf("Runtime: open(%s) -> not found\n",guest); }
         return -e;
     } else {
