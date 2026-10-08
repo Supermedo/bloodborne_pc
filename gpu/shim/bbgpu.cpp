@@ -348,3 +348,25 @@ extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
     }
     return state;
 }
+
+extern "C" void bbgpu_mouse_take(BbMouseInput* out) {
+    if (!out) return;
+    if (!g_window) { std::memset(out, 0, sizeof(*out)); return; }
+    Frontend::MouseInput mouse;
+    g_window->TakeMouseInput(mouse);
+    out->dx = mouse.dx;
+    out->dy = mouse.dy;
+    out->buttons = mouse.buttons;
+    out->wheel = mouse.wheel;
+    out->captured = mouse.captured ? 1 : 0;
+}
+
+extern "C" void bbgpu_input_configure(int mouse_mode_available, int32_t toggle_scancode, int32_t reload_scancode) {
+    if (!g_window) return;
+    g_window->ConfigureInput(mouse_mode_available != 0, toggle_scancode, reload_scancode);
+}
+
+extern "C" int bbgpu_input_reload_requested(void) {
+    if (!g_window) return 0;
+    return g_window->TakeInputReloadRequested();
+}

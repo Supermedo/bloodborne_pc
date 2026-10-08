@@ -97,6 +97,9 @@ def run_command():
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
+from bbport_input_config import (KEYBOARD_OUTPUTS, BUTTON_OUTPUTS, STICK_OUTPUTS, OUTPUT_LABELS, keysym_to_name,
+                                  button_num_to_name, input_ini_path, load_input_ini, reserved_keys,
+                                  save_input_ini, save_mouse_settings)  # noqa: E402
 
 LANG = 'en'
 
@@ -327,6 +330,14 @@ class Launcher:
         self.root = root
         self.app = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
         self.ini, self.ini_lines = load_ini()
+        self.remap_ini_path = input_ini_path(ini_path())
+        self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
+            self.mouse_settings = load_input_ini(self.remap_ini_path)
+        # {output: first-binding key name, or None once cleared}, edited by the remap page and
+        # applied on top of self.remap_bindings in collect(); separate from it so re-opening the
+        # Controls page after a cancelled edit shows what is actually on disk, not a half-edit.
+        self.remap_edits = {}
+        self.mouse_edited = False  # set by any mouse widget's command/trace; gates the save in collect()
         self.vars = {}
         self.process = self.job = None
         self.downloading = False
@@ -554,6 +565,7 @@ class Launcher:
         for name, title in (('play', _('Play', 'Играть')), ('graphics', _('Graphics', 'Графика')),
                             ('display', _('Display & FPS', 'Экран и FPS')), ('game', _('Game & effects', 'Игра и эффекты')),
                             ('cheats', _('Cheats', 'Читы')), ('mods', _('Mods & patches', 'Моды и патчи')),
+                            ('controls', _('Controls', 'Управление')),
                             ('advanced', _('Advanced', 'Дополнительно')),
                             ('log', _('Log', 'Журнал'))):
             item = tk.Label(side, text='    ' + title, bg=BG, fg=TEXT, anchor='w', font=('Segoe UI', 11),
@@ -591,6 +603,7 @@ class Launcher:
         self.build_game()
         self.build_cheats()
         self.build_mods()
+        self.build_controls()
         self.build_advanced()
         self.build_log()
         self.root.bind_all('<MouseWheel>', self.wheel)
@@ -833,6 +846,197 @@ class Launcher:
         self.patches_frame.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(8, 0))
         self.ttk.Button(f, text=_('Refresh', 'Обновить'), command=self.refresh_lists).grid(
             row=self.next_row(f), column=0, sticky='w', pady=(14, 0))
+
+    def current_binding(self, output):
+        """The key name currently bound to `output`'s first slot: a pending edit (even "cleared
+        to None"), else whatever input.ini already had, else None."""
+        if output in self.remap_edits:
+            return self.remap_edits[output]
+        values = self.remap_bindings.get(output) or []
+        return values[0] if values else None
+
+    def build_controls(self):
+        ttk, tk = self.ttk, self.tk
+        f = self.scrolled_page('controls', _('Controls', 'Управление'),
+                               _('Keyboard and mouse-button bindings. The controller keeps '
+                                 'working side by side; edit its lines in input.ini directly — '
+                                 'see docs/INPUT.md.',
+                                 'Раскладка клавиатуры и кнопок мыши. Геймпад продолжает '
+                                 'работать одновременно; его строки можно настроить только в '
+                                 'input.ini — см. docs/INPUT.md.'))
+        self.remap_rows = {}
+
+        def add_row(parent, output):
+            r = self.next_row(parent)
+            label, _ru = OUTPUT_LABELS[output]
+            ttk.Label(parent, text=_(label, _ru)).grid(row=r, column=0, sticky='w', padx=(0, 18), pady=4)
+            key_label = ttk.Label(parent, width=14, style='Muted.TLabel')
+            key_label.grid(row=r, column=1, sticky='w', pady=4)
+            set_btn = ttk.Button(parent, text=_('Set…', 'Назначить…'),
+                                 command=lambda o=output: self.start_remap_capture(o, key_label, set_btn))
+            set_btn.grid(row=r, column=2, sticky='w', padx=(10, 4), pady=4)
+            ttk.Button(parent, text=_('Clear', 'Сбросить'),
+                      command=lambda o=output: self.clear_remap(o, key_label)).grid(
+                row=r, column=3, sticky='w', pady=4)
+            self.remap_rows[output] = key_label
+            self.refresh_remap_row(output)
+
+        self.section(f, _('Buttons', 'Кнопки'), top=4)
+        for output in BUTTON_OUTPUTS:
+            add_row(f, output)
+        self.section(f, _('Sticks', 'Стики'))
+        for output in STICK_OUTPUTS:
+            add_row(f, output)
+        self.note(f, _('Click "Set…" on a button row to bind a mouse button instead of a key — '
+                       'left, middle, right, or the side buttons (back/forward), if the mouse '
+                       'has them. Stick directions stay keyboard-only.',
+                       'Нажмите «Назначить…» в строке кнопки, чтобы привязать кнопку мыши '
+                       'вместо клавиши — левую, среднюю, правую или боковые (вперёд/назад), '
+                       'если они есть. Направления стиков можно привязать только к клавише.'))
+        self.note(f, _('Reserved: Insert/Escape (the port\'s menu), F9 (route recording), and '
+                       'whichever key toggles mouse look or reloads input.ini (F7/F8 by '
+                       'default). A key or button already used elsewhere is simply bound to '
+                       'both actions (hold it to trigger both) — this page does not warn about '
+                       'that.',
+                       'Зарезервированы: Insert/Escape (меню порта), F9 (запись маршрута), а '
+                       'также клавиши переключения мыши и перезагрузки input.ini (по умолчанию '
+                       'F7/F8). Если клавиша или кнопка уже где-то занята, она просто '
+                       'срабатывает на обе привязки — страница об этом не предупреждает.'))
+
+        self.section(f, _('Mouse look', 'Обзор мышью'))
+        ms = self.mouse_settings
+
+        def mark_mouse_edited(*_a):
+            self.mouse_edited = True
+
+        # Built manually (not via self.check) because mouse_settings is its own dict, not
+        # self.ini/self.app -- self.var()'s ini/app bookkeeping does not apply to it.
+        enabled_var = tk.BooleanVar(value=ms['enabled'])
+        enabled_var.trace_add('write', lambda *_a: (ms.__setitem__('enabled', enabled_var.get()), mark_mouse_edited()))
+        ttk.Checkbutton(f, text=_('Enable mouse look', 'Включить обзор мышью'), variable=enabled_var).grid(
+            row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 0))
+        self.note(f, _('F7 also toggles this in-game, instantly; F8 reloads these settings '
+                       'without restarting.', 'F7 также переключает это прямо в игре мгновенно; '
+                       'F8 применяет эти настройки без перезапуска.'), top=2)
+
+        stick_var = tk.StringVar(value=ms['stick'])
+        stick_var.trace_add('write', lambda *_a: (ms.__setitem__('stick', stick_var.get()), mark_mouse_edited()))
+        stick_box = ttk.Frame(f)
+        ttk.Radiobutton(stick_box, text=_('Camera (right stick)', 'Камера (правый стик)'),
+                       variable=stick_var, value='right').pack(side='left')
+        ttk.Radiobutton(stick_box, text=_('Movement (left stick)', 'Движение (левый стик)'),
+                       variable=stick_var, value='left').pack(side='left', padx=(16, 0))
+        self.row(f, _('Mouse controls', 'Мышь управляет'), stick_box)
+
+        def slider_row(key, title, hint, lo, hi, fmt='{:.2f}'):
+            holder = ttk.Frame(f)
+            var = tk.DoubleVar(value=ms[key])
+            ttk.Scale(holder, from_=lo, to=hi, variable=var, length=280).pack(side='left')
+            value_label = ttk.Label(holder, width=6)
+            value_label.pack(side='left', padx=10)
+            show = lambda *_a: value_label.configure(text=fmt.format(var.get()))
+            var.trace_add('write', lambda *_a: (ms.__setitem__(key, round(var.get(), 3)), show(), mark_mouse_edited()))
+            show()
+            self.row(f, title, holder, hint)
+
+        # deadzone_offset ("Smoothness") used to gate a startup floor/ramp in mouse_to_axis;
+        # that formula was replaced by an output-value lerp with a fixed time constant
+        # (src/runtime_pad.c), which deadzone_offset no longer affects, so the slider for it was
+        # removed here rather than leave a control with no real effect. The value is still read/
+        # written in input.ini by bbport_input_config.py for files that already set it.
+        slider_row('speed', _('Sensitivity', 'Чувствительность'),
+                   _('How fast the camera turns for a given mouse movement.',
+                     'Насколько быстро поворачивается камера при движении мыши.'), 0.1, 5.0)
+        slider_row('speed_offset', _('Minimum turn speed', 'Минимальная скорость поворота'),
+                   _('A constant added on top of sensitivity; raises the floor for slow '
+                     'movements without affecting fast ones as much.',
+                     'Добавляется поверх чувствительности; поднимает минимальную скорость для '
+                     'медленных движений, почти не влияя на быстрые.'), 0.0, 1.0)
+
+        self.note(f, _('The scroll wheel is configured in input.ini directly (see docs/INPUT.md) '
+                       '— mouse buttons are bound from the Buttons section above.',
+                       'Колесо мыши настраивается напрямую в input.ini (см. docs/INPUT.md) — '
+                       'кнопки мыши назначаются в разделе «Кнопки» выше.'), top=10)
+        self.note(f, _('Changes apply the next time the game starts, or press F8 in-game to '
+                       'reload input.ini without restarting.',
+                       'Изменения применяются при следующем запуске игры, либо нажмите F8 в '
+                       'игре, чтобы перечитать input.ini без перезапуска.'), top=6)
+
+    def refresh_remap_row(self, output):
+        key = self.current_binding(output)
+        self.remap_rows[output].configure(text=key if key else _('(none)', '(нет)'))
+
+    def clear_remap(self, output, key_label):
+        self.remap_edits[output] = None
+        self.refresh_remap_row(output)
+
+    def start_remap_capture(self, output, key_label, set_btn):
+        """Grabs the next keypress or mouse click and binds it to `output`'s first slot. Esc
+        cancels; a key/button already reserved (HOT-001/HOT-002), or a mouse click on a
+        STICK_OUTPUTS row (an axis has no use for a press), is rejected in place, leaving the
+        previous binding untouched. bind_all (not root.bind) plus grab_set makes sure the event
+        reaches this handler even if some other widget currently has focus, and that no other
+        widget (e.g. the player-name Entry on another page) reacts to the same keypress.
+
+        The <ButtonPress> bind is installed via after_idle rather than immediately: this call
+        itself runs from the "Set…" button's own click handler, so the left-button-release that
+        follows (Tk doesn't fire <ButtonPress> again for that click, but belt-and-suspenders
+        against any platform quirk) would otherwise risk being seen as "the user chose
+        leftbutton" the instant capture starts."""
+        is_stick = output in STICK_OUTPUTS
+        original_text = set_btn['text']
+        key_label.configure(text=_('Press a key or mouse button…', 'Нажмите клавишу или кнопку мыши…')
+                            if not is_stick else _('Press a key…', 'Нажмите клавишу…'))
+        set_btn.configure(state='disabled')
+        self.root.grab_set()
+
+        def finish():
+            self.root.unbind_all('<KeyPress>')
+            self.root.unbind_all('<ButtonPress>')
+            self.root.grab_release()
+            set_btn.configure(state='normal', text=original_text)
+            self.refresh_remap_row(output)
+
+        def apply(name):
+            reserved = reserved_keys(self.remap_toggle_key, self.remap_reload_key)
+            if name in reserved:
+                self.messagebox.showwarning(
+                    _('Reserved', 'Зарезервировано'),
+                    _('{} is reserved (menu, recording, or a hotkey) and cannot be bound to a '
+                      'game action.', '{} зарезервирована (меню, запись или горячая клавиша) и '
+                      'не может быть назначена игровому действию.').format(name))
+            else:
+                self.remap_edits[output] = name
+            finish()
+
+        def on_key(event):
+            if event.keysym == 'Escape':
+                finish()
+                return
+            name = keysym_to_name(event.keysym)
+            if name is None:
+                self.messagebox.showwarning(
+                    _('Unsupported key', 'Клавиша не поддерживается'),
+                    _('That key has no bbport name; pick another one.',
+                      'У этой клавиши нет имени в bbport; выберите другую.'))
+                return
+            apply(name)
+
+        def on_click(event):
+            name = button_num_to_name(event.num)
+            if name is None:
+                return  # a button Tk reports but bbport has no name for: ignore, keep waiting
+            if is_stick:
+                self.messagebox.showwarning(
+                    _('Keyboard only', 'Только клавиатура'),
+                    _('A stick direction can only be bound to a key, not a mouse button.',
+                      'Направление стика можно привязать только к клавише, а не к кнопке мыши.'))
+                return
+            apply(name)
+
+        self.root.bind_all('<KeyPress>', on_key)
+        if not is_stick:
+            self.root.after_idle(lambda: self.root.bind_all('<ButtonPress>', on_click))
 
     def build_advanced(self):
         ttk = self.ttk
@@ -1078,6 +1282,19 @@ class Launcher:
         CONFIG_FILE.write_text(json.dumps(self.app, indent=2, ensure_ascii=False), encoding='utf-8')
         save_ini({key: self.ini[key] for key in INI_DEFAULTS}, self.ini_lines)
         self.ini, self.ini_lines = load_ini()
+        if self.remap_edits:
+            first_bindings = {key: (self.remap_edits[key] if key in self.remap_edits else
+                                    (vals[0] if vals else None))
+                              for key, vals in self.remap_bindings.items()}
+            save_input_ini(self.remap_ini_path, first_bindings, self.remap_lines)
+            self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
+                self.mouse_settings = load_input_ini(self.remap_ini_path)
+            self.remap_edits = {}
+        if self.mouse_edited:
+            save_mouse_settings(self.remap_ini_path, self.mouse_settings, self.remap_lines)
+            self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
+                self.mouse_settings = load_input_ini(self.remap_ini_path)
+            self.mouse_edited = False
         if self.mod_order:
             (DATA_DIR / 'mods.json').write_text(json.dumps(
                 {'order': self.mod_order, 'disabled': [n for n, v in self.mod_vars.items() if not v.get()]},
