@@ -1,6 +1,7 @@
 // bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
 #include <cstdlib>
 #include <cstring>
+#include <array>
 #include <SDL3/SDL.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -8,6 +9,14 @@
 #include "bbport_overlay.h"
 
 namespace Frontend {
+
+namespace {
+// MOU-007: each wheel step keeps its direction's bit set for 33 ms (shadPS4's pulse length,
+// ported so a config's mouse_movement_params tuning carries over); consecutive steps extend
+// it rather than stacking. One expiry timestamp per direction, window-thread only.
+constexpr uint32_t kWheelPulseMs = 33;
+std::array<uint64_t, 4> g_wheel_expiry_ms{}; // index: WHEEL_UP=0, DOWN=1, LEFT=2, RIGHT=3
+} // namespace
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
@@ -95,6 +104,53 @@ bool WindowSDL::PollEvents() {
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // HOT-003: the toggle/reload hotkeys work regardless of the menu or text dialog (F8
+        // must reload input.ini even with the menu open), so they are handled before anything
+        // else gets a chance to consume the key event. Held-down repeats are ignored the same
+        // way the menu's own Insert/Escape toggle already is (!event.key.repeat).
+        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+            const int32_t scancode = static_cast<int32_t>(event.key.scancode);
+            if (scancode == toggle_scancode.load(std::memory_order_relaxed) &&
+                mouse_mode_available.load(std::memory_order_relaxed)) {
+                mouse_mode_on.store(!mouse_mode_on.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                continue;
+            }
+            if (scancode == reload_scancode.load(std::memory_order_relaxed)) {
+                reload_requested.store(true, std::memory_order_relaxed);
+                continue;
+            }
+        }
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
+            window_focused = true;
+        } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            window_focused = false;
+        }
+        // Mouse motion/buttons/wheel feed the pad only while captured (MOU-002..006); the
+        // overlay (menu) gets its own mouse handling below via BbOverlay::HandleEvent and is
+        // mutually exclusive with capture (WantsMouseCapture() is false whenever the menu is
+        // open), so there is no double consumption of the same event by both paths. Note:
+        // mouse_captured_last only updates once per PollEvents call (below the event loop), so
+        // a menu-opening event (L3+R3, Insert) followed within the same batch by a mouse event
+        // can still see the old captured state for one iteration; accepted as a one-frame
+        // edge case rather than re-evaluating capture per event for a cosmetic gain.
+        if (mouse_captured_last) {
+            if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                std::scoped_lock lock{mouse_mutex};
+                mouse.dx += event.motion.xrel;
+                mouse.dy += event.motion.yrel;
+            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                std::scoped_lock lock{mouse_mutex};
+                const uint32_t mask = SDL_BUTTON_MASK(event.button.button);
+                if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) mouse.buttons |= mask;
+                else mouse.buttons &= ~mask;
+            } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+                const uint64_t expiry = SDL_GetTicks() + kWheelPulseMs;
+                if (event.wheel.y > 0) g_wheel_expiry_ms[0] = expiry; // WHEEL_UP
+                else if (event.wheel.y < 0) g_wheel_expiry_ms[1] = expiry; // WHEEL_DOWN
+                if (event.wheel.x > 0) g_wheel_expiry_ms[3] = expiry; // WHEEL_RIGHT
+                else if (event.wheel.x < 0) g_wheel_expiry_ms[2] = expiry; // WHEEL_LEFT
+            }
+        }
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
@@ -142,7 +198,78 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+    // MOU-004: re-evaluated every PollEvents (not only on the events that could change it),
+    // because the menu can also close from the render thread (bbport_overlay.cpp's "Close"
+    // button sets menu_open there, not through an SDL event here).
+    UpdateMouseCapture();
     return is_open;
+}
+
+bool WindowSDL::WantsMouseCapture() const {
+    // MOU-003: all of mouse mode on, window focused, menu closed, text dialog inactive.
+    // BbOverlay::CapturesInput() already covers both the menu and the text entry box.
+    return mouse_mode_on.load(std::memory_order_relaxed) && window_focused && !BbOverlay::CapturesInput();
+}
+
+void WindowSDL::UpdateMouseCapture() {
+    const bool wants = WantsMouseCapture();
+    if (wants == mouse_captured_last) {
+        return;
+    }
+    mouse_captured_last = wants;
+    SDL_SetWindowRelativeMouseMode(window, wants);
+    // Enabling relative mode hides the cursor by itself; disabling it does not document giving
+    // it back, so that side is made explicit here (SDL_ShowCursor is a no-op if already shown).
+    if (!wants) {
+        SDL_ShowCursor();
+    }
+    {
+        // MOU-005/MOU-007: leaving capture drops whatever motion/buttons/wheel accumulated so
+        // far -- a button still held when capture ends must never reach the pad as a press.
+        std::scoped_lock lock{mouse_mutex};
+        mouse.dx = mouse.dy = 0.0f;
+        mouse.buttons = 0;
+        mouse.wheel = 0;
+        mouse.captured = wants;
+    }
+    if (!wants) {
+        g_wheel_expiry_ms.fill(0);
+    }
+}
+
+void WindowSDL::TakeMouseInput(MouseInput& out) {
+    std::scoped_lock lock{mouse_mutex};
+    const uint64_t now = SDL_GetTicks();
+    mouse.wheel = 0;
+    for (size_t i = 0; i < g_wheel_expiry_ms.size(); ++i) {
+        if (g_wheel_expiry_ms[i] > now) mouse.wheel |= (1u << i);
+    }
+    out = mouse;
+    // Motion is drained (MOU-008: a delta is reported once, to the next sample only); held
+    // buttons are not -- a button still down stays down across calls until its SDL_EVENT_MOUSE_
+    // BUTTON_UP, same as SDL_GetMouseState would report. UpdateMouseCapture() is what clears
+    // buttons/wheel on the capture->uncaptured transition (MOU-005/MOU-007), not this function.
+    mouse.dx = mouse.dy = 0.0f;
+}
+
+void WindowSDL::ConfigureInput(bool mouse_mode_available_, int32_t toggle_scancode_, int32_t reload_scancode_) {
+    mouse_mode_available.store(mouse_mode_available_, std::memory_order_relaxed);
+    toggle_scancode.store(toggle_scancode_, std::memory_order_relaxed);
+    reload_scancode.store(reload_scancode_, std::memory_order_relaxed);
+    if (!mouse_mode_available_) {
+        // MOU-001: without mouse_to_joystick in input.ini, the mode does not exist; turning it
+        // off here also covers an F8 reload that removed the line while it was on.
+        mouse_mode_on.store(false, std::memory_order_relaxed);
+    } else if (!input_configured_once.exchange(true, std::memory_order_relaxed)) {
+        // MOU-002: "mode starts on" applies only to the very first load (game startup). A
+        // later F8 reload that keeps mouse_to_joystick present must not re-enable a mode the
+        // player turned off with the hotkey in between.
+        mouse_mode_on.store(true, std::memory_order_relaxed);
+    }
+}
+
+int WindowSDL::TakeInputReloadRequested() {
+    return reload_requested.exchange(false, std::memory_order_relaxed) ? 1 : 0;
 }
 
 } // namespace Frontend
