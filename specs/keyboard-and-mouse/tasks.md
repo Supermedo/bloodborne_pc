@@ -190,7 +190,8 @@ repositório inteiro), só os artefatos de build (`.o`, binários, o cache do CM
      acima). A curva racional da primeira correção nunca alcança de fato o piso — só se aproxima
      dele assintoticamente — então a troca de "usar a curva" para "usar a reta" no ponto de
      cruzamento ainda era uma troca abrupta de valor (confirmado numericamente: salto de ~32
-     para 64 entre duas magnitudes a 0.01 de distância). Corrigido de vez trocando o branch por
+     para 64 entre duas magnitudes a 0.01 de distância). Essa descontinuidade de valor foi
+     corrigida trocando o branch por
      uma única fórmula sem costura: `speed(mag) = (mag*speed+offset) * (1 - exp(-mag/k))` — o
      fator exponencial vai suavemente de 0 a 1, então a curva *converge* para a reta em vez de
      *trocar* para ela; não há mais nada para saltar entre. Verificado com uma varredura de
@@ -203,6 +204,76 @@ repositório inteiro), só os artefatos de build (`.o`, binários, o cache do CM
   repetidamente nesta sessão (ver nota de ambiente no topo deste arquivo); o código real em
   `src/runtime_pad.c` foi então compilado e testado de verdade pelo usuário via MSYS2 CLANG64
   (Windows nativo), não pelo WSL.
+  3. **"Ainda sinto dificuldade ... fazer um 180" / início da câmera pouco fluido** (relatado
+     depois de a correção 2 estar no PR, jogando no Windows de verdade). Causa raiz diferente das
+     duas anteriores: a fórmula da correção 2, embora sem salto de valor, ainda reage só à
+     **magnitude instantânea** de cada amostra — sem nenhuma memória entre chamadas. Numa
+     reversão rápida de 180°, a mão desacelera, passa por magnitude quase zero no ponto de
+     inflexão, e acelera de novo: a rampa reiniciava do zero bem no meio do gesto que mais
+     precisava de resposta imediata. A mesma falta de memória fazia até um movimento rápido
+     isolado começar devagar, porque a primeira amostra sempre começava a rampa em 0. Corrigido
+     trocando a suavização de "rampa por magnitude instantânea" para um **filtro passa-baixa
+     (média móvel exponencial) sobre a velocidade do mouse** (`dx/dt`, `dy/dt`, componente a
+     componente, não magnitude+ângulo, para preservar direção corretamente): dois novos estados
+     globais em `runtime_pad.c` (`smoothed_mouse_vx_px_ms`, `smoothed_mouse_vy_px_ms`, mesmo
+     padrão de `last_mouse_sample_us`, zerados no mesmo ponto em que a captura termina). A
+     constante de tempo do filtro (`tau_ms=10`) é independente do FPS do jogo (`alpha` é
+     recalculado a cada chamada a partir do `dt_ms` real), diferente de um EMA ingênuo por
+     amostra, que teria sensibilidade dependente de FPS. `deadzone_offset` deixou de ter efeito
+     nessa fórmula (não há mais piso nem rampa para ele controlar); o campo continua existindo em
+     `MouseParams`/no `.ini` por compatibilidade com arquivos existentes, mas o slider
+     "Smoothness" foi **removido do launcher** em vez de deixar um controle sem efeito real —
+     `docs/INPUT.md` documenta isso.
+  Validado com um programa C standalone (mesmo método das correções 1 e 2): convergência em
+  regime estacionário, resposta já substancial num único flick isolado, decaimento correto após
+  parar, e cruzamento de sinal sem estagnar no meio de uma reversão de 180° simulada. Uma
+  primeira tentativa de teste de regressão (varredura de magnitude congelada, reaproveitando a
+  técnica que pegou o bug 2) sinalizou um "salto" de 0 para 16 entre magnitude 0 e 0.1 — investigado
+  e descartado como falso positivo: é só `speed_offset` somando sua contribuição mínima
+  documentada a partir do primeiro valor não-nulo, não um defeito de suavização; o próprio método
+  de teste (magnitude congelada) não reflete como o filtro se comporta com uma entrada real e
+  contínua. Substituído por um teste de "trajetória realista" (aceleração gradual a partir do
+  repouso), que valida a suavidade sem esse falso positivo.
+  4. **"Inicia mt rápido e fica 'crispy'"** (relatado depois de o item 3 ser testado em jogo de
+     verdade pela primeira vez — ajustar os sliders de sensibilidade não resolveu). Pesquisa
+     dedicada (ver abaixo) sobre o pipeline real do shadPS4 mostrou que ele não faz nenhuma
+     suavização temporal: aplica a fórmula direto em cada evento de mouse bruto. A causa raiz do
+     "crispy" do item 3 é que filtrar **velocidade** (`dx/dt`) amplifica ruído: velocidade é uma
+     derivada, e dividir deltas pequenos e irregulares por `dt` pequeno (150 FPS) torna a entrada
+     já filtrada mais ruidosa, não menos — o "início rápido" sentido pelo usuário era esse ruído
+     amplificado, não falta de suavização. Corrigido movendo a suavização de **espaço de entrada**
+     (velocidade) para **espaço de saída** (o valor do stick que o jogador percebe como rotação da
+     câmera): a fórmula roda sem filtro a cada chamada sobre o delta bruto (reescalado para
+     "px por 33ms" para não depender do FPS, já que shadPS4 não faz essa normalização e sem ela a
+     mesma velocidade de mão geraria magnitudes diferentes a 150 FPS vs. 30 FPS), produzindo um
+     `target_x`/`target_y` instantâneo; só o valor final enviado ao jogo é suavizado via lerp
+     exponencial (`stick += (target-stick)*alpha`, mesmo `alpha=1-exp(-dt_ms/tau_ms)` de antes,
+     `tau_ms` subido de 15 para 25 depois de uma varredura comparando ruído residual vs. atraso de
+     resposta). As mesmas variáveis globais (`smoothed_mouse_stick_x`/`_y`, renomeadas do antigo
+     `_vx_px_ms`/`_vy_px_ms`) guardam agora o valor do stick, não a velocidade. Também suavizada a
+     transição de `speed_offset` (antes ligada/desligada de uma vez em `magnitude>=0.01`, o que
+     fazia ruído de amostragem em torno dessa borda piscar sua contribuição de ~16 unidades a cada
+     amostra) com uma rampa linear curta (`offset_fade`, 0 a 1 px/33ms) em vez de um corte binário.
+     Validado com programa C standalone: independência de FPS confirmada (mesma entrada física a
+     150 e 30 FPS converge ao mesmo valor), reversão de 180° cruza o sinal sem travar, flick
+     isolado já reflete boa parte do alvo na primeira amostra (sem ficar perto de zero como nos
+     itens 1-3), e entrada ruidosa de baixa magnitude (1px a 150 FPS) tem variação sensivelmente
+     menor que com o filtro de velocidade do item 3. Esta correção (item 4) ainda **não foi
+     compilada no build real do projeto, não foi commitada e não foi testada em jogo** — só
+     validada matematicamente; falta o usuário rodar `bash build.sh` via MSYS2 CLANG64 e confirmar
+     em jogo (rastreio lento, flick rápido, reversão de 180°, e especificamente que o "crispy" do
+     início do movimento desapareceu) antes de comitar e subir para o fork.
+
+     Durante a validação por simulação, uma primeira versão do teste de varredura ("scan de
+     magnitude congelada", reaproveitando a técnica da correção 2) apontou um "salto" de 0 para
+     ~16 entre magnitude 0 e magnitude 0.1 — investigado e descartado como falso positivo do
+     método de teste, não um bug real: `speed_offset*128` é somado de forma incondicional assim
+     que a magnitude sai de zero, o que é o próprio `speed_offset` cumprindo sua função de dar
+     uma resposta mínima imediata a um movimento lento, não um defeito de suavização. Um scan de
+     magnitude instantânea e congelada não reflete como o filtro se comporta de verdade (a
+     magnitude nunca pula instantaneamente de 0 para um valor fixo no uso real, ela evolui
+     continuamente a partir da velocidade). Substituído por um teste de trajetória realista
+     (aceleração gradual a partir do repouso), que é o que o filtro realmente processa.
 - **Depende de:** T1, T2, T4.
 
 ## T6. Releitura com F8

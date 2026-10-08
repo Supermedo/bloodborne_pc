@@ -58,14 +58,19 @@ Up to 4 bindings per output; a 5th is accepted and logged as ignored.
 
 ```ini
 mouse_to_joystick = right            # left | right; absent = mouse look does not exist
-mouse_movement_params = 0.5, 1, 0.125   # deadzone_offset, speed, speed_offset (shadPS4 defaults)
+mouse_movement_params = 0.5, 1, 0.125   # deadzone_offset (unused, see below), speed, speed_offset
 ```
 
-Mouse motion is converted into the chosen stick with the same formula shadPS4 uses
-(`EmulateJoystick`), normalized so the result does not depend on the game's frame rate. Mouse
-buttons and the wheel only act while the mouse is actually captured (window focused, settings
-menu and text entry closed, and look turned on) — clicking the window to give it focus never
-fires an attack.
+Mouse motion is smoothed over a short, fixed time window (so a fast flick or a quick 180-degree
+turn stays responsive, while small, slow movements don't produce a jumpy camera) and then
+converted into the chosen stick with a formula based on shadPS4's `EmulateJoystick`, normalized
+so the result does not depend on the game's frame rate. `speed` scales sensitivity; `speed_offset`
+adds a constant on top of it, raising the response for slow movements without affecting fast ones
+much. `deadzone_offset` is parsed for compatibility with existing files but no longer affects the
+camera (an earlier version of this formula used it as a startup floor; the launcher's
+"Smoothness" slider was removed along with that). Mouse buttons and the wheel only act while the
+mouse is actually captured (window focused, settings menu and text entry closed, and look turned
+on) — clicking the window to give it focus never fires an attack.
 
 **Known limitation:** the stick is still a stick. Camera rotation saturates at the game's own
 maximum turn speed and inherits its acceleration curve; this is not 1:1 mouse aim, by design —

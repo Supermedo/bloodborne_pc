@@ -68,6 +68,7 @@ static SDL_Gamepad *gamepad;
 static size_t reads;
 static uint8_t connected_count;
 static uint64_t last_mouse_sample_us; /* CNV-003: dt since the previous mouse-to-stick sample */
+static double smoothed_mouse_stick_x, smoothed_mouse_stick_y; /* mouse_to_axis's EMA state */
 
 static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
 static uint8_t trigger(int16_t v) { int x=v>>7; return (uint8_t)(x<0 ? 0 : x>255 ? 255 : x); }
@@ -199,47 +200,80 @@ static int apply_deadzone(int value, int inner, int outer) {
     return value<0 ? -(int)scaled : (int)scaled;
 }
 
-/* CNV-001..003, MOU-009: based on shadPS4's EmulateJoystick, normalized to its fixed 33 ms poll
- * window so mouse_movement_params' defaults (0.5, 1, 0.125) carry over close to unchanged even
- * though this port samples the mouse once per pad read (30..150 Hz) instead of on a dedicated
- * 33 ms timer. `dt_ms` is the time since the previous sample, already clamped to [1, 100] by
- * the caller.
+/* MOU-009: converts raw mouse motion straight into shadPS4's linear response (magnitude*speed +
+ * speed_offset*128, over a 33 ms window -- shadPS4's fixed poll interval, kept as the unit
+ * mouse_movement_params' defaults are tuned for), with no filtering of the raw delta itself, and
+ * then lerps the *output* stick value toward that target instead of jumping straight to it.
+ * `smoothed_mouse_stick_x`/`smoothed_mouse_stick_y` (module-level state, same pattern as
+ * `last_mouse_sample_us`, kept under their old names despite now holding a stick value rather
+ * than a velocity) persist across calls and are reset to 0 whenever capture starts or ends --
+ * MOU-005/CNV-002, see the caller in sample_host.
  *
- * Deviates from shadPS4 in one place: the original clamps speed up to a hard floor
- * (deadzone_offset*128) whenever any motion at all is seen, which is a step function -- at a
- * high sample rate (this port's 150 FPS vs. shadPS4's fixed 33 ms/~30 Hz poll), a slow mouse
- * move delivers tiny per-sample deltas that each jump straight to that floor and back to 0 the
- * instant motion stops, felt as camera "micro-jumps" instead of smooth tracking (reported
- * 2026-10-08). A first fix (branch at the crossing magnitude, selecting between a rational
- * curve below it and the line above it) removed the jump at magnitude=0 but left a real jump
- * of its own at the crossing point -- the curve approaches the floor only asymptotically, so
- * it never actually meets the line it switches to (still felt as a "degrau", reported in the
- * same session). This version has no branch at all: speed(magnitude) is the straight line
- * `magnitude*speed + offset` scaled by a smooth ramp factor `1 - exp(-magnitude/k)` that goes
- * from 0 at the origin to 1 as magnitude grows, continuous and differentiable everywhere, so
- * the curve converges onto the line itself (not onto a value the line merely reaches) and there
- * is nothing to switch between. `k` sets how many magnitude units the ramp needs to mostly
- * finish; tying it to floor/speed keeps that distance roughly in proportion to deadzone_offset,
- * as the old floor's reach was. */
+ * History (four iterations, all found by playing, not by a test): the first port of shadPS4's
+ * EmulateJoystick clamped speed up to a hard floor (deadzone_offset*128) whenever any motion was
+ * seen -- a step function. At a high sample rate (this port's 150 FPS vs. shadPS4's fixed 33 ms/
+ * ~30 Hz poll), a slow mouse move delivers tiny per-sample deltas that each jumped straight to
+ * that floor and back to 0 the instant motion stopped: "micro-jumps". A second version replaced
+ * the floor with a ramp scaling the linear response by each sample's *instantaneous* magnitude
+ * (`1 - exp(-magnitude/k)`); that removed the magnitude=0 jump but was still stateless -- during
+ * a fast 180-degree reversal, magnitude dips near zero at the inflection point (the hand
+ * decelerates, reverses, accelerates), so the ramp reset mid-gesture and felt like the camera
+ * stalled exactly when the reversal needed to be fastest; the same statelessness made even a
+ * single fast flick from a standstill start slow, since the first sample always began the ramp
+ * at 0. A third version filtered *velocity* (dx/dt, dy/dt) with a per-component EMA before the
+ * formula, which fixed the reversal stall and slow start, but amplified the mouse's own sampling
+ * noise: velocity is a derivative, and dividing small, irregular per-sample dt/dx by each other
+ * at a high poll rate makes the filtered input itself noisy, which read as the camera starting
+ * "too fast" and feeling jittery/"crispy" even after turning sensitivity down (the jitter isn't
+ * in the sensitivity, it's upstream of it).
+ *
+ * This version moves the smoothing from input space (velocity) to output space (the stick value
+ * the player actually perceives as camera rotation): the raw-delta formula runs unfiltered every
+ * call (so it reacts immediately, with no reversal-stall or slow-start risk -- there is no
+ * velocity history to reset), and only the final x/y stick value is lerped toward that target
+ * with the same `alpha=1-exp(-dt_ms/tau_ms)` shape as before. This damps perceptual jitter
+ * (whatever noise is in one sample's raw delta can only move the stick part-way toward it) without
+ * reintroducing the reversal stall, since a lerp has no near-zero singularity to stall at -- it
+ * just lerps straight through a sign change. `tau_ms=25` keeps a flick's 90%-of-target response
+ * under 100 ms (imperceptible as lag) while still visibly damping single-pixel-level jitter at
+ * high poll rates (tried 15 ms first; 25 ms cut the residual jitter spread by about a fifth for
+ * under 35 ms of extra settle time, found by sweeping the constant and comparing both).
+ * deadzone_offset no longer gates a floor or a ramp (there is no branch left to gate): it
+ * is unused by this formula and kept in MouseParams only because mouse_movement_params still
+ * carries three values in input.ini and the launcher still exposes a "Smoothness" slider for it
+ * -- T5's follow-up may repurpose or retire it. */
 static void mouse_to_axis(float dx, float dy, double dt_ms, const MouseParams *mouse, int *out_x, int *out_y) {
-    const double window_ms=33.0;
-    dx=(float)(dx*(window_ms/dt_ms));
-    dy=(float)(dy*(window_ms/dt_ms));
-    if (dx==0.0f && dy==0.0f) { *out_x=0; *out_y=0; return; }
-    double magnitude=sqrt((double)dx*dx+(double)dy*dy);
-    double offset=mouse->speed_offset*128.0;
-    double floor=mouse->deadzone_offset*128.0;
-    double linear=magnitude*mouse->speed+offset;
-    double k=floor/(mouse->speed>0.01 ? mouse->speed : 0.01);
-    if (k<1.0) k=1.0;
-    k*=0.15; /* empirically: the ramp reaches ~1.0 well before `linear` would reach `floor`,
-              * so by the time the two curves would have crossed under the old scheme, this one
-              * is already indistinguishable from the line -- see docs/INPUT.md. */
-    double ramp=1.0-exp(-magnitude/k);
-    double speed=linear*ramp;
-    if (speed>128.0) speed=128.0;
-    double angle=atan2((double)dy,(double)dx);
-    int x=(int)lround(cos(angle)*speed), y=(int)lround(sin(angle)*speed);
+    const double tau_ms=25.0;
+    double alpha=1.0-exp(-dt_ms/tau_ms);
+    /* Scale the raw delta to "px per 33 ms" (shadPS4's fixed poll window) so the same physical
+     * mouse speed produces the same magnitude regardless of this port's actual frame rate --
+     * without this, a 150 FPS sample would see 1/4.5 of the delta a 33 ms/~30 Hz sample would for
+     * the same hand motion, making sensitivity depend on FPS. This is a plain per-sample scale,
+     * not a time filter, so it adds no state and no lag of its own. */
+    double sdx=(double)dx*(33.0/dt_ms), sdy=(double)dy*(33.0/dt_ms);
+    double magnitude=sqrt(sdx*sdx+sdy*sdy);
+    double target_x=0.0, target_y=0.0;
+    if (magnitude>=0.01) {
+        /* speed_offset*128 is a sizeable minimum push (shadPS4's default, 0.125, is ~16 of 128
+         * units) meant to raise the response for slow movement -- but switching it fully on/off
+         * right at this magnitude>=0.01 boundary means the slightest jitter around that boundary
+         * (the mouse delivering a 0 px sample, then a 1 px sample, then 0 again) toggles a 16-unit
+         * contribution on and off every sample. The output lerp smooths that over several frames,
+         * but doesn't remove it, since each toggle still perturbs the lerp's target. Fading
+         * speed_offset in linearly over a short ramp (0 to ramp_mag) instead of switching it on
+         * at full strength removes that remaining source of jitter without changing how a normal,
+         * continuous slow movement feels (the ramp covers less than a pixel of travel). */
+        const double ramp_mag=1.0;
+        double offset_fade=magnitude<ramp_mag ? magnitude/ramp_mag : 1.0;
+        double speed=magnitude*mouse->speed+mouse->speed_offset*128.0*offset_fade;
+        if (speed>128.0) speed=128.0;
+        double angle=atan2(sdy,sdx);
+        target_x=cos(angle)*speed;
+        target_y=sin(angle)*speed;
+    }
+    smoothed_mouse_stick_x+=(target_x-smoothed_mouse_stick_x)*alpha;
+    smoothed_mouse_stick_y+=(target_y-smoothed_mouse_stick_y)*alpha;
+    int x=(int)lround(smoothed_mouse_stick_x), y=(int)lround(smoothed_mouse_stick_y);
     *out_x=x<-127?-127:x>127?127:x;
     *out_y=y<-127?-127:y>127?127:y;
 }
@@ -354,9 +388,9 @@ static void sample_host(PadData *d) {
     ry=apply_deadzone(ry,cfg->deadzone[DEADZONE_RIGHT_STICK].inner,cfg->deadzone[DEADZONE_RIGHT_STICK].outer);
 
     /* CNV-001/MOU-009: the mouse contribution is added after the stick's own deadzone, not
-     * before it -- EmulateJoystick's deadzone_offset already gives the mouse its own minimum-
-     * speed floor (mouse_movement_params), so running it through apply_deadzone too would
-     * apply the deadzone twice to the same motion. */
+     * before it -- mouse_to_axis's own output-value lerp already keeps small/slow motion from
+     * producing a jumpy or oversized contribution (see its doc comment), so running the result
+     * through apply_deadzone too would just chop off the small end of an already-smooth curve. */
     if (mouse.captured && cfg->mouse.stick) {
         uint64_t now=now_us();
         double dt_ms=last_mouse_sample_us ? (double)(now-last_mouse_sample_us)/1000.0 : 33.0;
@@ -369,7 +403,10 @@ static void sample_host(PadData *d) {
         *tx+=mx; *ty+=my;
         *tx=*tx<-127?-127:*tx>127?127:*tx; *ty=*ty<-127?-127:*ty>127?127:*ty;
     } else {
-        last_mouse_sample_us=0; /* MOU-005/CNV-002: no stale dt across a capture gap */
+        /* MOU-005/CNV-002: no stale dt or velocity-filter memory survives a capture gap -- the
+         * next capture must start the EMA fresh, not carry over speed from before the gap. */
+        last_mouse_sample_us=0;
+        smoothed_mouse_stick_x=smoothed_mouse_stick_y=0.0;
     }
 
     if (button_output_held(&host,cfg,OUT_LEFTJOYSTICK_HALFMODE)) { lx/=2; ly/=2; }

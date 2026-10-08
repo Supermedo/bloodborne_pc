@@ -94,69 +94,95 @@ static void test_binding_evaluation(void) {
     puts("PASS: binding evaluation (remap OR, deadzone ramp and saturation, halfmode binding)");
 }
 
-/* T5: the EmulateJoystick-derived formula (CNV-001..003, MOU-009), independent of SDL/pad
- * plumbing -- mouse_to_axis is deterministic given (dx, dy, dt_ms, params), so this is testable
- * without a real mouse or a running window thread. */
+/* T5: the shadPS4-based mouse formula (CNV-001..003, MOU-009). mouse_to_axis is stateful again
+ * (reads/writes smoothed_mouse_stick_x/y), but this time the state is the *output* stick value
+ * being lerped toward an unfiltered, instantaneous target -- not a filtered velocity. The raw
+ * delta->target formula runs fresh every call (so a flick or the start of a 180 reversal is
+ * immediately reflected in the target, with no ramp-up and no reversal-stall risk); only the
+ * final value sent to the game is smoothed, which is what damps jitter from noisy per-sample
+ * deltas without making the response itself laggy. See the doc comment above mouse_to_axis for
+ * the fourth-iteration history (micro-jumps -> degrau -> stall-on-reversal -> "crispy"). Each
+ * case below resets that state first (mirroring MOU-005/CNV-002's reset on a capture gap), so
+ * the tests are independent of each other and of call order. */
+static void reset_mouse_filter(void) { smoothed_mouse_stick_x=smoothed_mouse_stick_y=0.0; }
+
 static void test_mouse_to_axis(void) {
     MouseParams mouse={.deadzone_offset=0.5f,.speed=1.0f,.speed_offset=0.125f,.stick=2};
     int x=99, y=99;
 
-    /* CNV-002: no motion -> no contribution, regardless of dt. */
+    /* CNV-002: no motion -> no contribution. */
+    reset_mouse_filter();
     mouse_to_axis(0.0f,0.0f,33.0,&mouse,&x,&y);
     assert(x==0 && y==0);
 
-    /* dx=10 at dt=33ms (no normalization). speed = (10*1+16) * (1-exp(-10/9.6)) = ~16.83,
-     * rounds to x=17. The exact value matters less than that it sits strictly between the
-     * "no motion" (0) and "fully linear" (26 = 10*1+16) cases: proof the ramp is doing
-     * something, not a specific tuning to defend. */
-    mouse_to_axis(10.0f,0.0f,33.0,&mouse,&x,&y);
-    assert(x==17 && y==0);
+    /* Steady state: a constant dx=10 at dt=6.67ms (150 FPS), held long enough for the lerp to
+     * settle, must converge to the un-filtered linear response for that velocity: magnitude =
+     * 10 * (33/6.67) ~= 49.5, speed = 49.5*1+16 ~= 65.5. The lerp changes the *path* to get
+     * there, not the destination. */
+    reset_mouse_filter();
+    for (int i=0;i<60;++i) mouse_to_axis(10.0f,0.0f,6.67,&mouse,&x,&y);
+    assert(x>=63 && x<=67 && y==0);
 
-    /* CNV-003: the same physical speed (px/ms) at a different dt must give the same
-     * contribution once normalized to the 33 ms window -- dx=10 over 33ms == dx=2.1212... over
-     * 7ms, normalized back to 33ms's worth of motion. Tolerance +/-2 units for the rounding. */
-    mouse_to_axis(10.0f*7.0f/33.0f,0.0f,7.0,&mouse,&x,&y);
-    assert(x>=15 && x<=19 && y==0);
+    /* Responsive from a standstill: unlike both earlier designs (hard floor, magnitude ramp),
+     * the target here is the plain unfiltered formula, so a single large flick must already
+     * equal its own instantaneous target (minus a single lerp step, which still leaves most of
+     * it) -- this is what actually fixes "dificuldade ... fazer um 180" / a sluggish start. */
+    reset_mouse_filter();
+    mouse_to_axis(30.0f,0.0f,6.67,&mouse,&x,&y);
+    assert(x>=25 && y==0);
 
-    /* The fix this formula exists for: a tiny movement must produce a small, nonzero,
-     * proportionate contribution -- never a jump to some fixed floor, and never a jump to
-     * a second fixed value further out either (the bug in the first version of this fix,
-     * reported in the same session as "ainda sinto um pouco de degrau": the curve approached
-     * the floor only asymptotically and so never actually met the line it switched to at the
-     * crossing magnitude -- this version has no branch to jump between). dx=1 at dt=33ms:
-     * speed = (1+16) * (1-exp(-1/9.6)) = ~1.68, rounds to x=2. */
-    mouse_to_axis(1.0f,0.0f,33.0,&mouse,&x,&y);
-    assert(x>=1 && x<=3 && y==0);
-
-    /* A large movement must converge onto shadPS4's own linear response (the ramp factor is
-     * within 1% of 1.0 well before this magnitude): dx=100 at dt=33ms: linear = 100+16 = 116,
-     * ramp(100) = 1-exp(-100/9.6) ~= 0.99994, so speed ~= 115.997, rounds to x=116. */
-    mouse_to_axis(100.0f,0.0f,33.0,&mouse,&x,&y);
-    assert(x==116 && y==0);
-
-    /* No discontinuity anywhere between a tiny and a large movement: sampling magnitude in
-     * small steps must never show the output jump by much more than the step itself, at any
-     * point along the curve -- this is the actual regression test for the "degrau" bug (a
-     * spot check at one or two magnitudes would not have caught it; the bug was a jump between
-     * two specific points, not a wrong value at any single one). */
+    /* A flick ramps up toward its target while held, then decays (not instantly) once the
+     * physical motion stops -- the lerp's memory working as intended, not stuck or jumping. */
+    reset_mouse_filter();
     {
-        int prev_x = 99, prev_set = 0;
-        for (float m = 0.0f; m <= 200.0f; m += 0.5f) {
-            mouse_to_axis(m,0.0f,33.0,&mouse,&x,&y);
-            if (prev_set) {
-                int step = x - prev_x;
-                assert(step >= 0 && step <= 2); /* monotonic, no jump beyond what 0.5 magnitude units could cause */
-            }
-            prev_x = x; prev_set = 1;
-        }
+        int seq[]={20,20,20,0,0,0,0,0}, out[8];
+        for (int i=0;i<8;++i) { mouse_to_axis((float)seq[i],0.0f,6.67,&mouse,&x,&y); out[i]=x; }
+        assert(out[2]>out[0]); /* ramps up while flicking */
+        assert(out[7]<out[2]); /* decays after the flick stops */
     }
 
-    /* Diagonal motion: direction preserved via atan2, magnitude still clamped to 128 then the
-     * +/-127 cast. A large deflection saturates both axes toward the 45-degree corner. */
-    mouse_to_axis(1000.0f,1000.0f,33.0,&mouse,&x,&y);
+    /* The actual regression test for "ainda sinto dificuldade ... fazer um 180": a fast
+     * reversal (the mouse decelerates, passes near zero speed, then accelerates the other way)
+     * must cross to the opposite sign and keep moving that way, not stall at the near-zero
+     * sample as the earlier, stateless magnitude-ramp formula did, and not amplify noise around
+     * that crossing as the later, velocity-filtered formula did. */
+    reset_mouse_filter();
+    {
+        int seq[]={20,20,5,-5,-20,-20}, out[6];
+        for (int i=0;i<6;++i) { mouse_to_axis((float)seq[i],0.0f,6.67,&mouse,&x,&y); out[i]=x; }
+        assert(out[5]<0);           /* crosses to negative by the end of the reversal */
+        assert(out[4]<out[3]);      /* still moving negative, not stalled, right after crossing */
+    }
+
+    /* Diagonal motion, steady state: direction preserved via atan2, magnitude clamped to 128
+     * then the +/-127 cast. A large deflection saturates both axes toward the 45-degree corner. */
+    reset_mouse_filter();
+    for (int i=0;i<60;++i) mouse_to_axis(1000.0f,1000.0f,33.0,&mouse,&x,&y);
     assert(x>=89 && x<=91 && y>=89 && y<=91); /* 127/sqrt(2) ~= 89.8 */
 
-    puts("PASS: mouse_to_axis (EmulateJoystick formula: deadzone floor, dt normalization, saturation)");
+    /* Smooth acceleration from rest (a realistic trajectory -- dx ramping 0,1,2,...,10 over ten
+     * samples, then holding -- rather than an instantaneous jump to a fixed magnitude): once
+     * motion is under way, no sample-to-sample jump should be much larger than the acceleration
+     * itself justifies. The very first nonzero sample is excluded -- that one jump (roughly
+     * speed_offset's own contribution, faded in near zero magnitude but already near full
+     * strength by dx=1) is speed_offset doing its job of giving slow movements an immediate
+     * minimum response, not a defect in the smoothing curve. */
+    reset_mouse_filter();
+    {
+        int prev_x=0, prev_set=0, max_jump=0;
+        for (int i=0;i<20;++i) {
+            float dx=(float)(i<10 ? i : 10);
+            mouse_to_axis(dx,0.0f,6.67,&mouse,&x,&y);
+            if (prev_set && i>1) {
+                int step=x-prev_x;
+                if (step>max_jump) max_jump=step;
+            }
+            prev_x=x; prev_set=1;
+        }
+        assert(max_jump<=10);
+    }
+
+    puts("PASS: mouse_to_axis (output-value lerp: steady state, responsiveness, 180 reversal, saturation)");
 }
 
 /* T5: mouse buttons and wheel through the full binding path -- bbgpu_mouse_take, captured vs.

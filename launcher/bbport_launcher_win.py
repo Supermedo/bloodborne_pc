@@ -932,16 +932,14 @@ class Launcher:
             show()
             self.row(f, title, holder, hint)
 
+        # deadzone_offset ("Smoothness") used to gate a startup floor/ramp in mouse_to_axis;
+        # that formula was replaced by an output-value lerp with a fixed time constant
+        # (src/runtime_pad.c), which deadzone_offset no longer affects, so the slider for it was
+        # removed here rather than leave a control with no real effect. The value is still read/
+        # written in input.ini by bbport_input_config.py for files that already set it.
         slider_row('speed', _('Sensitivity', 'Чувствительность'),
                    _('How fast the camera turns for a given mouse movement.',
                      'Насколько быстро поворачивается камера при движении мыши.'), 0.1, 5.0)
-        slider_row('deadzone_offset', _('Smoothness (anti micro-jump)', 'Плавность (против рывков)'),
-                   _('Higher: the camera eases in more gently from a stop, less likely to feel '
-                     'like it jumps on small movements, but slow movements take longer to '
-                     'register. Lower: snappier, but small/slow movements may feel jerky.',
-                     'Выше: камера плавнее трогается с места, меньше ощущение рывка при малых '
-                     'движениях, но медленные движения дольше набирают скорость. Ниже: отклик '
-                     'быстрее, но малые/медленные движения могут ощущаться рывками.'), 0.0, 1.0)
         slider_row('speed_offset', _('Minimum turn speed', 'Минимальная скорость поворота'),
                    _('A constant added on top of sensitivity; raises the floor for slow '
                      'movements without affecting fast ones as much.',
