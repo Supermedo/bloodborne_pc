@@ -17,7 +17,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
-// DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license).
+// DejaVu Sans (Cyrillic) and a Noto Sans SC subset (Chinese) are embedded (third_party/fonts;
+// Bitstream Vera and SIL OFL licenses).
 #ifdef _WIN32
 asm(".section .rdata,\"dr\"\n"
     ".balign 16\n"
@@ -26,6 +27,12 @@ asm(".section .rdata,\"dr\"\n"
     ".incbin \"" BB_FONT_PATH "\"\n"
     ".global bb_font_ttf_end\n"
     "bb_font_ttf_end:\n"
+    ".balign 16\n"
+    ".global bb_font_cjk\n"
+    "bb_font_cjk:\n"
+    ".incbin \"" BB_FONT_CJK_PATH "\"\n"
+    ".global bb_font_cjk_end\n"
+    "bb_font_cjk_end:\n"
     ".text\n");
 #else
 asm(".section .rodata\n"
@@ -37,10 +44,20 @@ asm(".section .rodata\n"
     ".hidden bb_font_ttf_end\n"
     ".global bb_font_ttf_end\n"
     "bb_font_ttf_end:\n"
+    ".balign 16\n"
+    ".hidden bb_font_cjk\n"
+    ".global bb_font_cjk\n"
+    "bb_font_cjk:\n"
+    ".incbin \"" BB_FONT_CJK_PATH "\"\n"
+    ".hidden bb_font_cjk_end\n"
+    ".global bb_font_cjk_end\n"
+    "bb_font_cjk_end:\n"
     ".previous\n");
 #endif
 extern "C" const unsigned char bb_font_ttf[];
 extern "C" const unsigned char bb_font_ttf_end[];
+extern "C" const unsigned char bb_font_cjk[];
+extern "C" const unsigned char bb_font_cjk_end[];
 
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
 
@@ -469,6 +486,13 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
                                    int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config);
+    // Chinese glyphs come from the Noto Sans SC subset, merged after DejaVu: since ImGui 1.92
+    // the font inputs are queried in order and the first one with the glyph provides it.
+    ImFontConfig cjk_config;
+    cjk_config.FontDataOwnedByAtlas = false;
+    cjk_config.MergeMode = true;
+    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_cjk),
+                                   int(bb_font_cjk_end - bb_font_cjk), 18.0f, &cjk_config);
 
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(

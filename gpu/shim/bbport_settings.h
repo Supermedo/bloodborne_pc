@@ -67,7 +67,7 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
-    /// Overlay menu language (BbText::Language order): bbport.ini ui_language=en|ru|de|fr|es|it.
+    /// Overlay menu language (BbText::Language order): bbport.ini ui_language=en|ru|de|fr|es|it|zh.
     std::atomic<int> ui_language{0};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};

@@ -66,6 +66,7 @@ int main() {
     assert(LanguageFromCode(nullptr) == English);
     assert(LanguageFromCode("ru") == Russian);
     assert(LanguageFromCode("it") == Italian);
+    assert(LanguageFromCode("zh") == Chinese);
     assert(LanguageFromCode(CodeFromLanguage(1000)) == English); // out of range clamps
 
     // Every entry carries every language, and the format specifiers match the key.
@@ -102,6 +103,8 @@ int main() {
     assert(std::strcmp(Tr("Close"), "Cerrar") == 0);
     s.ui_language = Italian;
     assert(std::strcmp(Tr("Close"), "Chiudi") == 0);
+    s.ui_language = Chinese;
+    assert(std::strcmp(Tr("Close"), "关闭") == 0);
     s.ui_language = English;
     assert(EntryText(0, English) == EntryKey(0));
 

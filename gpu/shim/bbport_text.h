@@ -7,13 +7,14 @@
 
 namespace BbText {
 
-enum Language : int { English = 0, Russian, German, French, Spanish, Italian, LanguageCount };
+enum Language : int { English = 0, Russian, German, French, Spanish, Italian, Chinese,
+                      LanguageCount };
 
 /// Translation of an English literal for the active language (the literal itself when the
 /// language is English, the entry is missing, or the translation is empty).
 const char* Tr(const char* key);
 
-/// Parse/format for the bbport.ini value: "en", "ru", "de", "fr", "es", "it".
+/// Parse/format for the bbport.ini value: "en", "ru", "de", "fr", "es", "it", "zh".
 int LanguageFromCode(const char* code);
 const char* CodeFromLanguage(int language);
 /// Endonym for the language selector: "English", "Русский", "Deutsch", ...
