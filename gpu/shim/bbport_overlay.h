@@ -39,4 +39,7 @@ bool CapturesInput();
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text);
 
+/// Window thread: brief mousecam on/off toast after the F4 toggle.
+void ShowMousecam(bool enabled);
+
 } // namespace BbOverlay

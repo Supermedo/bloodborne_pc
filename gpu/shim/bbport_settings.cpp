@@ -66,6 +66,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                 v.output_res = r;
             }
         }
+    } else if (key == "mousecam_sensitivity") {
+        v.mousecam_sensitivity = std::clamp(i, 10, 500);
     } else {
         for (int e = 0; e < EffectCount; ++e) {
             if (key == Effects[e].key) {
@@ -199,8 +201,8 @@ void Save() {
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
-    std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
-                 OutputWidths[v.output_res], OutputHeights[v.output_res]);
+    std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\nmousecam_sensitivity=%d\n", v.model_lod.load(),
+                 OutputWidths[v.output_res], OutputHeights[v.output_res], v.mousecam_sensitivity.load());
     // Read by run.sh at start.
     std::fprintf(file, "live_resolution=%s\n", v.live_resolution < 0 ? "auto"
                                                   : v.live_resolution ? "1" : "0");

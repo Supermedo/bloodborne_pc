@@ -55,6 +55,10 @@ bool dirty = false; // settings changed while open: saved on close
 // The game's text dialog (SetTextEntry), guarded by imgui_mutex.
 bool text_entry_active = false;
 std::string text_entry_prompt, text_entry_text;
+// Mousecam toast (ShowMousecam), guarded by imgui_mutex.
+bool mousecam_toast = false;
+bool mousecam_enabled = false;
+float mousecam_toast_start = 0.0f;
 float base_scale = 1.0f;
 
 // Present rate for the FPS counter.
@@ -444,6 +448,33 @@ void FpsCounter() {
     ImGui::End();
 }
 
+// Brief bottom-center toast after the F4 mousecam toggle: rises in over
+// 0.3 s, shows for 3 s. Same window shape as the FPS counter.
+void MousecamToast() {
+    const float elapsed = ImGui::GetTime() - mousecam_toast_start;
+    if (elapsed >= 3.0f) {
+        mousecam_toast = false;
+        return;
+    }
+    const float rise = std::min(elapsed / 0.3f, 1.0f);
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                   viewport->WorkPos.y + viewport->WorkSize.y -
+                                       (20.0f + 20.0f * rise) * base_scale),
+                            ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.5f * std::min(rise * 3.0f, 1.0f));
+    ImGui::Begin("##mousecam", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+    if (mousecam_enabled) {
+        ImGui::TextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), "Mousecam enabled");
+    } else {
+        ImGui::TextDisabled("Mousecam disabled");
+    }
+    ImGui::End();
+}
+
 } // namespace
 
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
@@ -612,7 +643,8 @@ bool HandleEvent(const SDL_Event& event) {
 }
 
 bool Visible() {
-    return initialized && (menu_open || text_entry_active || BbSettings::Get().show_fps);
+    return initialized &&
+           (menu_open || text_entry_active || mousecam_toast || BbSettings::Get().show_fps);
 }
 
 bool CapturesInput() {
@@ -624,6 +656,13 @@ void SetTextEntry(bool active, const std::string& prompt, const std::string& tex
     text_entry_active = active;
     text_entry_prompt = prompt;
     text_entry_text = text;
+}
+
+void ShowMousecam(bool enabled) {
+    std::scoped_lock lock{imgui_mutex};
+    mousecam_enabled = enabled;
+    mousecam_toast_start = ImGui::GetTime();
+    mousecam_toast = true;
 }
 
 void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
@@ -660,6 +699,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (text_entry_active) {
         TextEntryBox();
+    }
+    if (mousecam_toast) {
+        MousecamToast();
     }
     ImGui::Render();
 

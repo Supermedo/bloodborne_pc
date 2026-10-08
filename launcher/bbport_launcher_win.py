@@ -159,7 +159,7 @@ TWEAKS = [
 INI_FLAGS = {'sharpen', 'object_motion', 'show_fps', *(k for k, _t, _o in EFFECTS + EXTRAS + CHEATS + TWEAKS)}
 INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': '0.50',
                 'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080', 'model_lod': '0',
-                'live_resolution': 'auto',
+                'mousecam_sensitivity': '100', 'live_resolution': 'auto',
                 **{key: '1' if on else '0' for key, _t, on in EFFECTS + EXTRAS + CHEATS + TWEAKS}}
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
@@ -443,6 +443,8 @@ class Launcher:
                     v = tk.BooleanVar(value=value == '1')
                 elif key == 'sharpness':
                     v = tk.DoubleVar(value=float(value or 0.5))
+                elif key == 'mousecam_sensitivity':
+                    v = tk.DoubleVar(value=float(value or 100))
                 else:
                     v = tk.StringVar(value=value)
             else:
@@ -794,6 +796,18 @@ class Launcher:
             self.check(f, key, 'ini', _(*title))
         self.note(f, _('Effects and extras are game patches for version 1.09, applied at start.',
                        'Эффекты и дополнения — патчи игры для версии 1.09, применяются при запуске.'))
+        self.section(f, _('Mouse camera', 'Мышь-камера'))
+        holder = self.ttk.Frame(f)
+        self.ttk.Scale(holder, from_=10, to=500, variable=self.var('mousecam_sensitivity', 'ini'),
+                       length=300).pack(side='left')
+        value = self.ttk.Label(holder, width=5)
+        value.pack(side='left', padx=10)
+        show = lambda *_a: value.configure(text=f'{self.vars["mousecam_sensitivity"].get():.0f}')
+        self.vars['mousecam_sensitivity'].trace_add('write', show)
+        show()
+        self.row(f, _('Sensitivity', 'Чувствительность'), holder,
+                 _("F4 switches the mouse camera on and off in game; 100 is the mouse's own speed.",
+                   'F4 включает и выключает мышь-камеру в игре; 100 — собственная скорость мыши.'))
 
     def build_cheats(self):
         f = self.scrolled_page('cheats', _('Cheats', 'Читы'),
@@ -1071,7 +1085,8 @@ class Launcher:
                 value = APP_DEFAULTS.get(key, INI_DEFAULTS.get(key))
             if var.store == 'ini':
                 self.ini[key] = ('1' if value else '0') if key in INI_FLAGS else \
-                    f'{float(value):.2f}' if key == 'sharpness' else str(value)
+                    f'{float(value):.2f}' if key == 'sharpness' else \
+                    f'{float(value):.0f}' if key == 'mousecam_sensitivity' else str(value)
             else:
                 self.app[key] = value
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
