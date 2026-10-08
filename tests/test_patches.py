@@ -75,7 +75,6 @@ class NativeUiTests(unittest.TestCase):
         self.assertIsNone(render_size({'upscaler': 'off', 'preset': '3'}))
 
     def test_output_other_than_1080p_scales_the_scene(self):
-        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'preset': '2'}))
         # Steam Deck: below 1080p the scene is still the preset's fraction of the output.
         for preset, expected in [(0, (1280, 720)), (2, (752, 424)), (4, (426, 240))]:
             with self.subTest(preset=preset):
@@ -85,6 +84,19 @@ class NativeUiTests(unittest.TestCase):
                          ((1916, 1078), (3840, 2160)))
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
+
+    def test_1080p_scales_the_scene_when_the_preset_reduces(self):
+        # The preset patches the game's own render size at 1080p too: the live host targets
+        # cannot make the game render smaller, so the patch is the only paying path there.
+        for preset, expected in [(1, (1280, 720)), (2, (1130, 636)),
+                                 (3, (960, 540)), (4, (640, 360))]:
+            with self.subTest(preset=preset):
+                self.assertEqual(scaled_sizes({'output_res': '1920x1080', 'preset': str(preset)}),
+                                 (expected, (1920, 1080)))
+        # Nothing to reduce at 1080p: Native AA, the upscaler off and TAA stay live.
+        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'preset': '0'}))
+        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'upscaler': 'off', 'preset': '4'}))
+        self.assertIsNone(scaled_sizes({'output_res': '1920x1080', 'upscaler': 'taa', 'preset': '4'}))
 
 
 class DebugPatchTests(unittest.TestCase):

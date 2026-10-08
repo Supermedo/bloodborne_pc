@@ -251,6 +251,12 @@ add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_sup
 target_include_directories(upscaler-support-test PRIVATE shim)
 target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
 
+# bbport: the overlay translation table (gpu/shim/bbport_text.cpp).
+add_executable(text-test EXCLUDE_FROM_ALL ../tests/test_text.cpp
+    shim/bbport_text.cpp shim/bbport_settings.cpp)
+target_include_directories(text-test PRIVATE shim)
+target_compile_options(text-test PRIVATE -UNDEBUG)
+
 add_executable(fsr4-bench EXCLUDE_FROM_ALL tools/fsr4_bench.cpp
     shadps4/video_core/renderer_vulkan/fsr411/fsr411.cpp)
 target_include_directories(fsr4-bench PRIVATE shadps4/video_core/renderer_vulkan/fsr411)

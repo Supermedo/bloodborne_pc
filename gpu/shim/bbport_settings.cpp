@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_settings.h"
 
+#include "bbport_text.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +54,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
     } else if (key == "show_fps") {
         v.show_fps = i != 0;
+    } else if (key == "ui_language") {
+        v.ui_language = BbText::LanguageFromCode(value.c_str());
     } else if (key == "fsr4_auto_exposure") {
         v.fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
@@ -113,6 +117,7 @@ void Load() {
         {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"BB_UI_LANGUAGE", "ui_language"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -168,13 +173,38 @@ int RenderPreset() {
         v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
 }
 
+bool StartupPatchApplies() {
+    const auto& v = Get();
+    if (const char* available = std::getenv("BB_PATCH_AVAILABLE"); available && available[0] == '0') {
+        return false; // patches need game version 01.09 (run scripts mark it)
+    }
+    if (v.upscaler == UpscalerTaa || v.upscaler == UpscalerOff) {
+        return false; // nothing to upscale from, or native guest targets
+    }
+    const bool downscale = PresetScale(v.preset) > 1.0f;
+    if (v.live_resolution == 1) {
+        return false; // live changes asked for explicitly
+    }
+    if (v.live_resolution < 0) {
+        // Auto: a reducing preset at a 1080p output always takes the patch (the live path
+        // cannot make the game itself render smaller there); elsewhere the GPU check decides.
+        return (v.output_res == OutputDefault && downscale) || FixedRenderSession();
+    }
+    return downscale || v.output_res != OutputDefault;
+}
+
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
-    // TAA needs the live path (native guest targets): run.sh selects it on restart.
-    return FixedRenderSession() &&
-        (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
-         (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
-         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
+    if (FixedRenderSession()) {
+        // The guest scene size is fixed at start; any selection that changes it needs the
+        // restart. TAA needs the live path (native guest targets): run.sh selects it on restart.
+        return v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
+               v.live_resolution != v.startup_live_resolution ||
+               (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
+               (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa);
+    }
+    // A live session: a selection the startup patch would apply cannot change live.
+    return StartupPatchApplies();
 }
 
 void Save() {
@@ -188,13 +218,15 @@ void Save() {
                  "# bbport settings (in-game menu: Insert / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
+                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n"
+                 "ui_language=%s\n",
                  UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
                  v.debug_view.load(), int(v.show_fps.load()),
-                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()));
+                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()),
+                 BbText::CodeFromLanguage(v.ui_language.load()));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));

@@ -701,16 +701,26 @@ class Launcher:
                    'Временной апскейлинг с векторами движения игры. FSR 4 нужны ассеты (ниже) и GPU с INT8; '
                    'иначе игра сама переключится на FSR 3.1.'))
         self.row(f, _('Quality preset', 'Пресет'), self.choice(f, 'preset', 'ini', PRESETS),
-                 _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
-                   'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
+                 _("Render scale per axis: Quality renders at 1/1.5 of the output size. A reducing "
+                   "preset sets the game's own render size by a patch at start (changing it restarts "
+                   'the game).',
+                   'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода. '
+                   'Уменьшающий пресет задаёт собственный размер рендера игры патчем при запуске '
+                   '(смена — с перезапуском).'))
         self.row(f, _('Output resolution', 'Разрешение вывода'), self.choice(f, 'output_res', 'ini', OUTPUTS),
                  _('What the upscaler produces; the HUD is drawn at this size too.',
                    'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
         self.row(f, _('Live resolution changes', 'Смена разрешения на лету'), self.choice(f, 'live_resolution', 'ini', LIVE),
-                 _('Off: outputs other than 1080p are set by a patch at start (fastest; changing them in the '
-                   'game restarts it). On: change output and preset in the game without a restart, at a cost.',
-                   'Выкл.: разрешения кроме 1080p задаются патчем при запуске (быстрее). Вкл.: менять в игре '
-                   'без перезапуска, но медленнее.'))
+                 _('Off: the preset reduces the game\'s own render size through a patch at start — at '
+                   'every output including 1080p (fastest; changing it in the game restarts it). On: the '
+                   'game stays at 1080p internally and the port scales scene targets at run time — change '
+                   'output and preset without a restart, at a cost. Auto: the patch at 1080p when a preset '
+                   'reduces; live changes elsewhere on strong GPUs.',
+                   'Выкл.: пресет уменьшает собственный размер рендера игры патчем при запуске — при '
+                   'любом выводе, включая 1080p (быстрее; смена в игре — с перезапуском). Вкл.: игра '
+                   'остаётся в 1080p, порт масштабирует цели сцены на лету — менять вывод и пресет без '
+                   'перезапуска, но медленнее. Авто: патч при 1080p с уменьшающим пресетом, на лету — '
+                   'для остальных выводов на мощных GPU.'))
         self.check(f, 'sharpen', 'ini', _('Sharpening (RCAS)', 'Резкость (RCAS)'))
         holder = ttk.Frame(f)
         ttk.Scale(holder, from_=0.0, to=2.0, variable=self.var('sharpness', 'ini'), length=300).pack(side='left')

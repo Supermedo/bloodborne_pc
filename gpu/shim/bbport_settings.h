@@ -18,34 +18,34 @@ inline bool IsFsr4(int upscaler) {
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 
-/// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
-/// menu label, default (the game's own behaviour).
+/// Game effects switched by the community patches at start (patches.py EFFECTS): ini key and
+/// default (the game's own behaviour). The launcher owns their labels; the in-game menu does
+/// not expose the game patches.
 struct Effect {
     const char* key;
-    const char* label;
     bool default_on;
 };
 inline constexpr Effect Effects[] = {
-    {"effect_chromatic_aberration", "Хроматическая аберрация", true},
-    {"effect_dof", "Глубина резкости (DoF)", true},
-    {"effect_motion_blur", "Размытие в движении", true},
-    {"effect_ssao", "Затенение SSAO", true},
-    {"effect_game_aa", "Собственное сглаживание игры", true},
-    {"effect_dynamic_shadows", "Тени от динамических источников", true},
-    {"effect_ssr", "Отражения SSR (не было в игре)", false},
-    {"skip_intro", "Пропуск заставок при запуске", false},
-    {"debug_camera", "Свободная камера (Cross + L3)", false},
-    {"debug_menu", "Debug menu (нужны файлы шрифтов)", false},
-    {"cheat_no_death", "Чит: бессмертие (не ниже 1 HP)", false},
-    {"cheat_stealth", "Чит: враги не замечают", false},
-    {"cheat_silent", "Чит: враги не слышат", false},
-    {"cheat_rally_no_decay", "Чит: Rally не угасает", false},
-    {"cheat_enemy_control", "Чит: управление врагом (R3 / L3)", false},
-    {"tweak_no_rally", "Без Rally (возврата HP)", false},
-    {"tweak_camera_distance", "Камера дальше", false},
-    {"tweak_no_camera_rotation", "Без автоповорота камеры", false},
-    {"tweak_easy_run", "Бег с меньшим наклоном стика", false},
-    {"tweak_ragdoll", "Физика тел как в Dark Souls", false},
+    {"effect_chromatic_aberration", true},
+    {"effect_dof", true},
+    {"effect_motion_blur", true},
+    {"effect_ssao", true},
+    {"effect_game_aa", true},
+    {"effect_dynamic_shadows", true},
+    {"effect_ssr", false},
+    {"skip_intro", false},
+    {"debug_camera", false},
+    {"debug_menu", false},
+    {"cheat_no_death", false},
+    {"cheat_stealth", false},
+    {"cheat_silent", false},
+    {"cheat_rally_no_decay", false},
+    {"cheat_enemy_control", false},
+    {"tweak_no_rally", false},
+    {"tweak_camera_distance", false},
+    {"tweak_no_camera_rotation", false},
+    {"tweak_easy_run", false},
+    {"tweak_ragdoll", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
 /// Live output resolutions: the upscaler's output and the UI host targets.
@@ -67,6 +67,8 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
+    /// Overlay menu language (BbText::Language order): bbport.ini ui_language=en|ru|de|fr|es|it.
+    std::atomic<int> ui_language{0};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};
@@ -107,6 +109,10 @@ void ConfigureDlssSupport(bool available, const char* problem);
 bool FixedRenderSession();
 int RenderPreset();
 bool ResolutionNeedsRestart();
+/// Whether a launch with the current selection would fix the game's render size by patch at
+/// start (the run scripts decide; BB_PATCH_AVAILABLE carries their answer to the game). A live
+/// session cannot change that size, so the menu offers a restart when this becomes true.
+bool StartupPatchApplies();
 /// Writes the file (menu changes).
 void Save();
 

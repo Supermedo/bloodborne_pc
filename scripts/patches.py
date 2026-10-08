@@ -130,15 +130,18 @@ def output_size(settings):
 
 
 def scaled_sizes(settings):
-    """(render, output) for an output other than 1080p (above it, or 720p for the Steam Deck):
-    the game renders at output / preset scale (or at the output size without upscaler) and the
-    upscaler fills the output. None at 1080p and for TAA (native, live host targets only)."""
+    """(render, output) when the startup patch should fix the game's own render size: the scene
+    is output / preset scale, the upscaler fills the output, the UI stays at the output size.
+    None for TAA (native) and when there is nothing to reduce (1080p with the upscaler off
+    or Native AA). A reducing preset patches at 1080p too: the live host targets cannot make
+    the game itself render smaller, so the patch is the only way the preset pays off there."""
     out=output_size(settings)
-    if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
+    if settings.get('upscaler')=='taa': return None
     scale=1.0
     if settings.get('upscaler','fsr3')!='off':
         preset=int(settings.get('preset','0') or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
+    if out==OUTPUT_SIZE and scale==1.0: return None
     render=tuple(max(2,round(v/scale/2)*2) for v in out)
     # A scene of exactly 1920x1080 (4K Performance) is indistinguishable from the game's UI
     # coordinate space, which the port's UI composition recognizes by that size.
@@ -277,11 +280,17 @@ def main():
     p.add_argument('--print-preset-size',action='store_true',help='print the selected preset size, if reduced')
     p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
     p.add_argument('--print-scaled',action='store_true',
-                   help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
+                   help='print "RENDER OUTPUT" (WxH) when the startup patch should fix the game\'s render size')
+    p.add_argument('--print-patched',action='store_true',
+                   help='print 1 when the community patches apply to this game (01.09), else 0')
     a=p.parse_args()
     if a.print_scaled:
         sizes=scaled_sizes(read_settings(a.settings))
         if sizes: print(f'{sizes[0][0]}x{sizes[0][1]} {sizes[1][0]}x{sizes[1][1]}')
+        return
+    if a.print_patched:
+        version=game_app_version(a.game_dir)
+        print('1' if version in (None,a.app_version) or os.environ.get('BB_FORCE_PATCHES') else '0')
         return
     if a.print_preset_size:
         settings=read_settings(a.settings)

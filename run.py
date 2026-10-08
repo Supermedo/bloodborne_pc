@@ -122,6 +122,8 @@ def main():
         patched = version in (None, '01.09') or bool(env.get('BB_FORCE_PATCHES'))
         if not patched:
             print(f'Game version {version}: community patches need 01.09; 30 FPS, no effect patches')
+        # The in-game menu tells applied/restart-pending settings apart with this.
+        env['BB_PATCH_AVAILABLE'] = '1' if patched else '0'
         # Sizes chosen below for the previous launch are recomputed after an in-game restart.
         if env.get('BB_AUTO_RENDER_RES') == '1':
             for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
@@ -134,12 +136,17 @@ def main():
                 scaled_render, scaled_output = printed
         live = '0'
         if scaled_output:
-            live = env.get('BB_LIVE_RES') or ini_value(config, 'live_resolution') or '0'
+            requested = env.get('BB_LIVE_RES') or ini_value(config, 'live_resolution') or '0'
+            live = requested
             if live == 'auto':
                 caps = probe.parent / 'bb-gpu-capabilities.exe'
                 result = subprocess.run([str(caps), '--live-resolution'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                         text=True, creationflags=no_console())
                 live = result.stdout.strip() if result.returncode == 0 else '0'
+            # A reducing preset at a 1080p output needs the startup patch: the live path keeps
+            # the game at 1080p internally there. An explicit live_resolution=1 still selects it.
+            if requested == 'auto' and scaled_output == '1920x1080' and scaled_render != scaled_output:
+                live = '0'
             live = '1' if live == '1' or not patched else '0'
         if live == '1':
             print(f'Output {scaled_output}: live resolution changes (live_resolution=0: startup patch)')

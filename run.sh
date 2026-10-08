@@ -52,6 +52,12 @@ fi
 "$PYTHON" scripts/link_libc.py "$game" --out "$out"
 "$PYTHON" scripts/link_modules.py "$game" --out "$out"
 "$PYTHON" scripts/content_profile.py "$game" --out "$out" --sku "${BB_CONTENT_SKU:-full}"
+# Community patches need game version 01.09 (patches.py applies none to others): such a game
+# runs at 30 FPS and keeps the live resolution changes; the in-game menu reads the flag.
+# %$'\r': a Windows Python writes CRLF (MSYS2), and command substitution keeps the CR.
+patched=$("$PYTHON" scripts/patches.py --print-patched --game-dir "$game")
+patched=${patched%$'\r'}
+export BB_PATCH_AVAILABLE=$patched
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
     unset BB_RENDER_RES BB_OUTPUT_RES BB_AUTO_RENDER_RES
@@ -60,34 +66,46 @@ fi
 # Frame rate: BB_FPS=uncap (default; delta-time patch, vblank follows the display),
 # 60/90 (fixed-timestep patches) or 30 (unpatched). BB_PATCHES adds patch names ("a;b").
 fps=${BB_FPS:-uncap}
-# bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
-# renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
-# drawn at the output size. Preset and output changes need a restart.
+# bbport.ini: a preset that reduces the scene (Quality..Ultra Performance) sets the game's own
+# render size through a patch at start — at every output including 1080p (output / preset
+# scale; the upscaler fills the output, the UI is drawn at the output size). Preset and output
+# changes need a restart. Native AA and TAA have nothing to reduce.
 # Live resolution changes keep the guest at 1920x1080 and scale host targets at run time instead
 # (output and presets change in the menu without a restart, but post-processing stays at 1080p
 # and scene targets are copied back: much slower on the Steam Deck and older GPUs). Chosen by
-# BB_LIVE_RES=0/1, else bbport.ini live_resolution=0/1/auto (auto: the GPU check, strong
-# discrete GPUs get them); off when unset. 1080p output and TAA always use the live path.
+# BB_LIVE_RES=0/1, else bbport.ini live_resolution=0/1/auto (auto: the GPU check for outputs
+# other than 1080p; a reducing preset at 1080p always takes the patch); off when unset.
 if [[ -z ${BB_RENDER_RES:-} ]]; then
     read -r scaled_render scaled_output < <("$PYTHON" scripts/patches.py --print-scaled --settings "$BB_CONFIG") || true
 fi
+# read keeps the CR of CRLF output on the last field (MSYS2 runs, Windows-written files).
+if [[ -n ${scaled_output:-} ]]; then
+    scaled_output=${scaled_output%$'\r'}
+fi
 live=0
 if [[ -n ${scaled_output:-} ]]; then
-    live=${BB_LIVE_RES:-}
+    requested=${BB_LIVE_RES:-}
     # Bash builtins only: the AppImage's PATH has no sed/grep (a missing one ended run.sh silently).
-    if [[ -z $live && -f $BB_CONFIG ]]; then
+    if [[ -z $requested && -f $BB_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
-            [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
+            # \r? tolerates a CRLF bbport.ini (MSYS2 plus a launcher-written file).
+            [[ $line =~ ^live_resolution=([01]|auto)$'\r'?$ ]] && requested=${BASH_REMATCH[1]}
         done < "$BB_CONFIG"
     fi
+    live=${requested:-0}
     if [[ $live == auto ]]; then
         if [[ -n ${BB_PROBE:-} ]]; then caps=$(dirname -- "$BB_PROBE")/bb-gpu-capabilities
         elif [[ -n ${BB_PREBUILT:-} ]]; then caps=bin/bb-gpu-capabilities
         else caps=out/bb-gpu-capabilities; fi
         live=$("$caps" --live-resolution 2> >(while IFS= read -r line; do
             [[ $line == *MANGOHUD* ]] || printf '%s\n' "$line"; done >&2)) || live=0
+        # A reducing preset at a 1080p output needs the startup patch: the live path keeps the
+        # game at 1080p internally there. An explicit live_resolution=1 still selects it.
+        if [[ $scaled_output == 1920x1080 && ${scaled_render:-} != "$scaled_output" ]]; then live=0; fi
     fi
     [[ $live == 1 ]] || live=0
+    # Games without the community patches always run live.
+    [[ $patched == 1 ]] || live=1
 fi
 if [[ $live == 1 ]]; then
     echo "Output ${scaled_output}: live resolution changes (live_resolution=0: startup patch)"

@@ -54,12 +54,38 @@ int main() {
             }
         }
     }
-    s.startup_preset = Quality;
-    s.startup_upscaler = UpscalerFsr3;
+    // A live session (no BB_RENDER_RES): a selection the startup patch would apply cannot
+    // change live, so the menu offers a restart for it.
+    unsetenv("BB_RENDER_RES");
+    unsetenv("BB_PATCH_AVAILABLE");
     s.upscaler = UpscalerFsr3;
+    s.preset = NativeAA;
+    s.output_res = OutputDefault;
+    s.live_resolution = 0;
+    assert(!FixedRenderSession() && !ResolutionNeedsRestart()); // nothing to reduce at 1080p
     s.preset = Performance;
-    assert(RenderPreset() == Performance && !ResolutionNeedsRestart());
+    assert(ResolutionNeedsRestart()); // now a patch would apply: restart required
+    s.live_resolution = 1;
+    assert(!ResolutionNeedsRestart()); // live changes are the explicit opt-out
+    s.live_resolution = 0;
+    s.preset = NativeAA;
+    assert(!StartupPatchApplies());
+    s.preset = Performance;
+    assert(StartupPatchApplies());
+    s.upscaler = UpscalerTaa;
+    assert(!StartupPatchApplies());
+    s.upscaler = UpscalerOff;
+    assert(!StartupPatchApplies());
+    s.upscaler = UpscalerFsr4;
+    setenv("BB_PATCH_AVAILABLE", "0", 1); // a game copy without the 01.09 patches
+    assert(!StartupPatchApplies() && !ResolutionNeedsRestart());
+    unsetenv("BB_PATCH_AVAILABLE");
+    // Fixed session: the running guest was patched at start; size changes need the restart.
+    s.output_res = 2;
+    s.live_resolution = 0;
     setenv("BB_RENDER_RES", "1706x960", 1);
+    s.startup_preset = Quality;
+    s.preset = Performance;
     assert(RenderPreset() == Quality && ResolutionNeedsRestart());
     s.preset = Quality;
     assert(!ResolutionNeedsRestart());
@@ -74,6 +100,11 @@ int main() {
     s.output_res = (output + 1) % OutputCount;
     assert(ResolutionNeedsRestart());
     s.output_res = output;
+    s.live_resolution = 1; // the next launch would be live: restart to apply
+    assert(ResolutionNeedsRestart());
+    s.live_resolution = 0;
+    s.output_res = OutputDefault;
+    s.preset = NativeAA;
     setenv("BB_RENDER_RES", "", 1);
     assert(!FixedRenderSession() && !ResolutionNeedsRestart());
     unsetenv("BB_RENDER_RES");
