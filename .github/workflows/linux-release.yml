@@ -43,6 +43,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/linux-v')
         uses: softprops/action-gh-release@v2
         with:
+          # Never GitHub's "latest" release: the Windows launcher's update check reads
+          # releases/latest and takes the version from its tag.
+          make_latest: false
           files: |
             dist/Bloodborne-bbport-x86_64.AppImage
             dist/Bloodborne-bbport-x86_64.AppImage.sha256
