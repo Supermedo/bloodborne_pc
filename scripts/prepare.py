@@ -13,9 +13,9 @@ from pathlib import Path
 import struct
 import sys
 
-# Path.write_text() defaults to the process locale. Game metadata (e.g. TITLE with
-# U+2122) is not always encodable there; force UTF-8 for JSON and tolerate console
-# encode errors when printing.
+# Path.read_text()/write_text() default to the process locale encoding. Game
+# metadata and config files can contain characters that locale cannot encode
+# (e.g. U+2122); force UTF-8 and tolerate console encode errors when printing.
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(errors='replace')
