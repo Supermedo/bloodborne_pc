@@ -14,7 +14,10 @@ if [[ ! -f $sdk/include/nvsdk_ngx_vk.h ]]; then
 fi
 cmake -S gpu/dlss_bridge -B out/dlss-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DDLSS_SDK_ROOT="$sdk" >/dev/null
-ninja -C out/dlss-bridge >/dev/null
+if ! ninja -C out/dlss-bridge > out/dlss-bridge.log 2>&1; then
+    grep -v '^\[' out/dlss-bridge.log | tail -30 >&2
+    echo 'DLSS bridge build failed (full log: out/dlss-bridge.log)' >&2; exit 1
+fi
 rm -f out/libnvidia-ngx-dlss.so.*
 cp out/dlss-bridge/libbbport_dlss.so out/
 cp "$sdk"/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.* out/
