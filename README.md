@@ -131,6 +131,15 @@ Everything built goes to `out/`; run the script again after pulling updates. Sep
 
 ### Making a release AppImage
 
+Push a tag named `linux-v<version>` (for example `git tag -a linux-v1.5.1 -m "..." && git push
+origin linux-v1.5.1`): GitHub Actions (`.github/workflows/linux-release.yml`) builds the
+AppImage and attaches it, with its SHA-256 checksum, to that tag's release, creating the
+release if there is none. The game is compiled from scratch, so it takes a while; follow it on the repository's **Actions**
+page. **Run workflow** there builds without releasing (the AppImage is a downloadable
+artifact for a week). On a fork, enable workflows on the Actions page once first.
+
+To build the same AppImage on your own machine:
+
     bash packaging/linux/release.sh
 
 builds `dist/Bloodborne-bbport-x86_64.AppImage` (about 900 MB) from scratch: it downloads the
