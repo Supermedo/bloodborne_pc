@@ -82,14 +82,24 @@ def mod_files(folder):
         raise ValueError(f'{folder}: expected dvdroot_ps4 (or chr/, parts/, ...) inside the mod folder')
     root, prefix = layout
     root = root.resolve()
+    dangling = []
     for directory, folders, files in os.walk(root, followlinks=False):
         directory = Path(directory)
-        for name in [*folders, *files]:
+        for name in folders:
             if (directory / name).is_symlink():
                 raise ValueError(f'Mod symlinks are unsupported: {directory / name}')
         for name in sorted(files):
             source = directory / name
-            relative = Path(prefix) / source.relative_to(root) if prefix else source.relative_to(root)
+            # File links are followed: mod managers (shadPS4's BB Launcher) link the files of
+            # their active mods into <game>-mods. A link that does not resolve here (a Windows
+            # C:/ path seen from Linux) is skipped instead of failing the launch.
+            if source.is_symlink():
+                if not source.is_file():
+                    dangling.append(source)
+                    continue
+                source = source.resolve()
+            inside = (directory / name).relative_to(root)
+            relative = Path(prefix) / inside if prefix else inside
             # Readme/metadata stay outside the mounted game. This loader handles assets;
             # executable patches use the existing patch compiler, with address validation.
             if relative.parts[0].casefold() != 'dvdroot_ps4':
@@ -99,6 +109,10 @@ def mod_files(folder):
             if not source.is_file():
                 raise ValueError(f'Not a regular mod file: {source}')
             yield relative, source
+    if dangling:
+        target = os.readlink(dangling[0])
+        print(f'Mods: {folder}: skipped {len(dangling)} broken links (first: {dangling[0].name} -> '
+              f'{target}); point the launcher\'s mods folder at the real files', file=sys.stderr)
 
 
 # Windows without the symlink privilege (Developer Mode off): directories become junctions,
