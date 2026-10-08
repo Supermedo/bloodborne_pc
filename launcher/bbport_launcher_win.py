@@ -98,8 +98,8 @@ def run_command():
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
 from bbport_input_config import (KEYBOARD_OUTPUTS, BUTTON_OUTPUTS, STICK_OUTPUTS, OUTPUT_LABELS, keysym_to_name,
-                                  input_ini_path, load_input_ini, reserved_keys, save_input_ini,
-                                  save_mouse_settings)  # noqa: E402
+                                  button_num_to_name, input_ini_path, load_input_ini, reserved_keys,
+                                  save_input_ini, save_mouse_settings)  # noqa: E402
 
 LANG = 'en'
 
@@ -858,12 +858,12 @@ class Launcher:
     def build_controls(self):
         ttk, tk = self.ttk, self.tk
         f = self.scrolled_page('controls', _('Controls', 'Управление'),
-                               _('Keyboard bindings. The controller and mouse keep working '
-                                 'side by side; edit those in input.ini directly for now — '
+                               _('Keyboard and mouse-button bindings. The controller keeps '
+                                 'working side by side; edit its lines in input.ini directly — '
                                  'see docs/INPUT.md.',
-                                 'Раскладка клавиатуры. Геймпад и мышь продолжают работать '
-                                 'одновременно; их пока можно настроить только в input.ini — '
-                                 'см. docs/INPUT.md.'))
+                                 'Раскладка клавиатуры и кнопок мыши. Геймпад продолжает '
+                                 'работать одновременно; его строки можно настроить только в '
+                                 'input.ini — см. docs/INPUT.md.'))
         self.remap_rows = {}
 
         def add_row(parent, output):
@@ -887,14 +887,21 @@ class Launcher:
         self.section(f, _('Sticks', 'Стики'))
         for output in STICK_OUTPUTS:
             add_row(f, output)
+        self.note(f, _('Click "Set…" on a button row to bind a mouse button instead of a key — '
+                       'left, middle, right, or the side buttons (back/forward), if the mouse '
+                       'has them. Stick directions stay keyboard-only.',
+                       'Нажмите «Назначить…» в строке кнопки, чтобы привязать кнопку мыши '
+                       'вместо клавиши — левую, среднюю, правую или боковые (вперёд/назад), '
+                       'если они есть. Направления стиков можно привязать только к клавише.'))
         self.note(f, _('Reserved: Insert/Escape (the port\'s menu), F9 (route recording), and '
                        'whichever key toggles mouse look or reloads input.ini (F7/F8 by '
-                       'default). A key already used elsewhere is simply bound to both actions '
-                       '(hold it to trigger both) — this page does not warn about that.',
+                       'default). A key or button already used elsewhere is simply bound to '
+                       'both actions (hold it to trigger both) — this page does not warn about '
+                       'that.',
                        'Зарезервированы: Insert/Escape (меню порта), F9 (запись маршрута), а '
                        'также клавиши переключения мыши и перезагрузки input.ini (по умолчанию '
-                       'F7/F8). Если клавиша уже где-то занята, она просто срабатывает на обе '
-                       'привязки — страница об этом не предупреждает.'))
+                       'F7/F8). Если клавиша или кнопка уже где-то занята, она просто '
+                       'срабатывает на обе привязки — страница об этом не предупреждает.'))
 
         self.section(f, _('Mouse look', 'Обзор мышью'))
         ms = self.mouse_settings
@@ -946,10 +953,10 @@ class Launcher:
                      'Добавляется поверх чувствительности; поднимает минимальную скорость для '
                      'медленных движений, почти не влияя на быстрые.'), 0.0, 1.0)
 
-        self.note(f, _('Mouse buttons and the scroll wheel are configured in input.ini directly '
-                       '(see docs/INPUT.md) — only keyboard and mouse look are on this page for now.',
-                       'Кнопки мыши и колесо настраиваются напрямую в input.ini (см. docs/INPUT.md) '
-                       '— пока на этой странице доступны только клавиатура и обзор мышью.'), top=10)
+        self.note(f, _('The scroll wheel is configured in input.ini directly (see docs/INPUT.md) '
+                       '— mouse buttons are bound from the Buttons section above.',
+                       'Колесо мыши настраивается напрямую в input.ini (см. docs/INPUT.md) — '
+                       'кнопки мыши назначаются в разделе «Кнопки» выше.'), top=10)
         self.note(f, _('Changes apply the next time the game starts, or press F8 in-game to '
                        'reload input.ini without restarting.',
                        'Изменения применяются при следующем запуске игры, либо нажмите F8 в '
@@ -964,43 +971,72 @@ class Launcher:
         self.refresh_remap_row(output)
 
     def start_remap_capture(self, output, key_label, set_btn):
-        """Grabs the next keypress and binds it to `output`'s first slot. Esc cancels; a key
-        already reserved (HOT-001/HOT-002) is rejected in place, leaving the previous binding
-        untouched. bind_all (not root.bind) plus grab_set makes sure the key reaches this
-        handler even if some other widget currently has focus, and that no other widget (e.g.
-        the player-name Entry on another page) reacts to the same keypress."""
+        """Grabs the next keypress or mouse click and binds it to `output`'s first slot. Esc
+        cancels; a key/button already reserved (HOT-001/HOT-002), or a mouse click on a
+        STICK_OUTPUTS row (an axis has no use for a press), is rejected in place, leaving the
+        previous binding untouched. bind_all (not root.bind) plus grab_set makes sure the event
+        reaches this handler even if some other widget currently has focus, and that no other
+        widget (e.g. the player-name Entry on another page) reacts to the same keypress.
+
+        The <ButtonPress> bind is installed via after_idle rather than immediately: this call
+        itself runs from the "Set…" button's own click handler, so the left-button-release that
+        follows (Tk doesn't fire <ButtonPress> again for that click, but belt-and-suspenders
+        against any platform quirk) would otherwise risk being seen as "the user chose
+        leftbutton" the instant capture starts."""
+        is_stick = output in STICK_OUTPUTS
         original_text = set_btn['text']
-        key_label.configure(text=_('Press a key…', 'Нажмите клавишу…'))
+        key_label.configure(text=_('Press a key or mouse button…', 'Нажмите клавишу или кнопку мыши…')
+                            if not is_stick else _('Press a key…', 'Нажмите клавишу…'))
         set_btn.configure(state='disabled')
         self.root.grab_set()
 
         def finish():
             self.root.unbind_all('<KeyPress>')
+            self.root.unbind_all('<ButtonPress>')
             self.root.grab_release()
             set_btn.configure(state='normal', text=original_text)
             self.refresh_remap_row(output)
 
-        def on_key(event):
-            if event.keysym == 'Escape':
-                finish()
-                return
-            name = keysym_to_name(event.keysym)
+        def apply(name):
             reserved = reserved_keys(self.remap_toggle_key, self.remap_reload_key)
-            if name is None:
+            if name in reserved:
                 self.messagebox.showwarning(
-                    _('Unsupported key', 'Клавиша не поддерживается'),
-                    _('That key has no bbport name; pick another one.',
-                      'У этой клавиши нет имени в bbport; выберите другую.'))
-            elif name in reserved:
-                self.messagebox.showwarning(
-                    _('Reserved key', 'Зарезервированная клавиша'),
+                    _('Reserved', 'Зарезервировано'),
                     _('{} is reserved (menu, recording, or a hotkey) and cannot be bound to a '
                       'game action.', '{} зарезервирована (меню, запись или горячая клавиша) и '
                       'не может быть назначена игровому действию.').format(name))
             else:
                 self.remap_edits[output] = name
             finish()
+
+        def on_key(event):
+            if event.keysym == 'Escape':
+                finish()
+                return
+            name = keysym_to_name(event.keysym)
+            if name is None:
+                self.messagebox.showwarning(
+                    _('Unsupported key', 'Клавиша не поддерживается'),
+                    _('That key has no bbport name; pick another one.',
+                      'У этой клавиши нет имени в bbport; выберите другую.'))
+                return
+            apply(name)
+
+        def on_click(event):
+            name = button_num_to_name(event.num)
+            if name is None:
+                return  # a button Tk reports but bbport has no name for: ignore, keep waiting
+            if is_stick:
+                self.messagebox.showwarning(
+                    _('Keyboard only', 'Только клавиатура'),
+                    _('A stick direction can only be bound to a key, not a mouse button.',
+                      'Направление стика можно привязать только к клавише, а не к кнопке мыши.'))
+                return
+            apply(name)
+
         self.root.bind_all('<KeyPress>', on_key)
+        if not is_stick:
+            self.root.after_idle(lambda: self.root.bind_all('<ButtonPress>', on_click))
 
     def build_advanced(self):
         ttk = self.ttk

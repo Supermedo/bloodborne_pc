@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
 """input.ini read/write for the launchers (shadPS4 input config syntax; see docs/INPUT.md and
-src/runtime_input_config.c, the authoritative parser this mirrors). Scope: keyboard bindings for
-the plain button/d-pad outputs and the stick half-axes, which is what the launcher's remap page
-edits. Controller and mouse bindings in the file are preserved untouched (round-tripped as
-unknown lines by save_input_ini), not edited here.
+src/runtime_input_config.c, the authoritative parser this mirrors). Scope: keyboard and mouse-
+button bindings for the plain button/d-pad outputs (BUTTON_OUTPUTS) and the stick half-axes
+(STICK_OUTPUTS, keyboard only -- a mouse button is a press, not an axis), which is what the
+launcher's remap page edits. Controller bindings and the scroll wheel are preserved untouched
+(round-tripped as unknown lines by save_input_ini), not edited here.
 """
 import os
 from pathlib import Path
@@ -51,6 +52,16 @@ KEY_NAMES = (
 )
 KEY_NAMES_SET = set(KEY_NAMES)
 
+# Names runtime_input_config.c's kMouseButtonNames accepts. Only buttons a BUTTON_OUTPUTS slot
+# can take (the wheel is a repeating pulse, not a holdable press, and stays input.ini-only).
+MOUSE_BUTTON_NAMES = ('leftbutton', 'middlebutton', 'rightbutton', 'sidebuttonback', 'sidebuttonforward')
+MOUSE_BUTTON_NAMES_SET = set(MOUSE_BUTTON_NAMES)
+
+# What a BUTTON_OUTPUTS/STICK_OUTPUTS line's value may be for load_input_ini/save_input_ini to
+# treat it as "this editor's own binding slot" rather than an untouched controller/other line.
+# Sticks stay keyboard-only (KEY_NAMES_SET); buttons additionally accept a mouse button name.
+BINDABLE_NAMES_SET = KEY_NAMES_SET | MOUSE_BUTTON_NAMES_SET
+
 # Reserved regardless of the file (HOT-001/HOT-002): the menu, BB_PAD_RECORD, and whichever key
 # currently toggles the mouse or reloads input.ini. The last two are read from the file itself
 # (hotkey_toggle_mouse_to_joystick / hotkey_reload_inputs) by reserved_keys() below.
@@ -83,6 +94,24 @@ def keysym_to_name(keysym):
     key, a media key, or a layout-specific glyph outside KEY_NAMES)."""
     name = TK_KEYSYM_TO_NAME.get(keysym, keysym.lower())
     return name if name in KEY_NAMES_SET else None
+
+
+# Tk's event.num for a <ButtonPress> -> our mouse button name. 1/2/3 are the standard left/
+# middle/right buttons on every platform Tk supports; 4/5 are the side (back/forward) buttons on
+# Windows specifically (Tk's core-8-6-branch gained WM_XBUTTONDOWN/UP support in 2019, reusing
+# the Aqua button numbering rather than X11's 8/9, since X11 uses 4/5 for the scroll wheel and
+# Windows delivers wheel scroll separately via <MouseWheel>/event.delta, so there is no clash on
+# this platform). Requires a reasonably current Tcl/Tk (8.6.12+, which is what Python 3.10+'s
+# official Windows installers bundle); an older frozen interpreter would simply never fire a
+# <ButtonPress> for the side buttons, same as if the button didn't exist.
+TK_BUTTON_NUM_TO_NAME = {1: 'leftbutton', 2: 'middlebutton', 3: 'rightbutton',
+                          4: 'sidebuttonback', 5: 'sidebuttonforward'}
+
+
+def button_num_to_name(num):
+    """Tk's event.num from a <ButtonPress> -> our mouse button name, or None for a button number
+    Tk reports that bbport has no name for."""
+    return TK_BUTTON_NUM_TO_NAME.get(num)
 
 
 def input_ini_path(bbport_ini_path):
@@ -120,12 +149,18 @@ def _parse_mouse_line(output, value, settings):
 
 
 def load_input_ini(path):
-    """Keyboard bindings for KEYBOARD_OUTPUTS: {output: [key_name, ...]} (in file order, so the
-    first binding shown matches what a fresh install's default.ini documents), the mouse
-    settings dict (MOUSE_SETTINGS_DEFAULTS' keys), plus the raw lines for save_input_ini to
-    round-trip. A stick output can have more than one keyboard binding bound in principle (not
-    by the defaults); the UI below only edits the first slot and leaves any further ones alone,
-    same spirit as the C parser's "extra bindings are kept, not silently dropped" rule.
+    """Keyboard and mouse-button bindings for KEYBOARD_OUTPUTS: {output: [name, ...]} (in file
+    order, so the first binding shown matches what a fresh install's default.ini documents), the
+    mouse settings dict (MOUSE_SETTINGS_DEFAULTS' keys), plus the raw lines for save_input_ini to
+    round-trip. An output can have more than one binding -- the shipped default actually does
+    this for circle/square (a keyboard key as the first/listed slot, a mouse button as a later
+    one); the UI below only edits the first slot and leaves any further ones alone, same spirit
+    as the C parser's "extra bindings are kept, not silently dropped" rule, so rebinding Circle's
+    key never touches its separate mouse-button slot (or vice versa -- a user who wants to
+    retarget that second slot has to edit input.ini by hand, same as for a stick axis's second
+    binding). A mouse button name is only accepted for a BUTTON_OUTPUTS entry -- a stick
+    half-axis stays keyboard-only, since a button press has no notion of the sustained pull an
+    axis slot expects.
 
     mouse_to_joystick is read whether or not its line is commented out (the default file ships
     it commented, "mouse off"), since the launcher needs to show/restore that line's state, not
@@ -161,7 +196,8 @@ def load_input_ini(path):
             reload_key = value
         elif _parse_mouse_line(output, value, mouse):
             pass
-        elif output in bindings and value in KEY_NAMES_SET:
+        elif output in bindings and (value in KEY_NAMES_SET or
+                                      (output in BUTTON_OUTPUTS and value in MOUSE_BUTTON_NAMES_SET)):
             bindings[output].append(value)
     return bindings, lines, toggle_key, reload_key, mouse
 
@@ -171,13 +207,13 @@ def reserved_keys(toggle_key, reload_key):
 
 
 def save_input_ini(path, bindings, lines):
-    """Rewrites the first keyboard-binding line of each KEYBOARD_OUTPUTS key in place (same
-    "preserve everything else" contract as the game's own BbSettings::Save for bbport.ini):
-    comments, controller/mouse lines and other outputs are kept byte for byte. A second+ existing
-    binding on the same output (e.g. the default's "r3 = q" / "r3 = c" pair) is left untouched;
-    only the first occurrence is replaced, since that is the only slot this editor shows. An
-    output set to None removes its first binding line entirely (NAME-005 equivalent: the user
-    can still type "unmapped" by hand for a line this editor doesn't touch).
+    """Rewrites the first keyboard- or mouse-button-binding line of each KEYBOARD_OUTPUTS key in
+    place (same "preserve everything else" contract as the game's own BbSettings::Save for
+    bbport.ini): comments, controller lines and other outputs are kept byte for byte. A second+
+    existing binding on the same output (e.g. the default's "r3 = q" / "r3 = c" pair) is left
+    untouched; only the first occurrence is replaced, since that is the only slot this editor
+    shows. An output set to None removes its first binding line entirely (NAME-005 equivalent:
+    the user can still type "unmapped" by hand for a line this editor doesn't touch).
     """
     written, out = set(), []
     for raw in lines:
@@ -186,10 +222,12 @@ def save_input_ini(path, bindings, lines):
         body = line[:hash_pos] if hash_pos >= 0 else line
         if '=' in body:
             output, value = (p.split(':')[0] for p in body.split('=', 1))
-            # Only a line whose value is a *keyboard* name is "the first keyboard binding" for
-            # this output -- a controller line with the same output (e.g. "cross = cross", the
-            # button name, not a key name) must never be mistaken for one and overwritten.
-            if output in bindings and output not in written and value in KEY_NAMES_SET:
+            # Only a line whose value is a name this editor itself can produce (a keyboard key,
+            # or -- for a BUTTON_OUTPUTS entry -- a mouse button) is "the first binding" for this
+            # output -- a controller line with the same output (e.g. "cross = cross", the button
+            # name, not a key/mouse name) must never be mistaken for one and overwritten.
+            is_bindable = value in KEY_NAMES_SET or (output in BUTTON_OUTPUTS and value in MOUSE_BUTTON_NAMES_SET)
+            if output in bindings and output not in written and is_bindable:
                 written.add(output)
                 new_key = bindings[output]
                 if new_key is None:

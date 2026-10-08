@@ -371,13 +371,33 @@ repositório inteiro), só os artefatos de build (`.o`, binários, o cache do CM
   `input.ini`, espelhando `runtime_input_config.c`) e a aba "Controls" em
   `launcher/bbport_launcher_win.py` (`build_controls`, captura de tecla por `bind_all` +
   `grab_set`, botões Set/Clear por ação). Só teclado, uma tecla por ação (sem combo — ver
-  abaixo); controle e mouse continuam editados só via `input.ini` direto. Testado via lógica
+  abaixo); controle continua editado só via `input.ini` direto. Testado via lógica
   pura (`load_input_ini`/`save_input_ini`, incluindo o caso de borda que achou um bug real:
   sobrescrever sem querer uma linha de controller ao adicionar um binding de teclado na mesma
   ação); a UI em si (Tkinter) não pôde ser testada nesta sessão (sem display aqui), só pelo
   usuário no Windows.
   - Ainda falta: tela equivalente no launcher Linux (GTK); menu do jogo (ImGui, os dois
     sistemas, aplicação imediata com o mecanismo do F8).
+- **Rebind dos botões do mouse (esquerdo/meio/direito/laterais) na mesma tela: feito**
+  (2026-10-08). `start_remap_capture` agora também escuta `<ButtonPress>` (não só `<KeyPress>`)
+  e aceita `event.num` 1/2/3/4/5 → `leftbutton`/`middlebutton`/`rightbutton`/`sidebuttonback`/
+  `sidebuttonforward` (`button_num_to_name` em `bbport_input_config.py`); rejeitado para outputs
+  de stick (eixo não tem "pressionar"), igual já valia para combos — nesse caso a UI mostra um
+  aviso em vez de aceitar. `BINDABLE_NAMES_SET`/`MOUSE_BUTTON_NAMES_SET` generalizam
+  `load_input_ini`/`save_input_ini` para aceitar e preservar corretamente um valor de botão de
+  mouse como "o primeiro binding" de um `BUTTON_OUTPUTS`, sem confundir com uma linha de
+  controller (`cross = cross`), mesma lógica que já existia para distinguir teclado de
+  controller. O pesquisado antes de implementar: Tk no Windows só reporta os botões laterais
+  (`event.num` 4/5) a partir do Tcl/Tk 8.6.12+ (patch de 2019 pro `WM_XBUTTONDOWN`/`UP`), que é
+  o que as instalações oficiais de Python 3.10+ já trazem — não precisou de dependência extra
+  (`pywin32`/`pynput`); se o Tk empacotado fosse mais antigo, a captura simplesmente nunca
+  dispararia pra esses dois botões (mesmo efeito de "a tecla não existe"), sem quebrar nada.
+  Decisão explícita do usuário: a UI continua editando só o primeiro slot de binding de cada
+  output (mesma regra dos eixos dos sticks) — o default já liga `circle`/`square` a uma tecla E
+  a um botão de mouse ao mesmo tempo (`circle = lshift` + `circle = sidebuttonback`); "Set…"
+  numa dessas linhas troca só o primeiro slot (a tecla), o segundo (o botão de mouse) fica
+  intocado e só editável no `.ini` à mão — não foi pedido suporte a múltiplos slots editáveis na
+  UI. Não testado ainda com display real do Windows (mesma limitação desta sessão de sempre).
 - Botão "abrir input.ini" e "importar do shadPS4" nos launchers.
 - **Combos de tecla (ex. Ctrl+E para uma ação).** Pedido pelo usuário em 2026-10-08; adiado a
   pedido dele mesmo. Duas pontas, nenhuma feita:
