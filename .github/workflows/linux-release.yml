@@ -1,0 +1,59 @@
+# Linux release: pushing a tag linux-v<version> builds the AppImage (packaging/linux/release.sh)
+# and attaches it to that tag's GitHub release, creating the release if there is none.
+# Run by hand (Actions -> Linux release -> Run workflow) it only builds, and the AppImage is
+# kept as a workflow artifact for testing.
+name: Linux release
+
+on:
+  push:
+    tags: ['linux-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Free disk space
+        # The Nix store, the build and the AppImage need more than the runner's free ~14 GB.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+
+      - name: Build the AppImage
+        run: bash packaging/linux/release.sh
+
+      - name: Checksum
+        run: |
+          cd dist
+          sha256sum Bloodborne-bbport-x86_64.AppImage | tee Bloodborne-bbport-x86_64.AppImage.sha256
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/linux-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # Never GitHub's "latest" release: the Windows launcher's update check reads
+          # releases/latest and takes the version from its tag.
+          make_latest: false
+          files: |
+            dist/Bloodborne-bbport-x86_64.AppImage
+            dist/Bloodborne-bbport-x86_64.AppImage.sha256
+
+      - name: Keep as a workflow artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bloodborne-bbport-x86_64.AppImage
+          path: dist/Bloodborne-bbport-x86_64.AppImage*
+          retention-days: 7

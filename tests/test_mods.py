@@ -80,6 +80,20 @@ class ModTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mods.build_overlay(self.game, self.root / 'out', [('A', a)])
 
+    def test_file_links_followed_and_broken_links_skipped(self):
+        # shadPS4's BB Launcher links its active mods' files into <game>-mods; made on Windows,
+        # those links point at C:/ paths that do not exist on Linux.
+        real = self.root / 'store' / 'a.dcx'
+        real.parent.mkdir()
+        real.write_bytes(b'linked')
+        folder = self.root / 'linked' / 'dvdroot_ps4' / 'chr'
+        folder.mkdir(parents=True)
+        (folder / 'a.dcx').symlink_to(real)
+        (folder / 'b.dcx').symlink_to('C:/BB Launcher/Mods-Active/b.dcx')
+        result = mods.build_overlay(self.game, self.root / 'out', [('linked', folder.parent.parent)])
+        self.assertEqual((result / 'dvdroot_ps4/chr/a.dcx').read_bytes(), b'linked')
+        self.assertEqual((result / 'dvdroot_ps4/chr/b.dcx').read_bytes(), b'untouched')
+
     def test_executable_replacement_rejected(self):
         a = self.mod('A')
         (a / 'eboot.bin').write_bytes(b'unsupported')

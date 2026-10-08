@@ -20,6 +20,11 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 (cd "$work" && nix bundle --impure --bundler github:ralismark/nix-appimage \
     --expr "import $root/packaging {}")
+image=$work/bbport.AppImage
+# nix-portable (packaging/linux/release.sh): its /nix/store is ~/.nix-portable/nix/store here.
+if [[ ! -e $image && -L $image ]]; then
+    image=${NP_LOCATION:-$HOME}/.nix-portable$(readlink "$image")
+fi
 mkdir -p dist
-install -m755 "$work/bbport.AppImage" dist/Bloodborne-bbport-x86_64.AppImage
+install -m755 "$image" dist/Bloodborne-bbport-x86_64.AppImage
 ls -lh dist/Bloodborne-bbport-x86_64.AppImage

@@ -2,6 +2,7 @@
 #include "bbport_settings.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -50,6 +51,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.reactive_max = Clamp(f, 0.0f, 1.0f);
     } else if (key == "debug_view") {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
+    } else if (key == "dlss_preset") {
+        v.dlss_preset = DlssPresetFromName(value);
     } else if (key == "show_fps") {
         v.show_fps = i != 0;
     } else if (key == "fsr4_auto_exposure") {
@@ -113,6 +116,7 @@ void Load() {
         {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"BB_DLSS_PRESET", "dlss_preset"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -152,7 +156,7 @@ void ConfigureDlssSupport(bool available, const char* problem) {
     v.dlss_problem = available || kept.empty() ? nullptr : kept.c_str();
     if (v.upscaler == UpscalerDlss && !available) {
         std::printf("Upscaler: DLSS unavailable (%s); falling back to FSR 3.1\n",
-                    kept.empty() ? "bbport_dlss.dll or nvngx_dlss.dll missing" : kept.c_str());
+                    kept.empty() ? "DLSS libraries missing" : kept.c_str());
         v.upscaler = UpscalerFsr3;
     }
 }
@@ -188,13 +192,15 @@ void Save() {
                  "# bbport settings (in-game menu: Insert / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
+                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n"
+                 "dlss_preset=%s\n",
                  UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
                  v.debug_view.load(), int(v.show_fps.load()),
-                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()));
+                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()),
+                 DlssPresetName(v.dlss_preset));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
@@ -205,6 +211,28 @@ void Save() {
     std::fprintf(file, "live_resolution=%s\n", v.live_resolution < 0 ? "auto"
                                                   : v.live_resolution ? "1" : "0");
     std::fclose(file);
+}
+
+namespace {
+// NVSDK_NGX_DLSS_Hint_Render_Preset values; J/K/L/M are the transformer models in DLSS 310.
+constexpr std::pair<int, const char*> DlssPresets[] = {
+    {0, "default"}, {10, "J"}, {11, "K"}, {12, "L"}, {13, "M"}};
+} // namespace
+
+const char* DlssPresetName(int preset) {
+    for (const auto& [value, name] : DlssPresets) {
+        if (value == preset) return name;
+    }
+    return "default";
+}
+
+int DlssPresetFromName(const std::string& name) {
+    for (const auto& [value, preset] : DlssPresets) {
+        if (std::ranges::equal(std::string_view{name}, std::string_view{preset},
+                               [](char a, char b) { return std::tolower(a) == std::tolower(b); }))
+            return value;
+    }
+    return 0;
 }
 
 float PresetScale(int preset) {

@@ -12,12 +12,17 @@
 
 #include "video_core/renderer_vulkan/vk_dlss.h"
 
+#if defined(_WIN32) || defined(__linux__)
+#define BB_DLSS_BRIDGE 1
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
+#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include "../../../dlss_bridge/bbport_dlss_bridge.h"
+#elif defined(__linux__)
+#include <dlfcn.h>
 #endif
 
 namespace Vulkan {
@@ -27,11 +32,12 @@ int Dlss::QualityForScale(float scale) {
     return scale >= 2.9f ? 4 : scale >= 1.95f ? 3 : scale >= 1.65f ? 2 : scale > 1.01f ? 1 : 0;
 }
 
-#ifdef _WIN32
+#ifdef BB_DLSS_BRIDGE
 
 namespace {
+#ifdef _WIN32
 constexpr wchar_t BridgeName[] = L"bbport_dlss.dll";
-constexpr wchar_t NgxName[] = L"nvngx_dlss.dll";
+using Module = HMODULE;
 
 std::filesystem::path ExecutableDirectory() {
     std::wstring path(MAX_PATH, L'\0');
@@ -39,6 +45,52 @@ std::filesystem::path ExecutableDirectory() {
     path.resize(length);
     return std::filesystem::path{path}.parent_path();
 }
+
+bool HasNgxLibrary(const std::filesystem::path& directory) {
+    return std::filesystem::is_regular_file(directory / L"nvngx_dlss.dll");
+}
+
+Module LoadBridge(const std::filesystem::path& path) {
+    return LoadLibraryW(path.c_str());
+}
+
+void* BridgeSymbol(Module module, const char* name) {
+    return reinterpret_cast<void*>(GetProcAddress(module, name));
+}
+#else
+constexpr char BridgeName[] = "libbbport_dlss.so";
+using Module = void*;
+
+std::filesystem::path ExecutableDirectory() {
+    std::error_code error;
+    const auto path = std::filesystem::read_symlink("/proc/self/exe", error);
+    return error ? std::filesystem::current_path() : path.parent_path();
+}
+
+// NGX looks for libnvidia-ngx-dlss.so.<version> in the directory passed to Configure.
+bool HasNgxLibrary(const std::filesystem::path& directory) {
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator{directory, error}) {
+        if (entry.is_regular_file() &&
+            entry.path().filename().string().starts_with("libnvidia-ngx-dlss.so.")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+Module LoadBridge(const std::filesystem::path& path) {
+    Module module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!module) {
+        std::printf("DLSS: %s\n", dlerror());
+    }
+    return module;
+}
+
+void* BridgeSymbol(Module module, const char* name) {
+    return dlsym(module, name);
+}
+#endif
 
 void BridgeLog(int warning, const char* message) {
     std::printf("DLSS: %s%s\n", warning ? "warning: " : "", message);
@@ -70,7 +122,7 @@ bool CollectExtensions(const VkExtensionProperties* required, u32 count,
 } // namespace
 
 struct Dlss::Impl {
-    HMODULE module{};
+    Module module{};
     const BbDlssApi* api{};
     std::vector<std::string> instance_extensions, device_extensions;
     std::optional<FeatureDesc> feature;
@@ -92,7 +144,7 @@ Dlss* Dlss::Get() {
         }
         const auto directory = ExecutableDirectory();
         if (!std::filesystem::is_regular_file(directory / BridgeName) ||
-            !std::filesystem::is_regular_file(directory / NgxName)) {
+            !HasNgxLibrary(directory)) {
             return nullptr;
         }
         auto* created = new Dlss;
@@ -109,13 +161,13 @@ Dlss* Dlss::Get() {
 
 Dlss::Dlss() : impl{std::make_unique<Impl>()} {
     const auto directory = ExecutableDirectory();
-    impl->module = LoadLibraryW((directory / BridgeName).c_str());
+    impl->module = LoadBridge(directory / BridgeName);
     const auto get_api =
-        impl->module ? reinterpret_cast<BbDlssGetApiFn>(GetProcAddress(impl->module, "BbDlssGetApi"))
+        impl->module ? reinterpret_cast<BbDlssGetApiFn>(BridgeSymbol(impl->module, "BbDlssGetApi"))
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
     if (!impl->api || impl->api->abi != BBPORT_DLSS_BRIDGE_ABI) {
-        impl->Disable("bbport_dlss.dll is missing or from another version");
+        impl->Disable("the DLSS bridge library is missing or from another version");
         return;
     }
     // NGX writes its logs and model updates here: beside the saves and shader caches.
@@ -125,7 +177,7 @@ Dlss::Dlss() : impl{std::make_unique<Impl>()} {
     }
     std::error_code error;
     std::filesystem::create_directories(data, error);
-    if (!impl->api->Configure(directory.c_str(), data.c_str(), BridgeLog)) {
+    if (!impl->api->Configure(directory.wstring().c_str(), data.wstring().c_str(), BridgeLog)) {
         impl->Disable("bridge configuration failed");
     }
 }
@@ -206,7 +258,7 @@ bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
     impl->feature.reset();
     const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
                                 desc.output_height, desc.quality,      0,
-                                0,                  desc.hdr ? 1 : 0};
+                                desc.preset,        desc.hdr ? 1 : 0};
     if (!impl->api->CreateFeature(command, &feature)) {
         return false;
     }
@@ -249,7 +301,7 @@ void Dlss::Shutdown() {
     }
 }
 
-#else
+#else // no bridge on this platform
 
 struct Dlss::Impl {};
 Dlss::Dlss() = default;
