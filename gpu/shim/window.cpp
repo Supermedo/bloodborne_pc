@@ -5,7 +5,9 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
+#include "bbport_mouse.h"
 #include "bbport_overlay.h"
+#include "bloodborne_cam.h"
 
 namespace Frontend {
 
@@ -53,9 +55,12 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    BbMouse::Start();
 }
 
 WindowSDL::~WindowSDL() {
+    BbMouse::Stop();
+    Core::BloodborneCam::Instance().Shutdown();
     SDL_DestroyWindow(window);
 }
 
@@ -125,7 +130,20 @@ bool WindowSDL::PollEvents() {
         if (BbOverlay::HandleEvent(event)) {
             continue;
         }
+        // Toggle mousecam, but do not swallow this keyboard event. The runtime
+        // samples SDL's keyboard state for game controls, and other consumers
+        // may also need to observe F4.
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F4 && !event.key.repeat) {
+            Core::BloodborneCam::Instance().Toggle(window);
+            BbOverlay::ShowMousecam(Core::BloodborneCam::Instance().IsEnabled());
+        }
         switch (event.type) {
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            Core::BloodborneCam::Instance().OnWindowFocusChanged(false, window);
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            Core::BloodborneCam::Instance().OnWindowFocusChanged(true, window);
+            break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_RESIZED: {
             int w = 0, h = 0;
@@ -142,6 +160,11 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+
+    // The BbMouse thread owns relative-state sampling; publish its gate here.
+    BbMouse::SetActive(!text_active && !BbOverlay::CapturesInput() &&
+                       (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
+                       Core::BloodborneCam::Instance().IsEnabled());
     return is_open;
 }
 
