@@ -36,7 +36,11 @@ MAX_LOG_LINES = 5000
 # Choices: (label, value). The first entry is the default. Labels are translated when shown.
 UI_LANGUAGES = [("Как в системе", ""), ("Русский", "ru"), ("English", "en")]
 UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
-             ("TAA (нативное сглаживание)", "taa"), ("Выключен", "off")]
+             ("DLSS (NVIDIA RTX)", "dlss"), ("TAA (нативное сглаживание)", "taa"),
+             ("Выключен", "off")]
+# DLSS model (bbport.ini dlss_preset): NVIDIA's choice per mode, or a fixed transformer preset.
+DLSS_PRESETS = [("Как решит NVIDIA (по умолчанию)", "default"), ("K (лучшее качество)", "K"),
+                ("J", "J"), ("L (для Ultra Performance)", "L"), ("M (для Performance)", "M")]
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
 OUTPUT_RES = [("1280×720 (Steam Deck)", "1280x720"), ("1920×1080", "1920x1080"), ("2560×1440", "2560x1440"), ("3840×2160", "3840x2160")]
@@ -82,6 +86,7 @@ DEFAULTS = {
     "readbacks": "",
     "mangohud": False,
     "frame_stats": False,
+    "dlss_indicator": False,
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
@@ -91,6 +96,7 @@ DEFAULTS = {
 INI_DEFAULTS = {
     "upscaler": "fsr4",
     "preset": "4",
+    "dlss_preset": "default",
     "sharpen": "1",
     "sharpness": "0.50",
     "object_motion": "1",
@@ -185,6 +191,9 @@ def game_environment(s):
         env["MANGOHUD"] = "1"
     if s["frame_stats"]:
         env["BB_FRAME_STATS"] = "1"
+    if s["dlss_indicator"]:
+        # NVIDIA's DLSS indicator (native NGX; 1024 is the Windows ShowDlssIndicator value).
+        env["__NGX_SHOW_INDICATOR"] = "1024"
     if s["gpu_profile"]:
         env["BB_GPU_PROFILE"] = "1"
     if s["vk_validation"]:
@@ -395,6 +404,14 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.preset_row.connect("notify::selected", lambda *_: self.update_upscaler_status())
         self.output_row.connect("notify::selected", lambda *_: self.update_upscaler_status())
         upscaler.add(self.preset_row)
+        self.dlss_preset_row = combo_row(tr("Модель DLSS"), None, DLSS_PRESETS,
+                                         self.ini.get("dlss_preset", "default"))
+        upscaler.add(self.dlss_preset_row)
+        self.dlss_indicator_row = Adw.SwitchRow(
+            title=tr("Индикатор DLSS"),
+            subtitle=tr("Версия, модель и разрешения DLSS внизу слева (от NVIDIA)"),
+            active=self.settings["dlss_indicator"])
+        upscaler.add(self.dlss_indicator_row)
         self.sharpen_row = Adw.SwitchRow(title=tr("Резкость (RCAS)"),
                                          active=self.ini.get("sharpen") == "1")
         upscaler.add(self.sharpen_row)
@@ -546,9 +563,18 @@ class LauncherWindow(Adw.ApplicationWindow):
                                      int(combo_value(self.preset_row)))
             hint = tr("Ассеты для выбранного режима найдены") if not problem else (
                 tr("{}. Установите полный набор fsr4_411 в {}.").format(problem, directory))
+        elif value == "dlss":
+            # tools/build_dlss_linux.sh puts both libraries next to bb-probe (bin/ when packaged).
+            directory = PORT_DIR / ("bin" if PACKAGED else "out")
+            ok = (directory / "libbbport_dlss.so").is_file() and any(
+                directory.glob("libnvidia-ngx-dlss.so.*"))
+            hint = tr("Библиотеки DLSS найдены (нужна GeForce RTX и драйвер NVIDIA)") if ok else (
+                tr("Нет библиотек DLSS: tools/build_dlss_linux.sh"))
         else:
             hint = tr("Сглаживание в разрешении вывода без модели FSR") if value == "taa" else None
         self.preset_row.set_sensitive(value not in ("taa", "off"))
+        self.dlss_preset_row.set_visible(value == "dlss")
+        self.dlss_indicator_row.set_visible(value == "dlss")
         self.sharpen_row.set_sensitive(value != "off")
         self.sharpness_row.set_sensitive(value != "off")
         self.upscaler_row.set_subtitle(hint or "")
@@ -580,6 +606,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["readbacks"] = combo_value(self.readbacks_row)
         s["mangohud"] = self.mangohud_row.get_active()
         s["frame_stats"] = self.stats_row.get_active()
+        s["dlss_indicator"] = self.dlss_indicator_row.get_active()
         s["gpu_profile"] = self.profile_row.get_active()
         s["vk_validation"] = self.validation_row.get_active()
         s["extra_env"] = self.extra_row.get_text().strip()
@@ -590,6 +617,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.ini.update({
             "upscaler": combo_value(self.upscaler_row),
             "preset": str(combo_value(self.preset_row)),
+            "dlss_preset": combo_value(self.dlss_preset_row),
             "sharpen": "1" if self.sharpen_row.get_active() else "0",
             "sharpness": f"{self.sharpness_row.get_value():.2f}",
             "object_motion": "1" if self.motion_row.get_active() else "0",
