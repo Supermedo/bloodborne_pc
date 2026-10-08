@@ -69,6 +69,74 @@ Ask on the [Discord server](https://discord.gg/yTMG8c4Bqm), or open an [issue](h
 `user\last_run.log` from the game folder, with your graphics card and what happened.
 If the game shows only a black screen, try **Advanced → Clear shader cache** first.
 
+## Linux (CachyOS, Arch, Bazzite)
+
+The port also runs natively on Linux, DLSS included. It is built from source; tested on CachyOS
+with a GeForce RTX 5090 and NVIDIA driver 615.71.09.
+
+### What you need
+
+- **Your own dump of the game** (CUSA03173, version 1.09 for the community patches), the same
+  as on Windows.
+- **A graphics card with Vulkan 1.3** and its current driver (Mesa RADV for AMD, the NVIDIA
+  proprietary driver for NVIDIA).
+- **For DLSS:** a GeForce RTX card (20 series or newer) with the **NVIDIA proprietary driver**,
+  which provides `libnvidia-ngx.so.1` (on Arch: `nvidia-utils`; the open kernel modules are
+  fine). Nouveau/NVK cannot run DLSS. FSR 3/4 and TAA work on every GPU.
+- **Internet access while building:** the script downloads git submodules and NVIDIA's DLSS SDK
+  (tag `v310.9.1`, from github.com/NVIDIA/DLSS, under NVIDIA's license; its
+  `libnvidia-ngx-dlss.so.310.9.1` is copied next to the game).
+- **Build tools and libraries:** gcc, cmake, ninja, pkgconf, git, Python 3, Vulkan headers and
+  loader, SDL3, FFmpeg, Boost, fmt, robin-map, xxHash, glslang, SPIRV-Headers, SPIRV-Cross,
+  Zydis, miniz and libX11; for the launcher PyGObject, GTK 4 and libadwaita. Vulkan Memory
+  Allocator and xbyak come as git submodules. On other distributions install the same packages
+  under their names and run the steps of `packaging/linux/setup-arch.sh` by hand.
+
+### Setup
+
+On Arch-based systems (CachyOS, EndeavourOS, Arch) one script installs the packages above with
+pacman (it asks for sudo), builds the game, builds the DLSS bridge on GeForce RTX systems, runs
+a DLSS self-test and adds the launcher to the application menu:
+
+    git clone --recursive -b linux_port https://github.com/TwoToneEddy/bloodborne_pc
+    cd bloodborne_pc
+    bash packaging/linux/setup-arch.sh
+
+Then start **Bloodborne** from the application menu (or `launcher/bb-launcher.sh`), choose your
+game folder and pick **DLSS (NVIDIA RTX)** as the upscaler. Everything built goes to `out/`;
+run the script again after pulling updates. Separately:
+
+- `bash build.sh`: builds the game (`out/bb-probe`).
+- `bash tools/build_dlss_linux.sh`: builds `out/libbbport_dlss.so` and copies NVIDIA's DLSS
+  library next to it. Without these two files DLSS is not offered and the other upscalers work.
+- `out/bb-dlss-selftest`: checks DLSS without the game (prints `PASS: DLSS works on this
+  system`). In the game's output (the launcher's **Log** page, or the terminal) DLSS prints `DLSS: ready` or the reason it
+  is unavailable.
+
+### DLSS options
+
+- **DLSS model:** the launcher's **DLSS model** row (`dlss_preset=default|J|K|L|M` in
+  `bbport.ini`, or the `BB_DLSS_PRESET` variable). `default` lets NVIDIA choose per mode.
+  Proton tools such as dxvk-nvapi driver settings do not reach the native game.
+- **NVIDIA's DLSS indicator** (version, model, resolutions, bottom left): the launcher's
+  **DLSS indicator** switch, or start the game with `__NGX_SHOW_INDICATOR=1024`.
+
+### Mods from the Windows BB Launcher
+
+Mods work as on Windows (the launcher's **Mods folder**). The `CUSA03173-mods` folder that the
+Windows BB Launcher for shadPS4 creates next to the game contains only links to `C:/` paths:
+on Linux they are skipped with a warning. Point the launcher's **Mods folder** at the BB
+Launcher's `Mods-Active` folder instead, where the mod files themselves are.
+
+### Bazzite and other immutable distributions (untested)
+
+Run the same script in an Arch distrobox that shares the NVIDIA driver, and start the launcher
+from it:
+
+    distrobox create --name bloodborne --image archlinux:latest --nvidia
+    distrobox enter bloodborne -- bash packaging/linux/setup-arch.sh
+    distrobox enter bloodborne -- launcher/bb-launcher.sh
+
 ## Building from source
 
 See [packaging/windows/README.md](packaging/windows/README.md): MSYS2 CLANG64, `bash build.sh`,
