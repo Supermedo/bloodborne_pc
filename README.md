@@ -3,7 +3,8 @@
 This is a fork of [Supermedo/bloodborne_pc](https://github.com/Supermedo/bloodborne_pc), based on
 **Windows v1.5**. It makes the port playable on CPUs **without BMI1, LZCNT and MOVBE**, such as
 Intel 3rd generation (Ivy Bridge) Core i3/i5/i7. It also fixes the crash when you **take damage** or
-**press D-pad up** (blood bullets). Everything below the line is the original README.
+**press D-pad up** (blood bullets), and running out of video memory after some minutes on 4 GB
+cards. Everything below the line is the original README.
 
 ### What this fork changes
 
@@ -23,6 +24,15 @@ Intel 3rd generation (Ivy Bridge) Core i3/i5/i7. It also fixes the crash when yo
   `BB_RED_ZONE=0` turns it off). The fix and the site list are from
   [PR #2](https://github.com/Supermedo/bloodborne_pc/pull/2) by **d4rksp4rt4n**. We confirmed that
   Ivy Bridge has the same crash, and the same fix removes it (`tests/test_redzone.py`).
+- **Texture cache that frees video memory (`ErrorOutOfDeviceMemory` after some minutes).**
+  Textures the cache must keep were consuming its whole deletion budget, so nothing was freed and
+  the game used more and more video memory until a 4 GB card ran out. On a GTX 1650 the original
+  freed 4 textures and closed at 3923 MiB; with the fix it freed 29,434 over the same areas and
+  kept running. The fix is [PR #4](https://github.com/Supermedo/bloodborne_pc/pull/4) by
+  **gtggdd4mzb-source**.
+- **Video memory on the FPS counter.** With the FPS counter on (launcher or in-game menu), a second
+  line shows `VRAM <in use> / <available> MB peak <highest>`, so you can watch how close the game
+  runs to your card's limit.
 - **Memory at outputs below 1080p.** Those scenes keep the PS4's 5056 MiB of direct memory.
   Upstream reserved 9152 MiB for any output other than 1080p, which a 16 GB PC may fail to reserve.
   Scenes above 1080p still get 9152 MiB (`run.py`).
@@ -34,7 +44,8 @@ Intel 3rd generation (Ivy Bridge) Core i3/i5/i7. It also fixes the crash when yo
 Intel Core i7-3770 · GeForce GTX 1650 4 GB · 16 GB RAM · Windows 10 · Bloodborne CUSA03173 v1.09.
 Settings used: 30 FPS, upscaler off, output 1280×720, depth of field / motion blur / SSAO /
 game AA / dynamic shadows / SSR off. The game held about 30 FPS, and damage and blood bullets no
-longer close it. Intel 2nd generation (Sandy Bridge) and older AMD CPUs have **not** been tested.
+longer close it. Also played at 60 FPS with FSR 3.1 (scene 640×360 → 1280×720): about 56 FPS.
+Intel 2nd generation (Sandy Bridge) and older AMD CPUs have **not** been tested.
 
 ### How to install
 
@@ -57,11 +68,14 @@ upstream version, without this fork's scripts.
 - 193 instructions are too short to translate safely: 58 `movbe` (an Ivy Bridge CPU would close the
   game if one is reached) and 135 `lzcnt`/`tzcnt` (may compute a different result). None of them
   caused a problem in testing. 42 red-zone stores could not be redirected.
+- The game reads only the first controller Windows lists. With two controllers connected, turn
+  off the one you don't use (or set `SDL_GAMECONTROLLER_IGNORE_DEVICES` to its `0xVID/0xPID`).
 - Online play from upstream v1.6 is not in this fork yet.
 
 ### Credits
 
 [Supermedo](https://github.com/Supermedo) (the port) · **d4rksp4rt4n** (red-zone fix, PR #2) ·
+**gtggdd4mzb-source** (texture cache fix, PR #4) ·
 [shadPS4](https://github.com/shadps4-emu/shadPS4) (graphics). License unchanged: GPL-2.0.
 No game files are included or distributed.
 

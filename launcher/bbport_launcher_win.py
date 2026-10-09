@@ -38,9 +38,9 @@ PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # This build. The Ivy Bridge fork tags its releases windows-v<upstream>-legacy.<n>, compared as
-# <upstream>.<n> (windows-v1.5-legacy.1 -> 1.5.1); updates come from the fork, so an update never
+# <upstream>.<n> (windows-v1.5-legacy.2 -> 1.5.2); updates come from the fork, so an update never
 # replaces the Legacy CPU scripts with upstream ones.
-VERSION = '1.5.1'
+VERSION = '1.5.2'
 EDITION = 'Legacy CPU Edition (Intel 3rd Gen / Ivy Bridge)'
 RELEASES_API = 'https://api.github.com/repos/T0ug/bloodborne_pc_Ivy-Bridge/releases/latest'
 RELEASES_PAGE = 'https://github.com/T0ug/bloodborne_pc_Ivy-Bridge/releases/latest'
