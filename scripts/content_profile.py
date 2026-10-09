@@ -15,7 +15,7 @@ def prepare(game, out, sku='full'):
                  user_params=params, mounted_addons=[],boot_attr=0)
     out.mkdir(parents=True,exist_ok=True)
     (out/'content.bin').write_bytes(struct.pack('<8s5I',b'BBCONT01',{'full':3,'trial':1}[sku],*params))
-    (out/'content-profile.json').write_text(json.dumps(profile,indent=2)+'\n')
+    (out/'content-profile.json').write_text(json.dumps(profile,indent=2)+'\n',encoding='utf-8')
     print(f'AppContent profile: SKU={sku} (probe setting), user params={params}, mounted add-ons=0')
 
 if __name__=='__main__':

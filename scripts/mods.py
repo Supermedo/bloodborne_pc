@@ -62,7 +62,7 @@ def selected(root, config):
     available = discover(root)
     if not config or not Path(config).is_file():
         return available
-    settings = json.loads(Path(config).read_text())
+    settings = json.loads(Path(config).read_text(encoding='utf-8'))
     disabled_names = settings.get('disabled', [])
     if not isinstance(disabled_names, list) or not all(isinstance(n, str) for n in disabled_names):
         raise ValueError('Disabled mods must be a list of folder names')
