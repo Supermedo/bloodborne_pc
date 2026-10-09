@@ -23,6 +23,11 @@ Intel 3rd generation (Ivy Bridge) Core i3/i5/i7. It also fixes the crash when yo
   `BB_RED_ZONE=0` turns it off). The fix and the site list are from
   [PR #2](https://github.com/Supermedo/bloodborne_pc/pull/2) by **d4rksp4rt4n**. We confirmed that
   Ivy Bridge has the same crash, and the same fix removes it (`tests/test_redzone.py`).
+- **Memory at outputs below 1080p.** Those scenes keep the PS4's 5056 MiB of direct memory.
+  Upstream reserved 9152 MiB for any output other than 1080p, which a 16 GB PC may fail to reserve.
+  Scenes above 1080p still get 9152 MiB (`run.py`).
+- **Updates from this fork.** The launcher's update check reads this fork's releases, so **Update**
+  never brings back the original scripts.
 
 ### Tested on
 
@@ -33,18 +38,16 @@ longer close it. Intel 2nd generation (Sandy Bridge) and older AMD CPUs have **n
 
 ### How to install
 
-Until this fork publishes its own package:
+1. Download **Bloodborne-Windows-LegacyCPU.zip** from the
+   [latest release](https://github.com/T0ug/bloodborne_pc_Ivy-Bridge/releases/latest) and unpack
+   it into a new folder.
+2. Start `Bloodborne.exe`, choose your game folder and press **PLAY**. The game output shows
+   `CPU compatibility: translated 6388 instruction sites` and
+   `Red zone: 605/607 guest store sites run red-zone-safe`.
+3. Coming from another installation? Copy its `user` folder (your saves) into the new folder.
 
-1. Download **Windows v1.5** from the
-   [original releases](https://github.com/Supermedo/bloodborne_pc/releases/tag/windows-v1.5) and
-   unpack it.
-2. Copy these files from this repository into that folder, keeping the folders:
-   `scripts/cpu_compat.py`, `scripts/link_libc.py`, `scripts/link_modules.py`,
-   `tools/legacy-cpu-plan.json` (create `tools/`), `patches/redzone.json`.
-3. **Turn off "Check for updates" in the launcher and do not press "Update".** The original
-   updater installs the upstream version, which brings back the original scripts (and the crashes).
-4. Start `Bloodborne.exe` as usual. The game output shows `CPU compatibility: translated 6388
-   instruction sites` and `Red zone: 605/607 guest store sites run red-zone-safe`.
+If you already have the original v1.5, **don't press "Update" in its launcher**: it installs the
+upstream version, without this fork's scripts.
 
 ### Known issues
 
