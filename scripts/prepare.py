@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
 
 
 def span(data, offset, size):
@@ -237,8 +238,12 @@ def prepare(game, out):
                   bundled_modules=sorted(p.name for p in (game / 'sce_module').iterdir()),
                   resources=dict(resources), resource_bytes=total_bytes,
                   status='Prepared only; execution and Vulkan are tested separately.')
-    (out / 'analysis.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
-    print(f"{report['sfo'].get('TITLE')} | entry={header[4]:#x} | image={size:,} bytes")
+    (out / 'analysis.json').write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    title = str(report['sfo'].get('TITLE', ''))
+    encoding = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+    title = title.encode(encoding, errors='backslashreplace').decode(encoding)
+    print(f"{title} | entry={header[4]:#x} | image={size:,} bytes")
     print(f"{len(names)} imported symbols; {sum(counts.values()):,} relocations; {len(report['needed'])} required modules")
     print(f"Unavailable non-loadable metadata headers: {missing}; not a byte-exact ELF reconstruction")
     print(f"Output: {out.resolve()}")
