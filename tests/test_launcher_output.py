@@ -57,28 +57,28 @@ class OutputSelectionTests(unittest.TestCase):
         return variable, window.choice(None, key, 'ini', options or launcher.OUTPUTS)
 
     def test_saved_custom_size_is_preserved(self):
-        variable, box = self.selection('3840x1820')
-        self.assertEqual(variable.get(), '3840x1820')
-        self.assertEqual(box.get(), '3840x1820')
+        variable, box = self.selection('3840x1600')
+        self.assertEqual(variable.get(), '3840x1600')
+        self.assertEqual(box.get(), '3840x1600')
         self.assertEqual(box.options['state'], 'normal')
 
     def test_typing_commits_on_return_and_focus_loss(self):
         for event in ('<Return>', '<FocusOut>'):
             variable, box = self.selection('1920x1080')
-            box.set(' 3840 X 1820 ')
+            box.set(' 3840 X 1600 ')
             box.events[event](None)
-            self.assertEqual(variable.get(), '3840x1820')
+            self.assertEqual(variable.get(), '3840x1600')
 
     def test_invalid_size_restores_saved_value(self):
-        for invalid in ('1921x1080', '0x0', '7682x4320', '3840x1820junk', 'bad'):
-            variable, box = self.selection('3840x1820')
+        for invalid in ('1921x1080', '0x0', '7682x4320', '3840x1600junk', 'bad'):
+            variable, box = self.selection('3840x1600')
             box.set(invalid)
             box.events['<Return>'](None)
-            self.assertEqual(variable.get(), '3840x1820')
-            self.assertEqual(box.get(), '3840x1820')
+            self.assertEqual(variable.get(), '3840x1600')
+            self.assertEqual(box.get(), '3840x1600')
 
     def test_preset_selection_updates_saved_size(self):
-        variable, box = self.selection('3840x1820')
+        variable, box = self.selection('3840x1600')
         box.current(0)
         box.events['<<ComboboxSelected>>'](None)
         self.assertEqual(variable.get(), launcher.OUTPUTS[0][0])

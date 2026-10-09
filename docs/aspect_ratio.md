@@ -1,7 +1,7 @@
 # Windows aspect-ratio support
 
 Bloodborne 1.09 can render wider, taller, ultrawide and portrait outputs while keeping
-the logical 1920x1080 HUD centered. For example, set `output_res=3840x1820` in
+the logical 1920x1080 HUD centered. For example, set `output_res=3840x1600` in
 bbport.ini (or type that size in the launcher after the custom-resolution change).
 The camera keeps its vertical field of view. Floating enemy labels can reach the
 expanded visible area. Title/loading screens retain their centered 16:9 stage.

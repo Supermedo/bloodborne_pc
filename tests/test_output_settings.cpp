@@ -20,7 +20,7 @@ int main() {
     unsetenv("BB_RENDER_RES");
 #endif
     auto& settings = Get();
-    for (const char* size : {"1920x1080", "3840x1820", "5000x2000", "1080x1920", "1280x800"}) {
+    for (const char* size : {"1920x1080", "3840x1600", "5000x2000", "1080x1920", "1280x800"}) {
         FILE* file = std::fopen(path.string().c_str(), "w");
         assert(file);
         std::fprintf(file, "output_res=%s\n", size);
