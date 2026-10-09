@@ -87,6 +87,28 @@ class NativeUiTests(unittest.TestCase):
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
 
 
+class FpsPatchTests(unittest.TestCase):
+    def test_fps_physics_write_preserves_unrelated_instruction(self):
+        for preset, value in [('60 FPS++', '8988883D'), ('90 FPS++', '8988083D'),
+                              ('Uncap FPS++', '8988883B')]:
+            with self.subTest(preset=preset):
+                writes = compile_patches(XML, [preset], '01.09', SEGMENTS)
+                self.assertIn((0x00f383ca - EBOOT_BASE, bytes.fromhex(value)), writes)
+                self.assertNotIn(0x011383ca - EBOOT_BASE, [at for at, data in writes])
+
+    def test_other_versions_keep_their_xml_addresses(self):
+        tree = ET.parse(XML)
+        for meta in tree.getroot().iter('Metadata'):
+            if meta.get('Name') == '60 FPS++' and meta.get('AppVer') == '01.09':
+                meta.set('AppVer', '01.08')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'patch.xml'
+            tree.write(path)
+            writes = compile_patches(path, ['60 FPS++'], '01.08', SEGMENTS)
+            self.assertIn(0x011383ca - EBOOT_BASE, [at for at, data in writes])
+            self.assertNotIn(0x00f383ca - EBOOT_BASE, [at for at, data in writes])
+
+
 class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):
         self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0'}), [])

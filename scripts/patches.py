@@ -200,6 +200,12 @@ def compile_patches(xml, names, app_version, segments):
     for name in names:
         for line in found[name].iter('Line'):
             offset=int(line.get('Address'),0)-EBOOT_BASE
+            # The 1.09 FPS XML mistypes the physics-step address by 0x200000.
+            # 0x011383ca lies inside an unrelated multi-byte NOP;
+            # the intended float immediate is at 0x00f383ca in this build.
+            if (app_version == '01.09' and name in ('60 FPS++', '90 FPS++', 'Uncap FPS++')
+                    and offset == 0x011383ca-EBOOT_BASE):
+                offset = 0x00f383ca-EBOOT_BASE
             data=encode(line)
             if not any(start<=offset and offset+len(data)<=end for start,end in segments):
                 raise ValueError(f'{name}: address {line.get("Address")} is outside the eboot')
