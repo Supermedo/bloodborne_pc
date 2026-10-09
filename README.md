@@ -86,6 +86,8 @@ put its address in **Server address**.
 Ask on the [Discord server](https://discord.gg/yTMG8c4Bqm), or open an [issue](https://github.com/Supermedo/bloodborne_pc/issues) and attach
 `user\last_run.log` from the game folder, with your graphics card and what happened.
 If the game shows only a black screen, try **Advanced → Clear shader cache** first.
+Crashes on AMD RDNA2 cards, slow FSR 4 and online errors are collected in
+[docs/WINDOWS_TROUBLESHOOTING.md](docs/WINDOWS_TROUBLESHOOTING.md).
 
 ## Building from source
 
