@@ -46,6 +46,7 @@ MORE_KEYS = [
     'The WebAPI box holds the game server address; it is ignored.',
     '"Play online" is off: the game starts offline.',
     'Could not add the game to Steam: {}',
+    'Japanese/Asian buttons: Circle confirms and interacts, Cross dodges',
 ]
 
 MORE = {
@@ -93,6 +94,7 @@ MORE = {
         'В поле WebAPI указан адрес игрового сервера; он не используется.',
         '«Играть онлайн» выключено: игра запустится офлайн.',
         'Не удалось добавить игру в Steam: {}',
+        'Японская раскладка: Круг — подтверждение и действие, Крест — уклонение',
     ],
     'ar': [
         'اللعب التعاوني عبر الإنترنت',
@@ -138,6 +140,7 @@ MORE = {
         'حقل WebAPI يحتوي على عنوان خادم اللعبة، ولن يُستخدم.',
         'خيار «العب عبر الإنترنت» متوقف: ستبدأ اللعبة بدون إنترنت.',
         'تعذّرت إضافة اللعبة إلى Steam: {}',
+        'أزرار يابانية/آسيوية: الدائرة للتأكيد والتفاعل، وX للمراوغة',
     ],
     'es': [
         'Cooperativo en línea',
@@ -183,6 +186,7 @@ MORE = {
         'El campo WebAPI contiene la dirección del servidor del juego; se ignora.',
         '«Jugar en línea» está desactivado: el juego se inicia sin conexión.',
         'No se pudo añadir el juego a Steam: {}',
+        'Botones japoneses/asiáticos: Círculo confirma e interactúa, Equis esquiva',
     ],
     'pt': [
         'Cooperativo online',
@@ -228,6 +232,7 @@ MORE = {
         'O campo WebAPI contém o endereço do servidor do jogo; ele é ignorado.',
         '"Jogar online" está desligado: o jogo abre offline.',
         'Não foi possível adicionar o jogo à Steam: {}',
+        'Botões japoneses/asiáticos: Círculo confirma e interage, Xis esquiva',
     ],
     'fr': [
         'Coopération en ligne',
@@ -273,6 +278,7 @@ MORE = {
         "Le champ WebAPI contient l'adresse du serveur du jeu ; elle est ignorée.",
         '« Jouer en ligne » est désactivé : le jeu démarre hors ligne.',
         "Impossible d'ajouter le jeu à Steam : {}",
+        'Boutons japonais/asiatiques : Rond valide et interagit, Croix esquive',
     ],
     'de': [
         'Online-Koop',
@@ -318,6 +324,7 @@ MORE = {
         'Das WebAPI-Feld enthält die Adresse des Spielservers; sie wird ignoriert.',
         '„Online spielen“ ist aus: Das Spiel startet offline.',
         'Das Spiel konnte nicht zu Steam hinzugefügt werden: {}',
+        'Japanische/asiatische Tasten: Kreis bestätigt und interagiert, Kreuz weicht aus',
     ],
     'it': [
         'Cooperativa online',
@@ -363,6 +370,7 @@ MORE = {
         "Il campo WebAPI contiene l'indirizzo del server di gioco; viene ignorato.",
         '"Gioca online" è disattivato: il gioco parte offline.',
         'Impossibile aggiungere il gioco a Steam: {}',
+        'Tasti giapponesi/asiatici: Cerchio conferma e interagisce, Croce schiva',
     ],
     'pl': [
         'Kooperacja online',
@@ -408,6 +416,7 @@ MORE = {
         'Pole WebAPI zawiera adres serwera gry; zostanie pominięte.',
         '„Graj online” jest wyłączone: gra uruchomi się offline.',
         'Nie udało się dodać gry do Steam: {}',
+        'Przyciski japońskie/azjatyckie: Kółko potwierdza i wchodzi w interakcję, Krzyżyk to unik',
     ],
     'tr': [
         'Çevrim içi ortak oyun',
@@ -453,6 +462,7 @@ MORE = {
         'WebAPI alanında oyun sunucusunun adresi var; yok sayılıyor.',
         '"Çevrim içi oyna" kapalı: oyun çevrim dışı başlar.',
         "Oyun Steam'e eklenemedi: {}",
+        'Japon/Asya tuşları: Daire onaylar ve etkileşir, Çarpı kaçınır',
     ],
     'zh': [
         '在线合作',
@@ -498,6 +508,7 @@ MORE = {
         'WebAPI 栏中填写的是游戏服务器地址，将被忽略。',
         '“在线游玩”未开启：游戏将以离线方式启动。',
         '无法将游戏添加到 Steam：{}',
+        '日版/亚洲版按键：圆圈键确认和互动，叉键闪避',
     ],
     'ja': [
         'オンライン協力プレイ',
@@ -543,6 +554,7 @@ MORE = {
         'WebAPI 欄にゲームサーバーのアドレスが入っているため、無視されます。',
         '「オンラインでプレイ」がオフのため、オフラインで起動します。',
         'ゲームを Steam に追加できませんでした: {}',
+        '日本/アジア配置：○で決定・調べる、×で回避',
     ],
     'ko': [
         '온라인 협동',
@@ -588,5 +600,6 @@ MORE = {
         'WebAPI 칸에 게임 서버 주소가 들어 있어 무시됩니다.',
         '"온라인으로 플레이"가 꺼져 있어 오프라인으로 시작합니다.',
         '게임을 Steam에 추가할 수 없습니다: {}',
+        '일본/아시아 버튼 배치: 동그라미로 결정·상호작용, 엑스로 회피',
     ],
 }

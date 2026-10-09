@@ -28,7 +28,7 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 - **Output resolutions** from 720p to 4K, presets from Native AA to Ultra Performance.
 - **Cheats page:** never die, stealth, silent footsteps, Rally that never fades, enemy control,
   and gameplay tweaks (camera distance, no camera auto-rotation, easier running, ragdoll
-  physics).
+  physics, the Japanese/Asian button layout with Circle to confirm and Cross to dodge).
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.
@@ -86,6 +86,8 @@ put its address in **Server address**.
 Ask on the [Discord server](https://discord.gg/yTMG8c4Bqm), or open an [issue](https://github.com/Supermedo/bloodborne_pc/issues) and attach
 `user\last_run.log` from the game folder, with your graphics card and what happened.
 If the game shows only a black screen, try **Advanced → Clear shader cache** first.
+Crashes on AMD RDNA2 cards, slow FSR 4 and online errors are collected in
+[docs/WINDOWS_TROUBLESHOOTING.md](docs/WINDOWS_TROUBLESHOOTING.md).
 
 ## Building from source
 
