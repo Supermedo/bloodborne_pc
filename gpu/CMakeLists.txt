@@ -243,6 +243,8 @@ if (WIN32)
     set_target_properties(atrac9 PROPERTIES C_STANDARD 99 INTERPROCEDURAL_OPTIMIZATION OFF)
     add_executable(bb-probe ../src/probe.c ${BB_RUNTIME} ../src/compat_win.c ../src/vulkan_smoke.c
         ../packaging/windows/bb-probe.rc)
+    target_sources(bb-probe PRIVATE ../src/aspect_ratio.cpp)
+    target_compile_definitions(bb-probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     set_target_properties(bb-probe PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
     target_compile_options(bb-probe PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
     target_include_directories(bb-probe PRIVATE .. ../src)
@@ -306,3 +308,9 @@ add_executable(output-settings-test EXCLUDE_FROM_ALL ../tests/test_output_settin
     shim/bbport_settings.cpp)
 target_include_directories(output-settings-test PRIVATE shim)
 target_compile_options(output-settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+
+if (WIN32)
+    add_executable(aspect-thunk-test EXCLUDE_FROM_ALL ../tests/test_aspect_thunk.cpp)
+    target_compile_options(aspect-thunk-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_include_directories(aspect-thunk-test PRIVATE ..)
+endif()

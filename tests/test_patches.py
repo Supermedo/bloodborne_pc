@@ -87,6 +87,19 @@ class NativeUiTests(unittest.TestCase):
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
 
 
+    def test_arbitrary_aspect_and_native_movie_viewport(self):
+        for out in ((2560,1080), (5120,2160), (1280,800), (1080,1920), (5000,2000)):
+            settings={'output_res': f'{out[0]}x{out[1]}', 'upscaler':'dlss', 'preset':'1'}
+            scene, actual=scaled_sizes(settings)
+            self.assertEqual(actual, out)
+            writes=resolution_writes(XML,scene,'01.09',SEGMENTS,ui=out)
+            self.assertEqual(immediate(writes, UI_WIDTH)[1],out[0])
+            self.assertEqual(immediate(writes, UI_HEIGHT)[1],out[1])
+            # The stage-coordinate constants still describe 1920x1080.
+            self.assertEqual(immediate(writes,0x019E83AF-EBOOT_BASE)[1],1920)
+        self.assertEqual(scaled_sizes({'output_res':'1280x800','upscaler':'taa'}),
+                         ((1280,800),(1280,800)))
+
     def test_invalid_custom_resolutions_fall_back(self):
         for text in ('0x0','999999x1080','1921x1080','1920x143','bad','-10x1080'):
             self.assertEqual(output_size({'output_res':text}),OUTPUT_SIZE)

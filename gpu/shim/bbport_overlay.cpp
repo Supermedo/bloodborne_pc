@@ -253,7 +253,9 @@ void Menu() {
     }
     ImGui::Text("Активный рендер сцены: %d x %d", s.active_render_width.load(),
                 s.active_render_height.load());
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         ImGui::Text("Пресет при запуске: %s", BbSettings::PresetName(s.startup_preset));
         if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
             automatic && automatic[0] == '1') {
@@ -323,7 +325,9 @@ void Menu() {
         }
         ImGui::EndCombo();
     }
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         Hint("Размер готового кадра и интерфейса. Пресет задаёт размер сцены относительно "
              "вывода: 4K Performance = 1920x1080. Применяется после перезапуска игры.");
     } else {

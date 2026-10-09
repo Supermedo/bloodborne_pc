@@ -109,6 +109,8 @@ void ConfigureDlssSupport(bool available, const char* problem);
 bool FixedRenderSession();
 int RenderPreset();
 bool ResolutionNeedsRestart();
+/// Camera and HUD aspect changes require new guest patches on restart.
+bool AspectNeedsRestart();
 /// Writes the file (menu changes).
 void Save();
 

@@ -44,6 +44,11 @@ int main() {
         Load();
         assert(settings.output_res == OutputDefault);
     }
+    settings.startup_output_res = OutputDefault;
+    settings.output_res = 2; // 2560x1440, same aspect as the startup output.
+    assert(!AspectNeedsRestart() && !ResolutionNeedsRestart());
+    settings.output_res = 6; // 3440x1440, different camera and HUD aspect.
+    assert(AspectNeedsRestart() && ResolutionNeedsRestart());
     std::filesystem::remove(path);
     std::puts("Custom output settings: save/load and malformed input rejection PASS");
 }
