@@ -37,10 +37,13 @@ CONFIG_FILE = CONFIG_DIR / 'settings.json'
 PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-# This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '1.5'
-RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/latest'
-RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
+# This build. The Ivy Bridge fork tags its releases windows-v<upstream>-legacy.<n>, compared as
+# <upstream>.<n> (windows-v1.5-legacy.1 -> 1.5.1); updates come from the fork, so an update never
+# replaces the Legacy CPU scripts with upstream ones.
+VERSION = '1.5.1'
+EDITION = 'Legacy CPU Edition (Intel 3rd Gen / Ivy Bridge)'
+RELEASES_API = 'https://api.github.com/repos/T0ug/bloodborne_pc_Ivy-Bridge/releases/latest'
+RELEASES_PAGE = 'https://github.com/T0ug/bloodborne_pc_Ivy-Bridge/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'bbport-update'
 # Never copied over an installation by an update (the package does not hold them either).
 USER_FILES = ('user', 'out', 'mods', 'bbport.ini', 'mods.json', 'patches.json', 'last_run.log')
@@ -335,7 +338,7 @@ class Launcher:
         self.banner_source = self.banner_image = None
         self.ui_calls = queue.Queue()  # work for the Tk thread from helper threads
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
-        root.title('Bloodborne — bbport')
+        root.title('Bloodborne — bbport (Legacy CPU)')
         root.configure(bg=BG)
         self.dpi = root.winfo_fpixels('1i') / 96.0
         root.geometry(f'{self.px(1120)}x{self.px(740)}')
@@ -548,7 +551,7 @@ class Launcher:
         side.pack_propagate(False)
         tk.Label(side, text='BLOODBORNE', bg=BG, fg=GOLD, font=('Georgia', 16)).pack(anchor='w', padx=22, pady=(24, 0))
         self.side = side
-        tk.Label(side, text=_('native port · Windows', 'нативный порт · Windows') + f'  ·  v{VERSION}', bg=BG, fg=MUTED,
+        tk.Label(side, text=_('native port · Windows', 'нативный порт · Windows') + f'  ·  v{VERSION}\n{EDITION}', bg=BG, fg=MUTED,
                  font=('Segoe UI', 9)).pack(anchor='w', padx=22, pady=(0, 20))
         self.nav, self.current_page = {}, None
         for name, title in (('play', _('Play', 'Играть')), ('graphics', _('Graphics', 'Графика')),
