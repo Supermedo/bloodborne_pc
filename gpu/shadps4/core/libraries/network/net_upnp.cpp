@@ -17,6 +17,8 @@
 
 namespace Libraries::Net {
 
+u16 GetP2PConfiguredPort(); // p2p_sockets.cpp
+
 UPnPClient& UPnPClient::Instance() {
     static UPnPClient instance;
     return instance;
@@ -112,6 +114,12 @@ void UPnPClient::DiscoverThread() {
 
     m_done = true;
     m_cv.notify_all();
+
+    // The P2P transport usually has its port before the router answers; when it comes up later
+    // it asks for the mapping itself (P2PTransport::Start).
+    if (const u16 port = GetP2PConfiguredPort(); port != 0) {
+        AddMapping(port);
+    }
 }
 
 void UPnPClient::AddMapping(u16 port) {
@@ -119,6 +127,10 @@ void UPnPClient::AddMapping(u16 port) {
         return;
 
     if (!m_available.load())
+        return;
+
+    std::lock_guard lock(m_mutex);
+    if (m_external_port.load() == port)
         return;
 
     const std::string port_str = std::to_string(port);
