@@ -123,7 +123,7 @@ def output_size(settings):
     """Output (UI) size from bbport.ini output_res, e.g. 3840x2160; 1920x1080 by default."""
     try:
         w,h=(int(v) for v in settings.get('output_res','').lower().split('x'))
-        if w>0 and h>0: return (w,h)
+        if 256<=w<=7680 and 144<=h<=4320 and not (w%2 or h%2): return (w,h)
     except ValueError:
         pass
     return OUTPUT_SIZE
@@ -134,9 +134,9 @@ def scaled_sizes(settings):
     the game renders at output / preset scale (or at the output size without upscaler) and the
     upscaler fills the output. None at 1080p and for TAA (native, live host targets only)."""
     out=output_size(settings)
-    if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
+    if out==OUTPUT_SIZE or (settings.get('upscaler')=='taa' and out[0]*9==out[1]*16): return None
     scale=1.0
-    if settings.get('upscaler','fsr3')!='off':
+    if settings.get('upscaler','fsr3') not in ('off','taa'):
         preset=int(settings.get('preset','0') or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     render=tuple(max(2,round(v/scale/2)*2) for v in out)
@@ -275,7 +275,7 @@ def main():
     p.add_argument('--game-dir',type=Path,default=Path(os.environ.get('BB_GAME_DIR','../CUSA03173')))
     p.add_argument('--render-res',default='',help='render resolution WxH (overrides the preset)')
     p.add_argument('--print-preset-size',action='store_true',help='print the selected preset size, if reduced')
-    p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
+    p.add_argument('--output-res',default='',help='output resolution WxH (centered 1920x1080 logical HUD stage)')
     p.add_argument('--print-scaled',action='store_true',
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
     a=p.parse_args()
@@ -307,10 +307,13 @@ def main():
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
-    # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
-    # it into the output-size image with a viewport scaled by output / 1920
-    # (UiComposition::NativeViewport), so it is rasterized at the output resolution.
+    # Scaleform's logical stage remains 1920x1080. At non-16:9 output sizes,
+    # give its show-all mode the actual physical viewport so it centers the stage.
+    # The renderer uses that coordinate space for native-resolution UI draws.
     ui=OUTPUT_SIZE
+    if a.output_res:
+        out=output_size({'output_res': a.output_res})
+        if out[0]*9 != out[1]*16: ui=out
     if size:
         writes+=resolution_writes(a.xml,size,a.app_version,segments,ui)
         if size[0]*size[1]>OUTPUT_SIZE[0]*OUTPUT_SIZE[1]:

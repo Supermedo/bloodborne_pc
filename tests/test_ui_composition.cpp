@@ -14,7 +14,16 @@ int main() {
     assert(Choose(true, true, true, false) == Background::Copy);
     assert(Choose(true, false, true, true) == Background::None);
     assert(Choose(false, true, true, true) == Background::None);
-    assert(NativeViewport(1920, -1080));
+    const auto [w,h] = MovieViewport();
+    assert(NativeViewport(float(w), -float(h)));
+    if (std::getenv("BB_UI_RES")) {
+        const auto native = Scale(960,540,w,h,true);
+        assert(native[0]==1 && native[1]==1);
+        const auto scene = Scale(960,540,w,h,false);
+        assert(scene[0]==float(w)/960 && scene[1]==float(h)/540);
+        std::puts("UI composition: custom movie viewport preserved without doubling PASS");
+        return 0;
+    }
     assert(!NativeViewport(960, -540));
     assert(MovieShader(0x34e8a281) && MovieShader(0x24042a9b));
     assert(!MovieShader(0x0b0acf50)); // fullscreen post/tonemap also has a native viewport

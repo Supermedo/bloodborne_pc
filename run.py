@@ -160,6 +160,9 @@ def main():
     mod_view = game if game.resolve() != original_game else None
     try:
         run_script('prepare.py', game, '--out', out)
+        sys.path.insert(0, str(PORT / 'scripts'))
+        from aspect_ratio import segment_fingerprint
+        env['BB_ASPECT_EBOOT_SEGMENTS'] = segment_fingerprint((out / 'eboot.elf').read_bytes())
         run_script('link_libc.py', game, '--out', out)
         run_script('link_modules.py', game, '--out', out)
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
@@ -191,6 +194,17 @@ def main():
                                         text=True, creationflags=no_console())
                 live = result.stdout.strip() if result.returncode == 0 else '0'
             live = '1' if live == '1' or not patched else '0'
+        if scaled_output or env.get('BB_OUTPUT_RES'):
+            movie_output = scaled_output or env['BB_OUTPUT_RES']
+            ow, oh = map(int, movie_output.split('x'))
+            if ow * 9 != oh * 16:
+                live = '0'
+                env['BB_UI_RES'] = movie_output
+                print('Aspect correction: centered 16:9 stage; aspect changes require restart')
+            else:
+                env.pop('BB_UI_RES', None)
+        else:
+            env.pop('BB_UI_RES', None)
         if live == '1':
             print(f'Output {scaled_output}: live resolution changes (live_resolution=0: startup patch)')
         elif scaled_output:

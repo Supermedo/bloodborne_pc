@@ -253,7 +253,9 @@ void Menu() {
     }
     ImGui::Text("Активный рендер сцены: %d x %d", s.active_render_width.load(),
                 s.active_render_height.load());
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         ImGui::Text("Пресет при запуске: %s", BbSettings::PresetName(s.startup_preset));
         if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
             automatic && automatic[0] == '1') {
@@ -310,17 +312,22 @@ void Menu() {
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText("Разрешение вывода");
-    static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
+    auto output_label = [](int i) {
+        return std::to_string(BbSettings::OutputWidths[i]) + " x " +
+               std::to_string(BbSettings::OutputHeights[i]);
+    };
     int output = s.output_res;
-    if (ImGui::BeginCombo("Разрешение вывода", outputs[output])) {
+    if (ImGui::BeginCombo("Разрешение вывода", output_label(output).c_str())) {
         for (int i = 0; i < BbSettings::OutputCount; ++i) {
-            if (ImGui::Selectable(outputs[i], i == output)) {
+            if (ImGui::Selectable(output_label(i).c_str(), i == output)) {
                 Store(s.output_res, i, true);
             }
         }
         ImGui::EndCombo();
     }
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         Hint("Размер готового кадра и интерфейса. Пресет задаёт размер сцены относительно "
              "вывода: 4K Performance = 1920x1080. Применяется после перезапуска игры.");
     } else {

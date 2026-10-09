@@ -296,7 +296,7 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool active = Active();
     const bool jitter_on = active && settings.jitter && !BbToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
-    const int output = settings.output_res.load();
+    const int output = BbSettings::AspectNeedsRestart() ? settings.startup_output_res : settings.output_res.load();
     const bool output_changed = !scaled_session && applied_output != output;
     if (output_changed) {
         target_width = BbSettings::OutputWidths[output];
@@ -1508,9 +1508,17 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
         .dstOffsets = std::array{vk::Offset3D{0, 0, 0},
             vk::Offset3D{s32(ui_width), s32(ui_height), 1}},
     };
-    cmd.blitImage(source, source_layout,
-                  vk::Image(ui_image), vk::ImageLayout::eTransferDstOptimal, region,
-                  vk::Filter::eLinear);
+    const auto [movie_w, movie_h] = UiComposition::MovieViewport();
+    if (!camera_motion.Ready() && uint64_t(movie_w) * 9 != uint64_t(movie_h) * 16) {
+        // The title/loading movie paints the central stage; its surrounding bars are black.
+        cmd.clearColorImage(vk::Image(ui_image), vk::ImageLayout::eTransferDstOptimal,
+                            vk::ClearColorValue{std::array<float,4>{0,0,0,1}},
+                            vk::ImageSubresourceRange{vk::ImageAspectFlagBits::eColor,0,1,0,1});
+    } else {
+        cmd.blitImage(source, source_layout,
+                      vk::Image(ui_image), vk::ImageLayout::eTransferDstOptimal, region,
+                      vk::Filter::eLinear);
+    }
     barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
     barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
     barrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;

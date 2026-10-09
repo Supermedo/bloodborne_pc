@@ -184,7 +184,11 @@ UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
 PRESETS = [('0', ('Native AA (×1.0)',)), ('1', ('Quality (×1.5)',)), ('2', ('Balanced (×1.7)',)),
            ('3', ('Performance (×2)',)), ('4', ('Ultra Performance (×3)',))]
 OUTPUTS = [('1280x720', ('1280 × 720 (Steam Deck)',)), ('1920x1080', ('1920 × 1080',)),
-           ('2560x1440', ('2560 × 1440',)), ('3840x2160', ('3840 × 2160 (4K)',))]
+           ('2560x1440', ('2560 × 1440',)), ('3840x2160', ('3840 × 2160 (4K)',)),
+           ('1280x800', ('1280 x 800 (16:10)',)), ('2560x1080', ('2560 x 1080 (Ultrawide)',)),
+           ('3440x1440', ('3440 x 1440 (Ultrawide)',)), ('5120x1440', ('5120 x 1440 (32:9)',)),
+           ('5120x2160', ('5120 x 2160 (Ultrawide)',)), ('1080x1920', ('1080 x 1920 (Portrait)',))]
+
 LIVE = [('auto', ('Auto (by graphics card)', 'Авто (по видеокарте)')), ('0', ('Off (faster)', 'Выключена (быстрее)')),
         ('1', ('On (change without restarting)', 'Включена (без перезапуска)'))]
 LODS = [('0', ('As in the game', 'Как в игре')), ('-2', ('Highest (−2)', 'Максимальная (−2)')),
@@ -524,15 +528,34 @@ class Launcher:
         """A combobox over (value, (english, russian)) pairs, kept in sync with its variable."""
         var = self.var(key, store)
         values = [v for v, _t in options]
-        box = self.ttk.Combobox(parent, values=[_(*text) for _v, text in options], state='readonly', width=width)
-        if var.get() not in values:
+        box = self.ttk.Combobox(parent, values=[_(*text) for _v, text in options],
+                               state='normal' if key == 'output_res' else 'readonly', width=width)
+        if var.get() not in values and key != 'output_res':
             var.set(values[0])
 
         def show(*_args):
             current = var.get()
-            box.current(values.index(current) if current in values else 0)
+            if current in values:
+                box.current(values.index(current))
+            else:
+                box.set(current)
         show()
         box.bind('<<ComboboxSelected>>', lambda _e: var.set(values[box.current()]))
+        if key == 'output_res':
+            def custom(_event):
+                if box.current() >= 0:
+                    return
+                text = box.get().strip().lower().replace(' ', '')
+                try:
+                    w, h = map(int, text.split('x'))
+                    if 256 <= w <= 7680 and 144 <= h <= 4320 and not (w % 2 or h % 2):
+                        var.set(f'{w}x{h}')
+                    else:
+                        show()
+                except ValueError:
+                    show()
+            box.bind('<FocusOut>', custom)
+            box.bind('<Return>', custom)
         var.trace_add('write', show)
         return box
 
@@ -776,7 +799,7 @@ class Launcher:
                  _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
                    'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
         self.row(f, _('Output resolution', 'Разрешение вывода'), self.choice(f, 'output_res', 'ini', OUTPUTS),
-                 _('What the upscaler produces; the HUD is drawn at this size too.',
+                 _('Choose a preset or type WxH (even dimensions, 256x144 through 7680x4320).',
                    'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
         self.row(f, _('Live resolution changes', 'Смена разрешения на лету'), self.choice(f, 'live_resolution', 'ini', LIVE),
                  _('Off: outputs other than 1080p are set by a patch at start (fastest; changing them in the '

@@ -49,9 +49,11 @@ inline constexpr Effect Effects[] = {
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
 /// Live output resolutions: the upscaler's output and the UI host targets.
-inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840};
-inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
-inline constexpr int OutputCount = 4;
+// Last slot retains a validated custom resolution loaded from the launcher/ini.
+inline int OutputWidths[] = {1280,1920,2560,3840,1280,2560,3440,5120,5120,1080,1920};
+inline int OutputHeights[] = {720,1080,1440,2160,800,1080,1440,1440,2160,1920,1080};
+inline constexpr int OutputCount = sizeof(OutputWidths) / sizeof(OutputWidths[0]);
+inline constexpr int OutputCustom = OutputCount - 1;
 inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 
 struct Values {
@@ -107,6 +109,8 @@ void ConfigureDlssSupport(bool available, const char* problem);
 bool FixedRenderSession();
 int RenderPreset();
 bool ResolutionNeedsRestart();
+/// Camera and HUD aspect changes require new guest patches on restart.
+bool AspectNeedsRestart();
 /// Writes the file (menu changes).
 void Save();
 
