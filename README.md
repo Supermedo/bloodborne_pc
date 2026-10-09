@@ -28,7 +28,7 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 - **Output resolutions** from 720p to 4K, presets from Native AA to Ultra Performance.
 - **Cheats page:** never die, stealth, silent footsteps, Rally that never fades, enemy control,
   and gameplay tweaks (camera distance, no camera auto-rotation, easier running, ragdoll
-  physics).
+  physics, the Japanese/Asian button layout with Circle to confirm and Cross to dodge).
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.

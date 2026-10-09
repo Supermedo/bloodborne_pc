@@ -46,8 +46,9 @@ Online play (beta)
 Cheats
 - The "Cheats" page has cheats (never die, enemies do not see or hear you, Rally never fades,
   control the targeted enemy) and gameplay tweaks (no Rally, camera further away, no camera
-  auto-rotation, run with less stick tilt, ragdoll physics). They are game patches for 1.09,
-  applied when the game starts.
+  auto-rotation, run with less stick tilt, ragdoll physics, the Japanese/Asian button layout:
+  Circle confirms and interacts, Cross cancels and dodges, and the button icons follow). They
+  are game patches for 1.09, applied when the game starts.
 
 Problems
 - Black screen at start: Advanced -> "Clear shader cache", then start again (the first minutes

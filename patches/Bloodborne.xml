@@ -1260,6 +1260,11 @@
             <Line Type="bytes" Address="0x01C2C890" Value="31C0C3909090909090909090909090"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Circle Confirm (Japanese/Asian button layout)" Note="The game's check for the regions where Circle confirms (Japan, Asia) always answers yes: Circle confirms and interacts, Cross cancels and dodges, and the on-screen button icons follow. Applied after Unlock Game Region, which clears the same check." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x023B8730" Value="B801000000C3"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Bookmark and Capture outputs" Author="Foxy Hooligans" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
             <Line Type="bytes" Address="0x04dba9be" Value="2f0064006100740061002f0062006c006f006f00640062006f0072006e0065002f000000"/>
