@@ -26,6 +26,9 @@ Starting
   Advanced -> "Check for updates" checks by hand.
 - Advanced -> "Launcher language": English, Russian, Arabic, Spanish, Portuguese, French,
   German, Italian, Polish, Turkish, Chinese, Japanese, Korean (default: the Windows language).
+- Game & effects -> "Text language" and "Voice language" are separate. Brazilian Portuguese
+  text uses the game's porbr files; voice tracks can use a different language. "As in the game"
+  keeps the original voice selection. A missing translated file falls back to the original.
 - In the game, Insert (or L3+R3 on a gamepad) opens the port's menu (upscaler, resolution,
   effects). Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square,
   Q Triangle, 1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad.

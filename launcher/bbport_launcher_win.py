@@ -167,6 +167,7 @@ INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': 
                 **{key: '1' if on else '0' for key, _t, on in EFFECTS + EXTRAS + CHEATS + TWEAKS}}
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
+                'voice_language': 'auto',
                 'player_name': '', 'fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '',
                 'frames_ahead': '', 'frame_stats': False, 'gpu_profile': False,
@@ -196,7 +197,11 @@ PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (б�
                  ('Immediate', ('Immediate (tearing)', 'Immediate (с разрывами)'))]
 LANGUAGES = [('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
              ('2', ('French', 'Французский')), ('3', ('Spanish', 'Испанский')), ('4', ('German', 'Немецкий')),
-             ('5', ('Italian', 'Итальянский'))]
+             ('5', ('Italian', 'Итальянский')), ('17', ('Português (Brasil)',))]
+VOICE_LANGUAGES = [('auto', ('As in the game',)), ('eng', ('English',)),
+                   ('ptb', ('Português (Brasil)',)), ('ded', ('Deutsch',)),
+                   ('esa', ('Español (América)',)), ('ese', ('Español (España)',)),
+                   ('frf', ('Français',)), ('iti', ('Italiano',)), ('jaj', ('日本語',))]
 DRAW_PIPE = [('', ('Auto (8+ threads)', 'Авто (8+ потоков)')), ('1', ('On', 'Включён')),
              ('0', ('Off (more stable)', 'Выключен (стабильнее)'))]
 READBACKS = [('', ('Relaxed (default)', 'Relaxed (по умолчанию)')), ('0', ('Off', 'Выключены')),
@@ -345,6 +350,7 @@ def game_environment(s):
     env['BB_PATCHES_DIR'] = s['patches_dir'] or str(DATA_DIR / 'patches')
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
+    env['BB_VOICE_LANGUAGE'] = s['voice_language']
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
     env['BB_FULLSCREEN'] = '1' if s['fullscreen'] else '0'
@@ -854,7 +860,9 @@ class Launcher:
                     _('Choose the saves folder', 'Выберите папку сохранений'),
                     _('Empty: {} (shader caches are kept there too).',
                       'Пусто: {} (там же кэш шейдеров).').format(DATA_DIR / 'user'), on_change=self.refresh_status)
-        self.row(f, _('Game language', 'Язык игры'), self.choice(f, 'language', 'app', LANGUAGES))
+        self.row(f, _('Text language', '\u042f\u0437\u044b\u043a \u0442\u0435\u043a\u0441\u0442\u0430'), self.choice(f, 'language', 'app', LANGUAGES))
+        self.row(f, _('Voice language', '\u042f\u0437\u044b\u043a \u043e\u0437\u0432\u0443\u0447\u043a\u0438'), self.choice(f, 'voice_language', 'app', VOICE_LANGUAGES),
+                 _('As in the game uses the original voice setting; other choices use available tracks.'))
         self.row(f, _('Player name', 'Имя игрока'), self.ttk.Entry(f, textvariable=self.var('player_name', 'app'), width=30),
                  _('Where the game shows the PSN name; empty: the default.', 'Где игра показывает имя PSN; пусто — по умолчанию.'))
         self.section(f, _('Effects', 'Эффекты'))

@@ -1214,6 +1214,15 @@ WINDOWS_LANGUAGES = {0x19: 'ru', 0x01: 'ar', 0x0a: 'es', 0x16: 'pt', 0x0c: 'fr',
 
 from bbport_lang_more import MORE, MORE_KEYS  # noqa: E402 (texts added later, Russian included)
 
+EXTRA_TRANSLATIONS = {
+    'pt': {
+        'Text language': 'Idioma dos textos',
+        'Voice language': 'Idioma da dublagem',
+        'As in the game uses the original voice setting; other choices use available tracks.':
+            'Como no jogo usa a voz original; as outras opções usam as faixas disponíveis.',
+    },
+}
+
 _tables = {}
 
 
@@ -1227,5 +1236,6 @@ def table(language):
         if more and len(more) != len(MORE_KEYS):
             raise ValueError(f'launcher translation {language}: {len(more)} texts for {len(MORE_KEYS)} new keys')
         _tables[language] = {**(dict(zip(KEYS, texts)) if texts else {}),
-                             **(dict(zip(MORE_KEYS, more)) if more else {})}
+                             **(dict(zip(MORE_KEYS, more)) if more else {}),
+                             **EXTRA_TRANSLATIONS.get(language, {})}
     return _tables[language]
