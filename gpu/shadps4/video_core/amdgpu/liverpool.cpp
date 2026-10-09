@@ -702,7 +702,10 @@ void ScanDcb(std::span<const u32> dcb, int depth) {
 } // namespace
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb,
-                                           u64 seq) {
+                                           u64 seq,
+                                           std::shared_ptr<const BbCommandBufferCopy> command_copy) {
+    // The coroutine parameter keeps the copied spans alive across every yield.
+    (void)command_copy;
     FIBER_ENTER(dcb_task_name);
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
@@ -1632,44 +1635,14 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     FIBER_EXIT;
 }
 
-Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
-    auto& queue = mapped_queues[GfxQueueId];
-    ASSERT_MSG(queue.dcb_buffer.capacity() >= queue.dcb_buffer_offset + dcb.size(),
-               "dcb copy buffer out of reserved space");
-    ASSERT_MSG(queue.ccb_buffer.capacity() >= queue.ccb_buffer_offset + ccb.size(),
-               "ccb copy buffer out of reserved space");
-
-    queue.dcb_buffer.resize(
-        std::max(queue.dcb_buffer.size(), queue.dcb_buffer_offset + dcb.size()));
-    queue.ccb_buffer.resize(
-        std::max(queue.ccb_buffer.size(), queue.ccb_buffer_offset + ccb.size()));
-
-    const u32 prev_dcb_buffer_offset = queue.dcb_buffer_offset;
-    const u32 prev_ccb_buffer_offset = queue.ccb_buffer_offset;
-    if (!dcb.empty()) {
-        std::memcpy(queue.dcb_buffer.data() + queue.dcb_buffer_offset, dcb.data(),
-                    dcb.size_bytes());
-        queue.dcb_buffer_offset += dcb.size();
-        dcb = std::span<const u32>{queue.dcb_buffer.begin() + prev_dcb_buffer_offset,
-                                   queue.dcb_buffer.begin() + queue.dcb_buffer_offset};
-    }
-
-    if (!ccb.empty()) {
-        std::memcpy(queue.ccb_buffer.data() + queue.ccb_buffer_offset, ccb.data(),
-                    ccb.size_bytes());
-        queue.ccb_buffer_offset += ccb.size();
-        ccb = std::span<const u32>{queue.ccb_buffer.begin() + prev_ccb_buffer_offset,
-                                   queue.ccb_buffer.begin() + queue.ccb_buffer_offset};
-    }
-
-    return std::make_pair(dcb, ccb);
-}
-
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
 
+    std::shared_ptr<const BbCommandBufferCopy> command_copy;
     if (EmulatorSettings.IsCopyGpuBuffers()) {
-        std::tie(dcb, ccb) = CopyCmdBuffers(dcb, ccb);
+        command_copy = std::make_shared<BbCommandBufferCopy>(dcb, ccb);
+        dcb = command_copy->Draw();
+        ccb = command_copy->Constant();
     }
 
     // The copy for the draw preparation workers is made before taking the queue lock, which
@@ -1684,7 +1657,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
             seq = gfx_submit_seq++;
             draw_prep->Enqueue(seq, std::move(prep_submission));
         }
-        auto task = ProcessGraphics(dcb, ccb, seq);
+        auto task = ProcessGraphics(dcb, ccb, seq, std::move(command_copy));
         queue.submits.emplace(task.handle);
     }
 
