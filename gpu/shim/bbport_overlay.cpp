@@ -61,6 +61,26 @@ float base_scale = 1.0f;
 std::chrono::steady_clock::time_point last_present{};
 float frame_ms_avg = 0.0f;
 
+// Video memory for the FPS counter (VK_EXT_memory_budget), sampled twice a second: this
+// process's use of the device-local heaps, the driver's budget for them and the session peak.
+const Vulkan::Instance* vram_instance = nullptr;
+std::chrono::steady_clock::time_point vram_sampled{};
+u64 vram_used_mib = 0, vram_budget_mib = 0, vram_peak_mib = 0;
+
+void SampleVram() {
+    if (!vram_instance || !vram_instance->CanReportMemoryUsage()) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - vram_sampled < std::chrono::milliseconds(500)) {
+        return;
+    }
+    vram_sampled = now;
+    vram_used_mib = vram_instance->GetDeviceMemoryUsage() >> 20;
+    vram_budget_mib = vram_instance->GetDeviceMemoryBudgetNow() >> 20;
+    vram_peak_mib = std::max(vram_peak_mib, vram_used_mib);
+}
+
 void SetOpen(bool value) {
     if (menu_open.exchange(value) == value) {
         return;
@@ -441,6 +461,12 @@ void FpsCounter() {
                 : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
                 : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
                                                          : "");
+    SampleVram();
+    if (vram_budget_mib) {
+        ImGui::Text("VRAM %llu / %llu MB  peak %llu", static_cast<unsigned long long>(vram_used_mib),
+                    static_cast<unsigned long long>(vram_budget_mib),
+                    static_cast<unsigned long long>(vram_peak_mib));
+    }
     ImGui::End();
 }
 
@@ -471,6 +497,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
                                    int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config);
 
+    vram_instance = &instance;
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
         instance.ApiVersion(),
