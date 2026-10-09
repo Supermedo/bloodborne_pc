@@ -1,0 +1,56 @@
+{
+  "coverage": {
+    "executable_bytes_scanned_rel32": 84776668,
+    "function_entries": 162959,
+    "jump_tables": "not_globally_resolved",
+    "landing_pads": "not_globally_resolved",
+    "overlapping_code": "not_globally_proven_absent",
+    "rel8_window": [
+      40557925,
+      40558491
+    ],
+    "resolved_relocation_destinations": 231478,
+    "symbols": 703
+  },
+  "discarded_raw_candidates_with_instruction_proof": [
+    {
+      "containing_address": 40558283,
+      "containing_bytes": "7471",
+      "containing_instruction": "je 0x26adf3e",
+      "reason": "starts_inside_other_decoded_instruction",
+      "source": 40558284,
+      "target": 40558358
+    }
+  ],
+  "function_end": 40558409,
+  "function_sha256": "16729bb23b2f814ef311ef0a3f3aac2d91f16110a206885eae694f2b17f38133",
+  "function_start": 40558016,
+  "global_indirect_proof": false,
+  "known_interior_entries": [],
+  "method": "allocator_count_spans_v1",
+  "schema_version": 1,
+  "source_sha256": "d65f0b4f01d59166aed16f8604196d8b7dd805abbf0758b356e8f1354c9429f9",
+  "spans": [
+    {
+      "address": 40558053,
+      "bytes": "f30fbdc0b920000000",
+      "end": 40558062
+    },
+    {
+      "address": 40558078,
+      "bytes": "f30fbcc883f910",
+      "end": 40558085
+    },
+    {
+      "address": 40558270,
+      "bytes": "f30fbdfaba1f000000",
+      "end": 40558279
+    },
+    {
+      "address": 40558354,
+      "bytes": "f30fbdf1b91f000000",
+      "end": 40558363
+    }
+  ],
+  "unresolved_candidates": []
+}
