@@ -11,6 +11,12 @@ from test_probe import package
 
 
 class LinkTests(unittest.TestCase):
+    def setUp(self):
+        # Synthetic libc: the Legacy CPU profile (automatic on Ivy Bridge) expects the real dump.
+        legacy = patch.dict('os.environ', {'BB_LEGACY_CPU': '0'})
+        legacy.start()
+        self.addCleanup(legacy.stop)
+
     def fixture(self, version=1, relocs=()):
         main_key=('fixture',('libc',1),('libc',1))
         lib_key=('fixture',('libc',version),('libc',1))

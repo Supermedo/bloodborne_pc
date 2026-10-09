@@ -1,3 +1,69 @@
+# Bloodborne for Windows — Legacy CPU Edition (Intel 3rd Gen / Ivy Bridge)
+
+This is a fork of [Supermedo/bloodborne_pc](https://github.com/Supermedo/bloodborne_pc), based on
+**Windows v1.5**. It makes the port playable on CPUs **without BMI1, LZCNT and MOVBE**, such as
+Intel 3rd generation (Ivy Bridge) Core i3/i5/i7. It also fixes the crash when you **take damage** or
+**press D-pad up** (blood bullets). Everything below the line is the original README.
+
+### What this fork changes
+
+- **Legacy CPU translations.** When the game image is prepared, 6,388 instructions this CPU lacks
+  (BMI1 `andn`/`bextr`/`blsi`/`blsr`/`tzcnt`, `lzcnt`, `movbe`) are replaced by equivalent code,
+  and libc's `strlen` is swapped for a version without BMI1. The game files are never changed.
+  The profile **turns on by itself** when the CPU lacks those extensions and stays off on newer
+  CPUs. Override it with `legacy_cpu=1` or `legacy_cpu=0` in `bbport.ini`, or `BB_LEGACY_CPU=1/0`.
+  Files: `scripts/cpu_compat.py`, `tools/legacy-cpu-plan.json`, `scripts/link_libc.py`,
+  `scripts/link_modules.py`; the plan generator is `tools/build_cpu_compat.py`.
+- **Red-zone protection (damage / D-pad up crash).** The effect code that draws blood writes
+  vertices into memory the GPU tracker write-protects. On Windows, each of those write faults
+  makes the system write an exception frame just below the stack pointer. That overwrites the
+  System V "red zone" where the game keeps a pointer, so the game reads NULL at `0x28ce9b5` and
+  closes. 605 of the 607 affected store sites now run with the stack pointer moved 128 bytes
+  lower (`patches/redzone.json`, applied by `scripts/link_modules.py`, Windows only;
+  `BB_RED_ZONE=0` turns it off). The fix and the site list are from
+  [PR #2](https://github.com/Supermedo/bloodborne_pc/pull/2) by **d4rksp4rt4n**. We confirmed that
+  Ivy Bridge has the same crash, and the same fix removes it (`tests/test_redzone.py`).
+
+### Tested on
+
+Intel Core i7-3770 · GeForce GTX 1650 4 GB · 16 GB RAM · Windows 10 · Bloodborne CUSA03173 v1.09.
+Settings used: 30 FPS, upscaler off, output 1280×720, depth of field / motion blur / SSAO /
+game AA / dynamic shadows / SSR off. The game held about 30 FPS, and damage and blood bullets no
+longer close it. Intel 2nd generation (Sandy Bridge) and older AMD CPUs have **not** been tested.
+
+### How to install
+
+Until this fork publishes its own package:
+
+1. Download **Windows v1.5** from the
+   [original releases](https://github.com/Supermedo/bloodborne_pc/releases/tag/windows-v1.5) and
+   unpack it.
+2. Copy these files from this repository into that folder, keeping the folders:
+   `scripts/cpu_compat.py`, `scripts/link_libc.py`, `scripts/link_modules.py`,
+   `tools/legacy-cpu-plan.json` (create `tools/`), `patches/redzone.json`.
+3. **Turn off "Check for updates" in the launcher and do not press "Update".** The original
+   updater installs the upstream version, which brings back the original scripts (and the crashes).
+4. Start `Bloodborne.exe` as usual. The game output shows `CPU compatibility: translated 6388
+   instruction sites` and `Red zone: 605/607 guest store sites run red-zone-safe`.
+
+### Known issues
+
+- Quitting to the title screen and loading the save again (Quit → Continue) can close the game
+  with `Shader binary info not found` (exit code 23). It happened in our tests before the
+  red-zone fix too, so the fix does not cause it. Restart the launcher to keep playing.
+- 193 instructions are too short to translate safely: 58 `movbe` (an Ivy Bridge CPU would close the
+  game if one is reached) and 135 `lzcnt`/`tzcnt` (may compute a different result). None of them
+  caused a problem in testing. 42 red-zone stores could not be redirected.
+- Online play from upstream v1.6 is not in this fork yet.
+
+### Credits
+
+[Supermedo](https://github.com/Supermedo) (the port) · **d4rksp4rt4n** (red-zone fix, PR #2) ·
+[shadPS4](https://github.com/shadps4-emu/shadPS4) (graphics). License unchanged: GPL-2.0.
+No game files are included or distributed.
+
+---
+
 # Bloodborne for Windows
 
 **Bloodborne running natively on Windows 10 and 11, by [Supermedo](https://github.com/Supermedo) Mohammed Albarghouthi.**
