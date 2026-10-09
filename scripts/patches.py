@@ -123,7 +123,7 @@ def output_size(settings):
     """Output (UI) size from bbport.ini output_res, e.g. 3840x2160; 1920x1080 by default."""
     try:
         w,h=(int(v) for v in settings.get('output_res','').lower().split('x'))
-        if w>0 and h>0: return (w,h)
+        if 256<=w<=7680 and 144<=h<=4320 and not (w%2 or h%2): return (w,h)
     except ValueError:
         pass
     return OUTPUT_SIZE

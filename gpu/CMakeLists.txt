@@ -301,3 +301,8 @@ add_executable(fsr4-bench EXCLUDE_FROM_ALL tools/fsr4_bench.cpp
     shadps4/video_core/renderer_vulkan/fsr411/fsr411.cpp)
 target_include_directories(fsr4-bench PRIVATE shadps4/video_core/renderer_vulkan/fsr411)
 target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan::fsr4-v07-assets Vulkan::Vulkan)
+
+add_executable(output-settings-test EXCLUDE_FROM_ALL ../tests/test_output_settings.cpp
+    shim/bbport_settings.cpp)
+target_include_directories(output-settings-test PRIVATE shim)
+target_compile_options(output-settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

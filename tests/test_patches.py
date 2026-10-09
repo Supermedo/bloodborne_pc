@@ -7,7 +7,7 @@ from pathlib import Path
 
 from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
-                     render_size, resolution_writes, scaled_sizes, effect_patches,
+                     render_size, resolution_writes, scaled_sizes, output_size, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
                      compile_external)
 
@@ -85,6 +85,11 @@ class NativeUiTests(unittest.TestCase):
                          ((1916, 1078), (3840, 2160)))
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
+
+
+    def test_invalid_custom_resolutions_fall_back(self):
+        for text in ('0x0','999999x1080','1921x1080','1920x143','bad','-10x1080'):
+            self.assertEqual(output_size({'output_res':text}),OUTPUT_SIZE)
 
 
 class DebugPatchTests(unittest.TestCase):
