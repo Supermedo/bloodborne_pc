@@ -240,16 +240,23 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
-    ASSERT(is_new);
-
-    it.value() = std::make_unique<GraphicsPipeline>(
+    auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
         sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
     sel.fetch_shader.reset();
+
+    // bbport: the driver refused it (see GraphicsPipeline): not registered, so the game builds
+    // it on first use instead of the preload taking the whole game down.
+    if (!pipeline->IsBuilt()) {
+        return false;
+    }
+
+    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
+    ASSERT(is_new);
+    it.value() = std::move(pipeline);
 
     return true;
 }

@@ -36,6 +36,11 @@ public:
         return *pipeline;
     }
 
+    /// False only for a pipeline preloaded from the cache that the driver refused.
+    bool IsBuilt() const noexcept {
+        return static_cast<bool>(pipeline);
+    }
+
     vk::PipelineLayout GetLayout() const noexcept {
         return *pipeline_layout;
     }

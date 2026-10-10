@@ -422,6 +422,14 @@ GraphicsPipeline::GraphicsPipeline(
 
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    if (preloading && pipeline_result != vk::Result::eSuccess) {
+        // bbport: a pipeline rebuilt from the on-disk cache can fail where the live one did not
+        // (Radeon RX 590: ErrorUnknown at startup on every launch until the cache was cleared).
+        // Leave it unbuilt: PipelineCache skips it and the game builds it again when needed.
+        LOG_WARNING(Render_Vulkan, "Cached graphics pipeline {} failed to build ({}); skipped",
+                    debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
