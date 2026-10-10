@@ -1,42 +1,41 @@
-# Bloodborne for Windows
+# Bloodborne for Windows - Custom Achievement Edition
+
+<img width="1118" height="773" alt="Screenshot 2026-10-10 100055" src="https://github.com/user-attachments/assets/6ad0ed29-1288-4976-b1ea-57e87f4b63bb" />
+
 
 **Bloodborne running natively on Windows 10 and 11, by [Supermedo](https://github.com/Supermedo) Mohammed Albarghouthi.**
+**Achievement System Integration by [pyL1nx](https://github.com/pyL1nx).**
 
-The original PlayStation 4 game runs directly on your PC: its own x86-64 code runs natively,
-and the graphics are translated to Vulkan. No emulator window, no setup scripts: unpack the zip,
-start `Bloodborne.exe`, pick your game folder and press **PLAY**.
+The original PlayStation 4 game runs directly on your PC: its own x86-64 code runs natively, and the graphics are translated to Vulkan. No emulator window, no setup scripts: unpack the zip, start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 
-**[Download the latest version](https://github.com/Supermedo/bloodborne_pc/releases/latest)** · **[Join the Discord](https://discord.gg/yTMG8c4Bqm)**
+**[Download the latest version](https://github.com/pyL1nx/bloodborne_pc/releases/tag/V.1.0.0)**
 
-> **No game files are included.** You need your own decrypted dump of Bloodborne
-> (CUSA03173). Version 1.09 is needed for the community patches (60/90/unlocked FPS,
-> resolution, effects); other versions run at 30 FPS.
-> This project is not affiliated with Sony Interactive Entertainment or FromSoftware.
+> **No game files are included.** You need your own decrypted dump of Bloodborne (CUSA03173). Version 1.09 is needed for the community patches (60/90/unlocked FPS, resolution, effects); other versions run at 30 FPS. This project is not affiliated with Sony Interactive Entertainment or FromSoftware.
+
+## Custom Achievement System
+
+This fork includes a fully integrated achievement tracking system and a dedicated UI tab in the Windows launcher.
+
+- **Live Tracking:** The launcher autonomously tracks and updates real trophy unlocks during gameplay, displaying all 40 trophies (earned and locked) on a dedicated page.
+- **Persistent Saves:** Game runtime hooks write unlock events explicitly to `trophies.log` in your saves folder, ensuring progress is never lost between sessions.
+- **Launcher Integration:** Unlocks are picked up dynamically from the game's live output, `trophies.log`, and `last_run.log`, meaning progress is tracked whether you use the launcher, Steam, or a desktop shortcut.
+- **Platinum Logic:** The Platinum trophy is awarded automatically once all 33 base-game trophies are earned. The 6 Old Hunters DLC trophies do not count toward it, matching original console behavior.
+
+*Note: For full tracking support, ensure you are using the compiled executable provided in the Releases tab alongside your decrypted game files.*
 
 ## Features
 
-- **Online play (beta):** messages, bloodstains and wandering ghosts from other hunters through
-  [The Hunter's Dream](https://thehuntersdream.com), and bells and summons through a shadNet
-  server (shadPS4's public one by default).
-- **Launcher with every setting in one window**, in 13 languages: English, Arabic, Russian,
-  Spanish, Portuguese, French, German, Italian, Polish, Turkish, Chinese, Japanese, Korean.
-- **Updates from the launcher:** when a new version is out it tells you, and **Update**
-  installs it. Your saves, settings and mods are kept.
+- **Online play (beta):** messages, bloodstains and wandering ghosts from other hunters through [The Hunter's Dream](https://thehuntersdream.com), and bells and summons through a shadNet server (shadPS4's public one by default).
+- **Launcher with every setting in one window**, in 13 languages.
+- **Updates from the launcher:** when a new version is out it tells you, and **Update** installs it. Your saves, settings and mods are kept.
 - **NVIDIA DLSS** on GeForce RTX cards (RTX 20 series and newer).
 - **AMD FSR 3.1 and FSR 4** upscaling, plus native-resolution TAA.
 - **Unlocked frame rate** with a frame cap (up to 120 by default), or 30/60/90 FPS.
 - **Output resolutions** from 720p to 4K, presets from Native AA to Ultra Performance.
-- **Cheats page:** never die, stealth, silent footsteps, Rally that never fades, enemy control,
-  and gameplay tweaks (camera distance, no camera auto-rotation, easier running, ragdoll
-  physics).
-- **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
-  game's own AA, dynamic light shadows, screen-space reflections, model detail.
+- **Cheats page:** never die, stealth, silent footsteps, Rally that never fades, enemy control, and gameplay tweaks.
+- **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.
 - **Add to Steam** puts the game in your Steam library in one click.
-- **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a
-  desktop shortcut).
-- **Controller and keyboard**, an in-game settings menu (Insert or L3+R3), name entry on
-  screen, a desktop shortcut, and a button to clear the shader cache.
 
 ## Requirements
 
@@ -49,81 +48,30 @@ Nothing else to install: everything the game needs is in the zip.
 
 ## How to play
 
-1. Download the zip from [Releases](https://github.com/Supermedo/bloodborne_pc/releases/latest)
-   and unpack it anywhere.
+1. Download the zip from [Releases](https://github.com/pyL1nx/bloodborne_pc/releases/tag/V.1.0.0) and unpack it anywhere.
 2. Start `Bloodborne.exe`.
 3. On **Game & effects**, choose your game folder (the one with `eboot.bin`).
 4. Press **PLAY**.
 
 In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
-Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, Q Triangle,
-1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad.
-
-## Playing online (beta)
-
-1. Register a shadNet account at [shadnet.shadps4.net](https://shadnet.shadps4.net).
-2. In the launcher, open **Online co-op**, tick **Play online** and enter your account name
-   (not your email) and password.
-3. Press **Test connection**: all three lines should say "reachable". Then press **PLAY** and
-   choose online at the title screen. The Hunter's Dream welcome message means you are online.
-
-Everyone you want to play with needs game version 1.09 and the same co-op server. A private
-shadNet server (from the [shadp2p](https://github.com/Wozzardman/shadp2p) project) works too:
-put its address in **Server address**.
 
 ## Known issues
 
-- The character preview on the character creation screen stays empty. The character is
-  created correctly and looks right in the game.
+- The character preview on the character creation screen stays empty. The character is created correctly and looks right in the game.
 - Some AMD graphics cards still crash when the game world loads; fixes are in progress.
-- Online play is new. Messages, bloodstains and ghosts work; summoning other players with the
-  bells has not been confirmed yet. Please report how it goes on Discord.
-- Above about 120 FPS the game's movement slows down (a limit of the game itself): keep the
-  frame cap at 120 or lower.
-
-## Problems and feedback
-
-Ask on the [Discord server](https://discord.gg/yTMG8c4Bqm), or open an [issue](https://github.com/Supermedo/bloodborne_pc/issues) and attach
-`user\last_run.log` from the game folder, with your graphics card and what happened.
-If the game shows only a black screen, try **Advanced → Clear shader cache** first.
-
-## Building from source
-
-See [packaging/windows/README.md](packaging/windows/README.md): MSYS2 CLANG64, `bash build.sh`,
-then `bash packaging/windows/package.sh`. DLSS is built separately with
-`packaging/windows/build_dlss.sh`.
+- Online play is new. Messages, bloodstains and ghosts work; summoning other players with the bells has not been confirmed yet.
+- Above about 120 FPS the game's movement slows down (a limit of the game itself): keep the frame cap at 120 or lower.
 
 ## Credits
 
-Built on [bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux port of
-Bloodborne by deadinside28, and on the [shadPS4](https://github.com/shadps4-emu/shadPS4)
-renderer. The original README is in [docs/original-readme](docs/original-readme/README.md).
+Built on [bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux port of Bloodborne by deadinside28, and on the [shadPS4](https://github.com/shadps4-emu/shadPS4) renderer. 
 
-Online play uses the network and PSN code of [shadp2p](https://github.com/Wozzardman/shadp2p)
-by Wozzardman (the shadPS4 Bloodborne co-op project), the shadNet server of the
-[shadPS4](https://shadps4.net) team, and [The Hunter's Dream](https://thehuntersdream.com) server
-by droogie and its team.
+Achievement system integration developed by pyL1nx. 
 
-Also used: [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK
-(FSR), FSR 4 assets from [FireBurn/Q2RTX](https://github.com/FireBurn/Q2RTX), the DLSS bridge
-adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR),
-the [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) (`nvngx_dlss.dll` under NVIDIA's license),
-[LibAtrac9](https://github.com/Thealexbarney/LibAtrac9), [SDL3](https://github.com/libsdl-org/SDL),
-[FFmpeg](https://ffmpeg.org), [Dear ImGui](https://github.com/ocornut/imgui),
-[sirit](https://github.com/shadps4-emu/sirit), [magic_enum](https://github.com/Neargye/magic_enum),
-[miniz](https://github.com/richgel999/miniz), [xbyak](https://github.com/herumi/xbyak),
-[wepoll](https://github.com/piscisaureus/wepoll), [cpp-httplib](https://github.com/yhirose/cpp-httplib),
-[Protocol Buffers](https://protobuf.dev), [OpenSSL](https://www.openssl.org),
-[miniupnpc](https://miniupnp.tuxfamily.org), [JSON for Modern C++](https://github.com/nlohmann/json),
-[Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator),
-[MSYS2](https://www.msys2.org) / [LLVM](https://llvm.org), [PyInstaller](https://pyinstaller.org)
-and [Pillow](https://python-pillow.org). Game patches by Kyo, Lance McDonald, auser1337,
-illusion, emoose and the Bloodborne community.
+Online play uses the network and PSN code of [shadp2p](https://github.com/Wozzardman/shadp2p) by Wozzardman, the shadNet server of the [shadPS4](https://shadps4.net) team, and [The Hunter's Dream](https://thehuntersdream.com) server by droogie and its team.
 
-NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation. The icon is original
-artwork.
+NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation. 
 
 ## License
 
-GNU GPL v2 or later ([LICENSE](LICENSE)). Third-party components keep their own licenses
-(see `licenses\` in the download).
+GNU GPL v2 or later. Third-party components keep their own licenses.
