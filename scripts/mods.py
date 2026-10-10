@@ -101,39 +101,31 @@ def mod_files(folder):
             yield relative, source
 
 
-# Windows without the symlink privilege (Developer Mode off): directories become junctions,
-# files hard links (copies across volumes). Those are not symlinks, so the overlay remembers
-# what it linked and where to.
+# Windows: files are always hard links (copies across volumes), never symlinks. The runtime's
+# UCRT _stat64 and FindFirstFileA report a file symlink's own size (0), not its target's, and
+# the game panics loading it (FileTransferTask.cpp(865)). Directories are symlinks, or
+# junctions without the symlink privilege (Developer Mode off). Hard links and junctions are
+# not symlinks, so the overlay remembers what it linked and where to.
 LINKED = {}
 
 
 def make_link(link, target):
-    try:
+    if os.name != 'nt':
         link.symlink_to(target, target_is_directory=target.is_dir())
         return
-    except OSError:
-        if os.name != 'nt':
-            raise
     if target.is_dir():
-        import _winapi
-        _winapi.CreateJunction(str(target), str(link))
+        try:
+            link.symlink_to(target, target_is_directory=True)
+            return
+        except OSError:
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
     else:
         try:
             os.link(target, link)
         except OSError:
             shutil.copy2(target, link)
     LINKED[str(link)] = target
-
-
-def symlinks_work(directory):
-    probe = Path(tempfile.mkdtemp(prefix='link-test-', dir=directory))
-    try:
-        (probe / 'link').symlink_to(probe, target_is_directory=True)
-        return True
-    except OSError:
-        return False
-    finally:
-        shutil.rmtree(probe, ignore_errors=True)
 
 
 def is_link(path):
@@ -186,7 +178,7 @@ def build_overlay(game, out, mods):
         return game
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    if os.name == 'nt' and not symlinks_work(out) and out.drive.casefold() != game.drive.casefold():
+    if os.name == 'nt' and out.drive.casefold() != game.drive.casefold():
         # Hard links only reach files on the same volume: the overlay goes beside the game.
         out = game.parent
     overlay = Path(tempfile.mkdtemp(prefix='mod-game-', dir=out))
