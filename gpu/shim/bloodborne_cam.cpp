@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from shadlixps4's Bloodborne mouse-camera implementation.
+// Bloodborne mouse camera by imedved (Nexus Mods), ported to bbport by mcrib884 (#3, bbmouse).
 
 #include "bloodborne_cam.h"
 

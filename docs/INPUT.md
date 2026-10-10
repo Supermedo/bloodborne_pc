@@ -86,8 +86,9 @@ mouse_to_joystick = right        # still required: mouse look on/off (F7), and t
 
 With `mouse_camera = direct`, mouse motion writes the game's camera yaw/pitch itself instead of
 emulating a stick, like a native PC game: no stick deadzone, no acceleration curve, no turn-speed
-cap. It hooks the game's camera update (`gpu/shim/bloodborne_cam.cpp`, ported from the bbmouse
-mouse camera of shadlixps4, via #3) and samples the mouse at 1 kHz on its own thread.
+cap. It hooks the game's camera update (`gpu/shim/bloodborne_cam.cpp`: the Bloodborne mouse
+camera by imedved on Nexus Mods, ported to this port by mcrib884 in #3) and samples the mouse at
+1 kHz on its own thread.
 
 - **Lock-on:** while a target is locked, motion goes to the stick instead (the game drives the
   camera then), so a flick still switches targets.

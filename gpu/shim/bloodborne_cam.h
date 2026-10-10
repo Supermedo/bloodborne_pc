@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Ported from shadlixps4's Bloodborne mouse-camera implementation (via bbport PR #3, bbmouse).
+// Bloodborne mouse camera by imedved (Nexus Mods), ported to bbport by mcrib884 (#3, bbmouse).
 //
 // Direct mouse camera: hooks the game's camera update so mouse motion writes the camera's
 // yaw/pitch itself (1:1, no stick deadzone or acceleration), like a native PC game. Game 1.09.
