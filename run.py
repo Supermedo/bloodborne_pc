@@ -68,6 +68,26 @@ def online_overrides(env, user_dir):
     env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
 
 
+# The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
+# (seen on US CUSA00900): one of its edits inverts a branch in the menu code (+0xf6d90d) and the
+# gestures menu crashes the game. The port has its own 60 fps; the clean 1.09 eboot.bin is needed.
+LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
+
+
+def image_sha256(game):
+    """The SHA-256 of eboot.bin's loaded image (its loadable segments at their addresses): the
+    same whatever tool dumped it, unlike the SELF around it."""
+    import hashlib
+    sys.path.insert(0, str(PORT / 'scripts'))
+    from prepare import parse_self, span
+    elf, _header, ph, _segments, _missing = parse_self((Path(game) / 'eboot.bin').read_bytes())
+    loads = [p for p in ph if p['type'] in (1, 0x61000010)]
+    image = bytearray(max(p['vaddr'] + p['memsz'] for p in loads))
+    for p in loads:
+        image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
+    return hashlib.sha256(image).hexdigest()
+
+
 def fail(message):
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -153,6 +173,16 @@ def main():
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()
+    if env.get('BB_SKIP_GAME_CHECK') != '1':
+        try:
+            patched = image_sha256(game) == LANCE_60FPS_IMAGE
+        except (OSError, ValueError, KeyError, IndexError):
+            patched = False  # prepare.py reports unreadable executables itself
+        if patched:
+            fail("This eboot.bin has Lance McDonald's 60 fps patch applied to it, which crashes the "
+                 'game when the gestures menu opens (the port has its own 60 fps): copy eboot.bin '
+                 'from a clean dump of the 1.09 update into the game folder, replacing this one. '
+                 'BB_SKIP_GAME_CHECK=1 starts it anyway.')
     # BB_PROMPTS (playstation, xbox, switch, keyboard) and BB_GESTURES_NO_MOTION=1: the menu's
     # button prompts and the gestures menu, made from the game's files (scripts/menu_prompts.py).
     ui_mods = run_script('menu_prompts.py', game, '--out', out,
