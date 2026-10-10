@@ -7,6 +7,9 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace BbSettings {
 
@@ -24,7 +27,11 @@ float Clamp(float v, float lo, float hi) {
 void Set(Values& v, const std::string& key, const std::string& value) {
     const float f = float(std::atof(value.c_str()));
     const int i = std::atoi(value.c_str());
-    if (key == "upscaler") {
+    if (key == "menu_language") {
+        if (value == "en") v.menu_language = MenuEnglish;
+        else if (value == "pt") v.menu_language = MenuPortuguese;
+        else if (value == "ru") v.menu_language = MenuRussian;
+    } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
                 v.upscaler = u;
@@ -86,6 +93,30 @@ void Load() {
     auto& v = Get();
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
+    }
+    // bbport: the menu language until one is chosen in the menu (menu_language in bbport.ini):
+    // BB_MENU_LANGUAGE (en, pt, ru), else the system's UI language, else English.
+    {
+        const char* lang = std::getenv("BB_MENU_LANGUAGE");
+        if (lang && *lang) {
+            Set(v, "menu_language", lang);
+        } else {
+#ifdef _WIN32
+            const LANGID id = GetUserDefaultUILanguage();
+            v.menu_language = PRIMARYLANGID(id) == LANG_PORTUGUESE ? MenuPortuguese
+                              : PRIMARYLANGID(id) == LANG_RUSSIAN  ? MenuRussian
+                                                                   : MenuEnglish;
+#else
+            for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+                if (const char* value = std::getenv(key); value && *value) {
+                    v.menu_language = std::strncmp(value, "pt", 2) == 0   ? MenuPortuguese
+                                      : std::strncmp(value, "ru", 2) == 0 ? MenuRussian
+                                                                          : MenuEnglish;
+                    break;
+                }
+            }
+#endif
+        }
     }
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
@@ -186,9 +217,10 @@ void Save() {
     }
     std::fprintf(file,
                  "# bbport settings (in-game menu: Insert / L3+R3)\n"
-                 "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
+                 "menu_language=%s\nupscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
                  "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
+                 v.menu_language == MenuPortuguese ? "pt" : v.menu_language == MenuRussian ? "ru" : "en",
                  UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
@@ -221,6 +253,16 @@ const char* PresetName(int preset) {
 const char* UpscalerName(int upscaler) {
     static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+}
+
+const char* MenuText(const char* english, const char* portuguese, const char* russian) {
+    const int language = Get().menu_language;
+    return language == MenuPortuguese ? portuguese : language == MenuRussian ? russian : english;
+}
+
+const char* EffectLabel(int effect) {
+    const auto& e = Effects[std::clamp(effect, 0, EffectCount - 1)];
+    return MenuText(e.label, e.label_pt, e.label_ru);
 }
 
 } // namespace BbSettings

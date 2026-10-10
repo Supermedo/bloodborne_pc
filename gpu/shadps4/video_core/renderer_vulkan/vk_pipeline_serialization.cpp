@@ -217,6 +217,17 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     sel.graphics_key.Deserialize(ar);
 
+    // bbport: motion-vector pipelines are never preloaded. Their vertex shader embeds session-
+    // local buffer addresses (see LoadShaderMeta), and the shader metadata is stored once per
+    // program, not per permutation: the meta found for a motion pipeline's stages could be the
+    // plain permutation, so LoadShaderMeta's motion check missed it and the preload built the
+    // 8-attachment motion key with plain shaders. The AMD driver refused some of these
+    // (ErrorUnknown: the startup crash), and the ones it accepted were registered under the
+    // motion key without motion output. Built at first use instead, like the vertex shaders.
+    if (sel.graphics_key.motion_vectors) {
+        return false;
+    }
+
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
@@ -240,16 +251,23 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
-    ASSERT(is_new);
-
-    it.value() = std::make_unique<GraphicsPipeline>(
+    auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
         sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
     sel.fetch_shader.reset();
+
+    // bbport: the driver refused it (see GraphicsPipeline): not registered, so the game builds
+    // it on first use instead of the preload taking the whole game down.
+    if (!pipeline->IsBuilt()) {
+        return false;
+    }
+
+    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
+    ASSERT(is_new);
+    it.value() = std::move(pipeline);
 
     return true;
 }

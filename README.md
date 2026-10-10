@@ -56,8 +56,11 @@ Nothing else to install: everything the game needs is in the zip.
 4. Press **PLAY**.
 
 In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
-Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, Q Triangle,
-1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad.
+Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, V Triangle,
+1/3 L1/R1, R/F L2/R2, Z L3, Q/C R3 (lock-on), I/K/J/L d-pad, Enter Options, Tab touchpad.
+The keyboard now works together with a connected controller instead of only without one.
+All of this is configurable in `input.ini` (shadPS4's input config syntax: a Bloodborne file
+made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.md](docs/INPUT.md).
 
 ## Playing online (beta)
 

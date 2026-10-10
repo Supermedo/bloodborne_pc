@@ -384,8 +384,11 @@ bool Rasterizer::DrawPipeWanted() {
         return env[0] == '1';
     }
     // Stage B spins while draws flow. Measured ahead with 16 threads (+19%) and with 4 cores /
-    // 8 threads (taskset, Steam Deck-like: +18%).
-    return BbThreads::Available() >= 8;
+    // 8 threads (taskset, Steam Deck-like: +18%). bbport (Windows): off unless BB_DRAW_PIPE=1.
+    // With it, a null record chunk (Scheduler::ReserveRecordData) and garbage PM4 ("Unimplemented
+    // PM4 type 0": a float 1.0 read as a packet header) crashed sessions after 20-30 minutes on a
+    // Ryzen 5 2600 / RX 590: two threads on the recording side at once. Stable by default.
+    return false;
 }
 
 bool Rasterizer::UseDrawPipe() const {
