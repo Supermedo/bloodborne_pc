@@ -173,7 +173,8 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
                 'check_updates': True, 'online': False, 'online_server': 'srv.shadps4.net:31313',
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
-                'online_community': COMMUNITY_SERVER}
+                'online_community': COMMUNITY_SERVER, 'prompts': 'playstation',
+                'gestures_no_motion': False}
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -197,6 +198,9 @@ PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (б�
 LANGUAGES = [('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
              ('2', ('French', 'Французский')), ('3', ('Spanish', 'Испанский')), ('4', ('German', 'Немецкий')),
              ('5', ('Italian', 'Итальянский'))]
+# The menu's button prompts (scripts/menu_prompts.py).
+PROMPT_CHOICES = [('playstation', ("PlayStation (the game's own)",)), ('xbox', ('Xbox',)),
+                  ('switch', ('Nintendo Switch',)), ('keyboard', ('Keyboard',))]
 DRAW_PIPE = [('', ('Auto (8+ threads)', 'Авто (8+ потоков)')), ('1', ('On', 'Включён')),
              ('0', ('Off (more stable)', 'Выключен (стабильнее)'))]
 READBACKS = [('', ('Relaxed (default)', 'Relaxed (по умолчанию)')), ('0', ('Off', 'Выключены')),
@@ -345,6 +349,8 @@ def game_environment(s):
     env['BB_PATCHES_DIR'] = s['patches_dir'] or str(DATA_DIR / 'patches')
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
+    env['BB_PROMPTS'] = s['prompts']
+    env['BB_GESTURES_NO_MOTION'] = '1' if s['gestures_no_motion'] else '0'
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
     env['BB_FULLSCREEN'] = '1' if s['fullscreen'] else '0'
@@ -857,6 +863,11 @@ class Launcher:
         self.row(f, _('Game language', 'Язык игры'), self.choice(f, 'language', 'app', LANGUAGES))
         self.row(f, _('Player name', 'Имя игрока'), self.ttk.Entry(f, textvariable=self.var('player_name', 'app'), width=30),
                  _('Where the game shows the PSN name; empty: the default.', 'Где игра показывает имя PSN; пусто — по умолчанию.'))
+        self.row(f, _('Button prompts'), self.choice(f, 'prompts', 'app', PROMPT_CHOICES),
+                 _('Xbox and Switch prompts by Dommo (Nexus Mods); keyboard prompts show the default keys. '
+                   'Applied at the next start.'))
+        self.check(f, 'gestures_no_motion', 'app', _('Gestures menu without the motion-control icons'),
+                   _('By Dommo (Nexus Mods).'))
         self.section(f, _('Effects', 'Эффекты'))
         self.version_warning(f)
         for key, title, _on in EFFECTS:
