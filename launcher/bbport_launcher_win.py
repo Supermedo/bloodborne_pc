@@ -101,6 +101,7 @@ def run_command():
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
+import bbport_trophies as trophies  # noqa: E402
 
 LANG = 'en'
 
@@ -384,6 +385,12 @@ def game_environment(s):
 
 BG, PANEL, CARD, LINE = '#0e0c0b', '#151210', '#1c1815', '#2e2722'
 TEXT, MUTED, GOLD, BLOOD, BLOOD_HI = '#e9e2d6', '#9a8f80', '#c8a96a', '#7c1717', '#9e2222'
+# Trophy glyphs only: the grade colours of the console, toned to the launcher's palette.
+TROPHY_COLORS = {trophies.PLATINUM: '#c4ccd8', trophies.GOLD: GOLD, trophies.SILVER: '#adb1b7',
+                 trophies.BRONZE: '#b0774f'}
+TROPHY_LOCKED = '#3b332c'
+GRADE_NAMES = {trophies.PLATINUM: ('Platinum', 'Платиновый'), trophies.GOLD: ('Gold', 'Золотой'),
+               trophies.SILVER: ('Silver', 'Серебряный'), trophies.BRONZE: ('Bronze', 'Бронзовый')}
 
 
 class Launcher:
@@ -400,6 +407,8 @@ class Launcher:
         self.banner_source = self.banner_image = None
         self.ui_calls = queue.Queue()  # work for the Tk thread from helper threads
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
+        self.tracker = trophies.Tracker(self.trophy_dir())
+        self.trophies_loaded, self.toasts = False, []
         root.title('Bloodborne — bbport')
         root.configure(bg=BG)
         self.dpi = root.winfo_fpixels('1i') / 96.0
@@ -411,6 +420,7 @@ class Launcher:
         self.show('play')
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
+        root.after(300, self.poll_trophies)
         threading.Thread(target=self.detect_gpu, daemon=True).start()
         if self.app.get('check_updates', True) and not COOP_TEST:
             threading.Thread(target=self.check_update, daemon=True).start()
@@ -621,6 +631,7 @@ class Launcher:
                             ('display', _('Display & FPS', 'Экран и FPS')), ('game', _('Game & effects', 'Игра и эффекты')),
                             ('cheats', _('Cheats', 'Читы')), ('online', _('Online co-op', 'Онлайн-кооператив')),
                             ('mods', _('Mods & patches', 'Моды и патчи')),
+                            ('trophies', _('Achievements', 'Достижения')),
                             ('advanced', _('Advanced', 'Дополнительно')),
                             ('log', _('Log', 'Журнал'))):
             item = tk.Label(side, text='    ' + title, bg=BG, fg=TEXT, anchor='w', font=('Segoe UI', 11),
@@ -659,6 +670,7 @@ class Launcher:
         self.build_cheats()
         self.build_online()
         self.build_mods()
+        self.build_trophies()
         self.build_advanced()
         self.build_log()
         self.root.bind_all('<MouseWheel>', self.wheel)
@@ -683,6 +695,8 @@ class Launcher:
             self.refresh_fsr4()
         elif name == 'play':
             self.refresh_status()
+        elif name == 'trophies':
+            self.render_trophies()
 
     def build_play(self):
         tk, ttk = self.tk, self.ttk
@@ -957,6 +971,179 @@ class Launcher:
         self.patches_frame.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(8, 0))
         self.ttk.Button(f, text=_('Refresh', 'Обновить'), command=self.refresh_lists).grid(
             row=self.next_row(f), column=0, sticky='w', pady=(14, 0))
+
+    def build_trophies(self):
+        f = self.scrolled_page('trophies', _('Achievements', 'Достижения'),
+                               _('Trophies the game unlocks while you play; updated live, kept with your saves.',
+                                 'Трофеи, которые игра открывает во время игры; обновляются сразу, хранятся с '
+                                 'сохранениями.'))
+        self.trophy_filter, self.trophy_state = 'all', None
+        self.trophy_body = self.ttk.Frame(f)
+        self.trophy_body.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
+
+    def trophy_icon(self, parent, grade, earned, size, bg):
+        """A trophy cup in the colour of its grade (dim while locked), on a round plate."""
+        c = self.tk.Canvas(parent, width=size, height=size, bg=bg, highlightthickness=0, bd=0)
+        color = TROPHY_COLORS.get(grade, MUTED) if earned else TROPHY_LOCKED
+        p = lambda *xy: [v * size for v in xy]
+        c.create_oval(*p(.02, .02, .98, .98), fill=PANEL, outline=LINE if earned else PANEL)
+        handle = max(2, round(size / 18))
+        c.create_arc(*p(.24, .27, .42, .47), start=90, extent=180, style='arc', outline=color, width=handle)
+        c.create_arc(*p(.58, .27, .76, .47), start=270, extent=180, style='arc', outline=color, width=handle)
+        c.create_polygon(*p(.33, .25, .67, .25, .66, .44, .58, .55, .42, .55, .34, .44), fill=color, outline=color)
+        c.create_rectangle(*p(.47, .55, .53, .65), fill=color, outline='')
+        c.create_rectangle(*p(.39, .65, .61, .70), fill=color, outline='')
+        c.create_rectangle(*p(.35, .71, .65, .76), fill=color, outline='')
+        return c
+
+    def render_trophies(self):
+        """Rebuilds the page when the unlocks or the filter changed."""
+        unlocked = dict(self.tracker.unlocked)
+        state = (tuple(sorted(unlocked.items())), self.trophy_filter)
+        if state == self.trophy_state:
+            return
+        self.trophy_state = state
+        tk, body = self.tk, self.trophy_body
+        for widget in body.winfo_children():
+            widget.destroy()
+        known = trophies.TROPHIES
+        earned = [t for t in known if t[0] in unlocked]
+        percent = len(earned) * 100 // len(known)
+
+        card = tk.Frame(body, bg=CARD, highlightthickness=1, highlightbackground=LINE)
+        card.pack(fill='x', pady=(4, 0))
+        left = tk.Frame(card, bg=CARD)
+        left.pack(side='left', padx=22, pady=16)
+        tk.Label(left, text=f'{percent}%', bg=CARD, fg=TEXT, font=('Georgia', 26)).pack(anchor='w')
+        width, height = self.px(260), max(3, self.px(4))
+        bar = tk.Canvas(left, width=width, height=height, bg=LINE, highlightthickness=0, bd=0)
+        bar.pack(anchor='w', pady=(2, 8))
+        if earned:
+            bar.create_rectangle(0, 0, max(height, width * len(earned) // len(known)), height, fill=GOLD, outline='')
+        tk.Label(left, text=_('{} of {} trophies earned', '{} из {} трофеев получено').format(len(earned), len(known)),
+                 bg=CARD, fg=MUTED, font=('Segoe UI', 9)).pack(anchor='w')
+        grades = tk.Frame(card, bg=CARD)
+        grades.pack(side='right', padx=(0, 22))
+        for grade in trophies.GRADES:
+            have = sum(1 for t in earned if t[3] == grade)
+            total = sum(1 for t in known if t[3] == grade)
+            cell = tk.Frame(grades, bg=CARD)
+            cell.pack(side='left', padx=self.px(9))
+            self.trophy_icon(cell, grade, True, self.px(34), CARD).pack()
+            tk.Label(cell, text=f'{have} / {total}', bg=CARD, fg=TEXT if have else MUTED,
+                     font=('Segoe UI', 9)).pack(pady=(4, 0))
+
+        tabs = tk.Frame(body, bg=PANEL)
+        tabs.pack(fill='x', pady=(18, 2))
+        for name, title, count in (('all', _('All', 'Все'), len(known)),
+                                   ('earned', _('Earned', 'Получены'), len(earned)),
+                                   ('locked', _('Locked', 'Не получены'), len(known) - len(earned))):
+            on = name == self.trophy_filter
+            tab = tk.Frame(tabs, bg=PANEL, cursor='hand2')
+            tab.pack(side='left', padx=(0, 24))
+            label = tk.Label(tab, text=f'{title}   {count}', bg=PANEL, fg=TEXT if on else MUTED, cursor='hand2',
+                             font=('Segoe UI', 10, 'bold' if on else 'normal'))
+            label.pack()
+            tk.Frame(tab, bg=GOLD if on else PANEL, height=2).pack(fill='x', pady=(4, 0))
+            for widget in (tab, label):
+                widget.bind('<Button-1>', lambda _e, n=name: self.set_trophy_filter(n))
+
+        keep = {'all': lambda t: True, 'earned': lambda t: t[0] in unlocked,
+                'locked': lambda t: t[0] not in unlocked}[self.trophy_filter]
+        shown = 0
+        for group in (trophies.BASE, trophies.DLC):
+            members = [t for t in known if t[4] == group]
+            items = [t for t in members if keep(t)]
+            if not items:
+                continue
+            shown += len(items)
+            head = tk.Frame(body, bg=PANEL)
+            head.pack(fill='x', pady=(16, 8))
+            tk.Label(head, text=group, bg=PANEL, fg=GOLD, font=('Georgia', 13)).pack(side='left')
+            tk.Label(head, text='{} / {}'.format(sum(1 for t in members if t[0] in unlocked), len(members)),
+                     bg=PANEL, fg=MUTED, font=('Segoe UI', 9)).pack(side='left', padx=10, pady=(3, 0))
+            for trophy in items:
+                self.trophy_card(body, trophy, unlocked.get(trophy[0]))
+        if not shown:
+            tk.Label(body, text=_('No trophies yet. They appear here as soon as the game unlocks them.',
+                                  'Трофеев пока нет. Они появятся здесь, как только игра их откроет.')
+                     if self.trophy_filter == 'earned' else _('Every trophy is earned. Hail, good hunter.',
+                                                              'Все трофеи получены. Славной охоты.'),
+                     bg=PANEL, fg=MUTED, font=('Segoe UI', 10)).pack(anchor='w', pady=(22, 0))
+
+    def trophy_card(self, parent, trophy, when):
+        tk = self.tk
+        _id, name, text, grade, _group = trophy
+        earned = when is not None
+        card = tk.Frame(parent, bg=CARD, highlightthickness=1, highlightbackground=LINE)
+        card.pack(fill='x', pady=(0, 6))
+        self.trophy_icon(card, grade, earned, self.px(46), CARD).pack(side='left', padx=(12, 14), pady=10)
+        side = tk.Frame(card, bg=CARD)
+        side.pack(side='right', padx=(12, 18))
+        tk.Label(side, text=_(*GRADE_NAMES[grade]), bg=CARD, fg=TROPHY_COLORS[grade] if earned else MUTED,
+                 font=('Segoe UI', 9, 'bold')).pack(anchor='e')
+        tk.Label(side, text=time.strftime('%d %b %Y', time.localtime(when)) if earned else _('Locked', 'Не получен'),
+                 bg=CARD, fg=MUTED, font=('Segoe UI', 9)).pack(anchor='e', pady=(2, 0))
+        middle = tk.Frame(card, bg=CARD)
+        middle.pack(side='left', fill='x', expand=True, pady=10)
+        tk.Label(middle, text=name, bg=CARD, fg=TEXT if earned else MUTED,
+                 font=('Segoe UI', 11, 'bold' if earned else 'normal')).pack(anchor='w')
+        tk.Label(middle, text=text, bg=CARD, fg=MUTED, font=('Segoe UI', 9), justify='left',
+                 wraplength=self.px(520)).pack(anchor='w', pady=(1, 0))
+
+    def set_trophy_filter(self, name):
+        self.trophy_filter = name
+        self.render_trophies()
+
+    def trophy_dir(self):
+        return Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user')
+
+    def poll_trophies(self):
+        """Every 2 s: trophies.log (written by the game) and last_run.log (a game started elsewhere)."""
+        folder = self.trophy_dir()
+        if folder != self.tracker.user_dir:
+            self.tracker, self.trophies_loaded = trophies.Tracker(folder), False
+        self.trophies_changed(self.tracker.poll(run_log=not self.process), announce=self.trophies_loaded)
+        self.trophies_loaded = True
+        self.root.after(2000, self.poll_trophies)
+
+    def trophies_changed(self, new, announce=True):
+        if self.current_page == 'trophies':
+            self.render_trophies()
+        if announce:
+            for trophy in new:
+                self.toasts.append(trophy)
+                if len(self.toasts) == 1:
+                    self.show_toast()
+
+    def show_toast(self):
+        """The console's 'You've earned a trophy' notice, top right, one at a time."""
+        if not self.toasts:
+            return
+        tk = self.tk
+        trophy = self.toasts[0]
+        _id, name, _text, grade, _group = trophies.BY_ID.get(
+            trophy, (trophy, _('Trophy {}', 'Трофей {}').format(trophy), '', trophies.BRONZE, trophies.BASE))
+        box = tk.Frame(self.content, bg=CARD, highlightthickness=1, highlightbackground=LINE, cursor='hand2')
+        icon = self.trophy_icon(box, grade, True, self.px(38), CARD)
+        icon.pack(side='left', padx=(12, 12), pady=10)
+        words = tk.Frame(box, bg=CARD)
+        words.pack(side='left', padx=(0, 20), pady=8)
+        caption = tk.Label(words, text=_("You've earned a trophy.", 'Вы получили трофей.'), bg=CARD, fg=MUTED,
+                           font=('Segoe UI', 9))
+        caption.pack(anchor='w')
+        title = tk.Label(words, text=f'{name}', bg=CARD, fg=TEXT, font=('Segoe UI', 11, 'bold'))
+        title.pack(anchor='w')
+        for widget in (box, icon, words, caption, title):
+            widget.bind('<Button-1>', lambda _e: self.show('trophies'))
+        box.place(relx=1.0, x=-self.px(20), y=self.px(18), anchor='ne')
+        box.lift()
+
+        def done():
+            box.destroy()
+            self.toasts.pop(0)
+            self.show_toast()
+        self.root.after(5500, done)
 
     def build_advanced(self):
         ttk = self.ttk
@@ -1294,6 +1481,8 @@ class Launcher:
                         self.status.configure(text=_('The game is running.', 'Игра запущена.'), fg=GOLD)
                     elif 'restarting through run.py' in item:
                         self.status.configure(text=_('Restarting with the new settings…', 'Перезапуск с новыми настройками…'), fg=GOLD)
+                    elif 'Runtime: trophy ' in item:
+                        self.trophies_changed(self.tracker.observe(item))
                     self.append(item)
         except queue.Empty:
             pass
@@ -1533,6 +1722,7 @@ def play_without_window(settings):
     attach_stdio()
     log_dir = Path(settings.get('user_dir') or DATA_DIR / 'user')
     log_dir.mkdir(parents=True, exist_ok=True)
+    tracker = trophies.Tracker(log_dir)
     with open(log_dir / 'last_run.log', 'w', encoding='utf-8', buffering=1) as log:
         process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(settings),
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -1540,6 +1730,8 @@ def play_without_window(settings):
         for raw in iter(process.stdout.readline, b''):
             text = raw.decode('utf-8', errors='replace')
             log.write(text)
+            if 'Runtime: trophy ' in text:
+                tracker.observe(text)
             try:
                 sys.stdout.write(text)
             except (OSError, ValueError):
