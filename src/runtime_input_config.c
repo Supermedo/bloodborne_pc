@@ -297,6 +297,23 @@ static void ParseStickReleaseDelay(InputConfig *cfg, const char *value) {
     cfg->stick_release_delay_ms = (int)ms;
 }
 
+/* stick_circular = on|off: clamp the keyboard left stick to a round gate (runtime_pad.c,
+ * shape_digital_stick). On by default. */
+static void ParseStickCircular(InputConfig *cfg, const char *value) {
+    if (EqualsCaseInsensitive(value, "on")) cfg->stick_circular = 1;
+    else if (EqualsCaseInsensitive(value, "off")) cfg->stick_circular = 0;
+    else ++cfg->warnings;
+}
+
+/* stick_turn_rate = 0..5000: degrees per second the keyboard left stick rotates toward a new
+ * direction (runtime_pad.c, shape_digital_stick). 0 = instant (default). */
+static void ParseStickTurnRate(InputConfig *cfg, const char *value) {
+    char *end;
+    long rate = strtol(value, &end, 10);
+    if (*end || rate < 0 || rate > 5000) { ++cfg->warnings; return; }
+    cfg->stick_turn_rate = (int)rate;
+}
+
 /* analog_deadzone = device, inner, outer (section 4.2, DZN-001). */
 static void ParseAnalogDeadzone(InputConfig *cfg, char *value) {
     char *a = value, *b = strchr(a, ','), *c = b ? strchr(b + 1, ',') : NULL;
@@ -379,6 +396,16 @@ static void ParseLine(ParseState *state, char *line) {
         ParseStickReleaseDelay(cfg, input_raw);
         return;
     }
+    if (EqualsCaseInsensitive(output_raw, "stick_circular")) {
+        if (!state->hotkeys_pass) return;
+        ParseStickCircular(cfg, input_raw);
+        return;
+    }
+    if (EqualsCaseInsensitive(output_raw, "stick_turn_rate")) {
+        if (!state->hotkeys_pass) return;
+        ParseStickTurnRate(cfg, input_raw);
+        return;
+    }
 
     /* Hotkey lines (HOT-002): resolved in the hotkeys pass so IsReservedScancode is accurate
      * for the main pass that follows. A combo here (comma) is rejected the same as any other
@@ -455,6 +482,8 @@ void input_config_parse(InputConfig *out, const char *text) {
     for (int i = 0; i < DEADZONE_COUNT; ++i) { out->deadzone[i].inner = 1; out->deadzone[i].outer = 127; }
     out->stick_socd_last = 1;
     out->stick_release_delay_ms = 0;
+    out->stick_circular = 1;
+    out->stick_turn_rate = 0;
     out->toggle_scancode = SDL_SCANCODE_F7;
     out->reload_scancode = SDL_SCANCODE_F8;
 

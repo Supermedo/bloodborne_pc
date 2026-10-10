@@ -117,6 +117,21 @@ A neutral stick ends a sprint, and two things used to produce one when strafing 
   replaces it immediately. 40-80 ms covers a fast key switch while still stopping on the spot
   when you let go.
 
+```ini
+stick_circular = on            # on (default) | off
+stick_turn_rate = 900          # degrees per second, 0..5000; default 0 (instant)
+```
+
+Keys alone drive the left stick like no real thumbstick can:
+
+- **Square diagonals.** W+A is (-127,-127), about 1.41x the reach of a real (round) stick.
+  `stick_circular = on` clamps it to the circle: a diagonal is full deflection, like a controller.
+- **Direction jumps.** Going from W to W+A turns the stick 45 degrees within one sample.
+  `stick_turn_rate` rotates it toward the new direction at that many degrees per second instead,
+  at full deflection the whole way (so a sprint is kept), like a thumb sliding along the gate.
+  900 turns 45 degrees in 50 ms. A reversal of more than 150 degrees (A <-> D, W <-> S) still
+  snaps, as a flick would, and after a release the next key starts straight at its direction.
+
 ## Analog deadzone
 
 ```ini

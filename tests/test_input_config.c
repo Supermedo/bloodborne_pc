@@ -213,6 +213,26 @@ static void TestStickSocdAndReleaseDelay(void) {
     assert(bad.stick_release_delay_ms == 0); /* default kept */
 }
 
+/* stick_circular / stick_turn_rate: round gate on, instant turns by default. */
+static void TestStickCircularAndTurnRate(void) {
+    InputConfig def;
+    input_config_parse(&def, "cross = space\n");
+    assert(def.stick_circular == 1);
+    assert(def.stick_turn_rate == 0);
+
+    InputConfig cfg;
+    input_config_parse(&cfg, "stick_circular = OFF\nstick_turn_rate = 900\n");
+    assert(cfg.warnings == 0);
+    assert(cfg.stick_circular == 0);
+    assert(cfg.stick_turn_rate == 900);
+
+    InputConfig bad;
+    input_config_parse(&bad, "stick_circular = round\nstick_turn_rate = -5\nstick_turn_rate = 9000\n");
+    assert(bad.warnings == 3);
+    assert(bad.stick_circular == 1);
+    assert(bad.stick_turn_rate == 0);
+}
+
 /* Section 4.2: analog_deadzone, including inner > outer rejection. */
 static void TestAnalogDeadzone(void) {
     InputConfig cfg;
@@ -343,6 +363,7 @@ int main(void) {
     TestMouseCamera();
     TestEscapeBindable();
     TestStickSocdAndReleaseDelay();
+    TestStickCircularAndTurnRate();
     TestAnalogDeadzone();
     TestOverlongNameRejected();
     TestOverlongLineDoesNotCrash();

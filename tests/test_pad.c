@@ -142,6 +142,47 @@ static void test_socd_and_release_delay(void) {
     puts("PASS: stick_socd last-wins and stick_release_delay_ms");
 }
 
+/* stick_circular and stick_turn_rate (shape_digital_stick), at 60 FPS samples. */
+static void test_digital_stick_shape(void) {
+    const uint64_t frame=16667; /* us */
+    /* circular: W+A's square corner becomes a full-deflection diagonal on the circle. */
+    StickShapeState c={0,0,0};
+    int x=-127, y=-127;
+    shape_digital_stick(&c,&x,&y,1,0,1000000);
+    assert(x==-90 && y==-90);
+    /* off and no turn rate: raw values untouched. */
+    StickShapeState o={0,0,0};
+    x=-127; y=-127;
+    shape_digital_stick(&o,&x,&y,0,0,1000000);
+    assert(x==-127 && y==-127);
+
+    /* turn rate 900 deg/s: W, then W+A. 15 degrees per frame toward the diagonal, staying at
+     * full deflection (never toward neutral), and reaching it after 3 frames. */
+    StickShapeState t={0,0,0};
+    uint64_t now=1000000;
+    x=0; y=-127;
+    shape_digital_stick(&t,&x,&y,1,900,now);
+    assert(x==0 && y==-127);
+    x=-127; y=-127; now+=frame;
+    shape_digital_stick(&t,&x,&y,1,900,now);
+    assert(x<=-30 && x>=-36 && y<=-120); /* about -105 degrees */
+    assert(x*x+y*y>=125*125);
+    for (int i=0;i<2;++i) { x=-127; y=-127; now+=frame; shape_digital_stick(&t,&x,&y,1,900,now); }
+    assert(x==-90 && y==-90);
+    /* reversal (more than 150 degrees): snaps, like a flick. */
+    x=127; y=127; now+=frame;
+    shape_digital_stick(&t,&x,&y,1,900,now);
+    assert(x==90 && y==90);
+    /* neutral, then a new key: starts at that key's direction, no rotation from the old one. */
+    x=0; y=0; now+=frame;
+    shape_digital_stick(&t,&x,&y,1,900,now);
+    assert(x==0 && y==0);
+    x=-127; y=0; now+=frame;
+    shape_digital_stick(&t,&x,&y,1,900,now);
+    assert(x==-127 && y==0);
+    puts("PASS: stick_circular and stick_turn_rate");
+}
+
 /* T5: the shadPS4-based mouse formula (CNV-001..003, MOU-009). mouse_to_axis is stateful again
  * (reads/writes smoothed_mouse_stick_x/y), but this time the state is the *output* stick value
  * being lerped toward an unfiltered, instantaneous target -- not a filtered velocity. The raw
@@ -376,6 +417,7 @@ static void test_reload_on_f8(void) {
 int main(void) {
     test_binding_evaluation();
     test_socd_and_release_delay();
+    test_digital_stick_shape();
     test_mouse_to_axis();
     test_mouse_buttons_and_wheel();
 

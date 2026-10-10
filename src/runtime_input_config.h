@@ -77,6 +77,8 @@ typedef struct InputConfig {
     AxisDeadzone deadzone[DEADZONE_COUNT];
     int stick_socd_last;        /* stick_socd = last (1, default) | neutral (0) */
     int stick_release_delay_ms; /* stick_release_delay_ms = 0..200 (default 0), left stick */
+    int stick_circular;         /* stick_circular = on (1, default) | off (0), left stick keys */
+    int stick_turn_rate;        /* stick_turn_rate = 0..5000 degrees/s (0 = instant, default) */
     int32_t toggle_scancode; /* hotkey_toggle_mouse_to_joystick; SDL_SCANCODE_UNKNOWN = none bound */
     int32_t reload_scancode; /* hotkey_reload_inputs */
     unsigned warnings;       /* lines ignored during parse, for the startup log line */

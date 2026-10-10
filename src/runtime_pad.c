@@ -211,6 +211,39 @@ static void hold_stick_on_release(StickReleaseState *s, int *x, int *y, int dela
     if (delay_ms>0 && (s->x || s->y) && now-s->active_at<(uint64_t)delay_ms*1000u) { *x=s->x; *y=s->y; return; }
     s->x=s->y=0;
 }
+
+/* stick_circular / stick_turn_rate: make the digital left stick behave like a real thumbstick.
+ * Keys alone give 8 directions on a square: W+A is (-127,-127), about 1.41x the reach of a real
+ * (round) stick, and every change of direction is a jump within one sample. With `circular`,
+ * the vector is clamped to the circle (W+A becomes about (-90,-90), full deflection). With a
+ * turn rate (degrees per second), the direction rotates toward the new one instead of jumping,
+ * like a thumb sliding along the gate, at full deflection the whole way so a sprint is kept;
+ * a reversal (more than kStickSnapRad, e.g. A <-> D) still snaps, as a flick would. The angle
+ * starts fresh from the pressed direction whenever the stick was neutral. */
+#define kStickSnapRad (150.0*3.14159265358979323846/180.0)
+typedef struct { double angle; uint64_t at; int active; } StickShapeState;
+static StickShapeState left_shape;
+static void shape_digital_stick(StickShapeState *s, int *x, int *y, int circular, int turn_rate, uint64_t now) {
+    if (!*x && !*y) { s->active=0; return; }
+    const double pi=3.14159265358979323846;
+    double tx=*x, ty=*y, mag=sqrt(tx*tx+ty*ty), target=atan2(ty,tx);
+    if (circular && mag>127.0) mag=127.0;
+    if (turn_rate>0 && s->active) {
+        double dt=(double)(now-s->at)/1e6;
+        if (dt>0.1) dt=0.1;
+        double diff=fmod(target-s->angle+3.0*pi,2.0*pi)-pi; /* -pi..pi, shortest way round */
+        double step=turn_rate*pi/180.0*dt;
+        if (fabs(diff)>kStickSnapRad || fabs(diff)<=step) s->angle=target;
+        else s->angle+=diff>0 ? step : -step;
+    } else {
+        s->angle=target;
+    }
+    s->active=1; s->at=now;
+    if (!circular && turn_rate<=0) return; /* off: leave the raw square values untouched */
+    int ox=(int)lround(cos(s->angle)*mag), oy=(int)lround(sin(s->angle)*mag);
+    *x=ox<-127?-127:ox>127?127:ox;
+    *y=oy<-127?-127:oy>127?127:oy;
+}
 /* True if any binding on `out` is currently held (MIX-002: OR). */
 static int button_output_held(const HostState *host, const InputConfig *cfg, InputOutput out) {
     for (int i=0;i<cfg->table.binding_count[out];++i)
@@ -416,6 +449,7 @@ static void sample_host(PadData *d) {
     int ry=resolve_axis_pair(&axis_pairs[3],axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_MINUS,-1),
                              axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_PLUS,1),last_wins,now_sample);
     hold_stick_on_release(&left_release,&lx,&ly,cfg->stick_release_delay_ms,now_sample);
+    shape_digital_stick(&left_shape,&lx,&ly,cfg->stick_circular,cfg->stick_turn_rate,now_sample);
     lx+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_X,1);
     ly+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y,1);
     rx+=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X,1);
