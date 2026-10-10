@@ -223,8 +223,11 @@ def main():
     parser.add_argument('--mods-dir', required=True, type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--enabled', choices=('0', '1'), default='1')
+    # The menu's button prompts and gestures menu (menu_prompts.py), each a folder,
+    # os.pathsep-separated: settings of their own, so laid first and kept with mods switched off.
+    parser.add_argument('--ui-mods', default='')
     args = parser.parse_args()
-    layers = []
+    layers = [(Path(p).name, Path(p)) for p in args.ui_mods.split(os.pathsep) if p]
     if args.enabled == '1':
         # shadPS4's loose overlay convention, beside the original game.
         legacy = Path(str(args.game.resolve()) + '-mods')

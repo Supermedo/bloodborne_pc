@@ -97,6 +97,17 @@ class ModTests(unittest.TestCase):
                 capture_output=True, text=True, check=True)
             self.assertEqual((Path(result.stdout.strip()) / 'dvdroot_ps4/chr/a.dcx').read_bytes(), expected)
 
+    def test_ui_mods_come_first_and_stay_with_mods_off(self):
+        ui = self.root / 'menu-prompts/prompts-xbox'
+        (ui / 'dvdroot_ps4/chr').mkdir(parents=True)
+        (ui / 'dvdroot_ps4/chr/a.dcx').write_bytes(b'prompts')
+        self.mod('A', b'user mod')
+        for enabled, expected in [('1', b'user mod'), ('0', b'prompts')]:
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/mods.py'), str(self.game),
+                '--out', str(self.root / 'out'), '--mods-dir', str(self.moddir), '--enabled', enabled,
+                '--ui-mods', str(ui)], capture_output=True, text=True, check=True)
+            self.assertEqual((Path(result.stdout.strip()) / 'dvdroot_ps4/chr/a.dcx').read_bytes(), expected)
+
     def test_app0_wrapped_mod_discovered(self):
         self.moddir.mkdir()
         (self.moddir / 'Wrapped/app0/dvdroot_ps4').mkdir(parents=True)

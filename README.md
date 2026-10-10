@@ -32,6 +32,8 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.
+- **Xbox, Switch and keyboard button prompts**, and a gestures menu without the motion-control
+  icons (Game & effects).
 - **Add to Steam** puts the game in your Steam library in one click.
 - **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a
   desktop shortcut).
@@ -119,6 +121,13 @@ the [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) (`nvngx_dlss.dll` under NV
 [MSYS2](https://www.msys2.org) / [LLVM](https://llvm.org), [PyInstaller](https://pyinstaller.org)
 and [Pillow](https://python-pillow.org). Game patches by Kyo, Lance McDonald, auser1337,
 illusion, emoose and the Bloodborne community.
+
+Xbox and Switch button prompts and the gestures menu without motion-control icons by **Dommo**
+([Nexus Mods, Bloodborne mod 30](https://www.nexusmods.com/bloodborne/mods/30), uploaded by
+goomab); only their drawn prompts are in this repository ([assets/menu_prompts](assets/menu_prompts)).
+The keyboard prompts follow the textures found by Abken's
+[KBM Icons Generator](https://www.nexusmods.com/bloodborne/mods/537) (after
+[mod 460](https://www.nexusmods.com/bloodborne/mods/460)); they are drawn here.
 
 NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation. The icon is original
 artwork.

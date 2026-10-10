@@ -153,10 +153,16 @@ def main():
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()
+    # BB_PROMPTS (playstation, xbox, switch, keyboard) and BB_GESTURES_NO_MOTION=1: the menu's
+    # button prompts and the gestures menu, made from the game's files (scripts/menu_prompts.py).
+    ui_mods = run_script('menu_prompts.py', game, '--out', out,
+                         '--prompts', env.get('BB_PROMPTS', 'playstation'),
+                         '--gestures', env.get('BB_GESTURES_NO_MOTION', '0'), capture=True).strip()
     game = Path(run_script('mods.py', game, '--out', out,
                            '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                            '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
-                           '--enabled', env.get('BB_MODS_ENABLED', '1'), capture=True).strip())
+                           '--enabled', env.get('BB_MODS_ENABLED', '1'), '--ui-mods', ui_mods,
+                           capture=True).strip())
     mod_view = game if game.resolve() != original_game else None
     try:
         run_script('prepare.py', game, '--out', out)
