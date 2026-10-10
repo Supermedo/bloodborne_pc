@@ -159,6 +159,15 @@ static void TestMouseMovementParams(void) {
     assert(incomplete.mouse.speed > 0.99f && incomplete.mouse.speed < 1.01f); /* default kept */
 }
 
+/* Escape is bindable (the overlay only uses it to close an open menu or cancel text entry,
+ * and the pad is neutral while either is open); Insert stays reserved. */
+static void TestEscapeBindable(void) {
+    InputConfig cfg;
+    input_config_parse(&cfg, "options = escape\n");
+    assert(cfg.warnings == 0);
+    assert(HasKeyBinding(&cfg, OUT_OPTIONS, SDL_SCANCODE_ESCAPE));
+}
+
 /* Section 4.2: analog_deadzone, including inner > outer rejection. */
 static void TestAnalogDeadzone(void) {
     InputConfig cfg;
@@ -286,6 +295,7 @@ int main(void) {
     TestDuplicateLineHarmless();
     TestMouseToJoystick();
     TestMouseMovementParams();
+    TestEscapeBindable();
     TestAnalogDeadzone();
     TestOverlongNameRejected();
     TestOverlongLineDoesNotCrash();

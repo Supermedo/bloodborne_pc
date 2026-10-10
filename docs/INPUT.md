@@ -88,8 +88,10 @@ analog_deadzone = leftjoystick, 1, 127   # device, inner, outer (1..127 each)
 
 ## Reserved keys
 
-**Insert**, **Escape** (the settings menu) and **F9** (`BB_PAD_RECORD`) can never be bound to a
-game output, and are rejected with a warning if a line tries. Whatever key currently toggles
+**Insert** (the settings menu) and **F9** (`BB_PAD_RECORD`) can never be bound to a game output,
+and are rejected with a warning if a line tries. **Escape** can be bound (e.g. `options = escape`):
+the settings menu only uses it to close itself, and the game gets no input while that menu or the
+text entry box is open. Whatever key currently toggles
 mouse look or reloads the file (`f7`/`f8` by default, or whatever `hotkey_toggle_mouse_to_joystick`/
 `hotkey_reload_inputs` were last set to) is reserved the same way.
 

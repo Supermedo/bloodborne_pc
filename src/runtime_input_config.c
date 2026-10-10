@@ -187,11 +187,13 @@ static int ResolveInput(const char *token, InputBinding *out) {
 
 /* ---- Hotkey reservation (HOT-001, HOT-002) -------------------------------------------- */
 
-/* Reserved no matter what the file says: the menu (Insert/Escape) and BB_PAD_RECORD (F9).
+/* Reserved no matter what the file says: the menu (Insert) and BB_PAD_RECORD (F9).
+ * Escape is bindable: the overlay only uses it to close an open menu or cancel text entry,
+ * and the pad is neutral while either is open (bbgpu_overlay_captures_input).
  * Used both for game-output bindings and for the hotkey lines themselves (HOT-001): F9 cannot
  * become hotkey_reload_inputs's key either, not just a cross/circle/... binding. */
 static int IsUnconditionallyReserved(int32_t scancode) {
-    return scancode == SDL_SCANCODE_INSERT || scancode == SDL_SCANCODE_ESCAPE || scancode == SDL_SCANCODE_F9;
+    return scancode == SDL_SCANCODE_INSERT || scancode == SDL_SCANCODE_F9;
 }
 /* Reserved for game-output bindings specifically: the above, plus whichever key currently
  * toggles the mouse or reloads input.ini (HOT-002). */

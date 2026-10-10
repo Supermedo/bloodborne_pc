@@ -62,10 +62,11 @@ MOUSE_BUTTON_NAMES_SET = set(MOUSE_BUTTON_NAMES)
 # Sticks stay keyboard-only (KEY_NAMES_SET); buttons additionally accept a mouse button name.
 BINDABLE_NAMES_SET = KEY_NAMES_SET | MOUSE_BUTTON_NAMES_SET
 
-# Reserved regardless of the file (HOT-001/HOT-002): the menu, BB_PAD_RECORD, and whichever key
-# currently toggles the mouse or reloads input.ini. The last two are read from the file itself
-# (hotkey_toggle_mouse_to_joystick / hotkey_reload_inputs) by reserved_keys() below.
-ALWAYS_RESERVED = {'insert', 'escape', 'f9'}
+# Reserved regardless of the file (HOT-001/HOT-002): the menu (Insert), BB_PAD_RECORD, and
+# whichever key currently toggles the mouse or reloads input.ini. The last two are read from the
+# file itself (hotkey_toggle_mouse_to_joystick / hotkey_reload_inputs) by reserved_keys() below.
+# Escape is bindable: the overlay only uses it to close an open menu (src/runtime_input_config.c).
+ALWAYS_RESERVED = {'insert', 'f9'}
 
 # Tk's event.keysym (X11/Tk names) -> our key name. Only keys with a different spelling are
 # listed; keysyms not in this table are tried lowercased as-is (covers a..z, 0..9, f1..f12).
