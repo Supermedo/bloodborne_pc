@@ -23,6 +23,9 @@ void bbgpu_mouse_take(BbMouseInput *out) {
 void bbgpu_input_configure(int mouse_mode_available, int32_t toggle_scancode, int32_t reload_scancode) {
     (void)mouse_mode_available; (void)toggle_scancode; (void)reload_scancode;
 }
+void bbgpu_mouse_camera_configure(int direct, float sensitivity) {
+    (void)direct; (void)sensitivity;
+}
 /* T6: controlled by the tests via stub_reload_requested, draining to 0 on read like the real
  * one (bbgpu_input_reload_requested's own doc comment: "1 once ... then clears back to 0"). */
 static int stub_reload_requested;
@@ -92,6 +95,51 @@ static void test_binding_evaluation(void) {
     assert(!button_output_held(&host,&cfg,OUT_LEFTJOYSTICK_HALFMODE));
 
     puts("PASS: binding evaluation (remap OR, deadzone ramp and saturation, halfmode binding)");
+}
+
+/* stick_socd and stick_release_delay_ms, with explicit timestamps (microseconds). The A -> D
+ * zigzag while sprinting must never hand the game a neutral left stick. */
+static void test_socd_and_release_delay(void) {
+    AxisPairState s={0,0};
+    /* A held, then D pressed while A is still down: D (the latest) wins, no neutral. */
+    assert(resolve_axis_pair(&s,-127,0,1,1000)==-127);
+    assert(resolve_axis_pair(&s,-127,127,1,2000)==127);
+    assert(resolve_axis_pair(&s,0,127,1,3000)==127);   /* A released: still D */
+    /* A pressed again on top of D: A wins; release A: back to D. */
+    assert(resolve_axis_pair(&s,-127,127,1,4000)==-127);
+    assert(resolve_axis_pair(&s,0,127,1,5000)==127);
+    /* neutral mode keeps the old sum-and-cancel behavior. */
+    AxisPairState n={0,0};
+    assert(resolve_axis_pair(&n,-127,0,0,1000)==-127);
+    assert(resolve_axis_pair(&n,-127,127,0,2000)==0);
+    /* both pressed in the same sample: no "latest" one, they cancel. */
+    AxisPairState t={0,0};
+    assert(resolve_axis_pair(&t,-127,127,1,1000)==0);
+
+    /* Release delay 60 ms: a 30 ms gap between releasing A and pressing D keeps A's direction,
+     * then D replaces it at once; a real stop ends after the delay. */
+    StickReleaseState r={0,0,0};
+    int x=-127, y=0;
+    hold_stick_on_release(&r,&x,&y,60,1000000);
+    assert(x==-127);
+    x=0; y=0;
+    hold_stick_on_release(&r,&x,&y,60,1030000); /* 30 ms after: held */
+    assert(x==-127 && y==0);
+    x=127; y=0;
+    hold_stick_on_release(&r,&x,&y,60,1031000); /* D: immediate */
+    assert(x==127);
+    x=0; y=0;
+    hold_stick_on_release(&r,&x,&y,60,1100000); /* 69 ms after D: stopped */
+    assert(x==0 && y==0);
+    x=0; y=0;
+    hold_stick_on_release(&r,&x,&y,0,1100500); /* delay 0: never held */
+    assert(x==0 && y==0);
+    x=0; y=-127;
+    hold_stick_on_release(&r,&x,&y,0,1101000);
+    x=0; y=0;
+    hold_stick_on_release(&r,&x,&y,0,1101001);
+    assert(x==0 && y==0);
+    puts("PASS: stick_socd last-wins and stick_release_delay_ms");
 }
 
 /* T5: the shadPS4-based mouse formula (CNV-001..003, MOU-009). mouse_to_axis is stateful again
@@ -327,6 +375,7 @@ static void test_reload_on_f8(void) {
 
 int main(void) {
     test_binding_evaluation();
+    test_socd_and_release_delay();
     test_mouse_to_axis();
     test_mouse_buttons_and_wheel();
 

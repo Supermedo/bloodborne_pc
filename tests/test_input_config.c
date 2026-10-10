@@ -193,6 +193,26 @@ static void TestEscapeBindable(void) {
     assert(HasKeyBinding(&cfg, OUT_OPTIONS, SDL_SCANCODE_ESCAPE));
 }
 
+/* stick_socd / stick_release_delay_ms: last-wins and no delay by default. */
+static void TestStickSocdAndReleaseDelay(void) {
+    InputConfig def;
+    input_config_parse(&def, "cross = space\n");
+    assert(def.stick_socd_last == 1);
+    assert(def.stick_release_delay_ms == 0);
+
+    InputConfig cfg;
+    input_config_parse(&cfg, "stick_socd = Neutral\nstick_release_delay_ms = 60\n");
+    assert(cfg.warnings == 0);
+    assert(cfg.stick_socd_last == 0);
+    assert(cfg.stick_release_delay_ms == 60);
+
+    InputConfig bad;
+    input_config_parse(&bad, "stick_socd = first\nstick_release_delay_ms = 500\nstick_release_delay_ms = 6x\n");
+    assert(bad.warnings == 3);
+    assert(bad.stick_socd_last == 1);       /* default kept */
+    assert(bad.stick_release_delay_ms == 0); /* default kept */
+}
+
 /* Section 4.2: analog_deadzone, including inner > outer rejection. */
 static void TestAnalogDeadzone(void) {
     InputConfig cfg;
@@ -322,6 +342,7 @@ int main(void) {
     TestMouseMovementParams();
     TestMouseCamera();
     TestEscapeBindable();
+    TestStickSocdAndReleaseDelay();
     TestAnalogDeadzone();
     TestOverlongNameRejected();
     TestOverlongLineDoesNotCrash();

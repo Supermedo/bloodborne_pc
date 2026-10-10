@@ -75,6 +75,8 @@ typedef struct InputConfig {
     InputBindingTable table;
     MouseParams mouse;
     AxisDeadzone deadzone[DEADZONE_COUNT];
+    int stick_socd_last;        /* stick_socd = last (1, default) | neutral (0) */
+    int stick_release_delay_ms; /* stick_release_delay_ms = 0..200 (default 0), left stick */
     int32_t toggle_scancode; /* hotkey_toggle_mouse_to_joystick; SDL_SCANCODE_UNKNOWN = none bound */
     int32_t reload_scancode; /* hotkey_reload_inputs */
     unsigned warnings;       /* lines ignored during parse, for the startup log line */

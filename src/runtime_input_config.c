@@ -280,6 +280,23 @@ static void ParseMouseCameraSensitivity(InputConfig *cfg, const char *value) {
     cfg->mouse.camera_sensitivity = v;
 }
 
+/* stick_socd = last|neutral: what two opposite directions held together give (runtime_pad.c,
+ * resolve_axis_pair). last = the most recent one (default), neutral = they cancel out. */
+static void ParseStickSocd(InputConfig *cfg, const char *value) {
+    if (EqualsCaseInsensitive(value, "last")) cfg->stick_socd_last = 1;
+    else if (EqualsCaseInsensitive(value, "neutral")) cfg->stick_socd_last = 0;
+    else ++cfg->warnings;
+}
+
+/* stick_release_delay_ms = 0..200: how long the left stick keeps its last direction after the
+ * keys are released (runtime_pad.c, hold_stick_on_release). 0 = off (default). */
+static void ParseStickReleaseDelay(InputConfig *cfg, const char *value) {
+    char *end;
+    long ms = strtol(value, &end, 10);
+    if (*end || ms < 0 || ms > 200) { ++cfg->warnings; return; }
+    cfg->stick_release_delay_ms = (int)ms;
+}
+
 /* analog_deadzone = device, inner, outer (section 4.2, DZN-001). */
 static void ParseAnalogDeadzone(InputConfig *cfg, char *value) {
     char *a = value, *b = strchr(a, ','), *c = b ? strchr(b + 1, ',') : NULL;
@@ -350,6 +367,16 @@ static void ParseLine(ParseState *state, char *line) {
     if (EqualsCaseInsensitive(output_raw, "mouse_camera_sensitivity")) {
         if (!state->hotkeys_pass) return;
         ParseMouseCameraSensitivity(cfg, input_raw);
+        return;
+    }
+    if (EqualsCaseInsensitive(output_raw, "stick_socd")) {
+        if (!state->hotkeys_pass) return;
+        ParseStickSocd(cfg, input_raw);
+        return;
+    }
+    if (EqualsCaseInsensitive(output_raw, "stick_release_delay_ms")) {
+        if (!state->hotkeys_pass) return;
+        ParseStickReleaseDelay(cfg, input_raw);
         return;
     }
 
@@ -426,6 +453,8 @@ void input_config_parse(InputConfig *out, const char *text) {
     out->mouse.camera_direct = 0;
     out->mouse.camera_sensitivity = 1.0f;
     for (int i = 0; i < DEADZONE_COUNT; ++i) { out->deadzone[i].inner = 1; out->deadzone[i].outer = 127; }
+    out->stick_socd_last = 1;
+    out->stick_release_delay_ms = 0;
     out->toggle_scancode = SDL_SCANCODE_F7;
     out->reload_scancode = SDL_SCANCODE_F8;
 

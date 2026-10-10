@@ -99,6 +99,24 @@ camera by imedved on Nexus Mods, ported to this port by mcrib884 in #3) and samp
   `Mouse camera: ... using the stick mode` once and the stick emulation above is used instead.
 - Latency is lowest with a locked frame rate (60 FPS works well).
 
+## Keyboard movement: opposite keys and quick direction changes
+
+```ini
+stick_socd = last              # last (default) | neutral
+stick_release_delay_ms = 60    # 0..200, left stick only; default 0 (off)
+```
+
+A neutral stick ends a sprint, and two things used to produce one when strafing A <-> D:
+
+- **Both keys down during the switch.** With `stick_socd = last`, two opposite directions held
+  together give the one pressed most recently (keyboard "snap tap"), instead of cancelling out.
+  `neutral` restores the old sum-and-cancel behavior (shadPS4's). Applies to both sticks' half-axis
+  bindings (keys, buttons, half sticks); full-axis bindings are unaffected.
+- **A gap between releasing one key and pressing the next.** `stick_release_delay_ms` keeps the
+  left stick's last direction for that long after its keys are released; any new direction
+  replaces it immediately. 40-80 ms covers a fast key switch while still stopping on the spot
+  when you let go.
+
 ## Analog deadzone
 
 ```ini

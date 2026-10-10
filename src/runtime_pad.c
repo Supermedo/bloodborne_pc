@@ -184,6 +184,33 @@ static int axis_output_value(const HostState *host, const InputConfig *cfg, Inpu
         sum+=binding_axis_value(host,&cfg->table.bindings[out][i],half_sign);
     return sum<-127 ? -127 : sum>127 ? 127 : (int)sum;
 }
+
+/* stick_socd: one axis's two half-axis outputs (minus <= 0, plus >= 0). With last_wins, holding
+ * both gives the direction pressed most recently (keyboard "snap tap"), so rolling from A to D
+ * never sums to a neutral stick that ends a sprint; otherwise (neutral) they add up and cancel,
+ * shadPS4's behavior. `*_since` is when each side became active (0 = not active). */
+typedef struct { uint64_t minus_since, plus_since; } AxisPairState;
+static AxisPairState axis_pairs[4]; /* left x, left y, right x, right y */
+static int resolve_axis_pair(AxisPairState *s, int minus, int plus, int last_wins, uint64_t now) {
+    if (minus) { if (!s->minus_since) s->minus_since=now; } else s->minus_since=0;
+    if (plus) { if (!s->plus_since) s->plus_since=now; } else s->plus_since=0;
+    if (last_wins && minus && plus) {
+        if (s->plus_since>s->minus_since) return plus;
+        if (s->minus_since>s->plus_since) return minus;
+    }
+    return minus+plus; /* one side only, or pressed in the same sample */
+}
+
+/* stick_release_delay_ms: when the (digital) left stick goes back to neutral, keep its last
+ * direction for this long, so releasing one key just before pressing the next one does not
+ * flash a neutral sample either. Any new direction replaces it immediately. */
+typedef struct { int x, y; uint64_t active_at; } StickReleaseState;
+static StickReleaseState left_release;
+static void hold_stick_on_release(StickReleaseState *s, int *x, int *y, int delay_ms, uint64_t now) {
+    if (*x || *y) { s->x=*x; s->y=*y; s->active_at=now; return; }
+    if (delay_ms>0 && (s->x || s->y) && now-s->active_at<(uint64_t)delay_ms*1000u) { *x=s->x; *y=s->y; return; }
+    s->x=s->y=0;
+}
 /* True if any binding on `out` is currently held (MIX-002: OR). */
 static int button_output_held(const HostState *host, const InputConfig *cfg, InputOutput out) {
     for (int i=0;i<cfg->table.binding_count[out];++i)
@@ -375,14 +402,24 @@ static void sample_host(PadData *d) {
     if (d->r2>INPUT_TRIGGER_BUTTON_THRESHOLD) d->buttons|=BTN_R2;
 
     /* MIX-003/HLF-001/DZN-001: sticks, summed across sources, then deadzone, then halfmode. */
-    int lx=axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_MINUS,-1)+axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_PLUS,1)
-          +axis_output_value(&host,cfg,OUT_AXIS_LEFT_X,1);
-    int ly=axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_MINUS,-1)+axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_PLUS,1)
-          +axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y,1);
-    int rx=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_MINUS,-1)+axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_PLUS,1)
-          +axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X,1);
-    int ry=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_MINUS,-1)+axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_PLUS,1)
-          +axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y,1);
+    /* Half-axis outputs (keys, buttons, half sticks) first: opposite directions are resolved
+     * (stick_socd) and a left-stick release can be held briefly (stick_release_delay_ms), so
+     * switching A -> D never passes through neutral. Full-axis bindings are added after. */
+    const uint64_t now_sample=now_us();
+    const int last_wins=cfg->stick_socd_last;
+    int lx=resolve_axis_pair(&axis_pairs[0],axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_PLUS,1),last_wins,now_sample);
+    int ly=resolve_axis_pair(&axis_pairs[1],axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_PLUS,1),last_wins,now_sample);
+    int rx=resolve_axis_pair(&axis_pairs[2],axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_PLUS,1),last_wins,now_sample);
+    int ry=resolve_axis_pair(&axis_pairs[3],axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_PLUS,1),last_wins,now_sample);
+    hold_stick_on_release(&left_release,&lx,&ly,cfg->stick_release_delay_ms,now_sample);
+    lx+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_X,1);
+    ly+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y,1);
+    rx+=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X,1);
+    ry+=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y,1);
     lx=lx<-127?-127:lx>127?127:lx; ly=ly<-127?-127:ly>127?127:ly;
     rx=rx<-127?-127:rx>127?127:rx; ry=ry<-127?-127:ry>127?127:ry;
     lx=apply_deadzone(lx,cfg->deadzone[DEADZONE_LEFT_STICK].inner,cfg->deadzone[DEADZONE_LEFT_STICK].outer);
