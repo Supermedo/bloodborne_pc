@@ -32,6 +32,7 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.
+- **DLC** from your own dump (The Old Hunters on base-game dumps), with a DLC folder setting.
 - **Add to Steam** puts the game in your Steam library in one click.
 - **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a
   desktop shortcut).
@@ -54,6 +55,12 @@ Nothing else to install: everything the game needs is in the zip.
 2. Start `Bloodborne.exe`.
 3. On **Game & effects**, choose your game folder (the one with `eboot.bin`).
 4. Press **PLAY**.
+
+**DLC.** The Game of the Year edition (CUSA03173) already has The Old Hunters. With a base-game
+dump, also dump your add-ons: each is a folder named like `SPEXPANSIONDLC03` with only
+`sce_sys` inside, since their data ships with the 1.09 update. Put them in one folder and choose
+it as **DLC folder** on **Game & effects**, or copy them to `user\addcont\<title id>\` (the
+layout shadPS4 and bbport use).
 
 In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
 Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, Q Triangle,
