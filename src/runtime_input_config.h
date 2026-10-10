@@ -59,6 +59,8 @@ typedef struct {
 typedef struct {
     float deadzone_offset, speed, speed_offset; /* mouse_movement_params; shadPS4 defaults 0.5,1,0.125 */
     int stick; /* 0=none, 1=left, 2=right; mouse_to_joystick */
+    int camera_direct;        /* mouse_camera = direct (1) | stick (0, default) */
+    float camera_sensitivity; /* mouse_camera_sensitivity; 1.0 default */
 } MouseParams;
 
 typedef struct {

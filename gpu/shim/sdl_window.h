@@ -97,6 +97,10 @@ private:
     /// (MOU-004, MOU-005) so no stale motion or held button survives into the next capture.
     void UpdateMouseCapture();
     bool mouse_captured_last{false};
+    /// Window thread, every PollEvents: installs/removes the direct camera hook
+    /// (bloodborne_cam.h) to match input.ini and the F7 toggle, and gates the BbMouse sampler.
+    void UpdateMouseCamera();
+    bool cam_hook_failed{false}; // camera code not found: stay on the stick until F7/F8
 };
 
 } // namespace Frontend

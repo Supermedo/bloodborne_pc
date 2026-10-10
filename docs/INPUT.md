@@ -74,7 +74,29 @@ on) — clicking the window to give it focus never fires an attack.
 
 **Known limitation:** the stick is still a stick. Camera rotation saturates at the game's own
 maximum turn speed and inherits its acceleration curve; this is not 1:1 mouse aim, by design —
-it is the same tradeoff shadPS4 makes.
+it is the same tradeoff shadPS4 makes. For 1:1 aim, use the direct camera below.
+
+## Direct mouse camera (1:1, game 1.09)
+
+```ini
+mouse_camera = direct            # direct | stick (default: stick)
+mouse_camera_sensitivity = 1.0   # 1.0 = 900 mouse counts per radian; higher turns faster
+mouse_to_joystick = right        # still required: mouse look on/off (F7), and the lock-on stick
+```
+
+With `mouse_camera = direct`, mouse motion writes the game's camera yaw/pitch itself instead of
+emulating a stick, like a native PC game: no stick deadzone, no acceleration curve, no turn-speed
+cap. It hooks the game's camera update (`gpu/shim/bloodborne_cam.cpp`, ported from the bbmouse
+mouse camera of shadlixps4, via #3) and samples the mouse at 1 kHz on its own thread.
+
+- **Lock-on:** while a target is locked, motion goes to the stick instead (the game drives the
+  camera then), so a flick still switches targets.
+- **Monocular:** aiming through the Monocular follows the mouse too.
+- **F7** turns mouse look off and removes the hook, so the right stick/arrow keys drive the
+  camera again. While the direct camera is on, the stick does not turn the camera.
+- **Fallback:** if the camera code is not found (another game version), the port logs
+  `Mouse camera: ... using the stick mode` once and the stick emulation above is used instead.
+- Latency is lowest with a locked frame rate (60 FPS works well).
 
 ## Analog deadzone
 

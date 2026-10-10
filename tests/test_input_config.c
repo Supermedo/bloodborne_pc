@@ -159,6 +159,31 @@ static void TestMouseMovementParams(void) {
     assert(incomplete.mouse.speed > 0.99f && incomplete.mouse.speed < 1.01f); /* default kept */
 }
 
+/* mouse_camera / mouse_camera_sensitivity: direct camera opt-in, stick is the default. */
+static void TestMouseCamera(void) {
+    InputConfig def;
+    input_config_parse(&def, "mouse_to_joystick = right\n");
+    assert(def.mouse.camera_direct == 0);
+    assert(def.mouse.camera_sensitivity > 0.99f && def.mouse.camera_sensitivity < 1.01f);
+
+    InputConfig cfg;
+    input_config_parse(&cfg, "mouse_camera = Direct\nmouse_camera_sensitivity = 1.75\n");
+    assert(cfg.warnings == 0);
+    assert(cfg.mouse.camera_direct == 1);
+    assert(cfg.mouse.camera_sensitivity > 1.74f && cfg.mouse.camera_sensitivity < 1.76f);
+
+    InputConfig back;
+    input_config_parse(&back, "mouse_camera = direct\nmouse_camera = stick\n");
+    assert(back.warnings == 0);
+    assert(back.mouse.camera_direct == 0);
+
+    InputConfig bad;
+    input_config_parse(&bad, "mouse_camera = gyro\nmouse_camera_sensitivity = 0\nmouse_camera_sensitivity = fast\n");
+    assert(bad.warnings == 3);
+    assert(bad.mouse.camera_direct == 0);
+    assert(bad.mouse.camera_sensitivity > 0.99f && bad.mouse.camera_sensitivity < 1.01f); /* default kept */
+}
+
 /* Escape is bindable (the overlay only uses it to close an open menu or cancel text entry,
  * and the pad is neutral while either is open); Insert stays reserved. */
 static void TestEscapeBindable(void) {
@@ -295,6 +320,7 @@ int main(void) {
     TestDuplicateLineHarmless();
     TestMouseToJoystick();
     TestMouseMovementParams();
+    TestMouseCamera();
     TestEscapeBindable();
     TestAnalogDeadzone();
     TestOverlongNameRejected();

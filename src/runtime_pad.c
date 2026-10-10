@@ -301,6 +301,8 @@ static void ensure_config_loaded(void) {
     bbgpu_input_configure(loaded_config ? loaded_config->mouse.stick!=0 : 0,
                           loaded_config ? loaded_config->toggle_scancode : default_config.toggle_scancode,
                           loaded_config ? loaded_config->reload_scancode : default_config.reload_scancode);
+    bbgpu_mouse_camera_configure(loaded_config ? loaded_config->mouse.camera_direct : 0,
+                                 loaded_config ? loaded_config->mouse.camera_sensitivity : 1.0f);
 }
 /* CFG-008: called once per sample() (under `lock`), reloads if the window thread set the F8
  * flag. The read of the new file (input_config_load, I/O) happens before the critical section
@@ -319,6 +321,7 @@ static void reload_config_if_requested(void) {
         if (fresh->warnings) printf("Input config: %s reloaded, %u line(s) ignored (see above)\n",path,fresh->warnings);
         else printf("Input config: %s reloaded\n",path);
         bbgpu_input_configure(loaded_config->mouse.stick!=0,loaded_config->toggle_scancode,loaded_config->reload_scancode);
+        bbgpu_mouse_camera_configure(loaded_config->mouse.camera_direct,loaded_config->mouse.camera_sensitivity);
     } else {
         free(fresh);
     }

@@ -6,7 +6,9 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
+#include "bbport_mouse.h"
 #include "bbport_overlay.h"
+#include "bloodborne_cam.h"
 
 namespace Frontend {
 
@@ -62,9 +64,12 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    BbMouse::Start();
 }
 
 WindowSDL::~WindowSDL() {
+    BbMouse::Stop();
+    Core::BloodborneCam::Instance().Shutdown();
     SDL_DestroyWindow(window);
 }
 
@@ -134,7 +139,11 @@ bool WindowSDL::PollEvents() {
         // can still see the old captured state for one iteration; accepted as a one-frame
         // edge case rather than re-evaluating capture per event for a cosmetic gain.
         if (mouse_captured_last) {
-            if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            // Direct camera: the BbMouse thread turns motion into camera angles, so it must not
+            // also reach the stick -- except while locked on, where a flick switches targets.
+            const Core::BloodborneCam& cam = Core::BloodborneCam::Instance();
+            const bool motion_to_stick = !cam.IsEnabled() || cam.IsLockedOn();
+            if (event.type == SDL_EVENT_MOUSE_MOTION && motion_to_stick) {
                 std::scoped_lock lock{mouse_mutex};
                 mouse.dx += event.motion.xrel;
                 mouse.dy += event.motion.yrel;
@@ -202,7 +211,25 @@ bool WindowSDL::PollEvents() {
     // because the menu can also close from the render thread (bbport_overlay.cpp's "Close"
     // button sets menu_open there, not through an SDL event here).
     UpdateMouseCapture();
+    UpdateMouseCamera();
     return is_open;
+}
+
+void WindowSDL::UpdateMouseCamera() {
+    Core::BloodborneCam& cam = Core::BloodborneCam::Instance();
+    const bool wanted = cam.IsConfigured() && mouse_mode_available.load(std::memory_order_relaxed) &&
+                        mouse_mode_on.load(std::memory_order_relaxed);
+    if (!wanted) {
+        cam_hook_failed = false; // F7/F8 retry after a failed attempt
+        if (cam.IsEnabled()) {
+            cam.SetEnabled(false);
+        }
+    } else if (!cam.IsEnabled() && !cam_hook_failed && mouse_captured_last) {
+        // Hooked once the game is actually being played (captured), F7 off unhooks so the
+        // stick/arrow keys drive the camera again.
+        cam_hook_failed = !cam.SetEnabled(true);
+    }
+    BbMouse::SetActive(mouse_captured_last && cam.IsEnabled());
 }
 
 bool WindowSDL::WantsMouseCapture() const {

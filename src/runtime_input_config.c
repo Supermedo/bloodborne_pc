@@ -263,6 +263,23 @@ static void ParseMouseToJoystick(InputConfig *cfg, const char *value) {
     else ++cfg->warnings;
 }
 
+/* mouse_camera = direct|stick: direct writes the game's camera angles from mouse motion
+ * (gpu/shim/bloodborne_cam.cpp, game 1.09), stick keeps the mouse-to-joystick emulation.
+ * Direct still needs mouse_to_joystick (it is the stick used while locked on). */
+static void ParseMouseCamera(InputConfig *cfg, const char *value) {
+    if (EqualsCaseInsensitive(value, "direct")) cfg->mouse.camera_direct = 1;
+    else if (EqualsCaseInsensitive(value, "stick")) cfg->mouse.camera_direct = 0;
+    else ++cfg->warnings;
+}
+
+/* mouse_camera_sensitivity = multiplier for the direct camera (1.0 = 900 counts per radian). */
+static void ParseMouseCameraSensitivity(InputConfig *cfg, const char *value) {
+    int ok;
+    float v = ParseFloatStrict(value, &ok);
+    if (!ok || v < 0.05f || v > 20.0f) { ++cfg->warnings; return; }
+    cfg->mouse.camera_sensitivity = v;
+}
+
 /* analog_deadzone = device, inner, outer (section 4.2, DZN-001). */
 static void ParseAnalogDeadzone(InputConfig *cfg, char *value) {
     char *a = value, *b = strchr(a, ','), *c = b ? strchr(b + 1, ',') : NULL;
@@ -323,6 +340,16 @@ static void ParseLine(ParseState *state, char *line) {
     if (EqualsCaseInsensitive(output_raw, "analog_deadzone")) {
         if (!state->hotkeys_pass) return;
         ParseAnalogDeadzone(cfg, input_raw);
+        return;
+    }
+    if (EqualsCaseInsensitive(output_raw, "mouse_camera")) {
+        if (!state->hotkeys_pass) return;
+        ParseMouseCamera(cfg, input_raw);
+        return;
+    }
+    if (EqualsCaseInsensitive(output_raw, "mouse_camera_sensitivity")) {
+        if (!state->hotkeys_pass) return;
+        ParseMouseCameraSensitivity(cfg, input_raw);
         return;
     }
 
@@ -396,6 +423,8 @@ void input_config_parse(InputConfig *out, const char *text) {
     out->mouse.speed = 1.0f;
     out->mouse.speed_offset = 0.125f;
     out->mouse.stick = 0;
+    out->mouse.camera_direct = 0;
+    out->mouse.camera_sensitivity = 1.0f;
     for (int i = 0; i < DEADZONE_COUNT; ++i) { out->deadzone[i].inner = 1; out->deadzone[i].outer = 127; }
     out->toggle_scancode = SDL_SCANCODE_F7;
     out->reload_scancode = SDL_SCANCODE_F8;
