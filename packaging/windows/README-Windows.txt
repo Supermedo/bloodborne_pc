@@ -17,7 +17,7 @@ Starting
   FSR 4 assets.
 - Play Bloodborne.exe starts the game straight away with the settings saved in the launcher,
   without opening it. Set things up once in Bloodborne.exe, then use Play Bloodborne.exe (or a
-  shortcut to it, or add it to Steam with "Add a Non-Steam Game"). If no game folder is chosen
+  shortcut to it, or "Add to Steam" on the Play page). If no game folder is chosen
   yet it opens the launcher. Bloodborne.exe --play does the same. The log goes to
   user\last_run.log.
 - Advanced -> "Desktop shortcut" puts Bloodborne on the desktop.
@@ -34,6 +34,14 @@ Data
 - Saves and shader caches: user\ next to Bloodborne.exe (the launcher can pick another folder).
 - Settings: bbport.ini next to Bloodborne.exe; launcher options in %APPDATA%\bbport-launcher.
 - Generated files (prepared game image, patches): out\.
+
+Online play (beta)
+- Register a shadNet account at https://shadnet.shadps4.net. In the launcher open
+  "Online co-op", tick "Play online", enter the account name (not the email) and password,
+  press "Test connection", then PLAY and choose online at the title screen.
+- Messages, bloodstains and ghosts come from The Hunter's Dream (https://thehuntersdream.com);
+  bells and summons go through the shadNet server. Everyone needs game version 1.09 and the
+  same co-op server. Summoning between players is not confirmed yet.
 
 Cheats
 - The "Cheats" page has cheats (never die, enemies do not see or hear you, Rally never fades,
@@ -61,6 +69,8 @@ Mods and patches
 - Third-party patches: shadPS4/GoldHEN XML files for 1.09 in patches\.
 
 Credits
+- Online play: shadp2p by Wozzardman (https://github.com/Wozzardman/shadp2p), shadNet by the
+  shadPS4 team, The Hunter's Dream by droogie.
 - bbport (the Linux port this is built on): https://github.com/deadinside28/bloodborne_pc
 - Windows port: https://github.com/Supermedo/bloodborne_pc
 - The full list of projects and patch authors is in README.md (Credits and licenses).

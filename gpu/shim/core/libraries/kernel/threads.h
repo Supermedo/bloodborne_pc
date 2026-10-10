@@ -10,6 +10,7 @@
 #include <system_error>
 #include <thread>
 #include "common/types.h"
+#include "core/libraries/kernel/threads/pthread.h"
 
 extern "C" void runtime_thread_attach_host(const char* name);
 

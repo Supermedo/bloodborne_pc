@@ -32,13 +32,17 @@ FROZEN = getattr(sys, 'frozen', False)
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
-CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'bbport-launcher'
+# Co-op test build: its own settings, and no updates (a public release would replace it).
+COOP_TEST = False
+CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / ('bbport-launcher-coop' if COOP_TEST else 'bbport-launcher')
 CONFIG_FILE = CONFIG_DIR / 'settings.json'
 PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '1.5'
+VERSION = '1.6'
+# Co-op: the community server that answers the game's own server requests.
+COMMUNITY_SERVER = 'https://thehuntersdream.com'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'bbport-update'
@@ -111,7 +115,7 @@ def _(en, ru=None):
     if en.endswith(WARN):
         return _(en[:-len(WARN)], ru and ru.removesuffix(WARN)) + WARN
     if LANG == 'ru':
-        return ru or en
+        return ru or bbport_lang.table('ru').get(en) or en
     return bbport_lang.table(LANG).get(en) or en
 
 
@@ -170,7 +174,9 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '',
                 'frames_ahead': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
-                'check_updates': True}
+                'check_updates': True, 'online': False, 'online_server': 'srv.shadps4.net:31313',
+                'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
+                'online_community': COMMUNITY_SERVER}
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -281,6 +287,56 @@ def game_info(folder):
         return 'Bloodborne', '?'
 
 
+def webapi_address(server):
+    """The shadNet WebAPI of a server address host:port (the server's default port 31315)."""
+    host = server.rsplit(':', 1)[0] if server.count(':') == 1 else server
+    return f'http://{host}:31315'
+
+
+def community_address(value):
+    """The game server (messages, bloodstains, ghosts) as https://host, The Hunter's Dream by default."""
+    value = str(value).strip() or COMMUNITY_SERVER
+    scheme, _sep, rest = value.rpartition('://')
+    host = rest.split('/')[0].split(':')[0]  # the game picks the ports (20443, 18671)
+    return f'{scheme or "https"}://{host}'
+
+
+def webapi_setting(s):
+    """The WebAPI field, unless it holds the game server's address (a common mix-up): then the
+    co-op server's own WebAPI is used."""
+    webapi = str(s['online_webapi']).strip()
+    community_host = community_address(s['online_community']).split('://', 1)[1].split(':')[0]
+    if webapi and community_host in webapi:
+        webapi = ''
+    return webapi or webapi_address(str(s['online_server']).strip() or APP_DEFAULTS['online_server'])
+
+
+def server_check(server, webapi, community):
+    """A line about each online address: reachable, or why not (runs off the Tk thread)."""
+    import socket
+    lines = []
+    try:
+        with urllib.request.urlopen(community + ':20443/bb-eu/ss.info', timeout=6) as reply:
+            reply.read(64)
+        lines.append(_('Game server {0}: reachable').format(community))
+    except (OSError, ValueError) as error:
+        lines.append(_('Game server {0}: not reachable ({1})').format(community, error))
+    host, _sep, port = server.rpartition(':')
+    try:
+        socket.create_connection((host or server, int(port or 31313)), timeout=4).close()
+        lines.append(_('Server {0}: reachable').format(server))
+    except (OSError, ValueError) as error:
+        lines.append(_('Server {0}: not reachable ({1})').format(server, error))
+    try:
+        with urllib.request.urlopen(webapi.rstrip('/') + '/status', timeout=4) as reply:
+            ok = b'"ok":true' in reply.read(512).replace(b' ', b'')
+        lines.append(_('WebAPI {0}: reachable').format(webapi) if ok else
+                     _('WebAPI {0}: answered, but it is not a shadNet server').format(webapi))
+    except (OSError, ValueError) as error:
+        lines.append(_('WebAPI {0}: not reachable ({1})').format(webapi, error))
+    return '\n'.join(lines)
+
+
 def game_environment(s):
     env = dict(os.environ)
     env['BB_GAME_DIR'] = s['game_dir']
@@ -312,6 +368,15 @@ def game_environment(s):
         if '=' in item:
             key, value = item.split('=', 1)
             env[key] = value
+    if s.get('online'):
+        server = str(s['online_server']).strip() or APP_DEFAULTS['online_server']
+        env['BB_ONLINE'] = '1'
+        env['BB_SHADNET_SERVER'] = server
+        env['BB_SHADNET_WEBAPI'] = webapi_setting(s)
+        env['BB_SHADNET_NPID'] = str(s['online_npid']).strip()
+        env['BB_SHADNET_PASSWORD'] = str(s['online_password'])
+        env['BB_UPNP'] = '1' if s['online_upnp'] else '0'
+        env['BB_COMMUNITY_SERVER'] = community_address(s['online_community'])
     env['PYTHONUNBUFFERED'] = '1'
     env['PYTHONIOENCODING'] = 'utf-8'
     return env
@@ -358,7 +423,7 @@ class Launcher:
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
         threading.Thread(target=self.detect_gpu, daemon=True).start()
-        if self.app.get('check_updates', True):
+        if self.app.get('check_updates', True) and not COOP_TEST:
             threading.Thread(target=self.check_update, daemon=True).start()
 
     def px(self, size):
@@ -559,12 +624,14 @@ class Launcher:
         side.pack_propagate(False)
         tk.Label(side, text='BLOODBORNE', bg=BG, fg=GOLD, font=('Georgia', 16)).pack(anchor='w', padx=22, pady=(24, 0))
         self.side = side
-        tk.Label(side, text=_('native port · Windows', 'нативный порт · Windows') + f'  ·  v{VERSION}', bg=BG, fg=MUTED,
+        tk.Label(side, text=_('by Super Medo'), bg=BG, fg=TEXT, font=('Segoe UI', 10)).pack(anchor='w', padx=22)
+        tk.Label(side, text=_('native port · Windows', 'нативный порт · Windows') + f'  ·  v{VERSION}' + ('\n' + _('co-op test build') if COOP_TEST else ''), bg=BG, fg=MUTED, justify='left',
                  font=('Segoe UI', 9)).pack(anchor='w', padx=22, pady=(0, 20))
         self.nav, self.current_page = {}, None
         for name, title in (('play', _('Play', 'Играть')), ('graphics', _('Graphics', 'Графика')),
                             ('display', _('Display & FPS', 'Экран и FPS')), ('game', _('Game & effects', 'Игра и эффекты')),
-                            ('cheats', _('Cheats', 'Читы')), ('mods', _('Mods & patches', 'Моды и патчи')),
+                            ('cheats', _('Cheats', 'Читы')), ('online', _('Online co-op', 'Онлайн-кооператив')),
+                            ('mods', _('Mods & patches', 'Моды и патчи')),
                             ('controls', _('Controls', 'Управление')),
                             ('advanced', _('Advanced', 'Дополнительно')),
                             ('log', _('Log', 'Журнал'))):
@@ -602,6 +669,7 @@ class Launcher:
         self.build_display()
         self.build_game()
         self.build_cheats()
+        self.build_online()
         self.build_mods()
         self.build_controls()
         self.build_advanced()
@@ -657,6 +725,10 @@ class Launcher:
         self.row(quick, _('Output', 'Разрешение'), self.choice(quick, 'output_res', 'ini', OUTPUTS, 26))
         ttk.Checkbutton(quick, text=_('Fullscreen', 'Полный экран'), variable=self.var('fullscreen', 'app')).grid(
             row=self.next_row(quick), column=1, sticky='w', pady=(8, 0))
+        ttk.Checkbutton(quick, text=_('Play online'), variable=self.var('online', 'app')).grid(
+            row=self.next_row(quick), column=1, sticky='w', pady=(4, 0))
+        ttk.Button(quick, text=_('Add to Steam'), command=self.add_to_steam).grid(
+            row=self.next_row(quick), column=1, sticky='w', pady=(10, 0))
         for key in ('fps_mode', 'upscaler', 'output_res'):
             self.vars[key].trace_add('write', lambda *_a: self.refresh_status())
 
@@ -824,6 +896,58 @@ class Launcher:
         control, camera = self.var('cheat_enemy_control', 'ini'), self.var('debug_camera', 'ini')
         control.trace_add('write', lambda *_a: control.get() and camera.set(False))
         camera.trace_add('write', lambda *_a: camera.get() and control.set(False))
+
+    def build_online(self):
+        ttk = self.ttk
+        f = self.scrolled_page('online', _('Online co-op'),
+                               _("Messages, bloodstains and ghosts come from The Hunter's Dream; bells and summons "
+                                 'go through a shadNet server.'))
+        self.check(f, 'online', 'app', _('Play online'),
+                   _('Off: the game stays offline, as before.'))
+        self.var('online', 'app').trace_add('write', lambda *_a: self.refresh_status())
+        self.section(f, _('Game server (messages, bloodstains, ghosts)'))
+        community = self.var('online_community', 'app')
+        self.row(f, _('Game server'), ttk.Entry(f, textvariable=community, width=40),
+                 _('The Hunter\'s Dream by default. Only the name is needed; the game picks the ports.'))
+        self.section(f, _('Co-op server (bells and summons)'))
+        server = self.var('online_server', 'app')
+        self.row(f, _('Server address'), ttk.Entry(f, textvariable=server, width=40),
+                 _('srv.shadps4.net:31313 is the public shadPS4 server. For a private server, enter '
+                   'host:port from the person who runs it.'))
+        self.row(f, _('WebAPI address'), ttk.Entry(f, textvariable=self.var('online_webapi', 'app'), width=40),
+                 _('Of the shadNet server, not the game server. Leave empty: the server address with '
+                   'port 31315 is used.'))
+        self.section(f, _('Account'))
+        self.row(f, _('Online ID (NPID)'), ttk.Entry(f, textvariable=self.var('online_npid', 'app'), width=40),
+                 _('Your shadNet account name, not your email. Register one at shadnet.shadps4.net, or ask the '
+                   'owner of a private server.'))
+        self.row(f, _('Password'), ttk.Entry(f, textvariable=self.var('online_password', 'app'), width=40, show='•'),
+                 _('Saved on this PC with the other launcher settings.'))
+        self.section(f, _('Connection'))
+        self.check(f, 'online_upnp', 'app', _('UPnP (open a port on the router automatically)'),
+                   _('Turn it off on Tailscale or another VPN.'))
+        result = ttk.Label(f, text='', style='Muted.TLabel', justify='left')
+
+        def check():
+            values = {key: self.var(key, 'app').get()
+                      for key in ('online_server', 'online_webapi', 'online_community')}
+            address = values['online_server'].strip() or APP_DEFAULTS['online_server']
+            webapi, game = webapi_setting(values), community_address(values['online_community'])
+            online_on = self.var('online', 'app').get()
+            result.configure(text=_('Checking…'))
+
+            def work():
+                text = server_check(address, webapi, game)
+                if values['online_webapi'].strip() and values['online_webapi'].strip() != webapi:
+                    text += '\n' + _('The WebAPI box holds the game server address; it is ignored.')
+                if not online_on:
+                    text += '\n' + _('"Play online" is off: the game starts offline.')
+                self.ui_calls.put(lambda: result.configure(text=text))
+            threading.Thread(target=work, daemon=True).start()
+        self.row(f, '', ttk.Button(f, text=_('Test connection'), command=check))
+        result.grid(row=self.next_row(f), column=1, sticky='w', pady=(6, 0))
+        self.note(f, _('Everyone in a session needs the same game version (1.09) and the same server. '
+                       'Cheats change the game for the other players too: turn them off when you play together.'))
 
     def build_mods(self):
         f = self.scrolled_page('mods', _('Mods & patches', 'Моды и патчи'),
@@ -1052,6 +1176,7 @@ class Launcher:
         holder = ttk.Frame(f)
         holder.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(10, 0))
         ttk.Button(holder, text=_('Desktop shortcut', 'Ярлык на рабочем столе'), command=self.shortcut).pack(side='left')
+        ttk.Button(holder, text=_('Add to Steam'), command=self.add_to_steam).pack(side='left', padx=(6, 0))
         ttk.Button(holder, text=_('Port folder', 'Папка порта'), command=lambda: self.open_path(DATA_DIR)).pack(side='left', padx=6)
         ttk.Button(holder, text='bbport.ini', command=lambda: self.open_path(ini_path())).pack(side='left')
         holder = ttk.Frame(f)
@@ -1152,7 +1277,8 @@ class Launcher:
             fps = ('30 FPS',)
         upscaler = dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0]
         output = self.var('output_res', 'ini').get().replace('x', ' × ')
-        return f'{_(*fps)}   ·   {upscaler}   ·   {output}'
+        online = _('Online') if self.var('online', 'app').get() else _('Offline')
+        return f'{_(*fps)}   ·   {upscaler}   ·   {output}   ·   {online}'
 
     def detect_gpu(self):
         exe = PORT_DIR / 'bin' / 'bb-gpu-capabilities.exe'
@@ -1311,6 +1437,20 @@ class Launcher:
     def play(self):
         if self.process:
             return
+        online, npid = self.var('online', 'app'), self.var('online_npid', 'app')
+        if not online.get() and npid.get().strip():
+            choice = self.messagebox.askyesnocancel(
+                'Bloodborne', _('An online account is filled in, but "Play online" is off.\n\n'
+                                'Yes: play online.   No: play offline.'))
+            if choice is None:
+                return
+            online.set(bool(choice))
+        if online.get() and '@' in npid.get():
+            self.messagebox.showwarning(
+                'Bloodborne', _('The Online ID is the account name (NPID) you registered on the server, '
+                                'not your email address.'))
+            self.show('online')
+            return
         self.collect()
         if not game_info(self.app['game_dir']):
             self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
@@ -1336,8 +1476,21 @@ class Launcher:
             self.root.after(5000, self.root.destroy)  # the game keeps running
 
     def read_output(self, process):
+        """Helper thread: the game's output to the Log page and to <saves folder>/last_run.log."""
+        log = None
+        try:
+            log_dir = Path(self.app.get('user_dir') or DATA_DIR / 'user')
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log = open(log_dir / 'last_run.log', 'w', encoding='utf-8', buffering=1)
+        except OSError:
+            pass
         for raw in iter(process.stdout.readline, b''):
-            self.output.put(raw.decode('utf-8', errors='replace'))
+            text = raw.decode('utf-8', errors='replace')
+            self.output.put(text)
+            if log:
+                log.write(text.replace('\r\n', '\n'))
+        if log:
+            log.close()
         self.output.put((process.wait(),))
 
     def drain_output(self):
@@ -1520,6 +1673,47 @@ class Launcher:
             self.messagebox.showinfo('Bloodborne', _('Shortcut created on the desktop.', 'Ярлык создан на рабочем столе.'))
         else:
             self.messagebox.showerror('Bloodborne', result.stderr.decode(errors='replace')[:400])
+
+    def add_to_steam(self):
+        """Bloodborne in the Steam library (a non-Steam game that starts Play Bloodborne.exe)."""
+        import bbport_steam
+        steam = bbport_steam.steam_folder()
+        configs = bbport_steam.user_configs(steam) if steam else []
+        if not configs:
+            self.messagebox.showerror('Bloodborne', _('Steam was not found on this PC (or nobody has signed in to it yet).'))
+            return
+        if FROZEN:
+            exe, options = PORT_DIR / 'Play Bloodborne.exe', ''
+        else:
+            pythonw = Path(sys.executable).with_name('pythonw.exe')
+            exe, options = (pythonw if pythonw.exists() else Path(sys.executable)), f'"{Path(__file__).resolve()}" --play'
+        self.collect()  # Play Bloodborne.exe starts the game with the saved settings
+        restart = False
+        if bbport_steam.steam_running():
+            if not self.messagebox.askyesno('Bloodborne', _('Steam has to close while the game is added; it starts '
+                                                            'again afterwards. Close Steam now?')):
+                return
+            subprocess.Popen([str(steam / 'steam.exe'), '-shutdown'], creationflags=NO_WINDOW)
+            for _i in range(60):
+                time.sleep(0.5)
+                if not bbport_steam.steam_running():
+                    break
+            else:
+                self.messagebox.showerror('Bloodborne', _('Steam did not close. Close it yourself and try again.'))
+                return
+            time.sleep(1)  # Steam writes its files as it exits
+            restart = True
+        try:
+            for config in configs:
+                bbport_steam.add_shortcut(config / 'shortcuts.vdf', 'Bloodborne', str(exe), str(PORT_DIR),
+                                          str(exe), options)
+        except (OSError, ValueError) as error:
+            self.messagebox.showerror('Bloodborne', _('Could not add the game to Steam: {}').format(error))
+            return
+        if restart:
+            os.startfile('steam://open/games')
+        self.messagebox.showinfo('Bloodborne', _('Bloodborne is in your Steam library. It starts with the settings '
+                                                 'saved in this launcher.'))
 
     def close(self):
         try:

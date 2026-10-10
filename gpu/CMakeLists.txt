@@ -155,6 +155,52 @@ add_library(bbgpu ${BBGPU_KIND} ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOU
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
     shadps4/core/libraries/videodec/video_utils.cpp)
 add_dependencies(bbgpu host_shaders)
+# bbport co-op: PS4 network and PSN libraries with the shadNet client, from shadp2p
+# (github.com/Wozzardman/shadp2p, GPL-2.0), for private Bloodborne co-op servers.
+find_package(Protobuf CONFIG REQUIRED)
+set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
+file(MAKE_DIRECTORY "${SHADNET_PROTO_OUT}")
+add_custom_command(
+    OUTPUT "${SHADNET_PROTO_OUT}/shadnet.pb.cc" "${SHADNET_PROTO_OUT}/shadnet.pb.h"
+    COMMAND protobuf::protoc "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet"
+            "--cpp_out=${SHADNET_PROTO_OUT}" "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto")
+file(GLOB_RECURSE BBNET_SOURCES CONFIGURE_DEPENDS shadps4/core/libraries/network/*.cpp
+    shadps4/core/libraries/np/*.cpp shadps4/shadnet/*.cpp)
+# Trophies and the system dialogs stay in the C runtime; their shadPS4 versions need the
+# emulator's UI layers.
+list(FILTER BBNET_SOURCES EXCLUDE REGEX
+    "np_trophy|trophy_ui|np_sns_facebook_dialog|np_profile_dialog/|np_commerce/")
+find_package(nlohmann_json CONFIG REQUIRED)
+add_library(bbnet STATIC ${BBNET_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc" bbnet/bbnet_glue.cpp)
+target_include_directories(bbnet PRIVATE shim shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
+    third_party/imgui third_party/httplib)
+target_link_libraries(bbnet PRIVATE nlohmann_json::nlohmann_json)
+# HTTPS (the community game server only speaks TLS) and gzip replies in cpp-httplib.
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
+target_compile_definitions(bbnet PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+target_link_libraries(bbnet PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
+if (WIN32)
+    target_sources(bbnet PRIVATE third_party/wepoll/wepoll.c)
+    target_include_directories(bbnet PRIVATE third_party/wepoll)
+    find_path(MINIUPNPC_INCLUDE miniupnpc.h PATH_SUFFIXES miniupnpc REQUIRED)
+    find_library(MINIUPNPC_LIBRARY NAMES libminiupnpc.a miniupnpc REQUIRED)
+    target_include_directories(bbnet PRIVATE "${MINIUPNPC_INCLUDE}")
+    target_compile_definitions(bbnet PRIVATE MINIUPNP_STATICLIB)
+    target_link_libraries(bbnet PRIVATE "${MINIUPNPC_LIBRARY}")
+endif()
+target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
+target_compile_options(bbnet PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
+target_link_libraries(bbnet PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
+    protobuf::libprotobuf)
+if (WIN32)
+    target_compile_definitions(bbnet PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(bbnet PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_CURRENT_SOURCE_DIR}/shim/bb_win_compat.h>)
+    target_link_libraries(bbnet PUBLIC ws2_32 iphlpapi bcrypt crypt32)
+endif()
+target_link_libraries(bbgpu PUBLIC bbnet)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
 target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp

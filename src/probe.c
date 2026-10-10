@@ -428,6 +428,11 @@ int main(int argc, char **argv) {
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
             runtime_savedata_configure(id);
+        char serial[16]="", title[128]="", version[16]="";
+        sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
+        sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
+        sfo_value(sfo,"APP_VER",version,sizeof(version),NULL);
+        bbnet_configure(app0,serial,title,version);
     }
     bbgpu_register_kernel();
 #ifdef _WIN32

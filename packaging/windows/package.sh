@@ -63,6 +63,15 @@ if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
 else
     echo "DLSS bridge not built (packaging/windows/build_dlss.sh): no DLSS in this package" >&2
 fi
+# Online co-op: the libraries compiled in (wepoll, cpp-httplib) and the MSYS2 DLLs it loads.
+mkdir -p "$dest/licenses"
+cp gpu/third_party/wepoll/LICENSE "$dest/licenses/wepoll-LICENSE.txt"
+cp gpu/third_party/httplib/LICENSE "$dest/licenses/cpp-httplib-LICENSE.txt"
+cp packaging/windows/licenses/*.txt "$dest/licenses/"
+for package in protobuf abseil-cpp openssl miniupnpc zlib; do
+    license=/clang64/share/licenses/$package/LICENSE
+    if [[ -f $license ]]; then cp "$license" "$dest/licenses/$package-LICENSE.txt"; fi
+done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
 mkdir -p dist
 rm -f dist/bbport-windows.zip

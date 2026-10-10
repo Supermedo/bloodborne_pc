@@ -2,6 +2,7 @@
 // variables (defaults match shadPS4 except the pipeline cache, which is on).
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <string>
 #include "common/types.h"
@@ -71,5 +72,19 @@ public:
     bool IsVkValidationEnabled() { static const auto value = Flag("BB_VK_VALIDATION", false); return value; }
     bool IsVkValidationGpuEnabled() { return false; }
     bool IsVkValidationSyncEnabled() { static const auto value = Flag("BB_VK_VALIDATION_SYNC", false); return value; }
+    // bbport co-op: online play through a shadNet server (BB_ONLINE=1, set by the launcher).
+    static std::string Text(const char* name, const char* fallback) {
+        const char* v = std::getenv(name);
+        return v && v[0] ? v : fallback;
+    }
+    bool IsConnectedToNetwork() { static const auto value = Flag("BB_ONLINE", false); return value; }
+    bool IsShadNetEnabled() { return IsConnectedToNetwork() && !shadnet_session_disabled.load(); }
+    void SetShadNetSessionDisabled(bool v) { shadnet_session_disabled.store(v); }
+    std::string GetShadNetServer() { return Text("BB_SHADNET_SERVER", "127.0.0.1:31313"); }
+    std::string GetShadNetWebApiServer() { return Text("BB_SHADNET_WEBAPI", "http://127.0.0.1:31315"); }
+    bool IsUPnPEnabled() { static const auto value = Flag("BB_UPNP", true); return value; }
+
+private:
+    std::atomic<bool> shadnet_session_disabled{false};
 };
 #define EmulatorSettings (*EmulatorSettingsImpl::GetInstance())

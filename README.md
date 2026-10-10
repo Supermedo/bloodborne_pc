@@ -15,6 +15,9 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 
 ## Features
 
+- **Online play (beta):** messages, bloodstains and wandering ghosts from other hunters through
+  [The Hunter's Dream](https://thehuntersdream.com), and bells and summons through a shadNet
+  server (shadPS4's public one by default).
 - **Launcher with every setting in one window**, in 13 languages: English, Arabic, Russian,
   Spanish, Portuguese, French, German, Italian, Polish, Turkish, Chinese, Japanese, Korean.
 - **Updates from the launcher:** when a new version is out it tells you, and **Update**
@@ -29,8 +32,9 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
 - **Mods and third-party patches**, loaded without changing your game files.
+- **Add to Steam** puts the game in your Steam library in one click.
 - **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a
-  desktop shortcut or Steam).
+  desktop shortcut).
 - **Controller and keyboard**, an in-game settings menu (Insert or L3+R3), name entry on
   screen, a desktop shortcut, and a button to clear the shader cache.
 
@@ -58,11 +62,25 @@ The keyboard now works together with a connected controller instead of only with
 All of this is configurable in `input.ini` (shadPS4's input config syntax: a Bloodborne file
 made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.md](docs/INPUT.md).
 
+## Playing online (beta)
+
+1. Register a shadNet account at [shadnet.shadps4.net](https://shadnet.shadps4.net).
+2. In the launcher, open **Online co-op**, tick **Play online** and enter your account name
+   (not your email) and password.
+3. Press **Test connection**: all three lines should say "reachable". Then press **PLAY** and
+   choose online at the title screen. The Hunter's Dream welcome message means you are online.
+
+Everyone you want to play with needs game version 1.09 and the same co-op server. A private
+shadNet server (from the [shadp2p](https://github.com/Wozzardman/shadp2p) project) works too:
+put its address in **Server address**.
+
 ## Known issues
 
 - The character preview on the character creation screen stays empty. The character is
   created correctly and looks right in the game.
 - Some AMD graphics cards still crash when the game world loads; fixes are in progress.
+- Online play is new. Messages, bloodstains and ghosts work; summoning other players with the
+  bells has not been confirmed yet. Please report how it goes on Discord.
 - Above about 120 FPS the game's movement slows down (a limit of the game itself): keep the
   frame cap at 120 or lower.
 
@@ -84,6 +102,11 @@ Built on [bbport](https://github.com/deadinside28/bloodborne_pc), the native Lin
 Bloodborne by deadinside28, and on the [shadPS4](https://github.com/shadps4-emu/shadPS4)
 renderer. The original README is in [docs/original-readme](docs/original-readme/README.md).
 
+Online play uses the network and PSN code of [shadp2p](https://github.com/Wozzardman/shadp2p)
+by Wozzardman (the shadPS4 Bloodborne co-op project), the shadNet server of the
+[shadPS4](https://shadps4.net) team, and [The Hunter's Dream](https://thehuntersdream.com) server
+by droogie and its team.
+
 Also used: [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK
 (FSR), FSR 4 assets from [FireBurn/Q2RTX](https://github.com/FireBurn/Q2RTX), the DLSS bridge
 adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR),
@@ -92,6 +115,9 @@ the [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) (`nvngx_dlss.dll` under NV
 [FFmpeg](https://ffmpeg.org), [Dear ImGui](https://github.com/ocornut/imgui),
 [sirit](https://github.com/shadps4-emu/sirit), [magic_enum](https://github.com/Neargye/magic_enum),
 [miniz](https://github.com/richgel999/miniz), [xbyak](https://github.com/herumi/xbyak),
+[wepoll](https://github.com/piscisaureus/wepoll), [cpp-httplib](https://github.com/yhirose/cpp-httplib),
+[Protocol Buffers](https://protobuf.dev), [OpenSSL](https://www.openssl.org),
+[miniupnpc](https://miniupnp.tuxfamily.org), [JSON for Modern C++](https://github.com/nlohmann/json),
 [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator),
 [MSYS2](https://www.msys2.org) / [LLVM](https://llvm.org), [PyInstaller](https://pyinstaller.org)
 and [Pillow](https://python-pillow.org). Game patches by Kyo, Lance McDonald, auser1337,

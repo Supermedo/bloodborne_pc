@@ -8,6 +8,7 @@ The in-game "Apply and restart" runs this script again through BB_RESTART_COMMAN
 `--after PID` waits for the previous game process to end first (its GPU device and memory).
 """
 import ctypes
+import json
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,55 @@ import subprocess
 import sys
 
 PORT = Path(__file__).resolve().parent
+
+
+# Co-op: the community service that answers Bloodborne's own game-server requests
+# (messages, bloodstains, sign-in); summon requests go to the shadNet server instead.
+COMMUNITY_SERVER = 'https://thehuntersdream.com'
+GAME_SERVER = 'https://ss4.scej-network.jp:20443'
+# The server's ss.info sends the game to this port for its API (summons among them).
+COMMUNITY_API_PORT = 18671
+
+
+def summon_service(webapi):
+    """True when a shadNet WebAPI answers Bloodborne's summon calls: the route exists there
+    (an empty request is refused with 400), where other servers answer 404."""
+    import urllib.error
+    import urllib.request
+    request = urllib.request.Request(webapi.rstrip('/') + '/summon_messenger/create', data=b'',
+                                     method='POST')
+    try:
+        urllib.request.urlopen(request, timeout=4).close()
+        return True
+    except urllib.error.HTTPError as error:
+        return error.code != 404
+    except (OSError, ValueError):
+        return False
+
+
+def online_overrides(env, user_dir):
+    """Writes user/host_overrides.json for this launch. A player who needs other addresses
+    puts them in user/host_overrides.custom.json, which is then used as it is."""
+    custom = user_dir / 'host_overrides.custom.json'
+    path = custom if custom.exists() else user_dir / 'host_overrides.json'
+    if path != custom:
+        community = (env.get('BB_COMMUNITY_SERVER') or COMMUNITY_SERVER).rstrip('/')
+        if '://' not in community:
+            community = 'https://' + community
+        host = community.split('://', 1)[1]
+        webapi = env.get('BB_SHADNET_WEBAPI') or 'http://127.0.0.1:31315'
+        # Game server -> community server (same port, 20443). Summon signs -> the shadNet
+        # WebAPI when that server has the Bloodborne summon service (the shadp2p server),
+        # otherwise they stay with the community server.
+        overrides = {GAME_SERVER: community}
+        if summon_service(webapi):
+            overrides.update({f'{scheme}://{host}:{COMMUNITY_API_PORT}/summon_messenger': webapi
+                              for scheme in ('https', 'http')})
+            print(f'Co-op: summon signs through {webapi}')
+        else:
+            print(f'Co-op: {webapi} has no summon service; summon signs through {community}')
+        path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
+    env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
 
 
 def fail(message):
@@ -161,6 +211,8 @@ def main():
         user_dir = Path(env.get('BB_USER_DIR', data / 'user')).resolve()
         user_dir.mkdir(parents=True, exist_ok=True)
         env.setdefault('BB_GPU_USER_DIR', str(user_dir))
+        if env.get('BB_ONLINE') == '1':
+            online_overrides(env, user_dir)
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         restart = [sys.executable, *this, '--after', str(os.getpid()), *args]
         env['BB_RESTART_COMMAND'] = subprocess.list2cmdline(restart)
