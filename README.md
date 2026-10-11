@@ -60,7 +60,9 @@ Nothing else to install: everything the game needs is in the zip.
 
 In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
 Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, Q Triangle,
-1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad.
+1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab / Backspace left / right touchpad half.
+Xbox controllers: Back + d-pad left / right clicks the left / right touchpad half (gestures / key items),
+Back alone the left half.
 
 ## Playing online (beta)
 
