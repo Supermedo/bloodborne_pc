@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
+#include <cstring>
+#include <mutex>
 #include <unordered_map>
 #include <boost/container/flat_map.hpp>
 #include <queue>
@@ -77,11 +80,25 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
         return false; // Not in SRT code range
     }
 
+    // bbport: the draw preparation workers run walkers concurrently, and two of them can fault
+    // on the same instruction. The second one used to decode the first one's `xor` and fail the
+    // assertion below ("SrtWalkerSignalHandler: Assertion Failed!" while loading an area).
+    // Patches are made under a lock, and an instruction already patched is simply retried.
+    static std::mutex patch_mutex;
+    std::scoped_lock lk{patch_mutex};
+
     // Patch instruction to zero register
     ZydisDecodedInstruction instruction;
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
     ZyanStatus status = Common::Decoder::Instance()->decodeInstruction(instruction, operands,
                                                                        const_cast<void*>(code), 15);
+
+    if (ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_XOR &&
+        operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+        operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+        operands[0].reg.value == operands[1].reg.value) {
+        return true; // bbport: patched by another thread meanwhile
+    }
 
     ASSERT(ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
            operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -93,26 +110,31 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
 
     // We can only encounter rdi or r10d as the first operand in a
     // fault memory access for SRT walker.
+    u8 patch[patch_size];
     switch (operands[0].reg.value) {
     case ZYDIS_REGISTER_RDI:
         // mov rdi, [rdi + (off_dw << 2)] -> xor rdi, rdi
-        code_patch[0] = 0x48;
-        code_patch[1] = 0x31;
-        code_patch[2] = 0xFF;
+        patch[0] = 0x48;
+        patch[1] = 0x31;
+        patch[2] = 0xFF;
         break;
     case ZYDIS_REGISTER_R10D:
         // mov r10d, [rdi + (off_dw << 2)] -> xor r10d, r10d
-        code_patch[0] = 0x45;
-        code_patch[1] = 0x31;
-        code_patch[2] = 0xD2;
+        patch[0] = 0x45;
+        patch[1] = 0x31;
+        patch[2] = 0xD2;
         break;
     default:
         UNREACHABLE_MSG("Unsupported register for SRT walker patch");
         return false;
     }
 
-    // Fill nops
+    // Fill nops. bbport: before the new head, so another thread running this code meanwhile
+    // sees the old mov (with a NOP displacement: it faults and retries above) or the finished
+    // patch, never a 3-byte xor followed by the old instruction's displacement bytes.
     memset(code_patch + patch_size, 0x90, len - patch_size);
+    std::atomic_thread_fence(std::memory_order_release);
+    std::memcpy(code_patch, patch, patch_size);
 
     LOG_WARNING(Render_Recompiler, "Patched SRT walker at {}, fault address {}", code,
                 fault_address);
