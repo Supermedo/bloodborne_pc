@@ -10,6 +10,11 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 # Frame pointers keep the loader's thread dumps (watchdog, SIGUSR2 sampling) walkable.
 add_compile_options(-fno-omit-frame-pointer)
+if (MINGW)
+    # Headers newer libc++ no longer includes transitively (see the file).
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/mingw_libcxx_compat.h>")
+endif()
 
 # bbport: link-time optimization (BB_LTO, default on) and profile-guided optimization
 # (BB_PGO: off, generate = instrumented build writing into BB_PGO_DIR, use = build with that
@@ -245,6 +250,14 @@ if (WIN32)
         ../packaging/windows/bb-probe.rc)
     set_target_properties(bb-probe PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
     target_compile_options(bb-probe PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
+    # Clang 23 added -Wunused-but-set-global (on with -Wall): the runtime keeps a few
+    # set-only state flags (e.g. common_initialized), so it stays a warning there.
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-Wno-error=unused-but-set-global BB_HAS_UNUSED_SET_GLOBAL)
+    if (BB_HAS_UNUSED_SET_GLOBAL)
+        target_compile_options(bb-probe PRIVATE
+            $<$<COMPILE_LANGUAGE:C>:-Wno-error=unused-but-set-global>)
+    endif()
     target_include_directories(bb-probe PRIVATE .. ../src)
     target_link_libraries(bb-probe PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     # The PS4 range (64 GiB - 1 TiB) must stay free: no high-entropy ASLR for heaps and stacks.
