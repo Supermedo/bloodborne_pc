@@ -623,6 +623,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="60 FPS++" Note="Changes some frame settings like the frame skip, vsync, frame tearing, etc.. \nWill help with better input delay/response times for 60 FPS." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x00a3fc3f" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b5458" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b55b6" Value="8988883C"/>
@@ -819,6 +821,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="90 FPS++" Note="Changes some frame settings like the frame skip, vsync, frame tearing, etc.. \nWill help with better input delay/response times for 90 FPS. Remember to change Vblank to 90 or higher." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x00a3fc3f" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b5458" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b55b6" Value="8988883C"/>
@@ -1015,6 +1019,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="Uncap FPS++" Note="Not really recommended as a lot of the timestep fixes would vary with fluctuating frame cap. Remember to increase vblank frequency." Author="Lance McDonald (manfightdragon), Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x024347F3" Value="31D2"/>
             <Line Type="bytes" Address="0x024348A2" Value="EB3D"/>
             <Line Type="bytes" Address="0x024348F0" Value="EB08"/>
