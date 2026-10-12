@@ -34,6 +34,12 @@ public:
     void BeginTextInput(const std::string& initial, const std::string& prompt);
     /// 0 while typing, 1 confirmed (Enter), 2 cancelled (Escape); text is UTF-8.
     int PollTextInput(std::string& text);
+    /// Mouse look (bbgpu_mouse_take): motion and wheel notches since the last call, reset.
+    void TakeMouse(double& dx, double& dy, int& wheel_up, int& wheel_down);
+    /// The window holds the mouse (relative mode) for looking around.
+    bool MouseCaptured() const { return mouse_captured.load(std::memory_order_relaxed); }
+    /// mouse_look=0: a click does not take the mouse.
+    static void EnableMouseLook(bool enabled) { mouse_look.store(enabled, std::memory_order_relaxed); }
 
 private:
     std::atomic<s32> width, height;
@@ -46,6 +52,12 @@ private:
     void UpdateCursor();
     u64 last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
     bool cursor_hidden{};
+    void CaptureMouse(bool capture);
+    std::mutex mouse_mutex;
+    double mouse_dx{}, mouse_dy{};
+    int wheel_up{}, wheel_down{};
+    std::atomic<bool> mouse_captured{false};
+    static inline std::atomic<bool> mouse_look{true};
     SDL_Window* window{};
     WindowSystemInfo window_info{};
 };

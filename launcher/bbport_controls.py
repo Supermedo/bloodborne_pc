@@ -1,21 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-# SDL names accepted by runtime_pad.c.
+# SDL names accepted by runtime_pad.c; mouse buttons and the wheel count while the game window holds
+# the mouse (mouse look, from bbport 0.51).
 CONTROLS = [
     ('cross', ('Cross', 'Крест'), 'Space', 'a'),
     ('circle', ('Circle', 'Круг'), 'Left Shift', 'b'),
     ('square', ('Square', 'Квадрат'), 'E', 'x'),
     ('triangle', ('Triangle', 'Треугольник'), 'Q', 'y'),
-    ('l1', ('L1', 'L1'), '1', 'leftshoulder'),
-    ('r1', ('R1', 'R1'), '3', 'rightshoulder'),
-    ('l2', ('L2', 'L2'), 'R', 'lefttrigger'),
-    ('r2', ('R2', 'R2'), 'F', 'righttrigger'),
+    ('l1', ('L1', 'L1'), '1, Mouse X2', 'leftshoulder'),
+    ('r1', ('R1', 'R1'), '3, Mouse Left', 'rightshoulder'),
+    ('l2', ('L2', 'L2'), 'R, Mouse Right', 'lefttrigger'),
+    ('r2', ('R2', 'R2'), 'F, Mouse X1', 'righttrigger'),
     ('l3', ('L3', 'L3'), 'Z', 'leftstick'),
-    ('r3', ('R3', 'R3'), 'C', 'rightstick'),
+    ('r3', ('R3', 'R3'), 'C, Mouse Middle', 'rightstick'),
     ('options', ('Options', 'Options'), 'Return', 'start'),
     ('touchpad', ('Touchpad left (gestures)', 'Тачпад, левая половина (жесты)'), 'Tab', 'back, touchpad'),
     ('touchpad_right', ('Touchpad right (personal effects)', 'Тачпад, правая половина (личные вещи)'), 'Backspace', ''),
-    ('up', ('D-pad up', 'Крестовина вверх'), 'I', 'dpup'),
-    ('down', ('D-pad down', 'Крестовина вниз'), 'K', 'dpdown'),
+    ('up', ('D-pad up', 'Крестовина вверх'), 'I, Wheel Up', 'dpup'),
+    ('down', ('D-pad down', 'Крестовина вниз'), 'K, Wheel Down', 'dpdown'),
     ('left', ('D-pad left', 'Крестовина влево'), 'J', 'dpleft'),
     ('right', ('D-pad right', 'Крестовина вправо'), 'L', 'dpright'),
     ('move_up', ('Move forward', 'Движение вперёд'), 'W', None),
