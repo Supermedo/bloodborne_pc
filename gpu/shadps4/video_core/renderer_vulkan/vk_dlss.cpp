@@ -76,6 +76,8 @@ struct Dlss::Impl {
     std::optional<FeatureDesc> feature;
     std::string problem;
     bool eligible{true}, instance_ready{}, device_ready{}, initialized{}, available{};
+    /// The bridge's table has the frame generation entries (ABI 2; ABI 1 ends before them).
+    bool frame_generation_api{};
 
     void Disable(std::string_view reason) {
         eligible = available = false;
@@ -114,9 +116,15 @@ Dlss::Dlss() : impl{std::make_unique<Impl>()} {
         impl->module ? reinterpret_cast<BbDlssGetApiFn>(GetProcAddress(impl->module, "BbDlssGetApi"))
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
-    if (!impl->api || impl->api->abi != BBPORT_DLSS_BRIDGE_ABI) {
-        // An older bridge's table is shorter: calling through it (ReleaseFrameGeneration at the
-        // first upscaler setup) read past its end. Without a matching bridge there is no API.
+    // ABI 2 only appends the frame generation entries to ABI 1's table: an ABI 1 bridge (the one
+    // packaged with 1.6) still gives DLSS super resolution, without DLSS frame generation.
+    if (impl->api && impl->api->abi == 1) {
+        std::printf("DLSS: bbport_dlss.dll ABI 1: super resolution only, no DLSS frame generation\n");
+    }
+    impl->frame_generation_api = impl->api && impl->api->abi >= 2;
+    if (!impl->api || (impl->api->abi != 1 && impl->api->abi != BBPORT_DLSS_BRIDGE_ABI)) {
+        // An unknown table: calling through it read past its end (ReleaseFrameGeneration at the
+        // first upscaler setup, with a shorter one). Without a matching bridge there is no API.
         impl->api = nullptr;
         impl->Disable("bbport_dlss.dll is missing or from another version");
         return;
@@ -244,7 +252,7 @@ void Dlss::ReleaseFeature() {
 }
 
 bool Dlss::FrameGenerationAvailable() const {
-    return impl->available && impl->api->FrameGenerationAvailable();
+    return impl->available && impl->frame_generation_api && impl->api->FrameGenerationAvailable();
 }
 bool Dlss::CreateFrameGeneration(vk::CommandBuffer command, u32 w, u32 h, vk::Format format) {
     return FrameGenerationAvailable() &&
@@ -254,7 +262,7 @@ bool Dlss::GenerateFrame(vk::CommandBuffer command, const BbDlssGenerate &frame)
     return FrameGenerationAvailable() && impl->api->GenerateFrame(command, &frame);
 }
 void Dlss::ReleaseFrameGeneration() {
-    if (impl->api)
+    if (impl->api && impl->frame_generation_api)
         impl->api->ReleaseFrameGeneration();
 }
 
