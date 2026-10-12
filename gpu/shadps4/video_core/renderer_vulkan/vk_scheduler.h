@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <condition_variable>
 #include <deque>
@@ -23,6 +25,7 @@
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
+#include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
@@ -72,6 +75,9 @@ struct SubmitInfo {
     vk::Fence fence;
     u32 num_wait_semas;
     u32 num_signal_semas;
+    /// bbport: queue operations that go out right before the submission, in queue order (sparse
+    /// binds): with BB_ASYNC_SUBMIT the submission itself goes out later, on a recording thread.
+    std::vector<std::function<void()>> before_submit;
 
     void AddWait(vk::Semaphore semaphore, u64 tick = 1) {
         wait_semas[num_wait_semas] = semaphore;
@@ -576,6 +582,20 @@ struct DynamicState {
 
 using SubmitFunc = Common::UniqueFunction<void, SubmitInfo&>;
 
+/// bbport: the command buffer segments of one submission and their chunk counters (guarded by the
+/// scheduler's recorder_mutex). With BB_ASYNC_SUBMIT several are in flight: a submission goes
+/// out from a recording thread once its segments are recorded.
+struct SubmissionBatch {
+    static constexpr u32 MaxSegments = 64;
+    std::array<vk::CommandBuffer, MaxSegments> segments{}; ///< null until begun
+    std::array<u32, MaxSegments> handed{}, recorded{};
+    void Reset() {
+        segments.fill({});
+        handed.fill(0);
+        recorded.fill(0);
+    }
+};
+
 /// bbport: a block of deferred Vulkan commands. Commands are closures placed in
 /// fixed storage (no allocation per command) and run in order on the recording thread.
 class RecordChunk {
@@ -633,6 +653,12 @@ public:
         return used;
     }
 
+    u32 segment = 0; ///< the command buffer segment the chunk is recorded into (Scheduler)
+    SubmissionBatch* batch = nullptr; ///< the submission it belongs to (Scheduler)
+    /// Ordered chunks: the command chunks of `segment` (and all of the segments before it)
+    /// that must be recorded before this chunk runs.
+    u32 after = 0;
+
 private:
     /// The recording thread last read these cache lines: the first write to each has to take
     /// it back from that core. Requesting ownership a few lines ahead overlaps those
@@ -682,10 +708,17 @@ public:
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish();
 
-    /// bbport: waits for the work submitted so far but leaves the command buffer being
-    /// recorded open, so a CommandBuffer() the caller holds stays valid (Finish() submits it:
-    /// recording into a submitted buffer crashes AMD's driver).
-    void WaitSubmitted();
+    /// bbport: waits for the GPU to complete the submissions before the current one, which is
+    /// not sent: for callers that keep recording into it (the upscaler between CommandBuffer()
+    /// and the end of its pass) and free resources only earlier submissions used.
+    void WaitSubmittedWork() {
+        const u64 tick = CurrentTick();
+        if (tick > 1) {
+            Wait(tick - 1);
+        }
+    }
+    // Compatibility for the Windows DLSS bridge's resource retirement.
+    void WaitSubmitted() { WaitSubmittedWork(); }
 
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick);
@@ -719,9 +752,9 @@ public:
     /// records directly (Record() included, so callers may mix both) until the next
     /// KickRecording() or submission.
     [[gnu::noinline]] vk::CommandBuffer CommandBuffer() {
-        if (recording_threaded && !direct_mode) {
-            SyncRecording();
-            direct_mode = true;
+        ProducerScope producer{*this, "CommandBuffer"};
+        if (!workers.empty() && !direct_mode) {
+            EnterDirectMode();
             direct_recordings.fetch_add(1, std::memory_order_relaxed);
             TraceDirectRecording(__builtin_return_address(0));
         }
@@ -731,31 +764,99 @@ public:
     /// BB_RECORDER_TRACE=1: prints the most frequent CommandBuffer() callers every 2000 calls.
     static void TraceDirectRecording(void* caller);
 
+    /// bbport: the recording side (current chunks, segments) is used by one thread at a time.
+    /// A second thread inside it at once — or HandOver() entered from inside Record*() on the
+    /// same thread (a fault handler) — is reported with both threads' names and this thread's
+    /// stack: a null record_chunk/ordered_chunk crashed HandOver and SmallGuestCopy.
+    class ProducerScope {
+    public:
+        ProducerScope(Scheduler& scheduler_, const char* where) noexcept : scheduler{scheduler_} {
+            if (ProducerCheck()) {
+                Enter(where);
+            }
+        }
+        ~ProducerScope() noexcept {
+            if (ProducerCheck()) {
+                Leave();
+            }
+        }
+        /// BB_PRODUCER_CHECK=1 (the launcher's crash diagnostics); off otherwise, the check
+        /// costs an atomic exchange per recorded command.
+        static bool ProducerCheck() noexcept {
+            static const bool enabled = [] {
+                const char* env = std::getenv("BB_PRODUCER_CHECK");
+                return env && env[0] == '1';
+            }();
+            return enabled;
+        }
+        ProducerScope(const ProducerScope&) = delete;
+        ProducerScope& operator=(const ProducerScope&) = delete;
+
+    private:
+        void Enter(const char* where) noexcept;
+        void Leave() noexcept;
+        Scheduler& scheduler;
+        const char* previous_where = nullptr;
+        bool outer = false;
+    };
+
     /// Records `func(vk::CommandBuffer)` in order with other commands. The closure must own
     /// everything it uses (capture by value): it may run later on the recording thread.
     template <typename Func>
     void Record(Func&& func) {
-        if (!recording_threaded || direct_mode) {
+        ProducerScope producer{*this, "Record"};
+        if (workers.empty() || direct_mode) {
             func(current_cmdbuf);
             return;
         }
         if (BbToggle::Disabled(BbToggle::ThreadedRecording)) {
-            SyncRecording();
-            direct_mode = true;
+            EnterDirectMode();
             func(current_cmdbuf);
             return;
         }
         if (!record_chunk->Push(std::forward<Func>(func))) {
-            full_chunks.push_back(std::move(record_chunk));
-            record_chunk = AcquireChunk();
+            RetireChunk();
             const bool pushed = record_chunk->Push(std::forward<Func>(func));
             ASSERT(pushed);
         }
     }
 
+    /// bbport: Record() for a draw, dispatch or pass that runs shaders, between GPU breadcrumbs
+    /// (vk_breadcrumbs.h): on a GPU hang they say which one never finished.
+    template <typename Func>
+    void RecordCrumb(const Breadcrumbs::Crumb& crumb, Func&& func) {
+        if (!Breadcrumbs::Enabled()) {
+            Record(std::forward<Func>(func));
+            return;
+        }
+        const u32 id = Breadcrumbs::Note(crumb_stream, crumb);
+        Record([func = std::forward<Func>(func), stream = crumb_stream,
+                id](vk::CommandBuffer cmdbuf) mutable {
+            Breadcrumbs::Mark(cmdbuf, stream, id, false);
+            func(cmdbuf);
+            Breadcrumbs::Mark(cmdbuf, stream, id, true);
+        });
+    }
+
+    /// bbport: waits until the submission signalling `tick` is in the queue. Another thread's
+    /// submission waiting for the tick on the same queue must not go first (BB_ASYNC_SUBMIT
+    /// submits from the recording threads): the queue would wait for a later submission.
+    void WaitSubmitted(u64 tick) {
+        u64 submitted = submitted_tick.load(std::memory_order_acquire);
+        while (submitted < tick) {
+            submitted_tick.wait(submitted, std::memory_order_acquire);
+            submitted = submitted_tick.load(std::memory_order_acquire);
+        }
+    }
+
+    /// bbport: the breadcrumb stream of this scheduler, for passes recorded on CommandBuffer().
+    [[nodiscard]] u32 CrumbStream() const noexcept {
+        return crumb_stream;
+    }
+
     /// True when Record() defers commands (and RecordData() copies into chunks).
     [[nodiscard]] bool IsRecordingDeferred() const noexcept {
-        return recording_threaded && !direct_mode &&
+        return !workers.empty() && !direct_mode &&
                !BbToggle::Disabled(BbToggle::ThreadedRecording);
     }
 
@@ -767,8 +868,7 @@ public:
         }
         ASSERT(bytes + 1024 <= RecordChunk::Capacity);
         if (RecordChunk::Capacity - record_chunk->Size() < bytes + 1024) {
-            full_chunks.push_back(std::move(record_chunk));
-            record_chunk = AcquireChunk();
+            RetireChunk();
         }
     }
 
@@ -776,6 +876,7 @@ public:
     /// been recorded (the same chunk). With threaded recording off, returns `data` itself.
     template <typename T>
     std::span<const T> RecordData(std::span<const T> data) {
+        ProducerScope producer{*this, "RecordData"};
         if (!IsRecordingDeferred() || data.empty()) {
             return data;
         }
@@ -787,8 +888,10 @@ public:
         return {dst, data.size()};
     }
 
-    /// Hands recorded commands to the recording thread. Called at points where no caller holds
-    /// the raw command buffer (end of draws and dispatches); small batches are kept.
+    /// Hands recorded commands to the recording threads. Called at points where no caller holds
+    /// the raw command buffer; small batches are kept. Without `force` (the end of a draw or
+    /// dispatch: nothing but the dynamic state and the render pass carries over to the next
+    /// command) a long enough segment is cut there, and the next one goes to another thread.
     void KickRecording(bool force = false);
 
     /// Waits until every recorded command is in the command buffer.
@@ -800,12 +903,21 @@ public:
     /// submission that reads them. Waits for all.
     void WaitHostCopies();
 
-    /// Runs `copy` on the recording thread in order with the commands (the thread spins for
-    /// work anyway, so small copies cost no wakeup); WaitHostCopies() covers it.
+    /// bbport: guest memory [address, address + size) a host copy issued now will read (the
+    /// source of a deferred upload or rename). WaitHostCopiesFor waits only for these.
+    void NoteHostCopySource(u64 address, u64 size);
+    /// Waits for the host copies when one of them may still read [address, address + size): a
+    /// write there (the command processor's WRITE_DATA/DMA) must not change what they copy.
+    /// Writes elsewhere do not wait (the hardware's command processor writes do not wait for
+    /// earlier draws either).
+    void WaitHostCopiesFor(u64 address, u64 size);
+
+    /// Runs `copy` on a recording thread in order with the commands, the other host copies and
+    /// the signals of SignalAfterHostCopies (the threads spin for work anyway, so small copies cost no wakeup);
+    /// WaitHostCopies() covers it.
     template <typename Func>
     void RecordHostCopy(Func&& copy) {
-        Record([copy = std::forward<Func>(copy), this,
-                seq = ++host_copies_issued](vk::CommandBuffer) {
+        RecordOrdered([copy = std::forward<Func>(copy), this, seq = ++host_copies_issued] {
             copy();
             host_copies_done.store(seq, std::memory_order_release);
         });
@@ -834,6 +946,9 @@ public:
 
     /// CommandBuffer() calls that waited for a recording thread (BB_FRAME_STATS).
     static inline std::atomic<u64> direct_recordings{0};
+    /// Command buffer segments submitted (BB_FRAME_STATS: segments per submission).
+    static inline std::atomic<u64> recorded_segments{0};
+    static inline std::atomic<u64> recorded_submissions{0};
 
     /// Returns the current command buffer tick.
     [[nodiscard]] u64 CurrentTick() const noexcept {
@@ -875,11 +990,91 @@ public:
     static std::mutex submit_mutex;
 
 private:
+    static constexpr u32 MaxSegments = SubmissionBatch::MaxSegments;
+
+    /// A recording thread. It owns a command pool (worker 0: the scheduler's) and records the
+    /// segments i with i % workers.size() == its index.
+    struct Worker {
+        CommandPool* pool{};
+        std::unique_ptr<CommandPool> own_pool;
+        std::deque<std::unique_ptr<RecordChunk>> queue; ///< guarded by recorder_mutex
+        std::atomic<size_t> queued{0};                  ///< queue.size() for lock-free polling
+        bool busy = false;     ///< running a chunk (guarded by recorder_mutex)
+        bool sleeping = false; ///< waiting on cv (guarded by recorder_mutex)
+        std::condition_variable_any cv;
+        std::jthread thread;
+    };
+
     void AllocateWorkerCommandBuffers();
+    SubmissionBatch* AcquireBatch();
+    /// BB_ASYNC_SUBMIT: hands the submission to the recording threads (it goes out once its
+    /// segments are recorded) instead of waiting for them here.
+    void SubmitAsync(SubmitInfo& info);
 
     std::unique_ptr<RecordChunk> AcquireChunk();
 
-    void RecorderThread(std::stop_token stoken);
+    /// Moves the full current chunk aside; a new one takes its place.
+    void RetireChunk() {
+        ProducerScope producer{*this, "RetireChunk"};
+        segment_bytes += record_chunk->Size();
+        full_chunks.push_back(std::move(record_chunk));
+        record_chunk = AcquireChunk();
+    }
+
+    /// Waits for the recording threads, then records on this thread into the current segment's
+    /// command buffer until the next KickRecording(). bbport: with BB_ASYNC_SUBMIT, into a
+    /// segment of its own instead, without waiting (direct_segment).
+    void EnterDirectMode();
+
+    /// Ends the direct segment (this thread's command buffer); the next commands go to a new
+    /// segment of the recording threads.
+    void LeaveDirectSegment();
+
+    /// Whether ordered tasks run on the calling thread right away: no recording threads, or
+    /// direct mode after waiting for them (not a direct segment: earlier tasks may be queued).
+    [[nodiscard]] bool OrderedInline() const noexcept {
+        return workers.empty() || (direct_mode && !direct_segment);
+    }
+
+    /// Cuts the command stream after the current segment when it is long enough.
+    void MaybeSplit();
+
+    /// Hands the current segment's chunks and the ordered chunks to the recording threads.
+    void HandOver();
+
+    /// Runs `func()` on a recording thread, in order with the other ordered tasks (guest memory
+    /// copies and the fence signals after them) and after every command recorded before it, in
+    /// all segments: the guest sees its fences no earlier than in 0.2. Fences signalled ahead of
+    /// the queued recording coincided with frequent guest heap corruption (guest offset
+    /// 0x263b8e7: 3 of 4 soak runs instead of none).
+    template <typename Func>
+    void RecordOrdered(Func&& func) {
+        ProducerScope producer{*this, "RecordOrdered"};
+        if (OrderedInline()) {
+            func();
+            return;
+        }
+        if (BbToggle::Disabled(BbToggle::ThreadedRecording)) {
+            EnterDirectMode();
+            func();
+            return;
+        }
+        auto command = [func = std::forward<Func>(func)](vk::CommandBuffer) mutable { func(); };
+        if (!ordered_chunk->Push(std::move(command))) {
+            ordered_full.push_back(std::move(ordered_chunk));
+            ordered_chunk = AcquireChunk();
+            const bool pushed = ordered_chunk->Push(std::move(command));
+            ASSERT(pushed);
+        }
+    }
+
+    [[nodiscard]] bool RecordingIdle() const; ///< with recorder_mutex held
+
+    /// Whether the oldest ordered chunk may run: the commands handed over before it are
+    /// recorded (with recorder_mutex held).
+    [[nodiscard]] bool OrderedReady() const;
+
+    void RecorderThread(std::stop_token stoken, u32 index);
 
     void SubmitExecution(SubmitInfo& info);
 
@@ -887,6 +1082,7 @@ private:
 
 private:
     const Instance& instance;
+    u32 crumb_stream = 0; ///< bbport: GPU breadcrumbs (vk_breadcrumbs.h)
     Semaphore work_semaphore;
     CommandPool command_pool;
     DynamicState dynamic_state;
@@ -907,27 +1103,61 @@ private:
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
-    // bbport: threaded recording
+    // bbport: threaded recording. Commands go into chunks of the current segment; segments are
+    // recorded in parallel, each into its own command buffer, and a submission runs their
+    // command buffers in order. Guest memory copies and fence signals go into ordered chunks,
+    // which one recording thread at a time runs in order, each once the commands handed over
+    // before it are recorded.
+    std::vector<std::unique_ptr<Worker>> workers; ///< empty: recording on the calling thread
+    /// The current submission's segments and the chunks of each handed to the recording threads
+    /// and recorded (guarded by recorder_mutex); with BB_ASYNC_SUBMIT earlier ones may still be
+    /// in flight (free_batches: those submitted).
+    SubmissionBatch* batch = nullptr;
+    std::vector<std::unique_ptr<SubmissionBatch>> all_batches;
+    std::vector<SubmissionBatch*> free_batches; ///< guarded by recorder_mutex
+    bool async_submit = false; ///< BB_ASYNC_SUBMIT (default on)
+    std::atomic<u64> submitted_tick{0}; ///< the last tick handed to the queue (WaitSubmitted)
+    u32 current_segment = 0;
+    std::atomic<u32> active_worker{0}; ///< the worker of current_segment (it spins for work)
+    size_t segment_bytes = 0;          ///< closures of the current segment handed over or retired
+    size_t split_bytes = 0;            ///< segment length at which the stream is cut
+    bool resume_rendering = false;     ///< a cut closed the render pass with render_state
     std::unique_ptr<RecordChunk> record_chunk;
     std::vector<std::unique_ptr<RecordChunk>> full_chunks;
+    std::unique_ptr<RecordChunk> ordered_chunk;
+    std::vector<std::unique_ptr<RecordChunk>> ordered_full;
     std::mutex recorder_mutex;
-    std::condition_variable_any recorder_cv;
     std::condition_variable_any recorder_idle_cv;
-    std::deque<std::unique_ptr<RecordChunk>> recorder_queue;
+    std::deque<std::unique_ptr<RecordChunk>> ordered_queue; ///< guarded by recorder_mutex
+    std::atomic<size_t> ordered_queued{0};
+    bool ordered_running = false; ///< a thread runs ordered chunks (guarded by recorder_mutex)
     std::vector<std::unique_ptr<RecordChunk>> free_chunks;
-    bool recorder_busy = false;
-    std::atomic<size_t> queued_chunks{0}; ///< recorder_queue.size() for lock-free polling
-    bool recorder_sleeping = false; ///< waiting on recorder_cv (guarded by recorder_mutex)
     bool direct_mode = false; ///< the command buffer is recorded on the caller's thread
+    /// bbport: direct_mode in a segment of its own (direct_pool), the recording threads going on
+    /// with the segments before it.
+    bool direct_segment = false;
+    std::unique_ptr<CommandPool> direct_pool; ///< used by the producer thread only
     u64 host_copies_issued = 0;
     std::atomic<u64> host_copies_done{0};
+    /// Host copy sources by 64 KiB granule in a direct-mapped table: a slot is pending while its
+    /// note is newer than the last completed WaitHostCopies; a slot two granules share is a
+    /// wildcard (any granule mapping there counts as pending).
+    struct HostCopySlot {
+        u64 granule = 0;
+        u64 seq = 0;
+    };
+    static constexpr u32 HostCopySlots = 4096;
+    static constexpr u64 HostCopyWildcard = ~u64(0);
+    std::mutex host_copy_sources_mutex;
+    std::array<HostCopySlot, HostCopySlots> host_copy_slots{};
+    u64 host_copy_source_seq = 0;
+    u64 host_copy_sources_done = 0;  ///< notes up to this one are copied
+    u64 host_copy_big_seq = 0;       ///< last note too large for the table (counts as everywhere)
     std::atomic<u64> deferred_signals_issued{0}; ///< by the thread recording (A or B)
+    std::atomic<u32> producer_tid{0};                 ///< ProducerScope: the thread inside
+    std::atomic<const char*> producer_where{nullptr}; ///< and where
     std::shared_ptr<std::atomic<u64>> deferred_signals_done =
         std::make_shared<std::atomic<u64>>(0);
-    // bbport: whether recorder_thread runs, read on every Record(). std::jthread::joinable()
-    // compares thread ids, which on Windows (libc++ over winpthreads) costs two system calls.
-    bool recording_threaded{false};
-    std::jthread recorder_thread;
     tracy::VkCtxScope* profiler_scope{};
 };
 

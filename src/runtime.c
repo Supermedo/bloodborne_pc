@@ -25,7 +25,23 @@ static _Atomic size_t memory_calls;
 static struct { const void *data; uint64_t filesz, memsz; } tls_modules[TLS_MODULES];
 static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
-void runtime_set_procparam(void *param) { process_param=param; }
+void runtime_set_procparam(void *param) {
+    process_param=param;
+    /* bbport: the game's libc heap settings (SceProcParam +0x30: SceLibcParam; its +0x10.. pointers to
+     * the heap size, delayed and extended allocation flags, initial size). */
+    const uint64_t *p=(const uint64_t *)param;
+    if (!p || p[0]<0x38 || !p[6]) return;
+    const uint64_t *libc=(const uint64_t *)p[6];
+    printf("Runtime: libc param size %#llx, entries %u", (unsigned long long)libc[0], (unsigned)libc[1]);
+    static const char *names[]={"heap size","delayed alloc","extended alloc","initial size"};
+    for (int i=0;i<4 && (uint64_t)(2+i)*8<libc[0];++i) {
+        const void *field=(const void *)libc[2+i];
+        if (!field) { printf(", %s -",names[i]); continue; }
+        if (i==0 || i==3) printf(", %s %#llx",names[i],(unsigned long long)*(const uint64_t *)field);
+        else printf(", %s %u",names[i],*(const uint32_t *)field);
+    }
+    printf("\n");
+}
 static ABI void *guest_procparam(void) { return process_param; }
 static void **application_heap_api;
 static ABI void guest_set_heap_api(void **api) {
@@ -161,13 +177,16 @@ static ABI __attribute__((noreturn)) void stack_fail(void) {
     exit(22);
 }
 static ABI void *guest_memset(void *dst, int value, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed); return memset(dst, value, size);
+    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    memset(dst, value, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI void *guest_memcpy(void *dst, const void *src, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed); return memcpy(dst, src, size);
+    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    memcpy(dst, src, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI void *guest_memmove(void *dst, const void *src, size_t size) {
-    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed); return memmove(dst, src, size);
+    atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);
+    memmove(dst, src, size); runtime_memory_note_cpu_write((uintptr_t)dst, size); return dst;
 }
 static ABI int guest_memcmp(const void *a, const void *b, size_t size) {
     atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed); return memcmp(a, b, size);

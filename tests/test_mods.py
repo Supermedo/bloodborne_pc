@@ -76,7 +76,12 @@ class ModTests(unittest.TestCase):
 
     def test_mod_symlinks_rejected(self):
         a = self.mod('A')
-        (a / 'dvdroot_ps4/escape').symlink_to(self.assets, target_is_directory=True)
+        try:
+            (a / 'dvdroot_ps4/escape').symlink_to(self.assets, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows symlinks require Developer Mode or administrator privileges')
+            raise
         with self.assertRaises(ValueError):
             mods.build_overlay(self.game, self.root / 'out', [('A', a)])
 
@@ -135,6 +140,7 @@ class ModTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mods.selected(self.moddir, config)
 
+    @unittest.skipIf(os.name == 'nt', 'Linux run.sh; Windows startup has separate coverage')
     def test_run_uses_overlay_propagates_exit_and_cleans_view(self):
         self.mod('A')
         python = self.root / 'python'

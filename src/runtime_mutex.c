@@ -80,7 +80,13 @@ static int32_t ensure_mutex(GuestMutex **mutex) {
 static ABI int32_t mutex_lock(GuestMutex **mutex) {
     int32_t e = ensure_mutex(mutex);
     if (e) return e;
-    e = orbis_error(pthread_mutex_lock(&(*mutex)->native));
+    int r = pthread_mutex_trylock(&(*mutex)->native);
+    if (r == EBUSY) { /* contended: timed for the wait profile */
+        const uint64_t start = runtime_wait_clock();
+        r = pthread_mutex_lock(&(*mutex)->native);
+        runtime_wait_note(1, runtime_wait_clock() - start);
+    }
+    e = orbis_error(r);
     if (!e) ++locks;
     return e;
 }
@@ -160,14 +166,20 @@ static ABI int32_t cond_wait(GuestCond **cond, GuestMutex **mutex) {
     if (e) return e;
     if (!mutex || (uintptr_t)*mutex < 3) return orbis_error(EINVAL);
     ++waits;
-    return orbis_error(pthread_cond_wait(&(*cond)->native, &(*mutex)->native));
+    const uint64_t start = runtime_wait_clock();
+    const int e2 = pthread_cond_wait(&(*cond)->native, &(*mutex)->native);
+    runtime_wait_note(0, runtime_wait_clock() - start);
+    return orbis_error(e2);
 }
 static int32_t cond_wait_until(GuestCond **cond, GuestMutex **mutex, const struct timespec *end) {
     int32_t e = ensure_cond(cond);
     if (e) return e;
     if (!mutex || (uintptr_t)*mutex < 3 || !end) return orbis_error(EINVAL);
     ++waits;
-    return timed_error(pthread_cond_timedwait(&(*cond)->native, &(*mutex)->native, end));
+    const uint64_t start = runtime_wait_clock();
+    const int e2 = pthread_cond_timedwait(&(*cond)->native, &(*mutex)->native, end);
+    runtime_wait_note(0, runtime_wait_clock() - start);
+    return timed_error(e2);
 }
 static ABI int32_t cond_timedwait(GuestCond **cond, GuestMutex **mutex, uint32_t usec) {
     struct timespec end;

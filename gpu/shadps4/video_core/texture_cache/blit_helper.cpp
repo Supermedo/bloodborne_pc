@@ -101,6 +101,7 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     scheduler.BeginRendering(state);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    const Vulkan::Breadcrumbs::Scope crumb{cmdbuf, scheduler.CrumbStream(), "blit helper"};
     const vk::DescriptorImageInfo image_info = {
         .sampler = VK_NULL_HANDLE,
         .imageView = color_view,
@@ -202,6 +203,7 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
     scheduler.BeginRendering(state);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+    const Vulkan::Breadcrumbs::Scope crumb{cmdbuf, scheduler.CrumbStream(), "blit helper"};
     const vk::DescriptorImageInfo image_info = {
         .sampler = VK_NULL_HANDLE,
         .imageView = src_view,

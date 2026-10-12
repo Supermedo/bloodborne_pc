@@ -194,4 +194,7 @@ u64 PS4_SYSV_ABI sceKernelGetEventData(const OrbisKernelEvent* ev);
 
 void RegisterEventQueue(Core::Loader::SymbolsResolver* sym);
 
+/// bbport (frame stats): prints the time the game waited in each event queue since the last call.
+void ReportEqueueWaits(double frames);
+
 } // namespace Libraries::Kernel

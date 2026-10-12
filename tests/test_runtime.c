@@ -4,6 +4,7 @@
 
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
+volatile int runtime_restarting;
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -194,8 +195,27 @@ static void direct_memory(void) {
     assert(*(uint64_t *)x==0);
     *(uint64_t *)x=UINT64_C(0xabcdef0123456789);
     assert(*(uint64_t *)y==UINT64_C(0xabcdef0123456789)); /* real shared backing */
+    uint64_t phys; uintptr_t end; int prot,type;
+    assert(runtime_memory_direct_phys((uintptr_t)x+7,&phys,&end) && phys==7 && end==(uintptr_t)x+length);
+    assert(runtime_memory_vma_info((uintptr_t)x,&prot,&type,&end) && prot==3 && type==0);
+    // Uploads and fence writes must work even while GPU tracking blocks all guest access.
+    runtime_memory_gpu_protect((uintptr_t)x,length,0,0);
+    unsigned char source[64], expected[80], actual[80];
+    for (size_t i=0;i<sizeof(source);++i) source[i]=(unsigned char)(i*3+1);
+    for (size_t offset=0;offset<8;++offset) for (size_t n=1;n<=64;++n) {
+        memset(y,0xa5,sizeof(actual)); memset(expected,0xa5,sizeof(expected));
+        memcpy(expected+offset,source,n);
+        assert(runtime_memory_write_backing((uintptr_t)x+offset,source,n));
+        runtime_memory_read_backing((uintptr_t)x,actual,sizeof(actual));
+        assert(!memcmp(actual,expected,sizeof(actual)) && !memcmp(y,expected,sizeof(actual)));
+    }
+    runtime_memory_gpu_protect((uintptr_t)x,length,1,1);
     assert((uint32_t)unmap((char *)x+4096,length)==0x80020016); /* unaligned */
     assert(unmap(x,length)==0 && unmap(y,length)==0);
+    memset(actual,1,sizeof(actual)); memset(expected,0,sizeof(expected));
+    runtime_memory_read_backing((uintptr_t)x,actual,sizeof(actual));
+    assert(!memcmp(actual,expected,sizeof(actual)));
+    assert(!runtime_memory_write_backing((uintptr_t)x,source,sizeof(source)));
     assert(release(a,length)==0 && release(b,length)==0 && release(c,length)==0);
     assert(alloc(0,pool,length,0,0,&a)==0 && a==0);
     x=NULL; assert(map(&x,length,3,0,a,0)==0);

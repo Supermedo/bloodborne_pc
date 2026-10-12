@@ -95,6 +95,8 @@ public:
         RegionBits& bits = GetRegionBits<type>();
         if constexpr (type == Type::CPU && enable) {
             CountWriteFaults(start_page, end_page);
+            last_cpu_write_frame = BbStats::frame_number.load(std::memory_order_relaxed);
+            NotePreuploadChurn();
         }
         if constexpr (enable) {
             bits.SetRange(start_page, end_page);
@@ -188,6 +190,32 @@ public:
 
         const RegionBits& bits = GetRegionBits<type>();
         return bits.AnyInRange(start_page, end_page);
+    }
+
+    /// bbport (pre-upload): whether some page is CPU-modified but not GPU-modified.
+    [[nodiscard]] bool HasCpuOnlyPages() const noexcept {
+        return (cpu & ~gpu).Any();
+    }
+    /// bbport (pre-upload): the frame of the newest guest write seen in this region.
+    u32 last_cpu_write_frame = 0;
+    /// bbport (pre-upload): when it was last pre-uploaded, and no pre-upload before this frame:
+    /// a region the game writes again soon after a pre-upload backs off, longer each time.
+    u32 preupload_frame = 0;
+    u32 preupload_backoff_until = 0;
+    u8 preupload_strikes = 0;
+    u32 preupload_count = 0;
+    void NotePreuploadChurn() noexcept {
+        constexpr u32 ChurnFrames = 600; // ~10 s: regions the game rewrites every few seconds
+        if (preupload_frame == 0 || last_cpu_write_frame - preupload_frame > ChurnFrames) {
+            return;
+        }
+        // One quick rewrite may be the game loading new data there (worth pre-uploading); from
+        // the second on it is data it rewrites now and then.
+        preupload_strikes = std::min<u8>(preupload_strikes + 1, 7);
+        if (preupload_strikes >= 2) {
+            preupload_backoff_until = last_cpu_write_frame + (240u << (preupload_strikes - 1));
+        }
+        preupload_frame = 0;
     }
 
     LockType lock;

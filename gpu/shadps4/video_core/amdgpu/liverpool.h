@@ -5,8 +5,10 @@
 
 #include <cstdlib>
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <coroutine>
 #include <exception>
 #include <mutex>
@@ -29,6 +31,10 @@ class Rasterizer;
 
 namespace Libraries::VideoOut {
 struct VideoOutPort;
+}
+
+namespace Libraries::GnmDriver {
+bool SubmitLockOnDecode(); // gnmdriver.cpp
 }
 
 namespace AmdGpu {
@@ -99,8 +105,15 @@ public:
     void SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb);
     void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
 
-    void SubmitDone() noexcept {
+    /// `frame` (BB_SUBMIT_LOCK=frame): the guest's frame number, reported finished once the GPU
+    /// has executed what was submitted until now on every queue, compute queues too (the game
+    /// reuses the frame's memory then; the submission lock waited for all of them as well)
+    /// (Libraries::GnmDriver::NoteFramesRetired).
+    void SubmitDone(u64 frame = 0) noexcept {
         std::scoped_lock lk{submit_mutex};
+        if (frame != 0) {
+            frame_ends.emplace_back(submissions_total, frame);
+        }
         mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
         mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
         submit_done = true;
@@ -119,7 +132,9 @@ public:
             const char* env = std::getenv("BB_WORK_RETIRED");
             return !(env && env[0] == '0');
         }();
-        return num_submits == 0 && (work_retired || !use_retired);
+        // BB_SUBMIT_LOCK=decode with honest labels: decoded is enough.
+        return num_submits == 0 &&
+               (work_retired || !use_retired || Libraries::GnmDriver::SubmitLockOnDecode());
     }
 
     void SetVoPort(Libraries::VideoOut::VideoOutPort* port) {
@@ -220,7 +235,21 @@ private:
 
     using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
     CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
-    Task ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb, u64 seq = NoSeq);
+    /// bbport: a submission's command buffers copied when the guest submits them
+    /// (BB_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
+    /// them ("PM4 type 0" from zeros or the next frame's commands, while an area loads).
+    struct SubmittedCopy {
+        std::vector<u32> data; ///< dcb, then ccb
+        const u32* guest_dcb{};
+        std::size_t dcb_dwords{};
+        const u32* guest_ccb{};
+        std::size_t ccb_dwords{};
+        std::chrono::steady_clock::time_point submitted;
+    };
+    Task ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb, u64 seq = NoSeq,
+                         std::shared_ptr<SubmittedCopy> copy = {});
+    /// After a copied submission is decoded: whether the guest changed its command buffers since.
+    static void CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq);
     Task ProcessCeUpdate(std::span<const u32> ccb);
     template <bool is_indirect = false>
     Task ProcessCompute(std::span<const u32> acb, u32 vqid);
@@ -267,10 +296,24 @@ private:
     const bool guest_markers_enabled;
     std::jthread process_thread{};
     std::atomic<u32> num_submits{};
+    /// BB_SUBMIT_LOCK=decode, under submit_mutex: graphics submissions made and decoded, and per frame
+    /// sceGnmSubmitDone ended the graphics submissions made so far (count, frame number).
+    u64 gfx_submitted = 0, gfx_decoded = 0;
+    u64 decoded_total = 0; ///< submissions of every queue decoded (submissions_total)
+    void* last_decoded = nullptr; ///< BB_TIMELINE: the submission whose decoding began last
+    std::deque<std::pair<u64, u64>> frame_ends;
+    /// Frames whose graphics submissions are all decoded are reported finished once the GPU has
+    /// executed the work recorded so far (GPU command thread).
+    void SignalDecodedFrames();
+    /// BB_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
+    /// was submitted since (the interrupt, work_retired).
+    void SignalGpuIdle(u64 generation);
     /// bbport: false from a submission until its draws and deferred fences are done (stage A
     /// decrements num_submits once it has decoded a submission, before that). Under
     /// submit_mutex with num_submits.
     std::atomic<bool> work_retired{true};
+    /// bbport: submissions so far (submit_mutex): BB_HONEST_LABELS GPU idle checks none came since.
+    u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};
     std::mutex submit_mutex;

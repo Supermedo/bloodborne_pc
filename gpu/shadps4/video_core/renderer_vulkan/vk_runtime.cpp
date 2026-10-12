@@ -177,6 +177,49 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
                  vk::AccessFlagBits2::eTransferWrite);
 }
 
+void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
+                                 std::span<const vk::BufferCopy> copies) {
+    if (copies.empty()) {
+        return;
+    }
+    scheduler.EndRendering();
+    bool needs_flush = false;
+    for (const auto& copy : copies) {
+        needs_flush |= IsBufferAccessed(dst, copy.dstOffset, copy.size, true);
+    }
+    if (needs_flush) {
+        FlushBarriers();
+    }
+    scheduler.Record([src, dst_handle = dst->Handle(),
+                      regions = scheduler.RecordData(copies)](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyBuffer(src, dst_handle, regions.size(), regions.data());
+    });
+    for (const auto& copy : copies) {
+        AccessBuffer(dst, copy.dstOffset, copy.size, vk::PipelineStageFlagBits2::eCopy,
+                     vk::AccessFlagBits2::eTransferWrite);
+    }
+}
+
+void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data) {
+    if (data.empty()) {
+        return;
+    }
+    scheduler.EndRendering();
+    if (IsBufferAccessed(dst, offset, data.size(), true)) {
+        FlushBarriers();
+    }
+    constexpr std::size_t Piece = 32 * 1024; // vkCmdUpdateBuffer takes 64 KiB at most
+    for (std::size_t at = 0; at < data.size(); at += Piece) {
+        const auto piece = data.subspan(at, std::min(Piece, data.size() - at));
+        scheduler.Record([handle = dst->Handle(), to = offset + at,
+                          bytes = scheduler.RecordData(piece)](vk::CommandBuffer cmdbuf) {
+            cmdbuf.updateBuffer(handle, to, bytes.size_bytes(), bytes.data());
+        });
+    }
+    AccessBuffer(dst, offset, data.size(), vk::PipelineStageFlagBits2::eCopy,
+                 vk::AccessFlagBits2::eTransferWrite);
+}
+
 void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
     scheduler.EndRendering();
 

@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 import struct
 
+import game_check
+
 
 def span(data, offset, size):
     if offset < 0 or size < 0 or offset + size > len(data):
@@ -120,6 +122,10 @@ def inspect_libc(path):
     return evidence
 
 
+class GameCheckError(Exception):
+    """Game files bbport does not run (game_check.py)."""
+
+
 def prepare(game, out):
     source = (game / 'eboot.bin').read_bytes()
     elf, header, ph, segments, missing = parse_self(source)
@@ -134,6 +140,9 @@ def prepare(game, out):
         if p['filesz'] > p['memsz']:
             raise ValueError('segment file size exceeds memory size')
         image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
+    # bbport: only the supported executable runs (game_check.py); others fail in the game's code.
+    if found := game_check.problem(game, hashlib.sha256(image).hexdigest()):
+        raise GameCheckError(game_check.explain(*found))
     dp = next(p for p in ph if p['type'] == 2)
     dyn = []
     for pos in range(dp['offset'], dp['offset'] + dp['filesz'], 16):
@@ -252,5 +261,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         prepare(args.game, args.out)
+    except GameCheckError as error:
+        parser.exit(2, f'\nUnsupported game files: {error}\nSet BB_SKIP_GAME_CHECK=1 to start anyway.\n')
     except (ValueError, OSError, StopIteration, KeyError, IndexError) as error:
         parser.exit(1, f'prepare failed: {error}\n')

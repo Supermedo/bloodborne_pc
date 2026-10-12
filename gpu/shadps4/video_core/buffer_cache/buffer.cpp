@@ -107,7 +107,26 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
     } else {
         buffer_ci.flags |=
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
-        buffer = Vulkan::Check(device.createBuffer(buffer_ci));
+        // Bound to exported guest memory chunks (BB_GUEST_IN_PLACE) as well as VRAM blocks.
+        const vk::ExternalMemoryBufferCreateInfo external{
+            .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
+        };
+        if (GuestInPlace()) {
+            buffer_ci.pNext = &external;
+            if (const auto [result, created] = device.createBuffer(buffer_ci);
+                result == vk::Result::eSuccess) {
+                buffer = created;
+            } else {
+                std::printf("Guest memory: the arena cannot take exported memory (%s); the GPU "
+                            "uses copies in VRAM as before\n",
+                            vk::to_string(result).c_str());
+                DisableGuestInPlace();
+            }
+            buffer_ci.pNext = nullptr;
+        }
+        if (!buffer) {
+            buffer = Vulkan::Check(device.createBuffer(buffer_ci));
+        }
     }
 
     if (with_bda) {
@@ -120,6 +139,31 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
     }
 }
 
+Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
+               std::string_view debug_name)
+    : size_bytes{size_bytes_}, mem_type{MemoryType::HostCached},
+      buffer{instance.GetDevice(), instance.GetAllocator()} {
+    const vk::ExternalMemoryBufferCreateInfo external{
+        .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
+    };
+    const vk::BufferCreateInfo buffer_ci = {
+        .pNext = &external,
+        .size = size_bytes,
+        .usage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
+                 vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eUniformBuffer |
+                 vk::BufferUsageFlagBits::eUniformTexelBuffer |
+                 vk::BufferUsageFlagBits::eStorageTexelBuffer,
+        .sharingMode = vk::SharingMode::eExclusive,
+    };
+    const auto device = instance.GetDevice();
+    buffer.buffer = Vulkan::Check(device.createBuffer(buffer_ci));
+    const auto result = device.bindBufferMemory(buffer.buffer, memory, 0);
+    ASSERT_MSG(result == vk::Result::eSuccess, "Binding a guest memory chunk failed: {}",
+               vk::to_string(result));
+    Vulkan::SetObjectName(device, Handle(), debug_name);
+    is_coherent = true;
+}
+
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                MemoryType mem_type_, std::string_view debug_name)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
@@ -130,6 +174,14 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
         .usage = AllFlags,
         .sharingMode = vk::SharingMode::eExclusive,
     };
+    // bbport: arenas are also read by the readback queue (BufferCache::DownloadMemory).
+    const std::array<u32, 2> families = {instance.GetGraphicsQueueFamilyIndex(),
+                                         instance.GetReadbackQueueFamilyIndex()};
+    if (mem_type == MemoryType::Sparse && instance.GetReadbackQueue()) {
+        buffer_ci.sharingMode = vk::SharingMode::eConcurrent;
+        buffer_ci.queueFamilyIndexCount = static_cast<u32>(families.size());
+        buffer_ci.pQueueFamilyIndices = families.data();
+    }
     VmaAllocationInfo alloc_info{};
     buffer.Create(buffer_ci, mem_type, &alloc_info);
 

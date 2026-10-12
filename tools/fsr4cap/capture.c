@@ -28,7 +28,7 @@ static uint64_t Fnv(const void* data, size_t size) {
 }
 
 static void WriteFile2(const char* name, const void* data, size_t size) {
-    char path[MAX_PATH];
+    char path[2 * MAX_PATH]; // dir and a name: no truncation (-Wformat-truncation)
     snprintf(path, sizeof(path), "%s\\%s", dir, name);
     FILE* f = fopen(path, "rb");
     if (f) { fclose(f); return; } // content-addressed: already there
@@ -433,7 +433,7 @@ static D3D12_GPU_VIRTUAL_ADDRESS STDMETHODCALLTYPE HookGetGpuVa(ID3D12Resource* 
 void CaptureInstall(ID3D12Device* device, ID3D12GraphicsCommandList* list, const char* directory) {
     snprintf(dir, sizeof(dir), "%s", directory);
     CreateDirectoryA(dir, NULL);
-    char path[MAX_PATH];
+    char path[MAX_PATH + 16];
     snprintf(path, sizeof(path), "%s\\trace.txt", dir);
     trace = fopen(path, "w");
     setvbuf(trace, NULL, _IOFBF, 1 << 20);

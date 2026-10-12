@@ -34,6 +34,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent);
 
 /// The menu is open or a text entry is shown: the game's input is held neutral.
 bool CapturesInput();
+bool MenuOpen();
 
 /// Window thread: the game's text dialog (sceImeDialog). Shown as a box on screen until
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.

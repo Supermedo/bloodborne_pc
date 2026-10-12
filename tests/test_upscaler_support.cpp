@@ -5,12 +5,13 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <unistd.h>
+#include "test_platform.h"
 #include "bbport_settings.h"
 
 int main() {
     using namespace BbSettings;
-    char path[] = "/tmp/bbport-upscaler-test-XXXXXX";
-    const int fd = mkstemp(path);
+    char path[4096];
+    const int fd = bb_test_temp(path, sizeof(path), "bbport-upscaler-test");
     assert(fd >= 0);
     close(fd);
     setenv("BB_CONFIG", path, 1);

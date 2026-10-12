@@ -2,7 +2,9 @@
 // bbport: FSR 4.1.1 replay on Vulkan (fsr411.h). The frame is the DLL's 29 dispatches: SPD auto
 // exposure, prepass, pass0_post, model passes 1..12 each followed by its _post pass (tensor border
 // clears), postpass, RCAS. The rules for group counts, the tensor size table and the constants
-// are the ones tools/fsr4cap/extract.py checks against the recorded D3D12 frames.
+// are the ones tools/fsr4cap/extract.py checks against the recorded D3D12 frames. The DLL's FP8
+// matrix variant (RDNA4) has the same passes, constants and buffers, other shaders and weights,
+// and other group counts (Rules).
 
 #include "fsr411.h"
 
@@ -31,6 +33,38 @@ constexpr uint32_t kPassCount = sizeof(kPasses) / sizeof(kPasses[0]);
 /// Tensor level (1/2^level of the aligned output) a model pass runs at, and of its _post pass.
 constexpr uint32_t kRunLevel[13] = {1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 2, 2, 1};
 constexpr uint32_t kPostLevel[13] = {1, 1, 1, 2, 2, 2, 3, 3, 3, 2, 2, 1, 1};
+
+/// The group counts of a variant (extract.py VARIANTS): tensor elements per group of model pass k
+/// at its level, output pixels per group of the prepass and postpass, and the alignment of the
+/// tensors' width whose border the _post passes clear (up to align + 1 columns right of it).
+struct Rules {
+    const char* name;
+    const char* folder; ///< of its asset sets
+    uint32_t tile[13][2];
+    uint32_t prepass[2], postpass[2];
+    uint32_t post_align;
+};
+constexpr Rules kInt8{"INT8",
+                      "",
+                      {{0, 0}, {64, 1}, {64, 1}, {64, 1}, {64, 1}, {64, 1}, {64, 1}, {64, 1}, {64, 1},
+                       {64, 1}, {64, 1}, {64, 1}, {64, 1}},
+                      {16, 16},
+                      {32, 32},
+                      4};
+constexpr Rules kFp8{"FP8",
+                     "fp8/",
+                     {{0, 0}, {16, 8}, {16, 8}, {32, 1}, {16, 4}, {16, 4}, {32, 1}, {16, 2}, {16, 2},
+                      {16, 1}, {16, 4}, {16, 1}, {16, 8}},
+                     {64, 2},
+                     {64, 2},
+                     32};
+/// The FP8 passes with FP8 emulated through FP16 matrices, as vkd3d-proton runs them on RDNA3.
+constexpr Rules kFp8Emulated = [] {
+    Rules r = kFp8;
+    r.name = "FP8 (emulated)";
+    r.folder = "fp8emu/";
+    return r;
+}();
 
 uint32_t CeilDiv(uint32_t a, uint32_t b) {
     return (a + b - 1) / b;
@@ -79,6 +113,7 @@ struct Reflection {
     std::string entry = "main";
     uint32_t local_size[3] = {1, 1, 1};
     std::vector<Binding> bindings;
+    bool matrices = false; ///< CooperativeMatrixKHR: runs as wave32
 };
 
 bool Reflect(const std::vector<uint32_t>& words, Reflection& out, std::string& error) {
@@ -118,6 +153,9 @@ bool Reflect(const std::vector<uint32_t>& words, Reflection& out, std::string& e
         }
         const uint32_t* w = &words[i];
         switch (op) {
+        case 17: // OpCapability
+            out.matrices |= w[1] == 6022; // CooperativeMatrixKHR
+            break;
         case 5: // OpName
             names[w[1]] = string_at(i + 2, i + count);
             break;
@@ -202,6 +240,7 @@ struct Upscaler::Impl {
     VkPhysicalDevice physical;
     VkDevice device;
     std::string dir;
+    const Rules* rules = &kInt8;
     std::string error;
     VkPhysicalDeviceMemoryProperties memory{};
     VkDeviceSize ubo_align = 256;
@@ -246,8 +285,20 @@ struct Upscaler::Impl {
     std::array<double, kPassCount> profile_ms{};
     uint64_t profile_frames = 0;
 
-    Impl(VkPhysicalDevice p, VkDevice d, std::string dir_)
+    Impl(VkPhysicalDevice p, VkDevice d, std::string dir_, Features features)
         : physical{p}, device{d}, dir{std::move(dir_)} {
+        // FP8 when the device runs it and its sets were built (on RDNA4: tools/fsr4cap records
+        // both variants there).
+        const auto built = [&](const Rules& r) {
+            return bool(std::ifstream(dir + "/" + r.folder + "t1080_m0/initializer.bin"));
+        };
+        const char* env = std::getenv("BB_FSR411_VARIANT");
+        const std::string wanted = env ? env : "";
+        if (wanted == "fp8emu" && features.fp16_matrices && built(kFp8Emulated)) {
+            rules = &kFp8Emulated;
+        } else if (wanted != "int8" && features.fp8_matrices && built(kFp8)) {
+            rules = &kFp8;
+        }
         vkGetPhysicalDeviceMemoryProperties(physical, &memory);
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(physical, &props);
@@ -419,7 +470,7 @@ struct Upscaler::Impl {
 
     bool LoadPass(uint32_t index) {
         std::vector<uint8_t> bytes;
-        const std::string path = dir + "/" + set + "/" + kPasses[index] + ".spv";
+        const std::string path = dir + "/" + rules->folder + set + "/" + kPasses[index] + ".spv";
         if (!ReadFile(path, bytes) || bytes.size() % 4) {
             error = "missing " + path + " (tools/fsr4cap: capture and extract the FSR 4.1.1 assets)";
             return false;
@@ -463,6 +514,17 @@ struct Upscaler::Impl {
         VkComputePipelineCreateInfo pci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         pci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         pci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        // Matrix passes as vkd3d-proton runs them (their wave size heuristic: extract.py checks
+        // it is these): wave32, which WMMA is on RDNA, in full subgroups.
+        VkPipelineShaderStageRequiredSubgroupSizeCreateInfo wave32{
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO};
+        wave32.requiredSubgroupSize = 32;
+        if (p.refl.matrices) {
+            pci.stage.pNext = &wave32;
+            if (p.refl.local_size[0] % 32 == 0) {
+                pci.stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+            }
+        }
         pci.stage.module = module;
         pci.stage.pName = p.refl.entry.c_str();
         pci.layout = p.layout;
@@ -498,9 +560,9 @@ struct Upscaler::Impl {
                 return false;
             }
         }
-        if (!ReadFile(dir + "/" + set + "/initializer.bin", initializer_data) ||
-            initializer_data.size() != 131072) {
-            error = "missing or wrong " + dir + "/" + set + "/initializer.bin";
+        const std::string weights = dir + "/" + rules->folder + set + "/initializer.bin";
+        if (!ReadFile(weights, initializer_data) || initializer_data.size() != 131072) {
+            error = "missing or wrong " + weights;
             return false;
         }
         const VkDeviceSize scratch_size = tier2160 ? 83232256u : 20880256u;
@@ -727,28 +789,31 @@ struct Upscaler::Impl {
             if (name == "spd") {
                 gx = CeilDiv(rw, 64);
                 gy = CeilDiv(rh, 64);
-            } else if (name == "prepass" || name == "rcas") {
+            } else if (name == "rcas") {
                 gx = CeilDiv(aw, 16);
                 gy = CeilDiv(ah, 16);
-            } else if (name == "postpass") {
-                gx = CeilDiv(aw, 32);
-                gy = CeilDiv(ah, 32);
+            } else if (name == "prepass" || name == "postpass") {
+                const uint32_t* tile = name == "prepass" ? rules->prepass : rules->postpass;
+                gx = CeilDiv(aw, tile[0]);
+                gy = CeilDiv(ah, tile[1]);
             } else if (name.ends_with("_post")) {
                 // Clears the border of a tensor: threads as the shader counts them (it stops the
-                // rest) from the tensor size and the tier's allocation.
+                // rest) from the tensor size and the tier's allocation (aligned).
                 const uint32_t k = name == "pass0_post" ? 0 : uint32_t(std::stoi(name.substr(4)));
-                const uint32_t level = k ? kPostLevel[k] : 1;
+                const uint32_t level = kPostLevel[k];
                 const uint32_t w = aw >> level, h = ah >> level;
-                const uint32_t tw = (tier2160 ? 3840u : 1920u) >> level;
+                const uint32_t align = rules->post_align;
+                const uint32_t tw = ((tier2160 ? 3840u : 1920u) >> level) + align - 1;
                 const uint32_t th = (tier2160 ? 2160u : 1080u) >> level;
-                const uint32_t kx = std::min(tw + 1 - w, 5u), ky = std::min(th + 1 - h, 1u);
+                const uint32_t kx = std::min(tw / align * align + 1 - w, align + 1);
+                const uint32_t ky = std::min(th + 1 - h, 1u);
                 const uint32_t threads = (w + 1 + kx) + h + h * kx + (w + 1 + kx) * ky;
                 gx = CeilDiv(threads, p.refl.local_size[0]);
             } else {
                 const uint32_t k = uint32_t(std::stoi(name.substr(4)));
                 const uint32_t level = kRunLevel[k];
-                gx = CeilDiv(aw >> level, 64);
-                gy = ah >> level;
+                gx = CeilDiv(aw >> level, rules->tile[k][0]);
+                gy = CeilDiv(ah >> level, rules->tile[k][1]);
             }
             vkCmdDispatch(cmd, gx, gy, 1);
             if (profile_pool) {
@@ -765,8 +830,8 @@ struct Upscaler::Impl {
     }
 };
 
-Upscaler::Upscaler(VkPhysicalDevice physical, VkDevice device, std::string dir)
-    : impl{std::make_unique<Impl>(physical, device, std::move(dir))} {}
+Upscaler::Upscaler(VkPhysicalDevice physical, VkDevice device, std::string dir, Features features)
+    : impl{std::make_unique<Impl>(physical, device, std::move(dir), features)} {}
 
 Upscaler::~Upscaler() = default;
 
@@ -779,7 +844,8 @@ const std::string& Upscaler::Error() const noexcept {
 }
 
 std::string Upscaler::Describe() const {
-    return impl->set + " output " + std::to_string(impl->out_w) + "x" + std::to_string(impl->out_h);
+    return std::string(impl->rules->name) + " " + impl->set + " output " + std::to_string(impl->out_w) +
+           "x" + std::to_string(impl->out_h);
 }
 
 } // namespace Fsr411

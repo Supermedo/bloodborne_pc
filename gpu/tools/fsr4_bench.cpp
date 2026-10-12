@@ -11,6 +11,7 @@
 // last frame, raw RGBA16F, for comparing shader variants.
 // Assets: BB_FSR4_DIR or fsr4_shaders in the working directory.
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -54,6 +55,7 @@ struct Gpu {
     VkQueue queue{};
     uint32_t family = 0;
     VkPhysicalDeviceMemoryProperties memory{};
+    Fsr411::Features fsr411; ///< what the device was created with for FSR 4.1.1's variants
 };
 
 uint32_t MemoryType(const Gpu& gpu, uint32_t bits, VkMemoryPropertyFlags flags) {
@@ -108,6 +110,8 @@ Gpu CreateGpu(bool stats) {
     // Cooperative matrix (WMMA) for experimental model passes, when the device has it.
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopmat{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+    // FSR 4.1.1's FP8 variant: FP8 cooperative matrices (RDNA4).
+    VkPhysicalDeviceShaderFloat8FeaturesEXT float8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
     // FSR 4.1.1 passes use mixed float dot products (dot2 of halves into float), as vkd3d-proton.
     VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE mixed_dot{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MIXED_FLOAT_DOT_PRODUCT_FEATURES_VALVE};
@@ -120,7 +124,8 @@ Gpu CreateGpu(bool stats) {
     f12.pNext = &f13;
     f13.pNext = &derivatives;
     derivatives.pNext = &coopmat;
-    coopmat.pNext = &mixed_dot;
+    coopmat.pNext = &float8;
+    float8.pNext = &mixed_dot;
     if (stats) {
         mixed_dot.pNext = &executable;
     }
@@ -135,6 +140,27 @@ Gpu CreateGpu(bool stats) {
     if (coopmat.cooperativeMatrix) {
         extensions.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
     }
+    // RADV fills the FP8 features in also where it does not offer the extension (RDNA3).
+    uint32_t available_count = 0;
+    vkEnumerateDeviceExtensionProperties(gpu.physical, nullptr, &available_count, nullptr);
+    std::vector<VkExtensionProperties> available(available_count);
+    vkEnumerateDeviceExtensionProperties(gpu.physical, nullptr, &available_count, available.data());
+    const bool has_float8 = std::any_of(available.begin(), available.end(), [](const auto& e) {
+        return std::strcmp(e.extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0;
+    });
+    if (!has_float8) {
+        float8.shaderFloat8 = float8.shaderFloat8CooperativeMatrix = VK_FALSE;
+    }
+    if (float8.shaderFloat8CooperativeMatrix) {
+        extensions.push_back(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+    } else {
+        coopmat.pNext = float8.pNext;
+    }
+    // The matrix passes run as wave32 in full subgroups, with the Vulkan memory model.
+    const bool matrices = coopmat.cooperativeMatrix && f12.vulkanMemoryModel && f13.subgroupSizeControl &&
+                          f13.computeFullSubgroups;
+    gpu.fsr411.fp8_matrices = matrices && float8.shaderFloat8CooperativeMatrix;
+    gpu.fsr411.fp16_matrices = matrices && f12.shaderFloat16;
     if (stats) {
         extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     }
@@ -496,7 +522,7 @@ int main(int argc, char** argv) {
     if (fsr411) {
         const char* dir411 = std::getenv("BB_FSR411_DIR");
         upscaler411 = std::make_unique<Fsr411::Upscaler>(gpu.physical, gpu.device,
-                                                         dir411 && dir411[0] ? dir411 : "fsr4_411");
+                                                         dir411 && dir411[0] ? dir411 : "fsr4_411", gpu.fsr411);
         VkQueryPoolCreateInfo qci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qci.queryCount = 2;
@@ -528,6 +554,9 @@ int main(int argc, char** argv) {
         if (!upscaler411->Record(f)) {
             std::fprintf(stderr, "FSR 4.1.1: %s\n", upscaler411->Error().c_str());
             return 1;
+        }
+        if (frame == 1) {
+            std::printf("FSR 4.1.1: %s\n", upscaler411->Describe().c_str());
         }
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps, 1);
         submit();
