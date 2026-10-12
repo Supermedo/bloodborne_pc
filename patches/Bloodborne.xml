@@ -325,6 +325,12 @@
             <Line Type="bytes" Address="0x04b36de2" Value="00a0"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Larger Frame Heaps" Note="Raises the two per-frame render heaps from 256 KiB to 1 MiB each. A busy frame used up 256 KiB, and the game copied into the NULL block it got back (crash at 0x025d5b40). The port applies this always." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02595c0a" Value="0x00100000"/>
+            <Line Type="bytes32" Address="0x02595c47" Value="0x00100000"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>
