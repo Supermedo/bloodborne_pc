@@ -974,6 +974,17 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
     if (width <= 0 || height <= 0) {
         return; // minimised: keep the last size (a 0x0 frame image cannot be made, issue #31)
     }
+    // bbport: frame generation works on this frame image, which follows the window: on a 4K
+    // display with a 1440p output it interpolated 4K frames and cost more render time than it
+    // gave back. With frame generation on, the frame stays at the game's output size; the present
+    // blit scales it to the window.
+    if (const auto& settings = BbSettings::Get();
+        settings.frame_generation.load(std::memory_order_relaxed) != BbSettings::FrameGenerationOff) {
+        const int output = std::clamp(settings.output_res.load(std::memory_order_relaxed), 0,
+                                      BbSettings::OutputCount - 1);
+        width = std::min<s32>(width, BbSettings::OutputWidths[output]);
+        height = std::min<s32>(height, BbSettings::OutputHeights[output]);
+    }
     const float ratio = (float)width / (float)height;
 
     expected_frame_height = height;
