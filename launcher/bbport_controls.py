@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SDL names accepted by runtime_pad.c; mouse buttons and the wheel count while the game window holds
+# the mouse (mouse look, from bbport 0.51).
+CONTROLS = [
+    ('cross', ('Cross', 'Крест'), 'Space', 'a'),
+    ('circle', ('Circle', 'Круг'), 'Left Shift', 'b'),
+    ('square', ('Square', 'Квадрат'), 'E', 'x'),
+    ('triangle', ('Triangle', 'Треугольник'), 'Q', 'y'),
+    ('l1', ('L1', 'L1'), '1, Mouse X2', 'leftshoulder'),
+    ('r1', ('R1', 'R1'), '3, Mouse Left', 'rightshoulder'),
+    ('l2', ('L2', 'L2'), 'R, Mouse Right', 'lefttrigger'),
+    ('r2', ('R2', 'R2'), 'F, Mouse X1', 'righttrigger'),
+    ('l3', ('L3', 'L3'), 'Z', 'leftstick'),
+    ('r3', ('R3', 'R3'), 'C, Mouse Middle', 'rightstick'),
+    ('options', ('Options', 'Options'), 'Return', 'start'),
+    ('touchpad', ('Touchpad left (gestures)', 'Тачпад, левая половина (жесты)'), 'Tab', 'back, touchpad'),
+    ('touchpad_right', ('Touchpad right (personal effects)', 'Тачпад, правая половина (личные вещи)'), 'Backspace', ''),
+    ('up', ('D-pad up', 'Крестовина вверх'), 'I, Wheel Up', 'dpup'),
+    ('down', ('D-pad down', 'Крестовина вниз'), 'K, Wheel Down', 'dpdown'),
+    ('left', ('D-pad left', 'Крестовина влево'), 'J', 'dpleft'),
+    ('right', ('D-pad right', 'Крестовина вправо'), 'L', 'dpright'),
+    ('move_up', ('Move forward', 'Движение вперёд'), 'W', None),
+    ('move_down', ('Move backward', 'Движение назад'), 'S', None),
+    ('move_left', ('Move left', 'Движение влево'), 'A', None),
+    ('move_right', ('Move right', 'Движение вправо'), 'D', None),
+    ('look_up', ('Look up', 'Камера вверх'), 'Up', None),
+    ('look_down', ('Look down', 'Камера вниз'), 'Down', None),
+    ('look_left', ('Look left', 'Камера влево'), 'Left', None),
+    ('look_right', ('Look right', 'Камера вправо'), 'Right', None),
+]

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <unordered_set>
 #include "common/serdes.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -165,12 +166,14 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
         return false;
     }
 
-    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
-    ASSERT(is_new);
-
-    it.value() =
+    // bbport: built before it is inserted: a pipeline the driver rejects while preloading throws
+    // (Serialization::CorruptData) and leaves no empty entry behind.
+    auto pipeline =
         std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
                                           compute_key, *sel.infos[0], sel.modules[0], sdata, true);
+    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
+    ASSERT(is_new);
+    it.value() = std::move(pipeline);
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
@@ -240,12 +243,12 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
-    ASSERT(is_new);
-
-    it.value() = std::make_unique<GraphicsPipeline>(
+    auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
         sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+    const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
+    ASSERT(is_new);
+    it.value() = std::move(pipeline);
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
@@ -267,7 +270,12 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
                                        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
                                        spv);
-    if (spv.empty()) {
+    // bbport: a SPIR-V binary starts with its magic number and a 5-word header; anything else is
+    // a damaged file (crash or power loss while it was written) the driver must not see.
+    if (spv.size() < 5 || spv[0] != 0x07230203u) {
+        if (!spv.empty()) {
+            throw Serialization::CorruptData{"damaged SPIR-V in the shader cache"};
+        }
         return false;
     }
 
@@ -275,10 +283,20 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // at the exact position rather than append
 
     vk::ShaderModule module{};
+    // bbport: a module the driver rejects is a damaged entry (WarmUp rebuilds the cache), not a
+    // fatal error as in CompileSPV.
+    const auto compile = [&] {
+        auto [result, created] = instance.GetDevice().createShaderModule(
+            {.codeSize = spv.size() * sizeof(u32), .pCode = spv.data()});
+        if (result != vk::Result::eSuccess) {
+            throw Serialization::CorruptData{"cached SPIR-V rejected by the driver"};
+        }
+        return created;
+    };
 
     auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
     if (new_program) {
-        module = CompileSPV(spv, instance.GetDevice());
+        module = compile();
         it_pgm.value() = std::move(program);
     } else {
         const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
@@ -296,7 +314,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             }
             module = it->module;
         } else {
-            module = CompileSPV(spv, instance.GetDevice());
+            module = compile();
         }
     }
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
@@ -350,34 +368,76 @@ void PipelineCache::WarmUp() {
 
     u32 num_pipelines{};
     u32 num_total_pipelines{};
+    u32 num_damaged{};
 
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
             ++num_total_pipelines;
+            // bbport: a damaged entry (cut short by a crash or a power loss, or rejected by the
+            // driver) used to stop the game at every start until the cache was deleted by hand
+            // (issues #28, #38, #39). It is counted here and the cache is rebuilt below.
+            try {
+                Serialization::Archive ar{std::move(data)};
+                Serialization::Reader pldata{ar};
 
-            Serialization::Archive ar{std::move(data)};
-            Serialization::Reader pldata{ar};
+                u32 version{};
+                pldata.Read(version);
+                if (version != Serialization::PipelineKeyVersion) {
+                    return;
+                }
 
-            u32 version{};
-            pldata.Read(version);
-            if (version != Serialization::PipelineKeyVersion) {
-                return;
-            }
+                u32 is_compute{};
+                pldata.Read(is_compute);
 
-            u32 is_compute{};
-            pldata.Read(is_compute);
+                bool result{};
+                if (is_compute) {
+                    result = LoadComputePipeline(ar);
+                } else {
+                    result = LoadGraphicsPipeline(ar);
+                }
 
-            bool result{};
-            if (is_compute) {
-                result = LoadComputePipeline(ar);
-            } else {
-                result = LoadGraphicsPipeline(ar);
-            }
-
-            if (result) {
-                ++num_pipelines;
+                if (result) {
+                    ++num_pipelines;
+                }
+            } catch (const std::exception& e) {
+                if (num_damaged++ == 0) {
+                    LOG_WARNING(Render, "Pipeline cache: damaged entry ({})", e.what());
+                }
+                sel.infos.fill(nullptr);
+                sel.modules.fill(nullptr);
+                sel.fetch_shader.reset();
             }
         });
+
+    if (num_damaged) {
+        // Nothing preloaded is trusted: modules of a damaged entry may sit in programs that later
+        // lookups would reuse. Start as with no cache and write a fresh one.
+        LOG_WARNING(Render, "Pipeline cache: {} damaged entries, rebuilding it", num_damaged);
+        graphics_pipelines.clear();
+        compute_pipelines.clear();
+        std::unordered_set<VkShaderModule> modules;
+        for (const auto& [_, program] : program_cache) {
+            if (!program) {
+                continue;
+            }
+            for (const auto& permutation : program->modules) {
+                if (permutation.module) {
+                    modules.insert(VkShaderModule(permutation.module));
+                }
+            }
+        }
+        for (const VkShaderModule module : modules) {
+            instance.GetDevice().destroyShaderModule(vk::ShaderModule{module});
+        }
+        program_cache.clear();
+        Storage::DataBase::Instance().Clear();
+        Storage::DataBase::Instance().FinishPreload();
+        profile_data.resize(sizeof(profile));
+        std::memcpy(profile_data.data(), &profile, sizeof(profile));
+        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
+                                           std::move(profile_data));
+        return;
+    }
 
     LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
     if (num_total_pipelines > num_pipelines) {
@@ -449,8 +509,11 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
     srt.Read(this, sizeof(*this));
 
     if (walker_func_size) {
-        walker_func = RegisterWalkerCode(ar.CurrPtr(), walker_func_size);
+        // bbport: the size is checked before the code is registered (it becomes executable):
+        // a cut-short file must not have bytes past its end run as the walker.
+        const auto code = ar.CurrPtr();
         ar.Advance(walker_func_size);
+        walker_func = RegisterWalkerCode(code, walker_func_size);
     }
 
     return true;

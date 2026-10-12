@@ -58,7 +58,11 @@ public:
     }
 
     using DescriptorWrites = std::vector<vk::WriteDescriptorSet>;
-    void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data) const;
+    /// `image_infos` and `buffer_infos`: the arrays the writes point into, if known (their
+    /// descriptors are then copied for the recording thread in one piece each).
+    void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data,
+                       std::span<const vk::DescriptorImageInfo> image_infos = {},
+                       std::span<const vk::DescriptorBufferInfo> buffer_infos = {}) const;
 
 protected:
     [[nodiscard]] std::string GetDebugString() const;

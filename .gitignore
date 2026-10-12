@@ -24,3 +24,10 @@ perf.data
 mods.json
 patches.json
 !launcher/bloodborne.png
+# Local: game logs, messages and archives from users, internal plans
+/logs/
+/message*.txt
+/*.zip
+/docs/ISSUE_ACTION_PLAN_*.md
+# AMD FidelityFX DLLs (FSR 4.1.1 is built from the user's own): never in the repository
+*.dll

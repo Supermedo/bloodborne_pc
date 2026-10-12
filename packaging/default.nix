@@ -12,10 +12,11 @@ let
   # FSR 4.1.1 models are extracted from AMD's DLLs: never in a public package. BB_PACKAGE_FSR411=1
   # (appimage.sh runs nix with --impure) bundles the local fsr4_411 for one's own devices.
   fsr411 = builtins.getEnv "BB_PACKAGE_FSR411" == "1";
-  assetDirs = [ "scripts" "patches" "fsr4_shaders" "launcher" ] ++ lib.optional fsr411 "fsr4_411";
+  assetDirs = [ "scripts" "patches" "fsr4_shaders" "launcher" "tools/fsr4cap" ]
+    ++ lib.optional fsr411 "fsr4_411";
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
-    "run.sh" "out" "out/bb-probe" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libbbgpu.so"
+    "run.sh" "out" "out/bb-probe" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libbbgpu.so" "tools"
   ] ++ assetDirs;
   src = builtins.path {
     name = "bbport-src";
@@ -26,6 +27,31 @@ let
         || lib.any (dir: lib.hasPrefix (dir + "/") rel) assetDirs;
   };
   python = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
+  # FSR 4.1.1 from the user's own AMD DLL (the launcher's button, tools/fsr4cap/build_assets.sh):
+  # its two tools built here, so that the package needs no compiler and no network for it. Proton
+  # (GE-Proton 10+) and Steam's runtime come from the user's Steam. On NixOS the recording runs
+  # on the host (systemd-run --user, below on PATH; umu-launcher from the host's nix-shell).
+  dxilSpirv = pkgs.stdenv.mkDerivation {
+    pname = "dxil-spirv";
+    version = "0-unstable-7dc5278";
+    src = pkgs.fetchFromGitHub {
+      owner = "HansKristian-Work";
+      repo = "dxil-spirv";
+      rev = "7dc52786cdb1f53c54dd5c5c2698dff00ea5f0a3";
+      fetchSubmodules = true;
+      hash = "sha256-vdSMp6QusmVTGpcl9jr+wQUQy5HLWwjr/5TI8ARMWRI=";
+    };
+    patches = [ ../tools/fsr4cap/dxil-spirv-class-bindings.patch ];
+    nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.python3 ];
+    # The CLI and the shared library it links (its own install rules set the RUNPATH).
+  };
+  fsr4capExe = pkgs.runCommand "fsr4cap.exe" {
+    nativeBuildInputs = [ pkgs.pkgsCross.mingwW64.buildPackages.gcc ];
+  } ''
+    f=${../tools/fsr4cap}
+    x86_64-w64-mingw32-gcc -std=c11 -O1 -Wall -I$f/ffx/api/include -I$f/ffx/upscalers/include \
+      $f/fsr4cap.c $f/capture.c $f/rootsig.c -o $out -ld3d12 -ldxguid -static
+  '';
   # Mesa comes with the package. bbport_vulkan.py adds the host NVIDIA ICD and
   # only its vendor libraries (matching the host's kernel module).
   icds = lib.concatMapStringsSep ":" (name: "${pkgs.mesa}/share/vulkan/icd.d/${name}")
@@ -79,6 +105,12 @@ pkgs.stdenv.mkDerivation {
     mkdir -p $d/bin $out/bin
     cp run.sh $d/
     cp -r scripts patches fsr4_shaders launcher $d/
+    mkdir -p $d/tools
+    cp -r tools/fsr4cap $d/tools/
+    rm -rf $d/tools/fsr4cap/__pycache__
+    mkdir -p $d/tools/fsr4cap/bin
+    ln -s ${dxilSpirv}/bin/dxil-spirv $d/tools/fsr4cap/bin/dxil-spirv
+    install -m644 ${fsr4capExe} $d/tools/fsr4cap/bin/fsr4cap.exe
     # FSR 4.1.1 models only with BB_PACKAGE_FSR411=1 (see above); otherwise run.sh finds them in
     # the data directory (~/.local/share/bbport/fsr4_411).
     if [ -d fsr4_411 ]; then
@@ -112,7 +144,9 @@ pkgs.stdenv.mkDerivation {
       --set BB_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
       --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
-      --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux ]} \
+      --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux pkgs.procps
+                                          pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
+                                          pkgs.systemdMinimal ]} \
       --run 'export BB_DATA_DIR=''${BB_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$BB_DATA_DIR"'
     # The game alone, without the launcher (settings from the data directory's bbport.ini).
     makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/bbport-game \
@@ -120,7 +154,7 @@ pkgs.stdenv.mkDerivation {
       --set BB_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
       --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
-      --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils ]} \
+      --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.procps ]} \
       --run 'export BB_DATA_DIR=''${BB_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$BB_DATA_DIR"'
   '';
   meta.mainProgram = "bbport";

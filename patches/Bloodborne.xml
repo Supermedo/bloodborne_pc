@@ -3435,4 +3435,9 @@
             <Line Type="bytes" Address="0x01de368b" Value="c3" />
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Sprint Fix (High FPS)" Note="Fixes sprint dropping to half speed above ~147 FPS (and at random moments above ~90 FPS). Use together with Uncap FPS++ or 90 FPS++. The game's wall detector measured distance per frame (a 30 FPS rule); this makes it measure speed instead." Author="yogesh1239" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes" Address="0x01914c24" Value="c5fa5e458c0f1f00"/>
+        </PatchList>
+    </Metadata>
 </Patch>

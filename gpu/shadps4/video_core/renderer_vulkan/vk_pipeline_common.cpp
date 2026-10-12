@@ -23,8 +23,9 @@ Pipeline::Pipeline(const Instance& instance_, Scheduler& scheduler_, DescriptorH
 Pipeline::~Pipeline() = default;
 
 
-void Pipeline::BindResources(DescriptorWrites& set_writes,
-                             const Shader::PushData& push_data) const {
+void Pipeline::BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data,
+                             std::span<const vk::DescriptorImageInfo> image_infos,
+                             std::span<const vk::DescriptorBufferInfo> buffer_infos) const {
     const auto bind_point =
         IsCompute() ? vk::PipelineBindPoint::eCompute : vk::PipelineBindPoint::eGraphics;
     const auto stage_flags = IsCompute() ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
@@ -47,6 +48,46 @@ void Pipeline::BindResources(DescriptorWrites& set_writes,
         }
         // Writes and the infos they point to are laid out in the recording chunk, with the
         // pointers already aimed at those copies: the command only carries a span.
+        // bbport: when every write points into the caller's info arrays (draws and
+        // dispatches), each array is copied once and the pointers are rebased: a copy per
+        // descriptor (two per write) cost the draw recording thread ~3% of its time.
+        const auto within = [](const auto* p, u32 count, const auto& array) {
+            return p >= array.data() && p + count <= array.data() + array.size();
+        };
+        bool bulk = !image_infos.empty() || !buffer_infos.empty();
+        for (const auto& write : set_writes) {
+            if (!bulk) {
+                break;
+            }
+            bulk = !write.pTexelBufferView &&
+                   (!write.pImageInfo || within(write.pImageInfo, write.descriptorCount,
+                                                image_infos)) &&
+                   (!write.pBufferInfo || within(write.pBufferInfo, write.descriptorCount,
+                                                 buffer_infos));
+        }
+        if (bulk) {
+            scheduler.ReserveRecordData(set_writes.size() * sizeof(vk::WriteDescriptorSet) +
+                                        image_infos.size_bytes() + buffer_infos.size_bytes() +
+                                        256);
+            const auto writes =
+                scheduler.RecordData(std::span<const vk::WriteDescriptorSet>{set_writes});
+            const auto images = scheduler.RecordData(image_infos);
+            const auto buffers = scheduler.RecordData(buffer_infos);
+            auto* patched = const_cast<vk::WriteDescriptorSet*>(writes.data());
+            for (size_t i = 0; i < writes.size(); ++i) {
+                auto& write = patched[i];
+                if (write.pImageInfo) {
+                    write.pImageInfo = images.data() + (write.pImageInfo - image_infos.data());
+                }
+                if (write.pBufferInfo) {
+                    write.pBufferInfo = buffers.data() + (write.pBufferInfo - buffer_infos.data());
+                }
+            }
+            scheduler.Record([bind_point, layout, writes](vk::CommandBuffer cmdbuf) {
+                cmdbuf.pushDescriptorSetKHR(bind_point, layout, 0, writes);
+            });
+            return;
+        }
         size_t bytes = set_writes.size() * sizeof(vk::WriteDescriptorSet) + 64;
         for (const auto& write : set_writes) {
             bytes += write.descriptorCount *

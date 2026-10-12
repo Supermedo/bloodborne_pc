@@ -107,7 +107,7 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
         runtime.FlushBarriers();
     }
     const u32 count = static_cast<u32>(copies.size());
-    scheduler.Record([src = src->Handle(), dst = dst->Handle(), table = stream.Handle(), src_min,
+    scheduler.RecordCrumb({.name = "HLE copy shader"}, [src = src->Handle(), dst = dst->Handle(), table = stream.Handle(), src_min,
                       src_size, dst_min, dst_size, table_offset, table_size,
                       count](vk::CommandBuffer cmdbuf) {
         const std::array<vk::DescriptorBufferInfo, 3> infos{{

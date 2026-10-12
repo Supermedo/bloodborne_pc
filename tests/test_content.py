@@ -1,4 +1,4 @@
-from paths import ROOT
+from paths import ROOT, executable
 from pathlib import Path
 import struct
 import subprocess
@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 import content_profile
 
-EXE=ROOT/'out/content-test'
+EXE=executable('content-test')
 
 class ProfileTests(unittest.TestCase):
     def test_sfo_parameters_and_explicit_trial_profile(self):

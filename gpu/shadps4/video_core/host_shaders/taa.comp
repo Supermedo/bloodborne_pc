@@ -34,7 +34,7 @@ vec4 fetchLinear(sampler2D tex, vec2 position) {
 float expectedPreviousDepth(float depth, vec2 source, ivec2 size) {
     if (depth >= 1.0) return 1.0;
     vec2 uv = (source + 0.5 - jitter) / vec2(size);
-    vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    vec2 ndc = uv * 2.0 - 1.0; // +y down the screen, proj carries the sign (camera_motion.comp)
     float z = proj.w / min(depth - proj.z, -1e-8);
     float prev_z = dot(previous_z, vec4(ndc * z / proj.xy, z, 1.0));
     if (prev_z <= 0.0) return -1.0;

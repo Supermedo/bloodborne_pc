@@ -15,6 +15,7 @@
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include <vk_mem_alloc.h>
+#include "test_assert.h"
 
 int main(int argc, char** argv) {
     using namespace Vulkan;

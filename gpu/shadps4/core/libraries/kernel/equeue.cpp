@@ -3,6 +3,12 @@
 
 #include <atomic>
 #include <thread>
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <mutex>
+#include <string>
+#include <vector>
 #include <magic_enum/magic_enum.hpp>
 
 #include "common/assert.h"
@@ -458,6 +464,33 @@ int PS4_SYSV_ABI sceKernelDeleteEqueue(OrbisKernelEqueue eq) {
     return ORBIS_OK;
 }
 
+namespace {
+// bbport (frame stats): time the game spends waiting in each event queue, and the events it got.
+struct EqueueWaitStat {
+    std::string name;
+    u64 waits = 0, ns = 0, events = 0;
+};
+std::mutex equeue_wait_mutex;
+std::vector<EqueueWaitStat> equeue_wait_stats;
+} // namespace
+
+void ReportEqueueWaits(double frames) {
+    std::scoped_lock lk{equeue_wait_mutex};
+    if (equeue_wait_stats.empty() || frames <= 0) {
+        return;
+    }
+    std::sort(equeue_wait_stats.begin(), equeue_wait_stats.end(),
+              [](const auto& a, const auto& b) { return a.ns > b.ns; });
+    std::printf("Guest event waits per frame:");
+    for (std::size_t i = 0; i < std::min<std::size_t>(equeue_wait_stats.size(), 6); ++i) {
+        const auto& s = equeue_wait_stats[i];
+        std::printf("%s %s %.1f waits %.2f ms %.1f events", i ? ";" : "", s.name.c_str(),
+                    s.waits / frames, s.ns / (frames * 1e6), s.events / frames);
+    }
+    std::printf("\n");
+    equeue_wait_stats.clear();
+}
+
 int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev, int num, int* out,
                                      OrbisKernelUseconds* timo) {
     HLE_TRACE;
@@ -479,7 +512,23 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev,
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
+    const auto wait_start = std::chrono::steady_clock::now();
     *out = equeue->WaitForEvents(ev, num, timo);
+    {
+        const u64 ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now() - wait_start)
+                                .count());
+        std::scoped_lock lk{equeue_wait_mutex};
+        auto it = std::find_if(equeue_wait_stats.begin(), equeue_wait_stats.end(),
+                               [&](const auto& s) { return s.name == equeue->GetName(); });
+        if (it == equeue_wait_stats.end()) {
+            it = equeue_wait_stats.insert(equeue_wait_stats.end(),
+                                          EqueueWaitStat{std::string(equeue->GetName())});
+        }
+        ++it->waits;
+        it->ns += ns;
+        it->events += u64(*out);
+    }
 
     if (*out == 0) {
         return ORBIS_KERNEL_ERROR_ETIMEDOUT;

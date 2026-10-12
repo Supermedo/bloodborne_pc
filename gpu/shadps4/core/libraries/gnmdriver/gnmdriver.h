@@ -226,6 +226,15 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
                                                        const u32* ccb_gpu_addrs[],
                                                        u32* ccb_sizes_in_bytes);
 s32 PS4_SYSV_ABI sceGnmSubmitDone();
+/// bbport BB_SUBMIT_LOCK=frame (default with honest labels; =gpu: the lock as before): submissions
+/// after sceGnmSubmitDone return once the GPU has finished the frame before, as the submission
+/// lock made them, but are handed to the GPU first instead of waiting for it to go idle (which
+/// drained the GPU every frame). Releasing them earlier let the game run a frame further ahead and
+/// its heap ran out (bad_alloc after ~7 minutes). The GPU idle interrupt stays honest.
+bool SubmitLockOnDecode();
+void ReleaseSubmissionLock();
+/// The GPU has finished everything up to the `frames`th sceGnmSubmitDone (BB_SUBMIT_LOCK=decode).
+void NoteFramesRetired(u64 frames);
 int PS4_SYSV_ABI sceGnmUnmapComputeQueue(u32 vqid);
 int PS4_SYSV_ABI sceGnmUnregisterAllResourcesForOwner();
 int PS4_SYSV_ABI sceGnmUnregisterOwnerAndResources();

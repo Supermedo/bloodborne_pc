@@ -31,6 +31,7 @@ import zipfile
 FROZEN = getattr(sys, 'frozen', False)
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
+import game_check  # noqa: E402
 DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
 # Co-op test build: its own settings, and no updates (a public release would replace it).
 COOP_TEST = False
@@ -47,7 +48,7 @@ RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/la
 RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'bbport-update'
 # Never copied over an installation by an update (the package does not hold them either).
-USER_FILES = ('user', 'out', 'mods', 'bbport.ini', 'mods.json', 'patches.json', 'last_run.log')
+USER_FILES = ('user', 'out', 'mods', 'logs', 'fsr4_411', 'bbport.ini', 'mods.json', 'patches.json', 'last_run.log')
 
 
 # ---------------------------------------------------------------------------------------------
@@ -56,11 +57,15 @@ USER_FILES = ('user', 'out', 'mods', 'bbport.ini', 'mods.json', 'patches.json', 
 def attach_stdio():
     """A windowed executable starts without sys.stdout; inherited pipes or a console still exist."""
     import msvcrt
+    from ctypes import wintypes
+    get_handle = ctypes.windll.kernel32.GetStdHandle
+    get_handle.argtypes = [wintypes.DWORD]
+    get_handle.restype = wintypes.HANDLE
     for name, std in (('stdout', -11), ('stderr', -12)):
         if getattr(sys, name) is not None:
             continue
         stream = None
-        handle = ctypes.windll.kernel32.GetStdHandle(std)
+        handle = get_handle(std)
         if handle and handle != ctypes.c_void_p(-1).value:
             try:
                 stream = open(msvcrt.open_osfhandle(handle, os.O_WRONLY), 'w', encoding='utf-8',
@@ -101,6 +106,8 @@ def run_command():
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
+from bbport_controls import CONTROLS  # noqa: E402
+from bbport_assets import fsr411_problem  # noqa: E402
 
 LANG = 'en'
 
@@ -171,9 +178,14 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '',
                 'frames_ahead': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
-                'check_updates': True, 'online': False, 'online_server': 'srv.shadps4.net:31313',
+                'check_updates': True, 'gamepad': '', 'save_log': False, 'fsr411_dir': '',
+                'online': False, 'online_server': 'srv.shadps4.net:31313',
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
                 'online_community': COMMUNITY_SERVER}
+for name, _label, keys, buttons in CONTROLS:
+    INI_DEFAULTS[f'key.{name}'] = keys
+    if buttons is not None:
+        INI_DEFAULTS[f'pad.{name}'] = buttons
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -334,8 +346,19 @@ def server_check(server, webapi, community):
     return '\n'.join(lines)
 
 
-def game_environment(s):
+def native_environment():
     env = dict(os.environ)
+    roots = [Path(env['MSYS2_ROOT'])] if env.get('MSYS2_ROOT') else [Path(r'C:\msys64'), PORT_DIR / 'out/msys64']
+    for root in roots:
+        clang64 = root / 'clang64/bin'
+        if clang64.is_dir():
+            env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
+            break
+    return env
+
+
+def game_environment(s):
+    env = native_environment()
     env['BB_GAME_DIR'] = s['game_dir']
     if s['user_dir']:
         env['BB_USER_DIR'] = s['user_dir']
@@ -345,6 +368,13 @@ def game_environment(s):
     env['BB_PATCHES_DIR'] = s['patches_dir'] or str(DATA_DIR / 'patches')
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
+    env['BB_MENU_LANGUAGE'] = LANG
+    if s.get('gamepad'):
+        env['BB_GAMEPAD'] = s['gamepad']
+    if s.get('save_log'):
+        env['BB_SAVE_LOG'] = '1'
+    if s.get('fsr411_dir'):
+        env['BB_FSR411_DIR'] = s['fsr411_dir']
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
     env['BB_FULLSCREEN'] = '1' if s['fullscreen'] else '0'
@@ -619,7 +649,8 @@ class Launcher:
         self.nav, self.current_page = {}, None
         for name, title in (('play', _('Play', 'Играть')), ('graphics', _('Graphics', 'Графика')),
                             ('display', _('Display & FPS', 'Экран и FPS')), ('game', _('Game & effects', 'Игра и эффекты')),
-                            ('cheats', _('Cheats', 'Читы')), ('online', _('Online co-op', 'Онлайн-кооператив')),
+                            ('controls', _('Controls', 'Управление')), ('cheats', _('Cheats', 'Читы')),
+                            ('online', _('Online co-op', 'Онлайн-кооператив')),
                             ('mods', _('Mods & patches', 'Моды и патчи')),
                             ('advanced', _('Advanced', 'Дополнительно')),
                             ('log', _('Log', 'Журнал'))):
@@ -656,6 +687,7 @@ class Launcher:
         self.build_graphics()
         self.build_display()
         self.build_game()
+        self.build_controls()
         self.build_cheats()
         self.build_online()
         self.build_mods()
@@ -809,6 +841,17 @@ class Launcher:
                        'about 30 MB, into the fsr4_shaders folder of the port.',
                        'С GitHub FireBurn/Q2RTX (собраны из MIT-исходников AMD FidelityFX), около 30 МБ, '
                        'в папку fsr4_shaders порта.'), top=6)
+        self.section(f, _('FSR 4.1.1 assets', 'Ассеты FSR 4.1.1'))
+        self.folder(f, 'fsr411_dir', _('Assets folder', 'Папка ассетов'),
+                    _('Choose the fsr4_411 folder', 'Выберите папку fsr4_411'),
+                    _('A complete set generated from your AMD 4.1.x DLL, including FP8 variants when available. '
+                      'Empty: fsr4_411 next to the port.',
+                      'Полный набор из вашей DLL AMD 4.1.x, включая FP8 при наличии. '
+                      'Пусто: fsr4_411 рядом с портом.'), on_change=self.refresh_fsr4)
+        self.fsr411_label = ttk.Label(f, wraplength=self.px(640), justify='left')
+        self.fsr411_label.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
+        for key in ('output_res', 'preset'):
+            self.var(key, 'ini').trace_add('write', lambda *_args: self.refresh_fsr4())
         self.section(f, _('Detail', 'Детализация'))
         self.row(f, _('Model detail (LOD)', 'Детализация моделей'), self.choice(f, 'model_lod', 'ini', LODS),
                  _('A game patch (game version 1.09).', 'Патч игры (версия 1.09).'))
@@ -822,9 +865,9 @@ class Launcher:
         self.section(f, _('Frame rate', 'Частота кадров'), top=4)
         self.row(f, _('Frame rate', 'Режим'), self.choice(f, 'fps_mode', 'app', FPS_MODES),
                  _("Community patches for game version 1.09. Unlocked makes the game use the real frame time. "
-                   'Other game versions always run at 30 FPS (the patches would corrupt them).',
+                   'This build requires a verified CUSA03173 1.09 executable.',
                    'Патчи сообщества для версии 1.09. «Без ограничения» — игра использует реальное время кадра. '
-                   'Другие версии всегда работают в 30 FPS.'))
+                   'Эта сборка требует проверенный исполняемый файл CUSA03173 1.09.'))
         self.row(f, _('Frame cap (unlocked mode)', 'Ограничение FPS (режим без ограничения)'),
                  self.choice(f, 'frame_cap', 'app', FRAME_CAPS),
                  _("Above about 120 FPS the game's movement timing breaks (running and rolling get slower, "
@@ -866,6 +909,56 @@ class Launcher:
             self.check(f, key, 'ini', _(*title))
         self.note(f, _('Effects and extras are game patches for version 1.09, applied at start.',
                        'Эффекты и дополнения — патчи игры для версии 1.09, применяются при запуске.'))
+
+    def build_controls(self):
+        f = self.scrolled_page('controls', _('Controls', 'Управление'),
+                               _('Choose a controller and remap keyboard keys or controller buttons.',
+                                 'Выберите контроллер и назначьте клавиши и кнопки.'))
+        self.section(f, _('Controller', 'Контроллер'), top=4)
+        holder = self.ttk.Frame(f)
+        self.gamepad_box = self.ttk.Combobox(holder, state='readonly', width=38)
+        self.gamepad_box.pack(side='left')
+        self.ttk.Button(holder, text=_('Refresh', 'Обновить'), command=self.refresh_gamepads).pack(side='left', padx=6)
+        self.row(f, _('Controller', 'Контроллер'), holder)
+        self.refresh_gamepads()
+        self.note(f, _('Use SDL names, separated by commas. Empty means unassigned. Changes apply at the next start.',
+                       'Имена SDL через запятую. Пустое поле отключает действие. Изменения применяются при запуске.'))
+        for kind, title in (('key', _('Keyboard', 'Клавиатура')), ('pad', _('Controller buttons', 'Кнопки контроллера'))):
+            self.section(f, title)
+            for name, label, keys, buttons in CONTROLS:
+                if kind == 'pad' and buttons is None:
+                    continue
+                key = f'{kind}.{name}'
+                entry = self.ttk.Entry(f, textvariable=self.var(key, 'ini'), width=36)
+                self.row(f, _(*label), entry)
+        self.ttk.Button(f, text=_('Restore default controls', 'Вернуть стандартное управление'),
+                        command=self.reset_controls).grid(row=self.next_row(f), column=1, sticky='w', pady=12)
+
+    def reset_controls(self):
+        for key, value in INI_DEFAULTS.items():
+            if key.startswith(('key.', 'pad.')):
+                self.var(key, 'ini').set(value)
+
+    def refresh_gamepads(self):
+        tool = next((PORT_DIR / folder / 'bb-gpu-capabilities.exe' for folder in ('bin', 'out')
+                     if (PORT_DIR / folder / 'bb-gpu-capabilities.exe').is_file()), None)
+        options = [('', (_('First connected controller', 'Первый подключённый контроллер'),))]
+        if tool:
+            try:
+                env = native_environment()
+                result = subprocess.run([str(tool), '--gamepads'], capture_output=True, text=True,
+                                        encoding='utf-8', errors='replace', timeout=5, creationflags=NO_WINDOW, env=env)
+                options += [(guid, (name,)) for line in result.stdout.splitlines() if '\t' in line
+                            for guid, name in [line.split('\t', 1)]]
+            except (OSError, subprocess.SubprocessError):
+                pass
+        current = self.var('gamepad', 'app').get()
+        if current and current not in [value for value, _ in options]:
+            options.append((current, (current,)))
+        box = self.gamepad_box
+        box.configure(values=[_(*label) for _value, label in options])
+        box.current([value for value, _ in options].index(current))
+        box.bind('<<ComboboxSelected>>', lambda _event: self.var('gamepad', 'app').set(options[box.current()][0]))
 
     def build_cheats(self):
         f = self.scrolled_page('cheats', _('Cheats', 'Читы'),
@@ -994,6 +1087,7 @@ class Launcher:
                  _('How exactly data the GPU writes is copied back for the game.',
                    'Насколько точно данные, записанные GPU, возвращаются игре.'))
         self.section(f, _('Diagnostics', 'Для разработчика'))
+        self.check(f, 'save_log', 'app', _('Save the log and frame statistics to files', 'Сохранять журнал и статистику кадров в файлы'))
         self.check(f, 'frame_stats', 'app', _('Frame statistics in the log (every 5 s)', 'Статистика кадров в журнале (раз в 5 с)'))
         self.check(f, 'gpu_profile', 'app', _('GPU time per pass in the log', 'Профиль GPU в журнале'))
         self.check(f, 'vk_validation', 'app', _('Vulkan validation layers (needs the Vulkan SDK; much slower)',
@@ -1020,10 +1114,8 @@ class Launcher:
     def version_warning(self, parent):
         """A banner shown while the selected game is not version 1.09 (refresh_status)."""
         label = self.ttk.Label(parent, style='Warning.TLabel', wraplength=self.px(640), justify='left', text=_(
-            'Your game is version {}: these options are patches for 1.09 and are not applied; the game runs '
-            'at 30 FPS. Update the dump to 1.09 to use them.',
-            'Ваша игра версии {}: эти настройки — патчи для 1.09 и не применяются; игра работает в 30 FPS. '
-            'Обновите дамп до 1.09, чтобы их использовать.'))
+            'Your game is version {}. This build requires CUSA03173 updated to 1.09 with a verified executable.',
+            'Ваша игра версии {}. Требуется CUSA03173 с обновлением 1.09 и проверенным исполняемым файлом.'))
         label.grid(row=self.next_row(parent), column=0, columnspan=2, sticky='we', pady=(6, 4))
         label.template = label.cget('text')
         self.warnings = getattr(self, 'warnings', []) + [label]
@@ -1042,8 +1134,8 @@ class Launcher:
         elif info[1] == PATCH_VERSION:
             game = _('✓ Game version {}: every patch available', '✓ Версия игры {}: доступны все патчи').format(info[1])
         else:
-            game = _('⚠ Game version {}: runs at 30 FPS without the community patches (they are for 1.09)',
-                     '⚠ Версия игры {}: 30 FPS без патчей сообщества (они для 1.09)').format(info[1])
+            game = _('⚠ Game version {}: update the dump to 1.09 before starting',
+                     '⚠ Версия игры {}: обновите дамп до 1.09 перед запуском').format(info[1])
         user = Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user')
         saves = list((user / 'savedata').glob('*/*/SPRJ*')) if (user / 'savedata').is_dir() else []
         save = (_('✓ Saves found in {}', '✓ Найдены сохранения в {}').format(user) if saves
@@ -1080,10 +1172,7 @@ class Launcher:
         exe = PORT_DIR / 'bin' / 'bb-gpu-capabilities.exe'
         if not exe.is_file():
             exe = PORT_DIR / 'out' / 'bb-gpu-capabilities.exe'
-        env = dict(os.environ)
-        if not (exe.parent / 'SDL3.dll').is_file():
-            clang64 = Path(os.environ.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
-            env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
+        env = native_environment()
         text = _('• Graphics card: not checked', '• Видеокарта: не проверена')
         try:
             result = subprocess.run([str(exe), '--live-resolution'], capture_output=True, text=True, timeout=30,
@@ -1107,6 +1196,15 @@ class Launcher:
             if not missing else _('{} of {} files missing in {}.', 'Нет {} из {} файлов в {}.').format(
                 missing, total, PORT_DIR / 'fsr4_shaders'))
         self.fsr4_button.configure(state='normal' if missing and not self.downloading else 'disabled')
+        if hasattr(self, 'fsr411_label'):
+            directory = Path(self.var('fsr411_dir', 'app').get() or
+                             os.environ.get('BB_FSR411_DIR', DATA_DIR / 'fsr4_411'))
+            try:
+                problem = fsr411_problem(directory, self.var('output_res', 'ini').get(),
+                                         int(self.var('preset', 'ini').get()))
+            except (OSError, ValueError) as error:
+                problem = str(error)
+            self.fsr411_label.configure(text=problem or _('Assets ready: {}', 'Ассеты готовы: {}').format(directory))
 
     def download_fsr4(self):
         self.downloading = True
@@ -1238,6 +1336,11 @@ class Launcher:
         if not game_info(self.app['game_dir']):
             self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
                                                       'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.show('game')
+            return
+        problem = game_check.problem(self.app['game_dir'])
+        if problem:
+            self.messagebox.showerror('Bloodborne', game_check.explain(*problem))
             self.show('game')
             return
         self.set_log('')

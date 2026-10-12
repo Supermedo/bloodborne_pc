@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <string>
 #include <atomic>
 #include <chrono>
 #include "bbport_toggles.h"
@@ -88,6 +89,9 @@ public:
                  Vulkan::Runtime& runtime, AmdGpu::Liverpool* liverpool, BufferCache& buffer_cache,
                  PageManager& tracker);
     ~TextureCache();
+
+    /// bbport (diagnostics): the images over [addr, addr + size), described briefly.
+    std::string DescribeImagesIn(VAddr addr, u64 size);
 
     /// bbport: changes whenever an image is registered or unregistered.
     [[nodiscard]] u64 RegistryGeneration() const noexcept {
@@ -401,6 +405,9 @@ private:
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< bbport: pressure report
     std::chrono::steady_clock::time_point gc_report_time{};
+    /// bbport: gc_tick at each of the last 64 seconds (GarbageCollectImages).
+    std::array<u64, 64> gc_tick_at_second{};
+    u64 gc_second = 0;
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;
     u64 critical_gc_memory = 0;
@@ -434,6 +441,7 @@ private:
     std::atomic<u64> registry_generation{0};
     std::mutex samplers_mutex;
     std::mutex download_images_mutex;
+    std::atomic<bool> downloads_queued{false}; ///< download_images may be non-empty (checked without the lock)
     struct MetaDataInfo {
         MetaType type;
         s32 clear_mask = -1;

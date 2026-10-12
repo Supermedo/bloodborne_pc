@@ -1,4 +1,5 @@
 #include "bbport_write_log.h"
+#include "bbport_gnm_hooks.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
@@ -6,6 +7,7 @@
 #ifndef _WIN32
 #include <sys/resource.h>
 #endif
+#include "bbport_free_check.h"
 #include "bbport_toggles.h"
 #include <algorithm>
 #include <atomic>
@@ -26,6 +28,7 @@
 #include "common/rdtsc.h"
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/libs.h"
+#include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "core/signals.h"
 #include "sdl_window.h"
@@ -35,8 +38,10 @@ extern "C" {
 // runtime_memory.c
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t size);
+void runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
 uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
 int runtime_memory_region(uintptr_t address, uintptr_t* start, uintptr_t* end, int* mapped);
+const uint64_t* runtime_memory_generation(void);
 void runtime_memory_gpu_protect(uintptr_t address, uint64_t size, int read, int write);
 typedef void (*RuntimeGpuRange)(uintptr_t address, uint64_t size);
 // runtime_kernel.c: one clock for guest and GPU timestamps
@@ -45,6 +50,8 @@ uint64_t runtime_process_time_counter(void);
 uint64_t runtime_tsc_frequency(void);
 int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
+void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
+void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
 }
 
 Frontend::WindowSDL* g_window = nullptr;
@@ -97,14 +104,69 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
+    // bbport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
+    // resource loaders): invalidated, and an asset (it may keep a VRAM copy).
+    runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
+        Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
+    });
+    // bbport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
+    runtime_memory_set_cpu_write_hook([](uintptr_t address, uint64_t size) {
+        Memory::Instance()->GetRasterizer()->OnCpuWrite(address, size);
+    });
 }
 void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
     if (rasterizer) rasterizer->InvalidateMemory(address, size);
 }
+namespace {
+// bbport: the mapped region of the last lookup, per thread, valid for the mapping table generation
+// it was read at. The GPU command thread clamps and copies thousands of constant ranges a frame,
+// nearly all within the region of the one before: two calls into the runtime each (~5% of it).
+struct RegionCache {
+    u64 generation = 1; // odd: invalid
+    uintptr_t start = 0, end = 0;
+};
+thread_local RegionCache region_cache;
+
+bool CachedMapped(VAddr address, u64 size) {
+    static const uint64_t* const generation_ptr = runtime_memory_generation();
+    const u64 generation = __atomic_load_n(generation_ptr, __ATOMIC_ACQUIRE);
+    if (generation & 1) {
+        return false; // being changed
+    }
+    auto& cache = region_cache;
+    if (cache.generation == generation && address >= cache.start && address + size <= cache.end) {
+        return true;
+    }
+    uintptr_t start = 0, end = 0;
+    int mapped = 0;
+    if (!runtime_memory_region(address, &start, &end, &mapped) || !mapped) {
+        return false;
+    }
+    cache = {generation, start, end};
+    return address + size <= end;
+}
+} // namespace
+
 u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
+    if (size && CachedMapped(virtual_addr, size)) {
+        return size;
+    }
     return runtime_memory_clamp(virtual_addr, size);
 }
 static void CopySparseSerial(VAddr source, u8* dest, u64 size) {
+    // BB_READBACKS=2 protects GPU-written pages against reads: the copy threads and recorders
+    // read through the backing view, as a read fault on them would wait for the GPU thread,
+    // which waits for them.
+    static const bool precise =
+        EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
+    if (precise) {
+        runtime_memory_read_backing(source, dest, size);
+        return;
+    }
+    if (size && CachedMapped(source, size)) {
+        std::memcpy(dest, reinterpret_cast<const void*>(source), size);
+        return;
+    }
     while (size) {
         uintptr_t start = 0, end = 0;
         int mapped = 0;
@@ -177,16 +239,6 @@ std::mutex g_window_mutex;
 std::condition_variable g_window_cv;
 bool g_window_ready;
 } // namespace
-
-u32 BbDisplayRefreshHz() {
-    static const u32 hz = [] {
-        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
-        const u32 rate = mode && mode->refresh_rate > 0 ? u32(mode->refresh_rate + 0.5f) : 60;
-        std::printf("GPU: vblank follows the display refresh rate, %u Hz\n", rate);
-        return std::max<u32>(rate, 60);
-    }();
-    return hz;
-}
 
 #ifdef BB_PGO_GENERATE
 extern "C" void __gcov_dump(void);
@@ -271,7 +323,20 @@ extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
 }
 
 extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
-    return Core::Signals::Instance()->DispatchAccessViolation(ucontext, address) ? 1 : 0;
+    // BB_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
+    // tracking (a write fault drains the draw pipe: thousands a second would change the timing
+    // under test); label pages are not expected to be GPU-tracked.
+    if (BbFreeCheck::OnTrapFault(ucontext, reinterpret_cast<std::uint64_t>(address))) {
+        return 1;
+    }
+    if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
+        return 1;
+    }
+    return BbFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(address)) ? 1 : 0;
+}
+
+extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
+    BbGnmHooks::PatchImage(image, size);
 }
 
 extern "C" unsigned bbgpu_symbol_count(void) {
@@ -331,6 +396,26 @@ ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
 
 extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
+}
+
+extern "C" void bbgpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
+    double x = 0, y = 0;
+    int up = 0, down = 0;
+    if (g_window) {
+        g_window->TakeMouse(x, y, up, down);
+    }
+    *dx = x;
+    *dy = y;
+    *wheel_up = up;
+    *wheel_down = down;
+}
+
+extern "C" int bbgpu_mouse_captured(void) {
+    return g_window && g_window->MouseCaptured() ? 1 : 0;
+}
+
+extern "C" void bbgpu_mouse_look_enable(int enabled) {
+    Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }
 
 extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {

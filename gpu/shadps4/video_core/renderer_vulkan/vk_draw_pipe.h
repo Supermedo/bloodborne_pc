@@ -13,6 +13,7 @@
 
 #include <cstdlib>
 #include "bbport_threads.h"
+#include "bbport_sections.h"
 
 #include <array>
 #include <atomic>
@@ -122,6 +123,35 @@ public:
         cycles_by_reason[slot] += waited;
     }
 
+    /// Stage A: the number the next committed packet gets (packets are numbered from 1), and
+    /// whether stage B has run the packet with that number.
+    [[nodiscard]] u64 NextPacket() const noexcept {
+        return packets + 1;
+    }
+    [[nodiscard]] bool ReachedPacket(u64 number) const noexcept {
+        return consumed_packets.load(std::memory_order_acquire) >= number;
+    }
+    /// Stage A: waits until stage B has run the packet `number` (Drain: all of them).
+    void WaitForPacket(u64 number, u32 reason) {
+        if (ReachedPacket(number)) {
+            return;
+        }
+        ++drains;
+        const u32 slot = reason < NumReasons ? reason : ReasonRasterizer;
+        ++drains_by_reason[slot];
+        const u64 start = __rdtsc();
+        for (u32 spins = 0; !ReachedPacket(number); ++spins) {
+            if (spins < 4096) {
+                __builtin_ia32_pause();
+            } else {
+                std::this_thread::yield();
+            }
+        }
+        const u64 waited = __rdtsc() - start;
+        drain_cycles += waited;
+        cycles_by_reason[slot] += waited;
+    }
+
     /// Stage A: position after the last committed packet; Reached(position) once B ran it.
     [[nodiscard]] u64 Head() const noexcept {
         return head;
@@ -132,6 +162,14 @@ public:
 
     [[nodiscard]] bool Idle() const noexcept {
         return consumed.load(std::memory_order_acquire) == head;
+    }
+    /// Stage B: the position of the packet it runs (packets before it have run).
+    [[nodiscard]] u64 Consumed() const noexcept {
+        return consumed.load(std::memory_order_acquire);
+    }
+    /// Stage B: bytes of packets committed and not run yet (the work queued for this thread).
+    [[nodiscard]] u64 Backlog() const noexcept {
+        return published.load(std::memory_order_acquire) - consumed.load(std::memory_order_relaxed);
     }
 
     /// Statistics (stage A): packets, drains that had to wait, cycles waited, cycles stage B
@@ -159,6 +197,7 @@ private:
     void Run(std::stop_token stop) {
         Common::SetCurrentThreadName("bb:DrawRec");
         on_stage_b = true;
+        BbSections::recording_thread = true;
         stage_b_tid.store(static_cast<u32>(gettid()), std::memory_order_release);
         u64 at = 0;
         while (true) {
@@ -202,6 +241,7 @@ private:
             handler(context, reinterpret_cast<const u8*>(header + 1), header->payload);
             busy_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
             at += header->size;
+            consumed_packets.fetch_add(1, std::memory_order_release);
             consumed.store(at, std::memory_order_release);
         }
     }
@@ -214,6 +254,7 @@ private:
     u32 pending_size = 0;
     alignas(64) std::atomic<u64> published{0};
     alignas(64) std::atomic<u64> consumed{0};
+    std::atomic<u64> consumed_packets{0}; ///< packets stage B has run (NextPacket numbers)
     alignas(64) std::atomic<u32> wake{0};
     std::atomic<bool> sleeping{false};
     std::atomic<u32> stage_b_tid{0};
