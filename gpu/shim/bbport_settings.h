@@ -68,6 +68,8 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
+    /// AMD Anti-Lag (VK_AMD_anti_lag, bbport_anti_lag.h) where the driver offers it.
+    std::atomic<bool> anti_lag{true};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};

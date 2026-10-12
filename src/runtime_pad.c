@@ -395,6 +395,7 @@ static const InputConfig *active_config(void) {
 }
 
 static void sample_host(PadData *d) {
+    bbgpu_anti_lag_input(); /* AMD Anti-Lag: the frame's input stage starts here */
     memset(d,0,sizeof(*d));
     d->left_x=d->left_y=d->right_x=d->right_y=128;
     d->orientation[3]=1.0f;

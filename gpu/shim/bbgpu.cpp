@@ -2,6 +2,7 @@
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
+#include "bbport_anti_lag.h"
 #include "bbport_copy.h"
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -339,6 +340,10 @@ u32 ConsumeGameOnlyScreenshotRequests() { return 0; }
 u32 ConsumeWithOverlaysScreenshotRequests() { return 0; }
 ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
 } // namespace VideoCore
+
+extern "C" void bbgpu_anti_lag_input(void) {
+    BbAntiLag::Input();
+}
 
 extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
