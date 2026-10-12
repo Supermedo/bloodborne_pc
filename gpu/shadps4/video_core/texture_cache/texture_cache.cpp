@@ -994,11 +994,16 @@ void TextureCache::RefreshImage(Image& image) {
         // character creation preview went black after one frame).
         // Only for images the GPU writes or may write (small ones, targets, storage images): a
         // streamed texture hashed here cost the GPU thread its whole size again on every upload.
-        const bool track = (is_gpu_modified && !is_gpu_dirty) || mip_size <= 64_KB ||
-                           image.usage.storage || image.usage.render_target ||
-                           image.usage.depth_target;
+        // Only guest memory that is mapped: the upload reads unmapped pages as zeros
+        // (CopySparseMemory), a hash of them faulted (a texture in unmapped memory right after
+        // Continue loaded the save).
+        const u8* mip_addr = std::bit_cast<u8*>(image.info.guest_address) + mip_offset;
+        const bool track = ((is_gpu_modified && !is_gpu_dirty) || mip_size <= 64_KB ||
+                            image.usage.storage || image.usage.render_target ||
+                            image.usage.depth_target) &&
+                           Core::Memory::Instance()->ClampRangeSize(VAddr(mip_addr), mip_size) ==
+                               mip_size;
         if (track) {
-            const u8* mip_addr = std::bit_cast<u8*>(image.info.guest_address) + mip_offset;
             const u64 mip_hash = XXH3_64bits(mip_addr, mip_size);
             if (is_gpu_modified && !is_gpu_dirty && image.mip_hashes[m] == mip_hash) {
                 continue;
