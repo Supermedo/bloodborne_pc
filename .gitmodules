@@ -16,3 +16,6 @@
 [submodule "gpu/third_party/xbyak"]
 	path = gpu/third_party/xbyak
 	url = https://github.com/herumi/xbyak.git
+[submodule "gpu/third_party/vma"]
+	path = gpu/third_party/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

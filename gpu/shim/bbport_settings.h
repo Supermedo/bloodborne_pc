@@ -6,6 +6,7 @@
 #pragma once
 
 #include <atomic>
+#include <string>
 
 namespace BbSettings {
 
@@ -67,6 +68,8 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
+    /// DLSS model preset hint (NVSDK_NGX_DLSS_Hint_Render_Preset): 0 NVIDIA's default per mode.
+    std::atomic<int> dlss_preset{0};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};
@@ -112,6 +115,9 @@ void Save();
 
 /// Render resolution divisor of a preset (1.0 native, 1.5 quality, ...).
 float PresetScale(int preset);
+/// bbport.ini names of the DLSS presets ("default", "J", "K", "L", "M") and back.
+const char* DlssPresetName(int preset);
+int DlssPresetFromName(const std::string& name);
 const char* PresetName(int preset);
 const char* UpscalerName(int upscaler);
 

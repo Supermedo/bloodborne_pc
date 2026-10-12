@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2026 IFreemz, bbport contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// bbport: NVIDIA DLSS Super Resolution through the optional bbport_dlss.dll bridge (gpu/
-// dlss_bridge, MIT), loaded at run time from next to bb-probe.exe together with NVIDIA's
-// nvngx_dlss.dll. The port itself contains no NVIDIA code; without the DLLs, on other GPUs or
-// with BB_DLSS=0 nothing changes. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR
+// bbport: NVIDIA DLSS Super Resolution through the optional bridge library (gpu/dlss_bridge,
+// MIT), loaded at run time from next to bb-probe together with NVIDIA's DLSS library:
+// bbport_dlss.dll + nvngx_dlss.dll on Windows, libbbport_dlss.so + libnvidia-ngx-dlss.so.<version>
+// on Linux. The port itself contains no NVIDIA code; without them, on other GPUs or with
+// BB_DLSS=0 nothing changes. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR
 // (vk_dlss_ngx).
 
 #pragma once
@@ -20,7 +21,7 @@ namespace Vulkan {
 
 class Dlss {
 public:
-    /// The process-wide instance, or null when the DLLs are absent or BB_DLSS=0.
+    /// The process-wide instance, or null when the libraries are absent or BB_DLSS=0.
     static Dlss* Get();
     ~Dlss();
 
@@ -47,6 +48,7 @@ public:
         u32 input_width, input_height, output_width, output_height;
         int quality;
         bool hdr;
+        u32 preset; ///< NVSDK_NGX_DLSS_Hint_Render_Preset, 0 NVIDIA's default (bbport.ini dlss_preset)
         bool operator==(const FeatureDesc&) const = default;
     };
     struct Frame {

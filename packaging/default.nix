@@ -16,6 +16,8 @@ let
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
     "run.sh" "out" "out/bb-probe" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libbbgpu.so"
+    # DLSS (tools/build_dlss_linux.sh): the bridge, NVIDIA's license; their library below.
+    "out/libbbport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt"
   ] ++ assetDirs;
   src = builtins.path {
     name = "bbport-src";
@@ -23,6 +25,7 @@ let
     filter = path: type:
       let rel = lib.removePrefix (toString root + "/") (toString path);
       in builtins.elem rel wanted
+        || lib.hasPrefix "out/libnvidia-ngx-dlss.so." rel
         || lib.any (dir: lib.hasPrefix (dir + "/") rel) assetDirs;
   };
   python = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
@@ -98,6 +101,12 @@ pkgs.stdenv.mkDerivation {
     install -m755 out/bb-probe $d/bin/bb-probe
     install -m755 out/bb-gpu-capabilities $d/bin/bb-gpu-capabilities
     install -Dm755 out/gpu/libbbgpu.so $d/bin/gpu/libbbgpu.so
+    # DLSS when built: the port loads both libraries from next to bb-probe. NGX itself
+    # (libnvidia-ngx.so.1) is the host driver's, exposed by bbport_vulkan.py.
+    if [ -f out/libbbport_dlss.so ]; then
+      install -m755 out/libbbport_dlss.so out/libnvidia-ngx-dlss.so.* $d/bin/
+      install -Dm644 out/NVIDIA-DLSS-LICENSE.txt $d/licenses/NVIDIA-DLSS-LICENSE.txt
+    fi
     runHook postInstall
   '';
   postFixup = ''
