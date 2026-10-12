@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <mutex>
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -223,6 +224,36 @@ std::string Instance::GetDriverVersionName() {
     return GetReadableVersion(version);
 }
 
+void Instance::DeviceLost(const char* where) const {
+    // The first thread to see it reports; the others wait here until the process exits.
+    static std::mutex reporting;
+    reporting.lock();
+    LOG_CRITICAL(Render_Vulkan, "GPU device lost ({}): the driver faulted or reset the GPU",
+                 where);
+    vk::DeviceFaultCountsEXT counts{};
+    if (device_fault && device->getFaultInfoEXT(&counts, nullptr) == vk::Result::eSuccess) {
+        std::vector<vk::DeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
+        std::vector<vk::DeviceFaultVendorInfoEXT> vendors(counts.vendorInfoCount);
+        counts.vendorBinarySize = 0;
+        vk::DeviceFaultInfoEXT info{.pAddressInfos = addresses.data(),
+                                    .pVendorInfos = vendors.data()};
+        const vk::Result result = device->getFaultInfoEXT(&counts, &info);
+        LOG_CRITICAL(Render_Vulkan, "Device fault ({}): {}", vk::to_string(result),
+                     info.description.data());
+        for (u32 i = 0; i < counts.addressInfoCount; ++i) {
+            LOG_CRITICAL(Render_Vulkan, "  address fault: {} at {:#x} (+-{:#x})",
+                         vk::to_string(addresses[i].addressType), addresses[i].reportedAddress,
+                         addresses[i].addressPrecision);
+        }
+        for (u32 i = 0; i < counts.vendorInfoCount; ++i) {
+            LOG_CRITICAL(Render_Vulkan, "  vendor fault: {} (code {:#x}, data {:#x})",
+                         vendors[i].description.data(), vendors[i].vendorFaultCode,
+                         vendors[i].vendorFaultData);
+        }
+    }
+    UNREACHABLE_MSG("GPU device lost");
+}
+
 bool Instance::CreateDevice() {
     const vk::StructureChain feature_chain = physical_device.getFeatures2<
         vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
@@ -234,7 +265,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
-        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
+        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
+        vk::PhysicalDeviceFaultFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -389,6 +421,8 @@ bool Instance::CreateDevice() {
         LOG_INFO(Render_Vulkan, "- shaderSubgroupClock: {}",
                  shader_clock_features.shaderSubgroupClock);
     }
+    device_fault = feature_chain.get<vk::PhysicalDeviceFaultFeaturesEXT>().deviceFault &&
+                   add_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
     const bool calibrated_timestamps =
         TRACY_GPU_ENABLED ? add_extension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) : false;
 
@@ -591,6 +625,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE{
             .shaderMixedFloatDotProductFloat16AccFloat32 = true,
         },
+        vk::PhysicalDeviceFaultFeaturesEXT{
+            .deviceFault = true,
+        },
     };
 
     if (!custom_border_color) {
@@ -650,6 +687,9 @@ bool Instance::CreateDevice() {
     }
     if (!mixed_float_dot_product) {
         device_chain.unlink<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
+    }
+    if (!device_fault) {
+        device_chain.unlink<vk::PhysicalDeviceFaultFeaturesEXT>();
     }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());

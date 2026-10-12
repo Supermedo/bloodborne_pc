@@ -864,7 +864,9 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
 
     info.AddWait(signal_sema, signal_tick);
     auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
-    ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+    if (submit_result == vk::Result::eErrorDeviceLost) {
+        instance.DeviceLost("sparse bind");
+    }
 
     pending_binds.clear();
 }

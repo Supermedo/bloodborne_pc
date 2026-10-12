@@ -453,7 +453,9 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 
     ImGui::Core::TextureManager::Submit();
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
-    ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+    if (submit_result == vk::Result::eErrorDeviceLost) {
+        instance.DeviceLost("submit");
+    }
 
     work_semaphore.Refresh();
     AllocateWorkerCommandBuffers();

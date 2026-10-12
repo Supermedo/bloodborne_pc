@@ -34,6 +34,9 @@ void Semaphore::Refresh() {
     do {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+        if (counter_result == vk::Result::eErrorDeviceLost) {
+            instance.DeviceLost("reading the GPU tick");
+        }
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
         counter = cntr;
@@ -62,7 +65,14 @@ void Semaphore::Wait(u64 tick) {
         .pValues = &tick,
     };
 
-    while (instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT) != vk::Result::eSuccess) {
+    // bbport: only a timeout is retried. Device loss returns at once, so retrying it spun
+    // forever (frozen game after the driver reset the GPU).
+    vk::Result result;
+    while ((result = instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT)) ==
+           vk::Result::eTimeout) {
+    }
+    if (result != vk::Result::eSuccess) {
+        instance.DeviceLost("waiting for the GPU");
     }
     Refresh();
 }
