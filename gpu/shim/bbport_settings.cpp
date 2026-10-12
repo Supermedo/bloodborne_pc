@@ -2,9 +2,11 @@
 #include "bbport_settings.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -61,10 +63,26 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "live_resolution") {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "output_res") {
-        for (int r = 0; r < OutputCount; ++r) {
+        for (int r = 0; r < OutputCustom; ++r) {
             if (value == std::to_string(OutputWidths[r]) + "x" + std::to_string(OutputHeights[r])) {
                 v.output_res = r;
+                return;
             }
+        }
+        const auto separator = value.find('x');
+        if (separator == std::string::npos) return;
+        int w = 0, h = 0;
+        const char* begin = value.data();
+        const char* split = begin + separator;
+        const char* end = begin + value.size();
+        const auto width = std::from_chars(begin, split, w);
+        const auto height = std::from_chars(split + 1, end, h);
+        if (width.ec == std::errc{} && width.ptr == split &&
+            height.ec == std::errc{} && height.ptr == end &&
+            w >= 256 && w <= 7680 && h >= 144 && h <= 4320 && !(w & 1) && !(h & 1)) {
+            OutputWidths[OutputCustom] = w;
+            OutputHeights[OutputCustom] = h;
+            v.output_res = OutputCustom;
         }
     } else {
         for (int e = 0; e < EffectCount; ++e) {
@@ -113,6 +131,7 @@ void Load() {
         {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"BB_OUTPUT_RES", "output_res"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -168,13 +187,20 @@ int RenderPreset() {
         v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
 }
 
+bool AspectNeedsRestart() {
+    const auto& v = Get();
+    const int a = v.output_res, b = v.startup_output_res;
+    return int64_t(OutputWidths[a]) * OutputHeights[b] !=
+           int64_t(OutputWidths[b]) * OutputHeights[a];
+}
+
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
-    return FixedRenderSession() &&
+    return AspectNeedsRestart() || (FixedRenderSession() &&
         (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
-         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
+         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa)));
 }
 
 void Save() {
