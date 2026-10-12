@@ -3,7 +3,9 @@
 // loader queries by NID (see bbgpu.cpp: bbgpu_resolve).
 #pragma once
 #include <string>
+#include "common/assert.h"
 #include "common/types.h"
+#include "core/emulator_settings.h"
 
 namespace Core::Loader {
 enum class SymbolType { Function, Object };

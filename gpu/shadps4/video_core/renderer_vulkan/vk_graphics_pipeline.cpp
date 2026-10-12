@@ -422,8 +422,13 @@ GraphicsPipeline::GraphicsPipeline(
 
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
+    // bbport: a driver that cannot build one pipeline (ErrorUnknown on some AMD drivers) stopped
+    // the game here; the pipeline stays empty instead and the draws that use it are skipped.
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR(Render_Vulkan, "Failed to create graphics pipeline {}: {}; its draws are skipped",
+                  debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     pipeline = std::move(pipe);
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 }

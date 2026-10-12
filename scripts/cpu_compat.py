@@ -181,8 +181,20 @@ def _cpuid_windows():
 def missing_host_extensions(cpuid=None):
     """Names of HOST_EXTENSIONS this CPU lacks, or None when CPUID cannot be read here."""
     cleanup = None
+    if cpuid is None and os.name != 'nt':
+        # The kernel's CPUID flags (LZCNT is "abm"); without them every CPU counted as unknown
+        # and got the translations.
+        try:
+            for line in Path('/proc/cpuinfo').read_text(encoding='utf-8', errors='replace').splitlines():
+                if line.startswith('flags'):
+                    flags = set(line.split(':', 1)[1].split())
+                    names = {'BMI1': 'bmi1', 'LZCNT': 'abm', 'MOVBE': 'movbe'}
+                    return [name for name in HOST_EXTENSIONS if names[name] not in flags]
+        except OSError:
+            pass
+        return None
     if cpuid is None:
-        if os.name != 'nt' or struct.calcsize('P') != 8:
+        if struct.calcsize('P') != 8:
             return None
         try:
             found = _cpuid_windows()

@@ -175,6 +175,12 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
 
+    // bbport: a cached pipeline the driver cannot create (a new driver, or one saved by a build
+    // that stopped on it) stopped every start here. It is compiled again when the game uses it.
+    if (!it.value()->IsValid()) {
+        compute_pipelines.erase(compute_key);
+        return false;
+    }
     return true;
 }
 
@@ -251,6 +257,11 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     sel.modules.fill(nullptr);
     sel.fetch_shader.reset();
 
+    // bbport: as for compute pipelines, a failed one is left to compile when the game uses it.
+    if (!it.value()->IsValid()) {
+        graphics_pipelines.erase(sel.graphics_key);
+        return false;
+    }
     return true;
 }
 

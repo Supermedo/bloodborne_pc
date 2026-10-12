@@ -9,7 +9,8 @@ from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
-                     compile_external)
+                     compile_external, eboot_bytes, eboot_matches_patches, patch_fingerprint,
+                     patch_sites)
 
 XML = ROOT / 'patches/Bloodborne.xml'
 SEGMENTS = [(0, 0x6000000)]
@@ -160,6 +161,63 @@ class ExternalPatchTests(unittest.TestCase):
 
     def test_built_in_file_is_not_external(self):
         self.assertEqual(external_patches(XML.parent), [])
+
+
+FINGERPRINTED = """<?xml version="1.0"?>
+<Patch>
+  <Metadata Name="60 FPS++" AppVer="01.09" AppElf="eboot.bin">
+    <PatchList>
+      <Line Type="bytes" Address="0x00400100" Value="909090"/>
+      <Line Type="bytes" Address="0x00400102" Value="9090"/>
+      <Line Type="bytes32" Address="0x00402ffe" Value="0x12345678"/>
+    </PatchList>
+  </Metadata>
+  <Metadata Name="Skip Intro" AppVer="01.09" AppElf="eboot.bin">
+    <PatchList><Line Type="bytes" Address="0x00400800" Value="90"/></PatchList>
+  </Metadata>
+</Patch>"""
+
+
+def elf_image(code):
+    """ELF64 with one PT_LOAD: `code` at vaddr 0 (file offset 0x1000), memory size 0x4000."""
+    header = bytearray(0x1000)
+    struct.pack_into('<Q', header, 0x20, 0x40)
+    struct.pack_into('<HH', header, 0x36, 56, 1)
+    struct.pack_into('<IIQQQQQQ', header, 0x40, 1, 5, 0x1000, 0, 0, len(code), 0x4000, 0x1000)
+    return bytes(header) + bytes(code)
+
+
+class FingerprintTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.xml = Path(directory.name) / 'patches.xml'
+        self.xml.write_text(FINGERPRINTED)
+        self.code = bytearray(range(256)) * 48  # 0x3000 bytes; the image is zero after that
+
+    def fingerprint(self, code):
+        return patch_fingerprint(elf_image(code), self.xml, '01.09')
+
+    def test_sites_merge_and_ignore_other_patches(self):
+        self.assertEqual(patch_sites(self.xml, '01.09'), [(0x100, 0x104), (0x2ffe, 0x3002)])
+
+    def test_image_bytes_past_the_file_are_zero(self):
+        self.assertEqual(eboot_bytes(elf_image(self.code), 0x2ffe, 0x3002),
+                         bytes(self.code[0x2ffe:]) + b'\0\0')
+
+    def test_only_patched_bytes_count(self):
+        expected = self.fingerprint(self.code)
+        other = bytearray(self.code)
+        other[0x800] ^= 0xff  # written only by a patch outside the fingerprint
+        other[0x50] ^= 0xff
+        self.assertEqual(self.fingerprint(other), expected)
+        other[0x103] ^= 0xff
+        self.assertNotEqual(self.fingerprint(other), expected)
+
+    @unittest.skipUnless((ROOT / 'out/eboot.elf').is_file(), 'needs a run of the game (out/eboot.elf)')
+    def test_stored_fingerprint_matches_the_prepared_game(self):
+        # Fails after the FPS or resolution patches change: update PATCH_FINGERPRINTS.
+        self.assertTrue(eboot_matches_patches(ROOT / 'out/eboot.elf'))
 
 
 if __name__ == '__main__':

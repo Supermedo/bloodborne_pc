@@ -51,6 +51,12 @@ fi
 "$PYTHON" scripts/prepare.py "$game" --out "$out"
 "$PYTHON" scripts/link_libc.py "$game" --out "$out"
 "$PYTHON" scripts/link_modules.py "$game" --out "$out"
+# Legacy CPU profile (scripts/cpu_compat.py): bb-probe's CPU check lets such a CPU start.
+if "$PYTHON" -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("cpu_compat",{}).get("enabled") else 1)' "$out/link.json"; then
+    export BB_CPU_COMPAT=1
+else
+    unset BB_CPU_COMPAT
+fi
 "$PYTHON" scripts/content_profile.py "$game" --out "$out" --sku "${BB_CONTENT_SKU:-full}"
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then

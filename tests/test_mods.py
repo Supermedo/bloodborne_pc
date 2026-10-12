@@ -80,6 +80,18 @@ class ModTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mods.build_overlay(self.game, self.root / 'out', [('A', a)])
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows overlay links')
+    def test_windows_overlay_files_report_their_size(self):
+        # bb-probe stats with UCRT _stat64 and lists with FindFirstFileA: both report a file
+        # symlink's own size (0), and the game panics loading it (FileTransferTask.cpp(865)).
+        a = self.mod('A', b'replaced')
+        result = mods.build_overlay(self.game, self.root / 'out', [('A', a)])
+        folder = result / 'dvdroot_ps4' / 'chr'
+        # DirEntry.stat(follow_symlinks=False) is FindFirstFile's data on Windows.
+        sizes = {e.name: e.stat(follow_symlinks=False).st_size for e in os.scandir(folder)}
+        self.assertEqual(sizes, {'a.dcx': len(b'replaced'), 'b.dcx': len(b'untouched')})
+        self.assertFalse(any((folder / name).is_symlink() for name in sizes))
+
     def test_executable_replacement_rejected(self):
         a = self.mod('A')
         (a / 'eboot.bin').write_bytes(b'unsupported')

@@ -481,4 +481,28 @@ static const RuntimeExport exports[]={
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceVoiceInit",ok_void}, {"sceVoiceEnd",ok_void},
 };
-uintptr_t runtime_services_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+/* Co-op (BB_ONLINE=1): network and PSN calls go to the shadNet libraries in bbgpu when they
+ * implement them. Trophies, voice and the store/profile dialogs stay here. */
+static int online_symbol(const char *symbol) {
+    static const char *const online[]={"sceNet","sceNp","sceHttp","sceSsl"};
+    static const char *const local[]={"sceNpTrophy","sceNpCommerce","sceNpProfileDialog"};
+    int match=0;
+    for (size_t i=0;i<sizeof(online)/sizeof(*online);++i)
+        if (!strncmp(symbol,online[i],strlen(online[i]))) match=1;
+    for (size_t i=0;i<sizeof(local)/sizeof(*local);++i)
+        if (!strncmp(symbol,local[i],strlen(local[i]))) match=0;
+    return match;
+}
+uintptr_t runtime_services_resolve(const char *name) {
+    static int online=-1;
+    if (online<0) { const char *v=getenv("BB_ONLINE"); online=v && v[0]=='1'; }
+    if (online) {
+        const char *symbol=runtime_symbol(name);
+        if (symbol && online_symbol(symbol)) {
+            uintptr_t address=bbgpu_resolve(name);
+            if (address) return address;
+            printf("Co-op: %s has no online version; using the offline one\n",symbol);
+        }
+    }
+    return RUNTIME_LOOKUP(exports,name);
+}
