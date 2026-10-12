@@ -4,8 +4,11 @@
 #pragma once
 
 #include <deque>
+#include <chrono>
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 
 #include <condition_variable>
+#include <mutex>
 
 #include "core/libraries/videoout/buffer.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
@@ -37,7 +40,7 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
-
+    std::shared_ptr<FrameGenerationOutput> generation;
 };
 
 enum SchedulerType {
@@ -102,11 +105,12 @@ public:
     Frame* PrepareLastFrame();
 
 private:
-    Frame* GetRenderFrame();
+  void PresentSingleFrame(Frame *frame, bool is_reusing_frame, bool is_game_frame);
+  Frame *GetRenderFrame();
 
-    void RecreateFrame(Frame* frame, u32 width, u32 height);
+  void RecreateFrame(Frame *frame, u32 width, u32 height);
 
-    void SetExpectedGameSize(s32 width, s32 height);
+  void SetExpectedGameSize(s32 width, s32 height);
 
 private:
     float expected_ratio{1920.0 / 1080.0f};
@@ -119,6 +123,7 @@ private:
     HostPasses::FsrPass::Settings fsr_settings{};
     HostPasses::PostProcessingPass::Settings pp_settings{};
     HostPasses::PostProcessingPass pp_pass;
+    std::mutex passes_mutex; ///< bbport: the passes are recorded on the recording threads
     AmdGpu::Liverpool* liverpool;
     Scheduler draw_scheduler;
     std::deque<u64> recent_frame_ticks; ///< bbport: BB_FRAMES_AHEAD bound (PrepareFrame)
@@ -128,6 +133,7 @@ private:
     Runtime runtime;
     std::unique_ptr<Rasterizer> rasterizer;
     VideoCore::TextureCache& texture_cache;
+    std::unique_ptr<FrameGeneration> frame_generation;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
     std::queue<Frame*> free_queue;

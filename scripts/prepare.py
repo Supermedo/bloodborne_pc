@@ -23,6 +23,8 @@ if hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
+import game_check
+
 
 def span(data, offset, size):
     if offset < 0 or size < 0 or offset + size > len(data):
@@ -131,7 +133,11 @@ def inspect_libc(path):
     return evidence
 
 
-def prepare(game, out):
+class GameCheckError(Exception):
+    """Game files bbport does not run (game_check.py)."""
+
+
+def prepare(game, out, *, inventory=True):
     source = (game / 'eboot.bin').read_bytes()
     elf, header, ph, segments, missing = parse_self(source)
     loads = [p for p in ph if p['type'] in (1, 0x61000010)]
@@ -145,6 +151,9 @@ def prepare(game, out):
         if p['filesz'] > p['memsz']:
             raise ValueError('segment file size exceeds memory size')
         image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
+    # bbport: only the supported executable runs (game_check.py); others fail in the game's code.
+    if found := game_check.problem(game, hashlib.sha256(image).hexdigest()):
+        raise GameCheckError(game_check.explain(*found))
     dp = next(p for p in ph if p['type'] == 2)
     dyn = []
     for pos in range(dp['offset'], dp['offset'] + dp['filesz'], 16):
@@ -231,13 +240,16 @@ def prepare(game, out):
             f.write(struct.pack('<QQqq', *relocation))
         f.write(image)
     (out / 'eboot.elf').write_bytes(elf)
+    # Patch bounds need only ELF/program headers, not the full executable copy.
+    (out / 'eboot-headers.bin').write_bytes(span(elf, 0, header[5] + header[9] * header[10]))
     (out / 'entry.bin').write_bytes(image[:1024])
     resources = collections.Counter()
     total_bytes = 0
-    for path in (game / 'dvdroot_ps4').rglob('*'):
-        if path.is_file():
-            resources[path.relative_to(game / 'dvdroot_ps4').parts[0]] += 1
-            total_bytes += path.stat().st_size
+    if inventory:
+        for path in (game / 'dvdroot_ps4').rglob('*'):
+            if path.is_file():
+                resources[path.relative_to(game / 'dvdroot_ps4').parts[0]] += 1
+                total_bytes += path.stat().st_size
     report = dict(source_sha256=hashlib.sha256(source).hexdigest(), source_bytes=len(source),
                   sfo=sfo((game / 'sce_sys/param.sfo').read_bytes()), entry=hex(header[4]),
                   image_bytes=size, program_headers=ph, self_segments=segments,
@@ -246,7 +258,8 @@ def prepare(game, out):
                   import_name_hints={name: known[name.split('#')[0]] for name in names if name.split('#')[0] in known},
                   libc_evidence=libc_evidence,
                   bundled_modules=sorted(p.name for p in (game / 'sce_module').iterdir()),
-                  resources=dict(resources), resource_bytes=total_bytes,
+                  resources=dict(resources), resource_bytes=total_bytes if inventory else None,
+                  resource_inventory=inventory,
                   status='Prepared only; execution and Vulkan are tested separately.')
     (out / 'analysis.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n',
                                        encoding='utf-8')
@@ -261,8 +274,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game', type=Path)
     parser.add_argument('--out', type=Path, default=Path(__file__).resolve().parent.parent / 'out')
+    parser.add_argument('--no-resource-inventory', action='store_true',
+                        help='Skip the diagnostic asset-tree walk (not needed to run the game)')
     args = parser.parse_args()
     try:
-        prepare(args.game, args.out)
+        prepare(args.game, args.out, inventory=not args.no_resource_inventory)
+    except GameCheckError as error:
+        parser.exit(2, f'\nUnsupported game files: {error}\nSet BB_SKIP_GAME_CHECK=1 to start anyway.\n')
     except (ValueError, OSError, StopIteration, KeyError, IndexError) as error:
         parser.exit(1, f'prepare failed: {error}\n')

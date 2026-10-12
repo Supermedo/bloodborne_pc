@@ -16,37 +16,48 @@ inline bool IsFsr4(int upscaler) {
     return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411;
 }
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
+
+/// Native NGX model hint values, independent of the render-resolution preset.
+inline constexpr int DlssPresets[] = {0, 1, 2, 3, 4, 5, 6, 10, 11, 13, 12};
+inline constexpr int DlssPresetCount = sizeof(DlssPresets) / sizeof(DlssPresets[0]);
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
+enum class MenuLanguage { English, Russian };
+enum FrameGeneration : int {
+    FrameGenerationOff,
+    FrameGenerationFsr,
+    FrameGenerationDlss,
+    FrameGenerationCount
+};
 
 /// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
 /// menu label, default (the game's own behaviour).
 struct Effect {
     const char* key;
     const char* label;
+    const char* label_ru;
     bool default_on;
 };
 inline constexpr Effect Effects[] = {
-    {"effect_chromatic_aberration", "Chromatic aberration", true},
-    {"effect_dof", "Depth of field (DoF)", true},
-    {"effect_motion_blur", "Motion blur", true},
-    {"effect_ssao", "Ambient occlusion (SSAO)", true},
-    {"effect_game_aa", "Game anti-aliasing", true},
-    {"effect_dynamic_shadows", "Dynamic shadows", true},
-    {"effect_ssr", "Screen-space reflections (SSR)", false},
-    {"skip_intro", "Skip intro logos and movie", false},
-    {"debug_camera", "Free camera (Cross + L3)", false},
-    {"debug_menu", "Debug menu (requires font files)", false},
-    {"cheat_no_death", "Cheat: never die (minimum 1 HP)", false},
-    {"cheat_stealth", "Cheat: enemies cannot see you", false},
-    {"cheat_silent", "Cheat: enemies cannot hear you", false},
-    {"cheat_rally_no_decay", "Cheat: Rally never decays", false},
-    {"cheat_enemy_control", "Cheat: control targeted enemy (R3 / L3)", false},
-    {"tweak_no_rally", "Disable Rally (health recovery)", false},
-    {"tweak_camera_distance", "Increase camera distance", false},
-    {"tweak_no_camera_rotation", "Disable automatic camera rotation", false},
-    {"tweak_easy_run", "Run with less stick tilt", false},
-    {"tweak_ragdoll", "Dark Souls-style ragdoll physics", false},
-    {"tweak_circle_confirm", "Japanese/Asian buttons (Circle confirms)", false},
+    {"effect_chromatic_aberration", "Chromatic aberration", "Хроматическая аберрация", true},
+    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", true},
+    {"effect_motion_blur", "Motion blur", "Размытие в движении", true},
+    {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", true},
+    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", true},
+    {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", true},
+    {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", false},
+    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", false},
+    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", false},
+    {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", false},
+    {"cheat_no_death", "Never die (minimum 1 HP)", "Чит: бессмертие (не ниже 1 HP)", false},
+    {"cheat_stealth", "Enemies do not see you", "Чит: враги не замечают", false},
+    {"cheat_silent", "Silent footsteps", "Чит: враги не слышат", false},
+    {"cheat_rally_no_decay", "Rally does not decay", "Чит: Rally не угасает", false},
+    {"cheat_enemy_control", "Control enemies (R3 / L3)", "Чит: управление врагом (R3 / L3)", false},
+    {"tweak_no_rally", "Disable Rally", "Без Rally (возврата HP)", false},
+    {"tweak_camera_distance", "Camera distance", "Камера дальше", false},
+    {"tweak_no_camera_rotation", "Disable automatic camera rotation", "Без автоповорота камеры", false},
+    {"tweak_easy_run", "Run with less stick tilt", "Бег с меньшим наклоном стика", false},
+    {"tweak_ragdoll", "Dark Souls ragdoll physics", "Физика тел как в Dark Souls", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
 /// Live output resolutions: the upscaler's output and the UI host targets.
@@ -56,8 +67,15 @@ inline constexpr int OutputCount = 4;
 inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 
 struct Values {
+    std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
     std::atomic<int> upscaler{UpscalerFsr3};
     std::atomic<int> preset{NativeAA};
+    std::atomic<int> dlss_preset{0}; ///< 0 = DLL default; otherwise an NGX model preset
+    std::atomic<int> frame_generation{FrameGenerationOff};
+    std::atomic<bool> fsr_fg_supported{false}, dlss_fg_supported{false};
+    std::atomic<const char *> frame_generation_problem{nullptr};
+    std::atomic<bool> frame_generation_active{false};
+    std::atomic<float> frame_generation_render_ms{0};
     std::atomic<bool> sharpen{true};
     std::atomic<float> sharpness{0.3f};
     std::atomic<bool> jitter{true};
@@ -68,6 +86,10 @@ struct Values {
     std::atomic<float> reactive_max{0.9f};
     std::atomic<int> debug_view{DebugNone};
     std::atomic<bool> show_fps{false};
+    std::atomic<bool> mouse_camera{false}, mouse_invert_y{false};
+    std::atomic<float> mouse_sensitivity{100.f}; // percent; 100 = 900 counts/radian
+    /// The settings menu's position (fraction of the screen), -1 until it is moved.
+    std::atomic<float> menu_x{-1.0f}, menu_y{-1.0f};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};
@@ -97,6 +119,8 @@ struct Values {
 };
 
 Values& Get();
+/// Localized overlay text; the Language selector itself stays in English.
+const char* MenuText(const char* english, const char* russian);
 
 /// Reads the file, then the environment overrides. Called once at start.
 void Load();
@@ -114,6 +138,8 @@ void Save();
 /// Render resolution divisor of a preset (1.0 native, 1.5 quality, ...).
 float PresetScale(int preset);
 const char* PresetName(int preset);
+const char* DlssPresetName(int preset);
+const char* DlssPresetLabel(int preset);
 const char* UpscalerName(int upscaler);
 
 } // namespace BbSettings

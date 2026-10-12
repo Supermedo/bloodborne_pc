@@ -89,8 +89,18 @@ struct MotionVectors {
     /// the position array (vec4 per vertex; element 0 is scratch), fixed for the session.
     static inline u64 params_address = 0;
     static inline u64 positions_address = 0;
+    /// SPIR-V SpecId for the session buffer device addresses (filled at pipeline create).
+    static constexpr u32 ParamsAddressSpecId = 0;
+    static constexpr u32 PositionsAddressSpecId = 1;
     static constexpr u32 FlagStore = 1;
     static constexpr u32 FlagLoad = 2;
+};
+
+// Driver-bounded EXT_transform_feedback export, enabled only for Remix sessions.
+// No physical storage-buffer addresses are used by this scene capture path.
+struct RemixCapture {
+    static inline bool enabled = false;
+    static constexpr u32 UvLocation = 30;
 };
 
 struct HwLocalRuntimeInfo {
@@ -113,6 +123,8 @@ struct HwVertexRuntimeInfo {
     u32 user_clip_plane_mask{};
     /// bbport: object motion vectors (G-buffer draws), see MotionVectors below.
     bool motion_vectors{};
+    bool remix_capture{};
+    u16 remix_uv = 0xffff;
 
     bool operator==(const HwVertexRuntimeInfo& other) const noexcept = default;
 };

@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+layout(local_size_x=8,local_size_y=8) in;
+layout(binding=0) uniform texture2D source_depth;
+layout(binding=1,r32f) uniform writeonly image2D copied_depth;
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(p,imageSize(copied_depth)))) return;
+    imageStore(copied_depth,p,vec4(texelFetch(source_depth,p,0).r));
+}

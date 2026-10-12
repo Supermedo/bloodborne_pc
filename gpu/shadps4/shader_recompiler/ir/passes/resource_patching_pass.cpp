@@ -808,6 +808,39 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
                                                  : IR::F32{};
     const IR::F32 lod_clamp = inst_info.has_lod_clamp ? get_addr_reg(addr_reg++) : IR::F32{};
 
+    if (info.sw_stage == SwStage::Fragment && view_type == AmdGpu::ImageType::Color2D &&
+        !unnormalized && !inst_info.is_depth) {
+        // Read-only provenance tracking: only an unambiguous UV varying is exported.
+        std::vector<IR::Value> work{coords};
+        std::vector<const IR::Inst*> seen;
+        u32 mask=0, attribute=UINT32_MAX;
+        bool ambiguous=false;
+        while (!work.empty() && seen.size()<64) {
+            const auto item=work.back(); work.pop_back();
+            const auto* node=item.TryInst();
+            if (!node || std::find(seen.begin(),seen.end(),node)!=seen.end()) continue;
+            seen.push_back(node);
+            if (node->GetOpcode()==IR::Opcode::GetAttribute && IR::IsParam(node->Arg(0).Attribute())) {
+                const u32 a=u32(node->Arg(0).Attribute())-u32(IR::Attribute::Param0);
+                ambiguous |= attribute!=UINT32_MAX && attribute!=a;
+                attribute=a; mask |= 1u<<node->Arg(1).U32();
+            } else if ((node->GetOpcode()==IR::Opcode::CompositeExtractF32x2 ||
+                        node->GetOpcode()==IR::Opcode::CompositeExtractF32x3 ||
+                        node->GetOpcode()==IR::Opcode::CompositeExtractF32x4) && node->Arg(1).IsImmediate()) {
+                const auto* composite=node->Arg(0).TryInst();
+                const u32 component=node->Arg(1).U32();
+                if (composite && component<composite->NumArgs() &&
+                    (composite->GetOpcode()==IR::Opcode::CompositeConstructF32x2 ||
+                     composite->GetOpcode()==IR::Opcode::CompositeConstructF32x3 ||
+                     composite->GetOpcode()==IR::Opcode::CompositeConstructF32x4)) work.push_back(composite->Arg(component));
+                else for(size_t n=0;n<node->NumArgs();++n) work.push_back(node->Arg(n));
+            } else if (node->GetOpcode()!=IR::Opcode::Phi) {
+                for(size_t n=0;n<node->NumArgs();++n) work.push_back(node->Arg(n));
+            } else ambiguous=true;
+        }
+        if (!ambiguous && work.empty() && attribute<IR::NumParams && (mask==3 || mask==12))
+            info.images[inst.Arg(0).U32()&0xffff].remix_uv=u16(attribute*4+(mask==12 ? 2 : 0));
+    }
     auto texel = [&] -> IR::Value {
         if (is_msaa) {
             return ir.ImageRead(handle, coords, {}, ir.Imm32(0U), inst_info);

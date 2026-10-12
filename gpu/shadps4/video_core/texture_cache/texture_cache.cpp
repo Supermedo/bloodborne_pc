@@ -4,6 +4,7 @@
 #include <xxhash.h>
 
 #include "bbport_toggles.h"
+#include "bbport_free_check.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -63,8 +64,35 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
 
 TextureCache::~TextureCache() = default;
 
+std::string TextureCache::DescribeImagesIn(VAddr addr, u64 size) {
+    std::unique_lock lock{mutex, std::try_to_lock}; // the caller may hold it already
+    if (!lock.owns_lock()) {
+        return " [images: not looked up]";
+    }
+    std::string out;
+    int shown = 0;
+    ForEachImageInRegion(addr, size, [&](ImageId, Image& image) {
+        if (shown++ < 3) {
+            out += fmt::format(" [image {:#x}+{:#x} {}x{} fmt {} tile {}{}{}]", image.info.guest_address,
+                               image.info.guest_size, image.info.size.width,
+                               image.info.size.height, u32(image.info.pixel_format),
+                               u32(image.info.tile_mode), image.usage.render_target ? " RT" : "",
+                               True(image.flags & ImageFlagBits::GpuModified) ? " gpu" : "");
+        }
+    });
+    if (shown > 3) {
+        out += fmt::format(" +{} more", shown - 3);
+    }
+    return out;
+}
+
 void TextureCache::ProcessDownloadImages() {
+    // bbport: called for every fence (~450 a frame): the lock only when something is queued.
+    if (!downloads_queued.load(std::memory_order_acquire)) {
+        return;
+    }
     std::unique_lock lk{download_images_mutex};
+    downloads_queued.store(false, std::memory_order_relaxed);
     for (const ImageId image_id : download_images) {
         DownloadImageMemory(image_id, true);
     }
@@ -79,6 +107,32 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     const u32 download_size = image.info.pitch * image.info.size.height * image.info.size.depth *
                               image.info.resources.layers * (image.info.num_bits / 8);
     ASSERT(download_size <= image.info.guest_size);
+    vk::BufferImageCopy image_copy = {
+        .bufferOffset = 0,
+        .bufferRowLength = image.info.pitch,
+        .bufferImageHeight = image.info.size.height,
+        .imageSubresource =
+            {
+                .aspectMask = image.info.props.is_depth ? vk::ImageAspectFlagBits::eDepth
+                                                        : vk::ImageAspectFlagBits::eColor,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = image.info.resources.layers,
+            },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {image.info.size.width, image.info.size.height, image.info.size.depth},
+    };
+    // bbport BB_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
+    // order: before the fences that follow, no wait here and no CPU copy afterwards.
+    if (GuestInPlace() && image.info.guest_address != 0) {
+        const auto [arena, offset] =
+            buffer_cache.ObtainBuffer(image.info.guest_address, download_size, true);
+        if (buffer_cache.IsInPlace(image.info.guest_address, download_size)) {
+            image_copy.bufferOffset = offset;
+            runtime.DownloadImage(&image, arena, std::span{&image_copy, 1});
+            return;
+        }
+    }
     const auto download =
         runtime.GetStagingPool().Request(download_size, MemoryType::HostCached, 16, !sync);
     const vk::BufferImageCopy image_download = {
@@ -100,14 +154,24 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     if (sync) {
         scheduler.Finish();
         download.Invalidate();
+        BbFreeCheck::Check(image.info.guest_address, download_size, download.mapped,
+                           BbFreeCheck::ImageDownload);
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image.info.guest_address),
                                                   download.mapped, download_size);
+        if (!WriteTracking()) {
+            buffer_cache.InvalidateMemory(image.info.guest_address, download_size);
+        }
     } else {
         scheduler.DeferPriorityOperation(
             [this, device_addr = image.info.guest_address, download, download_size] {
                 download.Invalidate();
+                BbFreeCheck::Check(device_addr, download_size, download.mapped,
+                                   BbFreeCheck::ImageDownload);
                 Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(device_addr),
                                                           download.mapped, download_size);
+                if (!WriteTracking()) {
+                    buffer_cache.InvalidateMemory(device_addr, download_size);
+                }
                 runtime.GetStagingPool().FreeDeferred(download);
             });
     }
@@ -141,6 +205,9 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
             // Modified region overlaps image, so the image was definitely accessed by this fault.
             // Untrack the image, so that the range is unprotected and the guest can write freely.
             image.flags |= ImageFlagBits::CpuDirty;
+            PageManager::NoteImageFault(image.info.guest_address, image.info.guest_size,
+                                        image.info.size.width, image.info.size.height,
+                                        u32(image.info.pixel_format), u32(image.info.tile_mode));
             UntrackImage(image_id);
         } else if (pages_end < image_end) {
             // This page access may or may not modify the image.
@@ -321,6 +388,20 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
         // Size is greater but resources are not, because the tiling mode is different.
         // Likely the address is reused for a image with a different tiling mode.
         if (image_info.tile_mode != cache_image.info.tile_mode) {
+            if (safe_to_delete) {
+                FreeImage(cache_image_id);
+            }
+            return {merged_image_id, -1, -1};
+        }
+
+        // Same address reused with a different mip/layer layout (pooled texture memory): the
+        // resources neither contain nor are contained by the cached ones. Treat it as a new
+        // image, like the tiling-mode case.
+        const auto& old_res = cache_image.info.resources;
+        const auto& new_res = image_info.resources;
+        const bool old_fits = old_res.levels <= new_res.levels && old_res.layers <= new_res.layers;
+        const bool new_fits = new_res.levels <= old_res.levels && new_res.layers <= old_res.layers;
+        if (!old_fits && !new_fits) {
             if (safe_to_delete) {
                 FreeImage(cache_image_id);
             }
@@ -685,6 +766,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
             image.info.guest_address != 0) {
             std::unique_lock lk{download_images_mutex};
             download_images.emplace(image_id);
+            downloads_queued.store(true, std::memory_order_release);
         }
     }
     if (refresh) {
@@ -712,6 +794,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
         std::unique_lock lk{download_images_mutex};
         download_images.emplace(image_id);
+        downloads_queued.store(true, std::memory_order_release);
     }
     image.usage.render_target = 1u;
     UpdateImage(image_id);
@@ -888,6 +971,9 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
+    BbStats::live_image_bytes.fetch_add(Common::AlignUp(image.info.guest_size, 1024),
+                                        std::memory_order_relaxed);
+    BbStats::live_images.fetch_add(1, std::memory_order_relaxed);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
     ForEachPage(image.info.guest_address, image.info.guest_size,
@@ -902,6 +988,9 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ++registry_generation;
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
+    BbStats::live_image_bytes.fetch_sub(Common::AlignUp(image.info.guest_size, 1024),
+                                        std::memory_order_relaxed);
+    BbStats::live_images.fetch_sub(1, std::memory_order_relaxed);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == nullptr) {
@@ -1048,18 +1137,23 @@ void TextureCache::GarbageCollectImages() {
             }
         }
     }
+    BbStats::gc_used_bytes.store(total_used_memory, std::memory_order_relaxed);
+    BbStats::gc_trigger_bytes.store(trigger_gc_memory, std::memory_order_relaxed);
     // bbport: gc_tick (one per guest submission, hundreds a second) at each of the last 64
     // seconds, for ages in seconds. The usage compared is all of our VRAM, not only images: on a
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) would evict
-    // every texture briefly off screen and upload it again. Below the pressure mark an image goes
+    // every texture briefly off screen and uploaded it again. Below the pressure mark an image goes
     // once unused for BB_GC_IDLE_SECONDS (20): the textures of an area left behind.
-    // (From bbport 0.3, deadinside28/bloodborne_pc 4d4d208.)
     const u64 second = u64(std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count());
     if (second != gc_second) {
         gc_second = second;
+        BbStats::coarse_second.store(u32(second), std::memory_order_relaxed);
         gc_tick_at_second[second % gc_tick_at_second.size()] = gc_tick;
+    }
+    if (BbToggle::Disabled(BbToggle::TextureCollector)) {
+        return;
     }
     if (total_used_memory < trigger_gc_memory) {
         return;
@@ -1107,6 +1201,7 @@ void TextureCache::GarbageCollectImages() {
                 gc_kept_bytes += image.info.guest_size;
             }
             lru_cache.Touch(image.lru_id, gc_tick);
+            BbStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
         --num_deletions;
@@ -1118,6 +1213,7 @@ void TextureCache::GarbageCollectImages() {
             ++gc_downloads;
         }
         ++gc_evictions;
+        BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         FreeImage(image_id);
         if (total_used_memory < critical_gc_memory) {
             if (aggresive) {

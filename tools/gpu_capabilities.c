@@ -1,9 +1,12 @@
 /* Check whether native-size depth/stencil images can be blitted to reduced
- * renderer targets. The renderer needs both directions for live presets. */
+ * renderer targets. The renderer needs both directions for live presets.
+ * --gamepads: the connected gamepads, "GUID<tab>name" per line (the launcher's controller list,
+ * BB_GAMEPAD). --read-input: one key or button for the launcher's controls (below). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
+#include <SDL3/SDL.h>
 
 static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
     VkPhysicalDeviceMemoryProperties memory;
@@ -64,7 +67,38 @@ static int live_resolution_suits(VkPhysicalDevice device) {
     return suits;
 }
 
+static int list_gamepads(void) {
+    if (!SDL_Init(SDL_INIT_GAMEPAD)) {
+        fprintf(stderr, "gamepads: %s\n", SDL_GetError());
+        return 1;
+    }
+    // Some devices (HIDAPI) show up only after events are pumped.
+    for (int i = 0; i < 5; ++i) {
+        SDL_PumpEvents();
+        SDL_Delay(40);
+    }
+    int count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    for (int i = 0; ids && i < count; ++i) {
+        char guid[33];
+        SDL_GUIDToString(SDL_GetGamepadGUIDForID(ids[i]), guid, sizeof guid);
+        const char *name = SDL_GetGamepadNameForID(ids[i]);
+        printf("%s\t%s\n", guid, name ? name : "?");
+    }
+    SDL_free(ids);
+    SDL_Quit();
+    return 0;
+}
+
+#include "input_capture.h"
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--read-input")) {
+        return read_input(argc > 2 ? argv[2] : "key", argc > 3 ? argv[3] : NULL);
+    }
+    if (argc > 1 && !strcmp(argv[1], "--gamepads")) {
+        return list_gamepads();
+    }
     const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,

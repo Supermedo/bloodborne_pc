@@ -210,6 +210,9 @@ public:
     /// Returns a numeric scalar constant.
     Id Constant(Id result_type, const Literal& literal);
 
+    /// Returns a numeric scalar specialization constant.
+    Id SpecConstant(Id result_type, const Literal& literal);
+
     /// Returns a numeric scalar constant.
     Id ConstantComposite(Id result_type, std::span<const Id> constituents);
 

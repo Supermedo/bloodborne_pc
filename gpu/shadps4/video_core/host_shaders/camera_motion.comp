@@ -38,7 +38,11 @@ void main() {
     // Depth was rasterised through a shifted viewport. Reconstruct its unjittered
     // position, and keep jitter out of FSR's motion vectors (as for the object vectors).
     const vec2 scene_uv = uv - jitter / size;
-    const vec2 ndc = vec2(scene_uv.x * 2.0 - 1.0, 1.0 - scene_uv.y * 2.0);
+    // bbport: ndc +y down the screen (pixel rows). The projection's y scale carries the sign of
+    // the G-buffer pass's viewport y scale (CameraMotion::OnConstants): the viewport decides which
+    // way view +y goes. A fixed sign was right in some areas and wrong in others (0.2: y up, bad on
+    // the Cathedral Ward stairs and in the sewers; 0.3: y down, smearing when the camera turns).
+    const vec2 ndc = vec2(scene_uv.x * 2.0 - 1.0, scene_uv.y * 2.0 - 1.0);
 
     // Clip z = zs * z + zo, w = z; depth = zs + zo / z (zo < 0, depth < zs in front).
     const bool sky = depth >= 1.0;
@@ -51,7 +55,7 @@ void main() {
         vec3(dot(reproject[0], view), dot(reproject[1], view), dot(reproject[2], view));
     const vec2 prev_ndc =
         vec2(prev_view.x * prev_proj.x, prev_view.y * prev_proj.y) / max(prev_view.z, 1e-4);
-    const vec2 prev_uv = vec2(prev_ndc.x * 0.5 + 0.5, 0.5 - prev_ndc.y * 0.5);
+    const vec2 prev_uv = prev_ndc * 0.5 + 0.5;
     const vec2 motion = (prev_uv - scene_uv) * size;
 
 #ifdef DEBUG_OVERLAY

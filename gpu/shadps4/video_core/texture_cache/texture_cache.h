@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <atomic>
 #include <chrono>
 #include "bbport_toggles.h"
@@ -89,6 +90,9 @@ public:
                  Vulkan::Runtime& runtime, AmdGpu::Liverpool* liverpool, BufferCache& buffer_cache,
                  PageManager& tracker);
     ~TextureCache();
+
+    /// bbport (diagnostics): the images over [addr, addr + size), described briefly.
+    std::string DescribeImagesIn(VAddr addr, u64 size);
 
     /// bbport: changes whenever an image is registered or unregistered.
     [[nodiscard]] u64 RegistryGeneration() const noexcept {
@@ -440,6 +444,7 @@ private:
     std::atomic<u64> registry_generation{0};
     std::mutex samplers_mutex;
     std::mutex download_images_mutex;
+    std::atomic<bool> downloads_queued{false}; ///< download_images may be non-empty (checked without the lock)
     struct MetaDataInfo {
         MetaType type;
         s32 clear_mask = -1;

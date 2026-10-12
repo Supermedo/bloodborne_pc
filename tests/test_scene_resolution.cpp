@@ -11,6 +11,7 @@
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include <vk_mem_alloc.h>
+#include "test_assert.h"
 
 int main() {
     using namespace Vulkan;

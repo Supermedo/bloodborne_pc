@@ -15,6 +15,11 @@ namespace Shader {
 
 using PFN_SrtWalker = void PS4_SYSV_ABI (*)(const u32* /*user_data*/, u32* /*flat_dst*/);
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size);
+/// True when `code` only writes inside the flat buffer (`flat_dwords`) and its own stack,
+/// branches within itself and ends in `ret`: what GenerateSrtProgram emits.
+bool ValidateWalkerCode(const u8* code, size_t size, u32 flat_dwords);
+void RunSrtWalkerSafe(PFN_SrtWalker fn, const u32* user_data, u32* flat, u32 user_dwords,
+                      u32 flat_dwords);
 
 struct PersistentSrtInfo {
     // Special case when fetch shader uses step rates.

@@ -7,6 +7,7 @@
 #include "shader_recompiler/ir/type.h"
 #include "video_core/amdgpu/resource.h"
 
+#include <span>
 #include <boost/container/static_vector.hpp>
 
 namespace Shader {
@@ -34,16 +35,24 @@ struct SharpFetch {
 
     template <u32 num_dwords = N>
         requires(num_dwords <= N)
-    constexpr bool Fetch(const u32* flatbuf, T* out) const {
+    constexpr bool Fetch(std::span<const u32> flat, T* out) const {
+        if (flat.empty()) {
+            return false;
+        }
         u8 mask = load_mask;
         for (u32 i = 0; i < num_dwords; i++) {
             if (offsets[i] == UNKNOWN_LOCATION) {
                 return false;
             }
+            if ((mask & 1) && offsets[i] >= flat.size()) {
+                return false;
+            }
+            mask >>= 1;
         }
+        mask = load_mask;
         std::array<u32, num_dwords> out_dw;
         for (u32 i = 0; i < num_dwords; i++) {
-            out_dw[i] = (mask & 1) ? flatbuf[offsets[i]] : immediates[i];
+            out_dw[i] = (mask & 1) ? flat[offsets[i]] : immediates[i];
             mask >>= 1;
         }
         std::memcpy(out, out_dw.data(), sizeof(out_dw));
@@ -90,7 +99,7 @@ struct BufferResource {
 
     constexpr AmdGpu::Buffer GetSharp(const auto& info) const noexcept {
         AmdGpu::Buffer buffer;
-        if (!sharp_fetch.Fetch(info.FlatUserData().data(), &buffer)) {
+        if (!sharp_fetch.Fetch(info.FlatUserData(), &buffer)) {
             return AmdGpu::Buffer::Null();
         }
         if (post_op == SharpFetchPostOp::BitwiseOrDw1WithImm) {
@@ -123,12 +132,13 @@ struct ImageResource {
     /// queries, offsets): needs the native-size image, not a reduced scene proxy.
     bool needs_native{};
     u8 constant_mip_index{};
+    u16 remix_uv = 0xffff; ///< parameter * 4 + first UV component, or unknown
     MipStorageFallbackMode mip_fallback_mode{};
     SharpFetchPostOp post_op{};
 
     constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
         AmdGpu::Image image{};
-        if (!Fetch(info.FlatUserData().data(), &image)) {
+        if (!Fetch(info.FlatUserData(), &image)) {
             return AmdGpu::Image::Null(is_depth);
         }
         if (post_op == SharpFetchPostOp::ConvertCubeTo2DArray) {
@@ -147,13 +157,13 @@ struct ImageResource {
         return image;
     }
 
-    constexpr bool Fetch(const u32* flatbuf, AmdGpu::Image* out) const {
+    constexpr bool Fetch(std::span<const u32> flat, AmdGpu::Image* out) const {
         if (!is_r128) {
             // Fetch full 8 byte T#
-            return sharp_fetch.Fetch(flatbuf, out);
+            return sharp_fetch.Fetch(flat, out);
         }
         // Fetch r128 T# and fix pitch
-        if (!sharp_fetch.Fetch<4>(flatbuf, out)) {
+        if (!sharp_fetch.Fetch<4>(flat, out)) {
             return false;
         }
         out->pitch = out->width;
@@ -161,10 +171,14 @@ struct ImageResource {
     }
 
     u32 NumBindings(const auto& info) const {
+        if (mip_fallback_mode != MipStorageFallbackMode::DynamicIndex) {
+            return 1;
+        }
         const AmdGpu::Image tsharp = GetSharp(info);
-        return (mip_fallback_mode == MipStorageFallbackMode::DynamicIndex)
-                   ? (tsharp.last_level - tsharp.base_level + 1)
-                   : 1;
+        if (!tsharp.Valid()) {
+            return 1;
+        }
+        return tsharp.last_level - tsharp.base_level + 1;
     }
 };
 using ImageResourceList = boost::container::static_vector<ImageResource, NUM_IMAGES>;
@@ -177,9 +191,15 @@ struct SamplerResource {
 
     constexpr AmdGpu::Sampler GetSharp(const auto& info) const noexcept {
         AmdGpu::Sampler sampler{};
-        sharp_fetch.Fetch(info.FlatUserData().data(), &sampler);
+        const auto flat = info.FlatUserData();
+        if (flat.empty() || !sharp_fetch.Fetch(flat, &sampler)) {
+            return sampler;
+        }
         if (post_op == SharpFetchPostOp::DisableAnisoIfSingleLod) {
-            const u32 tsharp_dw3 = info.FlatUserData()[post_op_tsharp_dw3_off];
+            if (post_op_tsharp_dw3_off >= flat.size()) {
+                return sampler;
+            }
+            const u32 tsharp_dw3 = flat[post_op_tsharp_dw3_off];
             if (((tsharp_dw3 >> 12) & 0xff) == 0) {
                 sampler.max_aniso.Assign(AmdGpu::AnisoRatio::One);
             }

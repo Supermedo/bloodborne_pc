@@ -23,12 +23,27 @@ MINGW*|MSYS*)
     cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO=off \
         -DBB_LTO="${BB_LTO:-OFF}" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ >/dev/null
     echo "GPU library and loader: LTO ${BB_LTO:-OFF}"
-    if ! ninja -C out/gpu bb-probe bb-gpu-capabilities bb-play > out/gpu-build.log 2>&1; then
+    if ! ninja -C out/gpu bb-probe bb-gpu-capabilities bb-play bb-crash-monitor bb-remix-host > out/gpu-build.log 2>&1; then
         grep -v '^\[' out/gpu-build.log | tail -40 >&2
         echo 'Build failed (full log: out/gpu-build.log)' >&2; exit 1
     fi
-    cp out/gpu/bb-probe.exe out/gpu/bb-gpu-capabilities.exe out/gpu/bb-play.exe out/
+    cp out/gpu/bb-probe.exe out/gpu/bb-gpu-capabilities.exe out/gpu/bb-play.exe out/gpu/bb-crash-monitor.exe out/
+    cp out/gpu/remix/bb-remix-host.exe out/
     echo "Built $PWD/out/bb-probe.exe"
+    if [[ ${1:-} == --test ]]; then
+        # Exercise the optional bridge in the renderer tests when it was built.
+        if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
+            cp out/bbport_dlss.dll out/nvngx_dlss.dll out/gpu/
+            if [[ -f out/nvngx_dlssg.dll ]]; then cp out/nvngx_dlssg.dll out/gpu/; fi
+        else
+            rm -f out/gpu/bbport_dlss.dll out/gpu/nvngx_dlss.dll out/gpu/nvngx_dlssg.dll
+        fi
+        ninja -C out/gpu bb-tests > out/test-build.log 2>&1 || {
+            tail -50 out/test-build.log >&2; exit 1;
+        }
+        ctest --test-dir out/gpu --output-on-failure
+        python -m unittest discover -s tests -p 'test_*.py'
+    fi
     exit 0
     ;;
 esac
@@ -89,8 +104,8 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
 fi
 "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/bb-probe
 echo "Built $PWD/out/bb-probe"
-# GPU check for run.sh (live_resolution=auto): links only the Vulkan loader.
-"$CC" -std=c11 -O2 -Wall -Wextra -Werror tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
+# GPU check for run.sh (live_resolution=auto) and the launcher's gamepad list (--gamepads).
+"$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" tools/gpu_capabilities.c "${libraries[@]}" -o out/bb-gpu-capabilities
 if [[ ${1:-} == --test ]]; then
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_input_config.c -lm "${libraries[@]}" -o out/pad-test
     out/pad-test

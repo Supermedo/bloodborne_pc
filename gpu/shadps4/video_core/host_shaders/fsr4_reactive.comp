@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: FSR 4 has no reactive input (its model reads colour, depth, motion, history and
+// exposure). Where the reactive mask marks the game's blended effects (fog, light shafts, water,
+// particles: no motion vectors fit them), its output is blended with this frame upscaled
+// bilinearly, so the effects do not drag history along (fog over the Cathedral Ward stairs).
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D current_tex;  // FSR 4's input colour, render size
+layout(binding = 1) uniform sampler2D reactive_tex; // R8 reactive mask, render size
+layout(binding = 2, rgba16f) uniform image2D output_img;
+layout(push_constant) uniform Params {
+    vec2 render_size;
+    vec2 jitter;   // this frame's content shift in render pixels (x right, y down)
+    float strength;
+};
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 size = imageSize(output_img);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+    // The output is unjittered: the content seen there sits at +jitter in this frame.
+    const vec2 render_pos = (vec2(pixel) + 0.5) * render_size / vec2(size);
+    const float r = clamp(texture(reactive_tex, render_pos / render_size).r * strength, 0.0, 1.0);
+    if (r <= 0.0) {
+        return;
+    }
+    const vec4 now = texture(current_tex, (render_pos + jitter) / render_size);
+    const vec4 upscaled = imageLoad(output_img, pixel);
+    imageStore(output_img, pixel, vec4(mix(upscaled.rgb, now.rgb, r), upscaled.a));
+}

@@ -9,12 +9,13 @@
 
 #include <stdint.h>
 #include <vulkan/vulkan.h>
+#include "bbport_frame_camera.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define BBPORT_DLSS_BRIDGE_ABI 1
+#define BBPORT_DLSS_BRIDGE_ABI 2
 
 typedef void (*BbDlssLogFn)(int warning, const char* message);
 
@@ -50,6 +51,13 @@ typedef struct BbDlssEvaluate {
     float sharpness; // 0..1; 0 leaves the output unsharpened
 } BbDlssEvaluate;
 
+typedef struct BbDlssGenerate {
+    BbDlssImage color, hudless, ui, depth, motion, output;
+    BbFrameCamera camera;
+    VkBuffer disable_interpolation; // GPU writes a bool, host reads after completion.
+    int32_t reset;
+} BbDlssGenerate;
+
 typedef struct BbDlssApi {
     uint32_t abi;
     // UTF-16 paths: the directory with nvngx_dlss.dll, and a writable data directory.
@@ -67,6 +75,11 @@ typedef struct BbDlssApi {
     // The caller must have waited for the GPU work that used the feature.
     void (*ReleaseFeature)(void);
     void (*Shutdown)(void);
+    int32_t (*FrameGenerationAvailable)(void);
+    int32_t (*CreateFrameGeneration)(VkCommandBuffer command, uint32_t width, uint32_t height,
+                                     VkFormat format);
+    int32_t (*GenerateFrame)(VkCommandBuffer command, const BbDlssGenerate *frame);
+    void (*ReleaseFrameGeneration)(void);
 } BbDlssApi;
 
 typedef const BbDlssApi* (*BbDlssGetApiFn)(void);

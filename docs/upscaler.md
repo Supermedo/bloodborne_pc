@@ -33,14 +33,14 @@ Python tests. `out/taa-live-validation.log` and `out/taa-appimage-validation.log
 check TAA at 1080p/720p/1440p/4K, TAA ↔ FSR 3, and a missing 2160-tier FSR 4.1.1
 model in one gameplay process, including output captures and camera movement.
 `out/taa-launcher-validation.log` checks actual GTK controls and saved settings.
-TAA has not yet been tested on the tester's GTX 1060.
+TAA still needs broader gameplay validation.
 
 ## Startup patch is the default again for outputs other than 1080p (2026-10-02)
 
-The live path below made the Steam Deck and a GTX 1060 + 4-core Haswell drop to 7–8 FPS
-(release 0.1 AppImage: 40–50 FPS on the Deck). With guest allocations at 1920×1080 the game's
+On the tested portable and four-core configurations, the live path below dropped to 7–8 FPS
+(release 0.1 AppImage: 40–50 FPS on the portable test system). With guest allocations at 1920×1080 the game's
 post-processing stays at 1080p even for 720p output, guest compute passes resolve scene proxies
-back to 1080p every frame (RX 7800 XT, 720p FSR 3 Performance on 4 cores: 826 vs 576
+back to 1080p every frame (720p FSR 3 Performance on 4 cores: 826 vs 576
 draws/frame, 185 vs 210 FPS), and on GPUs without shader stencil export every depth/stencil
 copy took nine draws.
 
@@ -168,7 +168,7 @@ The previous frame's matrices are not there; the port keeps them itself.
 Замеры: `BB_FSR4_PROFILE=1` (время каждого прохода FSR 4, патч провайдера в субмодуле,
 см. `gpu/patches/fsr-vulkan`), бенчмарк вне игры `out/gpu/fsr4-bench` (`ninja -C out/gpu
 fsr4-bench`; `--stats` — регистры и инструкции от RADV). 4K Balanced (2260x1272 → 3840x2160),
-RX 7800 XT: весь FSR 4 — 5.8 мс, из них **post 2.5–2.9 мс** (не нейросеть: последние слои,
+в тестовом окружении весь FSR 4 — 5.8 мс, из них **post 2.5–2.9 мс** (не нейросеть: последние слои,
 pixel shuffle 2x2 и смешивание с историей), 12 проходов модели — 2.4 мс, pre 0.55.
 
 Причина: каждый поток считает блок 2x2 выходных пикселей и пишет их по одному в три образа

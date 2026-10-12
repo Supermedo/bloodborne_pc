@@ -1,7 +1,8 @@
-# bbport on Windows
+# Enhanced Native Bloodborne Port for Windows — Build guide
 
-The port builds and runs natively on 64-bit Windows 10 (1903+) / 11 with the same sources as
-on Linux. Players: see `README-Windows.txt` (it ships in the package).
+Build and package **v2** for 64-bit Windows 10 (1903+) / 11. Players: see the
+[quick start](../../README.md#quick-start) or [README-Windows.txt](README-Windows.txt)
+(included in Windows archives).
 
 ## Build
 
@@ -36,10 +37,22 @@ scripts (`--script`) and the game without the window (`--play`): players need no
 `Play Bloodborne.exe` (`packaging/windows/play.c`) is a small native program that runs
 `Bloodborne.exe --play` from its folder and waits for it, for players who want to start the
 game directly with the saved settings.
-`patches.py` applies the 1.09 patches only to a 1.09 game (`BB_FORCE_PATCHES=1` overrides);
-`run.py` then runs other versions at 30 FPS with live resolution changes.
-From a source tree it adds `C:\msys64\clang64\bin` (or `$MSYS2_ROOT`) to `PATH` for the DLLs.
+Upstream 0.4 requires the supported decrypted executable of CUSA03173 1.09.
+`prepare.py` verifies its hash before preparation; other executables are rejected.
+`BB_FORCE_PATCHES` does not bypass this verification.
+From a source tree it adds `C:\msys64\clang64\bin` (or `$MSYS2_ROOT`) to `PATH` for the DLLs;
+without either, it also finds a local toolchain under `out/msys64`.
 `bash tools/fetch_fsr4_assets.sh` works in the CLANG64 shell as on Linux.
+
+Run `bash build.sh --test` for native CTest and Python regression tests, including
+Vulkan execution on the installed GPU. For a non-default MSYS2 installation set
+`MSYS2_ROOT` (for example `/e/bloooood-win/out/msys64` in Bash).
+See [upstream 0.4 migration and validation](../../docs/windows-upstream-0.4.md).
+
+FSR 4.1.1 assets: choose the prepared `fsr4_411` directory in Graphics, or set
+`BB_FSR411_DIR`. DLL extraction in `tools/fsr4cap/build_assets.sh` requires Linux/Proton;
+Windows runs the generated SPIR-V set. Experimental Linux dma-buf/userfaultfd memory
+and ELF diagnostic hooks are disabled; Windows retains its own memory backend.
 
 DLSS (optional): `DLSS_SDK_ROOT=<checkout of github.com/NVIDIA/DLSS> bash
 packaging/windows/build_dlss.sh` builds `bbport_dlss.dll` (`gpu/dlss_bridge`, the only code that
@@ -53,6 +66,10 @@ are in `launcher/bbport_lang.py` (one list per language in the order of `KEYS`; 
 empty text falls back to English). The icon (`launcher/bloodborne.ico`/`.png`) is drawn by
 `packaging/windows/make_icon.py` and built into `Bloodborne.exe`, `bb-probe.exe` (the game
 window) and `bb-gpu-capabilities.exe`.
+
+`VERSION.txt` is the port version shared by the launcher, runtime log, native Windows
+resources and PyInstaller metadata (`version_info.py`). Release v2 uses numeric file
+version `2.0.0.0`; game, upstream and third-party library versions keep their own meanings.
 
 ## What is different from Linux
 

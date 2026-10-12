@@ -15,6 +15,7 @@
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
 
 namespace Vulkan {
 
@@ -47,6 +48,7 @@ public:
         u32 input_width, input_height, output_width, output_height;
         int quality;
         bool hdr;
+        u32 preset = 0;
         bool operator==(const FeatureDesc&) const = default;
     };
     struct Frame {
@@ -64,8 +66,12 @@ public:
     bool CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc);
     bool Evaluate(vk::CommandBuffer command, const Frame& frame);
     void ReleaseFeature();
+    bool FrameGenerationAvailable() const;
+    bool CreateFrameGeneration(vk::CommandBuffer command, u32 width, u32 height, vk::Format format);
+    bool GenerateFrame(vk::CommandBuffer command, const BbDlssGenerate &frame);
+    void ReleaseFrameGeneration();
 
-private:
+  private:
     Dlss();
     struct Impl;
     std::unique_ptr<Impl> impl;

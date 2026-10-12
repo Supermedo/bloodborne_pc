@@ -366,6 +366,9 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
         ctx.AddCapability(spv::Capability::PhysicalStorageBufferAddresses);
         ctx.AddExtension("SPV_KHR_physical_storage_buffer");
     }
+    if (ctx.VertexRemix()) {
+        ctx.AddCapability(spv::Capability::TransformFeedback);
+    }
     const auto shared_type_count = std::popcount(static_cast<u32>(info.shared_types));
     if (shared_type_count > 1 && profile.supports_workgroup_explicit_memory_layout) {
         ctx.AddExtension("SPV_KHR_workgroup_memory_explicit_layout");
@@ -400,6 +403,7 @@ void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
     }
     case SwStage::Vertex:
         execution_model = spv::ExecutionModel::Vertex;
+        if (ctx.VertexRemix()) ctx.AddExecutionMode(main, spv::ExecutionMode::Xfb);
         break;
     case SwStage::TessellationControl:
         execution_model = spv::ExecutionModel::TessellationControl;

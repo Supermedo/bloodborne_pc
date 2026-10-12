@@ -77,8 +77,12 @@ static void EmitVertexMotion(EmitContext& ctx) {
                                            ctx.push_data_block,
                                            ctx.ConstU32(PushData::MotionParamIndex));
     const Id param_index = ctx.OpLoad(u32_type, param_ptr);
-    const auto address = [&](u64 base, Id index, u32 stride) {
-        return ctx.OpIAdd(ctx.U64, ctx.Constant(ctx.U64, base),
+    const Id params_base = ctx.SpecConstant(ctx.U64, u64(0));
+    ctx.Decorate(params_base, spv::Decoration::SpecId, MotionVectors::ParamsAddressSpecId);
+    const Id positions_base = ctx.SpecConstant(ctx.U64, u64(0));
+    ctx.Decorate(positions_base, spv::Decoration::SpecId, MotionVectors::PositionsAddressSpecId);
+    const auto address = [&](Id base, Id index, u32 stride) {
+        return ctx.OpIAdd(ctx.U64, base,
                           ctx.OpIMul(ctx.U64, ctx.OpUConvert(ctx.U64, index),
                                      ctx.Constant(ctx.U64, u64(stride))));
     };
@@ -86,7 +90,7 @@ static void EmitVertexMotion(EmitContext& ctx) {
     const Id f32x4_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, ctx.F32[4]);
     const Id params = ctx.OpLoad(
         ctx.U32[4],
-        ctx.OpConvertUToPtr(u32x4_ptr, address(MotionVectors::params_address, param_index, 32)),
+        ctx.OpConvertUToPtr(u32x4_ptr, address(params_base, param_index, 32)),
         spv::MemoryAccessMask::Aligned, 16u);
     const Id store_base = ctx.OpCompositeExtract(u32_type, params, 0u);
     const Id load_base = ctx.OpCompositeExtract(u32_type, params, 1u);
@@ -94,7 +98,8 @@ static void EmitVertexMotion(EmitContext& ctx) {
     const Id flags = ctx.OpCompositeExtract(u32_type, params, 3u);
     const Id offsets = ctx.OpLoad(
         ctx.U32[4], ctx.OpConvertUToPtr(u32x4_ptr,
-            address(MotionVectors::params_address + 16, param_index, 32)),
+            address(ctx.OpIAdd(ctx.U64, params_base, ctx.Constant(ctx.U64, u64(16))), param_index,
+                    32)),
         spv::MemoryAccessMask::Aligned, 16u);
     const Id first_vertex = ctx.OpCompositeExtract(u32_type, offsets, 0u);
     const Id first_instance = ctx.OpCompositeExtract(u32_type, offsets, 1u);
@@ -118,7 +123,7 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.OpSelectionMerge(store_merge, spv::SelectionControlMask::MaskNone);
     ctx.OpBranchConditional(do_store, store_label, store_merge);
     ctx.AddLabel(store_label);
-    const Id store_address = address(MotionVectors::positions_address,
+    const Id store_address = address(positions_base,
                                      ctx.OpIAdd(u32_type, store_base, slot), 16);
     // Indexed draws may invoke the same vertex more than once. Atomic component stores
     // avoid write/write races; all these invocations produce the same clip position.
@@ -139,7 +144,7 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.OpBranchConditional(do_load, load_label, load_merge);
     ctx.AddLabel(load_label);
     const Id loaded = ctx.OpLoad(
-        ctx.F32[4], ctx.OpConvertUToPtr(f32x4_ptr, address(MotionVectors::positions_address,
+        ctx.F32[4], ctx.OpConvertUToPtr(f32x4_ptr, address(positions_base,
             ctx.OpIAdd(u32_type, load_base, slot), 16)), spv::MemoryAccessMask::Aligned, 16u);
     ctx.OpBranch(load_merge);
     ctx.AddLabel(load_merge);
@@ -187,6 +192,20 @@ static void EmitFragmentMotion(EmitContext& ctx) {
 }
 
 void EmitEpilogue(EmitContext& ctx) {
+    if (ctx.VertexRemix()) {
+        Id u = ctx.f32_zero_value, v = ctx.f32_zero_value;
+        const u32 selector = ctx.runtime_info.hw.vs.remix_uv;
+        if (selector / 4 < IR::NumParams && selector % 4 < 3) {
+            const auto& output = ctx.output_params[selector / 4];
+            if (Sirit::ValidId(output.id) && output.num_components >= selector % 4 + 2) {
+                const Id uv = ctx.OpLoad(ctx.F32[output.num_components], output.id);
+                u = ctx.OpCompositeExtract(ctx.F32[1], uv, selector % 4);
+                v = ctx.OpCompositeExtract(ctx.F32[1], uv, selector % 4 + 1);
+            }
+        }
+        ctx.OpStore(ctx.remix_uv_out, ctx.OpCompositeConstruct(ctx.F32[4],
+            std::array<Id,4>{u, v, ctx.Constant(ctx.F32[1],1.f), ctx.f32_zero_value}));
+    }
     if (Sirit::ValidId(ctx.motion_out_cur)) {
         EmitVertexMotion(ctx);
     }

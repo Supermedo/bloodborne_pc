@@ -204,13 +204,23 @@ struct Info : InfoPersistent {
 
     template <typename T>
     inline T ReadUdSharp(u32 sharp_idx) const noexcept {
-        return *reinterpret_cast<const T*>(&FlatUserData()[sharp_idx]);
+        T data{};
+        const auto flat = FlatUserData();
+        const u32 words = sizeof(T) / sizeof(u32);
+        if (sharp_idx + words > flat.size()) {
+            return data;
+        }
+        std::memcpy(&data, &flat[sharp_idx], sizeof(T));
+        return data;
     }
 
     template <typename T>
     T ReadUdReg(u32 ptr_index, u32 dword_offset) const noexcept {
-        T data;
+        T data{};
         const auto ud = UserData();
+        if (ud.empty()) {
+            return data;
+        }
         const u32* base = ud.data();
         if (ptr_index != IR::NumScalarRegs) {
             std::memcpy(&base, &ud[ptr_index], sizeof(base));
@@ -240,10 +250,9 @@ struct Info : InfoPersistent {
     void RefreshFlatBuf() {
         flattened_ud_buf.resize(srt_info.flattened_bufsize_dw);
         ASSERT(user_data.size() <= NUM_USER_DATA_REGS);
-        std::memcpy(flattened_ud_buf.data(), user_data.data(), user_data.size_bytes());
-        if (srt_info.walker_func) {
-            srt_info.walker_func(user_data.data(), flattened_ud_buf.data());
-        }
+        RunSrtWalkerSafe(srt_info.walker_func, user_data.data(), flattened_ud_buf.data(),
+                         static_cast<u32>(user_data.size()),
+                         static_cast<u32>(flattened_ud_buf.size()));
     }
 
     void ReadTessConstantBuffer(TessellationDataConstantBuffer& tess_constants) const {

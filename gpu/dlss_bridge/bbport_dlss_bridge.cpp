@@ -8,13 +8,17 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "bbport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
 
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_vk.h>
 #include <nvsdk_ngx_helpers_vk.h>
+#include <nvsdk_ngx_helpers_dlssg_vk.h>
 
 namespace {
 
@@ -31,6 +35,10 @@ struct State {
     NVSDK_NGX_Parameter* capabilities{};
     NVSDK_NGX_Parameter* parameters{};
     NVSDK_NGX_Handle* feature{};
+    NVSDK_NGX_Handle *generation{};
+    NVSDK_NGX_Parameter *generation_parameters{};
+    std::vector<VkExtensionProperties> instance_extensions, device_extensions;
+    bool generation_supported{};
     BbDlssFeature feature_desc{};
     VkDevice device{};
     bool configured{};
@@ -83,7 +91,21 @@ int32_t InstanceExtensions(uint32_t* count, const VkExtensionProperties** extens
                NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(&state.discovery, count,
                                                                        &required)))
         return 0;
-    *extensions = required;
+    state.instance_extensions.assign(required, required + *count);
+    auto discovery = state.discovery;
+    discovery.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
+    uint32_t fg_count{};
+    if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
+            &discovery, &fg_count, &required))) {
+        for (uint32_t i = 0; i < fg_count; ++i)
+            if (std::none_of(state.instance_extensions.begin(), state.instance_extensions.end(),
+                             [&](const auto &x) {
+                                 return !std::strcmp(x.extensionName, required[i].extensionName);
+                             }))
+                state.instance_extensions.push_back(required[i]);
+    }
+    *count = uint32_t(state.instance_extensions.size());
+    *extensions = state.instance_extensions.data();
     return 1;
 }
 
@@ -106,7 +128,30 @@ int32_t DeviceExtensions(VkInstance instance, VkPhysicalDevice physical, uint32_
                NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
                    instance, physical, &state.discovery, count, &required)))
         return 0;
-    *extensions = required;
+    state.device_extensions.assign(required, required + *count);
+    auto discovery = state.discovery;
+    discovery.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
+    support = {};
+    state.generation_supported =
+        NVSDK_NGX_SUCCEED(
+            NVSDK_NGX_VULKAN_GetFeatureRequirements(instance, physical, &discovery, &support)) &&
+        support.FeatureSupported == NVSDK_NGX_FeatureSupportResult_Supported;
+    if (state.generation_supported) {
+        uint32_t fg_count{};
+        if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
+                instance, physical, &discovery, &fg_count, &required))) {
+            for (uint32_t i = 0; i < fg_count; ++i)
+                if (std::none_of(state.device_extensions.begin(), state.device_extensions.end(),
+                                 [&](const auto &x) {
+                                     return !std::strcmp(x.extensionName,
+                                                         required[i].extensionName);
+                                 }))
+                    state.device_extensions.push_back(required[i]);
+        } else
+            state.generation_supported = false;
+    }
+    *count = uint32_t(state.device_extensions.size());
+    *extensions = state.device_extensions.data();
     return 1;
 }
 
@@ -138,6 +183,15 @@ int32_t Initialize(VkInstance instance, VkPhysicalDevice physical, VkDevice devi
         Log(1, "DLSS Super Resolution is not available on this system");
         return 0;
     }
+    available = needs_driver = 0;
+    NVSDK_NGX_Parameter_GetI(state.capabilities, NVSDK_NGX_Parameter_FrameGeneration_Available,
+                             &available);
+    NVSDK_NGX_Parameter_GetI(state.capabilities,
+                             NVSDK_NGX_Parameter_FrameGeneration_NeedsUpdatedDriver, &needs_driver);
+    state.generation_supported = state.generation_supported && available && !needs_driver;
+    Log(0, "Frame Generation %s",
+        state.generation_supported ? "available"
+                                   : "unavailable (RTX 40+, driver and nvngx_dlssg.dll required)");
     return 1;
 }
 
@@ -226,7 +280,80 @@ int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
                : 0;
 }
 
+void ReleaseFrameGeneration() {
+    if (state.generation)
+        NVSDK_NGX_VULKAN_ReleaseFeature(state.generation);
+    if (state.generation_parameters)
+        NVSDK_NGX_VULKAN_DestroyParameters(state.generation_parameters);
+    state.generation = nullptr;
+    state.generation_parameters = nullptr;
+}
+
+int32_t FrameGenerationAvailable() { return state.initialized && state.generation_supported; }
+
+int32_t CreateFrameGeneration(VkCommandBuffer command, uint32_t width, uint32_t height,
+                              VkFormat format) {
+    if (!FrameGenerationAvailable())
+        return 0;
+    ReleaseFrameGeneration();
+    if (!Check("FG parameter allocation",
+               NVSDK_NGX_VULKAN_AllocateParameters(&state.generation_parameters)))
+        return 0;
+    NVSDK_NGX_DLSSG_Create_Params desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.NativeBackbufferFormat = format;
+    return Check("FG creation", NGX_VK_CREATE_DLSSG(command, 1, 1, &state.generation,
+                                                    state.generation_parameters, &desc));
+}
+
+int32_t GenerateFrame(VkCommandBuffer command, const BbDlssGenerate *frame) {
+    if (!state.generation || !frame)
+        return 0;
+    auto color = Wrap(frame->color, false), hudless = Wrap(frame->hudless, false),
+         ui = Wrap(frame->ui, false);
+    auto depth = Wrap(frame->depth, false), motion = Wrap(frame->motion, false),
+         output = Wrap(frame->output, true);
+    auto disable = NVSDK_NGX_Create_Buffer_Resource_VK(frame->disable_interpolation, 4, true);
+    NVSDK_NGX_VK_DLSSG_Eval_Params images{};
+    images.pBackbuffer = &color;
+    images.pHudless = &hudless;
+    images.pUI = &ui;
+    images.pDepth = &depth;
+    images.pMVecs = &motion;
+    images.pOutputInterpFrame = &output;
+    images.pOutputDisableInterpolation = &disable;
+    NVSDK_NGX_DLSSG_Opt_Eval_Params params{};
+    std::memcpy(params.cameraViewToClip, frame->camera.view_to_clip, 64);
+    std::memcpy(params.clipToCameraView, frame->camera.clip_to_view, 64);
+    std::memcpy(params.clipToPrevClip, frame->camera.clip_to_previous, 64);
+    std::memcpy(params.prevClipToClip, frame->camera.previous_to_clip, 64);
+    for (int i = 0; i < 4; ++i)
+        params.clipToLensClip[i][i] = 1;
+    std::memcpy(params.cameraPos, frame->camera.position, 12);
+    std::memcpy(params.cameraUp, frame->camera.up, 12);
+    std::memcpy(params.cameraRight, frame->camera.right, 12);
+    std::memcpy(params.cameraFwd, frame->camera.forward, 12);
+    params.jitterOffset[0] = frame->camera.jitter[0];
+    params.jitterOffset[1] = frame->camera.jitter[1];
+    params.mvecScale[0] = params.mvecScale[1] =
+        1; // NGX takes pixels (unlike Streamline's normalized constants).
+    params.cameraNear = frame->camera.near_plane;
+    params.cameraFar = frame->camera.far_plane;
+    params.cameraFOV = frame->camera.vertical_fov;
+    params.cameraAspectRatio = float(frame->motion.width) / frame->motion.height;
+    params.cameraMotionIncluded = true;
+    params.reset = frame->reset != 0;
+    params.motionVectorsInvalidValue = std::numeric_limits<float>::max();
+    params.depthInverted = false;
+    params.colorBuffersHDR = false;
+    return Check("FG evaluation",
+                 NGX_VK_EVALUATE_DLSSG(command, state.generation, state.generation_parameters,
+                                       &images, &params));
+}
+
 void Shutdown() {
+    ReleaseFrameGeneration();
     ReleaseFeature();
     if (state.capabilities) {
         NVSDK_NGX_VULKAN_DestroyParameters(state.capabilities);
@@ -239,9 +366,19 @@ void Shutdown() {
     }
 }
 
-const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,      InstanceExtensions, DeviceExtensions,
-                    Initialize,             CreateFeature,  Evaluate,           ReleaseFeature,
-                    Shutdown};
+const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI,
+                    Configure,
+                    InstanceExtensions,
+                    DeviceExtensions,
+                    Initialize,
+                    CreateFeature,
+                    Evaluate,
+                    ReleaseFeature,
+                    Shutdown,
+                    FrameGenerationAvailable,
+                    CreateFrameGeneration,
+                    GenerateFrame,
+                    ReleaseFrameGeneration};
 
 } // namespace
 

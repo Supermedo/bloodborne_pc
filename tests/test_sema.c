@@ -4,6 +4,7 @@
 
 /* The settings menu of the GPU library restarts through probe.c, which tests do not link. */
 void runtime_restart(void) { abort(); }
+volatile int runtime_restarting;
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>

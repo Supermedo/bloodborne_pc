@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+# Preserve the official SDK sources byte-for-byte, including upstream whitespace.
+gpu/remix/include/remix/remix_c.h whitespace=-blank-at-eol
+gpu/remix/LICENSE.txt whitespace=-blank-at-eol

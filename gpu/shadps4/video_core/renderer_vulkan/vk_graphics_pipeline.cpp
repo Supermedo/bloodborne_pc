@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <mutex>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 
+#include "common/serdes.h"
 #include "common/assert.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
@@ -47,10 +51,9 @@ GraphicsPipeline::GraphicsPipeline(
         .size = sizeof(Shader::PushData),
     };
 
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
+        .setLayoutCount = desc_set_count,
+        .pSetLayouts = desc_layout_handles.data(),
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     };
@@ -60,13 +63,12 @@ GraphicsPipeline::GraphicsPipeline(
     pipeline_layout = std::move(layout);
     SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
 
-    if (!preloading) {
+    if (sdata.vertex_attributes.empty() &&
+        !instance.IsVertexInputDynamicState()) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
-        if (!instance.IsVertexInputDynamicState()) {
-            const auto& vs_info = runtime_infos[u32(Shader::SwStage::Vertex)].sw.vs;
-            GetVertexInputs(sdata.vertex_attributes, sdata.vertex_bindings, sdata.divisors,
-                            guest_buffers, vs_info.step_rate_0, vs_info.step_rate_1);
-        }
+        const auto& vs_info = runtime_infos[u32(Shader::SwStage::Vertex)].sw.vs;
+        GetVertexInputs(sdata.vertex_attributes, sdata.vertex_bindings, sdata.divisors,
+                        guest_buffers, vs_info.step_rate_0, vs_info.step_rate_1);
     }
 
     const vk::PipelineVertexInputDivisorStateCreateInfo divisor_state = {
@@ -118,7 +120,7 @@ GraphicsPipeline::GraphicsPipeline(
         raster_chain.unlink<vk::PipelineRasterizationDepthClipStateCreateInfoEXT>();
     }
 
-    if (!preloading) {
+    if (sdata.multisampling.rasterizationSamples == vk::SampleCountFlagBits{}) {
         const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
         sdata.multisampling = {
             .rasterizationSamples = LiverpoolToVK::NumSamples(
@@ -166,80 +168,93 @@ GraphicsPipeline::GraphicsPipeline(
         .pDynamicStates = dynamic_states.data(),
     };
 
+    struct MotionSpecData {
+        u64 params_address;
+        u64 positions_address;
+    } motion_spec{
+        Shader::MotionVectors::params_address,
+        Shader::MotionVectors::positions_address,
+    };
+    const std::array<vk::SpecializationMapEntry, 2> motion_spec_entries = {
+        vk::SpecializationMapEntry{
+            .constantID = Shader::MotionVectors::ParamsAddressSpecId,
+            .offset = 0,
+            .size = sizeof(u64),
+        },
+        vk::SpecializationMapEntry{
+            .constantID = Shader::MotionVectors::PositionsAddressSpecId,
+            .offset = sizeof(u64),
+            .size = sizeof(u64),
+        },
+    };
+    const vk::SpecializationInfo motion_spec_info = {
+        .mapEntryCount = static_cast<u32>(motion_spec_entries.size()),
+        .pMapEntries = motion_spec_entries.data(),
+        .dataSize = sizeof(motion_spec),
+        .pData = &motion_spec,
+    };
+
     boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>
         shader_stages;
-    auto stage = u32(Shader::SwStage::Vertex);
-    if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = modules[stage],
-            .pName = "main",
-        });
-    }
-    stage = u32(Shader::SwStage::Geometry);
-    if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eGeometry,
-            .module = modules[stage],
-            .pName = "main",
-        });
-    }
-    stage = u32(Shader::SwStage::TessellationControl);
-    if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eTessellationControl,
-            .module = modules[stage],
-            .pName = "main",
-        });
-    } else if (is_rect_list || is_quad_list) {
-        const auto type = is_quad_list ? AuxShaderType::QuadListTCS : AuxShaderType::RectListTCS;
-        if (!preloading) {
-            const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
-            sdata.tcs = Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info);
+    const auto add_module = [&](vk::ShaderStageFlagBits stage_bit, vk::ShaderModule module,
+                                const vk::SpecializationInfo* spec = nullptr) {
+        if (!module) {
+            return;
         }
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eTessellationControl,
-            .module = CompileSPV(sdata.tcs, instance.GetDevice()),
+            .stage = stage_bit,
+            .module = module,
             .pName = "main",
+            .pSpecializationInfo = spec,
         });
-    }
-    stage = u32(Shader::SwStage::TessellationEval);
-    if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eTessellationEvaluation,
-            .module = modules[stage],
-            .pName = "main",
-        });
-    } else if (is_rect_list || is_quad_list) {
-        if (!preloading) {
-            const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
-            sdata.tes = Shader::Backend::SPIRV::EmitAuxilaryTessShader(
-                AuxShaderType::PassthroughTES, fs_info);
+    };
+    {
+        auto stage = u32(Shader::SwStage::Vertex);
+        if (infos[stage]) {
+            add_module(vk::ShaderStageFlagBits::eVertex, modules[stage],
+                       key.motion_vectors ? &motion_spec_info : nullptr);
         }
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eTessellationEvaluation,
-            .module = CompileSPV(sdata.tes, instance.GetDevice()),
-            .pName = "main",
-        });
-    }
-    stage = u32(Shader::SwStage::Fragment);
-    if (infos[stage]) {
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = modules[stage],
-            .pName = "main",
-        });
-    } else if (runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs.clip_distance_emulation) {
-        if (!preloading) {
-            const auto& vs = runtime_infos[static_cast<u32>(Shader::SwStage::Vertex)].hw.vs;
-
-            sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
+        stage = u32(Shader::SwStage::Geometry);
+        if (infos[stage]) {
+            add_module(vk::ShaderStageFlagBits::eGeometry, modules[stage]);
         }
-        shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eFragment,
-            .module = CompileSPV(sdata.fragment, instance.GetDevice()),
-            .pName = "main",
-        });
+        stage = u32(Shader::SwStage::TessellationControl);
+        if (infos[stage]) {
+            add_module(vk::ShaderStageFlagBits::eTessellationControl, modules[stage]);
+        } else if (is_rect_list || is_quad_list) {
+            const auto type = is_quad_list ? AuxShaderType::QuadListTCS : AuxShaderType::RectListTCS;
+            if (sdata.tcs.empty()) {
+                const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
+                sdata.tcs = Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info);
+            }
+            add_module(vk::ShaderStageFlagBits::eTessellationControl,
+                       CompileSPV(sdata.tcs, instance.GetDevice()));
+        }
+        stage = u32(Shader::SwStage::TessellationEval);
+        if (infos[stage]) {
+            add_module(vk::ShaderStageFlagBits::eTessellationEvaluation, modules[stage]);
+        } else if (is_rect_list || is_quad_list) {
+            if (sdata.tes.empty()) {
+                const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
+                sdata.tes = Shader::Backend::SPIRV::EmitAuxilaryTessShader(
+                    AuxShaderType::PassthroughTES, fs_info);
+            }
+            add_module(vk::ShaderStageFlagBits::eTessellationEvaluation,
+                       CompileSPV(sdata.tes, instance.GetDevice()));
+        }
+    }
+    {
+        const auto stage = u32(Shader::SwStage::Fragment);
+        if (infos[stage]) {
+            add_module(vk::ShaderStageFlagBits::eFragment, modules[stage]);
+        } else if (runtime_infos[stage].hw.fs.clip_distance_emulation) {
+            if (sdata.fragment.empty()) {
+                const auto& vs = runtime_infos[u32(Shader::SwStage::Vertex)].hw.vs;
+                sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
+            }
+            add_module(vk::ShaderStageFlagBits::eFragment,
+                       CompileSPV(sdata.fragment, instance.GetDevice()));
+        }
     }
 
     const vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size_ci = {
@@ -403,7 +418,7 @@ GraphicsPipeline::GraphicsPipeline(
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
-    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+    vk::GraphicsPipelineCreateInfo pipeline_info = {
         .pNext = &pipeline_rendering_ci,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
@@ -439,15 +454,18 @@ template <typename Attribute, typename Binding>
 void GraphicsPipeline::GetVertexInputs(
     VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
     VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
-    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1) const {
+    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1,
+    std::span<const AmdGpu::Buffer> sharps) const {
     using InstanceIdType = Shader::Gcn::VertexAttribute::InstanceIdType;
     if (!fetch_shader || fetch_shader->attributes.empty()) {
         return;
     }
     const auto& vs_info = GetStage(Shader::SwStage::Vertex);
-    for (const auto& attrib : fetch_shader->attributes) {
+    const bool given = sharps.size() == fetch_shader->attributes.size();
+    for (u32 index = 0; const auto& attrib : fetch_shader->attributes) {
         const auto step_rate = attrib.GetStepRate();
-        const auto buffer = attrib.GetSharp(vs_info);
+        const auto buffer = given ? sharps[index] : attrib.GetSharp(vs_info);
+        ++index;
         attributes.push_back(Attribute{
             .location = attrib.semantic,
             .binding = attrib.semantic,
@@ -480,26 +498,70 @@ template void GraphicsPipeline::GetVertexInputs(
     VertexInputs<vk::VertexInputAttributeDescription>& attributes,
     VertexInputs<vk::VertexInputBindingDescription>& bindings,
     VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
-    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1) const;
+    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1,
+    std::span<const AmdGpu::Buffer> sharps) const;
 template void GraphicsPipeline::GetVertexInputs(
     VertexInputs<vk::VertexInputAttributeDescription2EXT>& attributes,
     VertexInputs<vk::VertexInputBindingDescription2EXT>& bindings,
     VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
-    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1) const;
+    VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0, u32 step_rate_1,
+    std::span<const AmdGpu::Buffer> sharps) const;
+
+using SetBindings = boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32>;
+
+/// Set layouts are shared by content: pipelines and libraries with the same stage bindings get
+/// the same handle, which also lets the descriptor heap reuse its per-layout batches.
+static vk::DescriptorSetLayout SharedSetLayout(vk::Device device, const SetBindings& bindings,
+                                               vk::DescriptorSetLayoutCreateFlags flags) {
+    struct Entry {
+        std::vector<vk::DescriptorSetLayoutBinding> bindings;
+        vk::DescriptorSetLayoutCreateFlags flags;
+        vk::DescriptorSetLayout layout;
+    };
+    static std::mutex mutex;
+    static std::unordered_multimap<u64, Entry> layouts;
+
+    const u64 hash = XXH3_64bits_withSeed(bindings.data(),
+                                          bindings.size() * sizeof(vk::DescriptorSetLayoutBinding),
+                                          static_cast<u32>(flags));
+    const auto same = [&](const Entry& entry) {
+        return entry.flags == flags && std::ranges::equal(entry.bindings, bindings);
+    };
+    std::scoped_lock lock{mutex};
+    for (auto [it, end] = layouts.equal_range(hash); it != end; ++it) {
+        if (same(it->second)) {
+            return it->second.layout;
+        }
+    }
+    const vk::DescriptorSetLayoutCreateInfo desc_layout_ci = {
+        .flags = flags,
+        .bindingCount = static_cast<u32>(bindings.size()),
+        .pBindings = bindings.data(),
+    };
+    const auto [result, layout] = device.createDescriptorSetLayout(desc_layout_ci);
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create graphics descriptor set layout: {}",
+               vk::to_string(result));
+    layouts.emplace(hash, Entry{{bindings.begin(), bindings.end()}, flags, layout});
+    return layout;
+}
 
 void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
-    boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
+    (void)preloading;
+    std::array<SetBindings, Shader::Backend::NumGraphicsSets> set_bindings;
+    std::array<u32, Shader::Backend::NumGraphicsSets> set_descriptors{};
     u32 binding{};
 
     for (const auto* stage : stages) {
         if (!stage) {
             continue;
         }
+        const u32 set = stage->sw_stage == Shader::SwStage::Fragment
+                            ? Shader::Backend::FragmentSet
+                            : Shader::Backend::PreRasterSet;
+        auto& bindings = set_bindings[set];
+        const u32 first = binding;
         const auto stage_bit = LogicalStageToStageBit[u32(stage->sw_stage)];
-        for (const auto& buffer : stage->buffers) {
-            const auto sharp =
-                preloading ? AmdGpu::Buffer{}
-                           : buffer.GetSharp(*stage); // See for the comment in compute PL creation
+        for (size_t i = 0; i < stage->buffers.size(); ++i) {
             bindings.push_back({
                 .binding = binding++,
                 .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -518,7 +580,7 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             });
             binding += num_bindings;
         }
-        for (const auto& sampler : stage->samplers) {
+        for (size_t i = 0; i < stage->samplers.size(); ++i) {
             bindings.push_back({
                 .binding = binding++,
                 .descriptorType = vk::DescriptorType::eSampler,
@@ -526,21 +588,22 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
                 .stageFlags = stage_bit,
             });
         }
+        set_descriptors[set] += binding - first;
     }
-    uses_push_descriptors = binding < instance.MaxPushDescriptors();
-    const auto flags = uses_push_descriptors
-                           ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
-                           : vk::DescriptorSetLayoutCreateFlagBits{};
-    const vk::DescriptorSetLayoutCreateInfo desc_layout_ci = {
-        .flags = flags,
-        .bindingCount = static_cast<u32>(bindings.size()),
-        .pBindings = bindings.data(),
-    };
-    auto [layout_result, layout] =
-        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
-    desc_layout = std::move(layout);
+
+    // Only one set of a layout may use push descriptors. The fragment set holds most of the
+    // textures, so it gets them; the pre-rasterization set is written from the descriptor heap.
+    desc_set_count = Shader::Backend::NumGraphicsSets;
+    const auto device = instance.GetDevice();
+    for (u32 set = 0; set < desc_set_count; ++set) {
+        set_is_push[set] = set == Shader::Backend::FragmentSet &&
+                           set_descriptors[set] < instance.MaxPushDescriptors();
+        desc_layout_handles[set] = SharedSetLayout(
+            device, set_bindings[set],
+            set_is_push[set] ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
+                             : vk::DescriptorSetLayoutCreateFlags{});
+    }
+    uses_push_descriptors = set_is_push[Shader::Backend::FragmentSet];
 }
 
 } // namespace Vulkan

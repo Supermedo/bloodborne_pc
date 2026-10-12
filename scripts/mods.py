@@ -109,6 +109,13 @@ def mod_files(folder):
 LINKED = {}
 
 
+def link_key(path):
+    # MinGW Python can mix / and \\ after iterdir() in an MSYS2 shell. The same hard
+    # link must still be recognized, rather than reported as an original game file.
+    key = str(path)
+    return key.replace('\\', '/').casefold() if os.name == 'nt' else key
+
+
 def make_link(link, target):
     if os.name != 'nt':
         link.symlink_to(target, target_is_directory=target.is_dir())
@@ -125,15 +132,15 @@ def make_link(link, target):
             os.link(target, link)
         except OSError:
             shutil.copy2(target, link)
-    LINKED[str(link)] = target
+    LINKED[link_key(link)] = target
 
 
 def is_link(path):
-    return path.is_symlink() or str(path) in LINKED or (hasattr(path, 'is_junction') and path.is_junction())
+    return path.is_symlink() or link_key(path) in LINKED or (hasattr(path, 'is_junction') and path.is_junction())
 
 
 def link_target(path):
-    return LINKED.get(str(path)) or path.resolve(strict=True)
+    return LINKED.get(link_key(path)) or path.resolve(strict=True)
 
 
 def remove_link(path):
@@ -141,7 +148,7 @@ def remove_link(path):
         os.rmdir(path)
     else:
         path.unlink()
-    LINKED.pop(str(path), None)
+    LINKED.pop(link_key(path), None)
 
 
 def expand(directory):

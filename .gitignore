@@ -26,6 +26,19 @@ perf.data
 mods.json
 patches.json
 !launcher/bloodborne.png
+# Local: game logs, messages and archives from users, internal plans
+/logs/
+/message*.txt
+/*.zip
+/docs/ISSUE_ACTION_PLAN_*.md
+# AMD FidelityFX DLLs (FSR 4.1.1 is built from the user's own): never in the repository
+*.dll
+# Official Remix SDK runtime and generated diagnostic caches stay local.
+/remix-runtime-*/
+/remix-assets/
+/rtx-remix/
+/metrics.txt
+/*.dxvk-cache
 # IDE/session-local
 .claude/
 .vscode/

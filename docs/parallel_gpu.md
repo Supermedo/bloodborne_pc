@@ -52,7 +52,7 @@ compared by screenshot and frame rate.
 
 ## Portability
 
-Must scale down to the Steam Deck (4 cores / 8 threads): worker count follows
+Must scale down to the portable test system (4 cores / 8 threads): worker count follows
 `hardware_concurrency()`, no busy waiting when cores are scarce, no AVX-512.
 
 ## Results
@@ -127,7 +127,7 @@ input state from the resolved handles.
 ## Scaling to the available threads (2026-09-30)
 
 Draw preparation used to replay the whole command stream in every worker and was switched
-off below 12 hardware threads (Steam Deck: no workers). Now:
+off below 12 hardware threads (portable test system: no workers). Now:
 
 - One scanner (`bb:DrawScan`) replays the register writes in order and stores, per buffer,
   its starting checksum and a delta of the 32-word register blocks it wrote
@@ -233,7 +233,7 @@ State after this work, standing still, `BB_FPS_LIMIT=0`, FSR 4: 82–85 FPS; GPU
 `build.sh` builds `libbbgpu` with LTO (`-flto=auto`, also for sirit and FSR-Vulkan linked
 into it) and, when `pgo/` holds a profile, with `-fprofile-use` (`-fprofile-partial-training
 -fprofile-correction`; functions changed since the profile compile without it). No `-march`:
-the same build runs on the Steam Deck.
+the same build runs on the portable test system.
 
 Collecting a profile: `BB_PGO=generate bash run.sh` builds an instrumented library
 (`-fprofile-generate -fprofile-update=atomic`) that writes `pgo/` every 30 s (`bb:pgo` thread:
@@ -407,7 +407,7 @@ A/B in one run (16 threads, FSR 4 Ultra Performance, clean toggle bits): whole p
 
 ### GPU time per frame vs upscaler preset
 
-The GPU (RX 7800 XT) now limits more than the CPU. Presets change it little:
+The GPU now limits more than the CPU in the test environment. Presets change it little:
 
 | mode | FPS | GPU busy | GPU ms/frame |
 |---|---|---|---|
@@ -539,7 +539,7 @@ rendering without an upscaler. Found on the way:
   each keeps the native size. What remains native before the upscaler: half-resolution
   (960x540) passes, which `SceneTargets::Eligible` does not handle.
 
-Next GPU item (matters most on the Steam Deck): guest compute `3d5ebf4e` is a dword memcpy that
+Next GPU item (matters most on the portable test system): guest compute `3d5ebf4e` is a dword memcpy that
 copies render target memory (the 1080p depth buffer, 12 MB, sampled afterwards as R32F; a
 G-buffer target; two 960x540 targets): 8 dispatches, and each needs the image downloaded into
 the buffer, the proxy resolved and the destination image uploaded again. Recognizing copies

@@ -3,6 +3,7 @@
 
 #include <boost/container/small_vector.hpp>
 
+#include "common/serdes.h"
 #include "shader_recompiler/info.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -38,7 +39,9 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         // this properly we need to track shaprs or portion of them in `sdata`, but since we're
         // interested only in "is storage" flag (which is not even effective atm), we can take a
         // shortcut there.
-        const auto sharp = preloading ? AmdGpu::Buffer{} : buffer.GetSharp(*info);
+        const auto sharp =
+            (preloading || info->FlatUserData().empty()) ? AmdGpu::Buffer{} : buffer.GetSharp(*info);
+        (void)sharp;
         bindings.push_back({
             .binding = binding++,
             .descriptorType = vk::DescriptorType::eStorageBuffer,

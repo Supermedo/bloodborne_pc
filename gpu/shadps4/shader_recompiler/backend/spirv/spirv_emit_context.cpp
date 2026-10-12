@@ -650,6 +650,18 @@ void EmitContext::DefineOutputs() {
                 Name(motion_out_cur, "motion_cur");
                 Name(motion_out_prev, "motion_prev");
             }
+            if (VertexRemix()) {
+                // EXT_transform_feedback writes ONLY the buffer range supplied by the
+                // draw recorder. Unlike BDA stores, shader output cannot escape it.
+                Decorate(output_position, spv::Decoration::XfbBuffer, 0u);
+                Decorate(output_position, spv::Decoration::Offset, 0u);
+                Decorate(output_position, spv::Decoration::XfbStride, 32u);
+                remix_uv_out = DefineOutput(F32[4], RemixCapture::UvLocation);
+                Decorate(remix_uv_out, spv::Decoration::XfbBuffer, 0u);
+                Decorate(remix_uv_out, spv::Decoration::Offset, 16u);
+                Decorate(remix_uv_out, spv::Decoration::XfbStride, 32u);
+                Name(remix_uv_out, "remix_uv_valid");
+            }
             if (needs_clip_distance_emulation) {
                 clip_distances = Id{DefineOutput(F32[MaxEmulatedClipDistances], 0)};
                 output_params[num_attrs] = GetAttributeInfo(
@@ -829,7 +841,7 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
     const Id pointer_type = TypePointer(storage_class, data_type);
     const Id id{AddGlobalVariable(struct_pointer_type, storage_class)};
     Decorate(id, spv::Decoration::Binding, binding.unified);
-    Decorate(id, spv::Decoration::DescriptorSet, 0U);
+    Decorate(id, spv::Decoration::DescriptorSet, binding.set);
     if (!is_written) {
         Decorate(id, spv::Decoration::NonWritable);
     } else if (is_coherent) {
@@ -1029,7 +1041,7 @@ void EmitContext::DefineImagesAndSamplers() {
         const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
         Decorate(id, spv::Decoration::Binding, binding.unified);
         binding.unified += num_bindings;
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        Decorate(id, spv::Decoration::DescriptorSet, binding.set);
         Name(id, fmt::format("{}_{}{}", hw_stage, "img", images.size()));
         images.push_back({
             .data_types = &data_types,
@@ -1056,7 +1068,7 @@ void EmitContext::DefineImagesAndSamplers() {
     for (const auto& samp_desc : info.samplers) {
         const Id id{AddGlobalVariable(sampler_pointer_type, spv::StorageClass::UniformConstant)};
         Decorate(id, spv::Decoration::Binding, binding.unified++);
-        Decorate(id, spv::Decoration::DescriptorSet, 0U);
+        Decorate(id, spv::Decoration::DescriptorSet, binding.set);
         Name(id, fmt::format("{}_{}{}", hw_stage, "samp", samplers.size()));
         samplers.push_back(id);
         interfaces.push_back(id);

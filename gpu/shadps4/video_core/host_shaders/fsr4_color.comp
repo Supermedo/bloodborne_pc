@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: FSR 4 takes its colour as linear light and has no setting for display-encoded input.
+// The scaled presets feed it the game's tonemapped frame (sRGB-encoded): decoded here into a
+// linear rgba16f image first, and its output encoded again (ENCODE, in place) before the UI
+// composition. FSR 3 and TAA keep the encoded frame (issue #41: only FSR 4 swam on the stairs).
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+layout(local_size_x = 8, local_size_y = 8) in;
+#ifdef ENCODE
+layout(binding = 0, rgba16f) uniform image2D color_img;
+#else
+layout(binding = 0) uniform texture2D source_tex;
+layout(binding = 1, rgba16f) uniform writeonly image2D result_img;
+#endif
+
+vec3 ToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 ToSrgb(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+#ifdef ENCODE
+    if (any(greaterThanEqual(pixel, imageSize(color_img)))) {
+        return;
+    }
+    const vec4 c = imageLoad(color_img, pixel);
+    imageStore(color_img, pixel, vec4(ToSrgb(clamp(c.rgb, 0.0, 1.0)), c.a));
+#else
+    if (any(greaterThanEqual(pixel, imageSize(result_img)))) {
+        return;
+    }
+    const vec4 c = texelFetch(source_tex, pixel, 0);
+    imageStore(result_img, pixel, vec4(ToLinear(clamp(c.rgb, 0.0, 1.0)), c.a));
+#endif
+}

@@ -258,6 +258,11 @@ public:
     Id motion_in_cur{};
     Id motion_in_prev{};
     Id motion_frag_out{};
+    Id remix_uv_out{};
+    [[nodiscard]] bool VertexRemix() const {
+        return sw_stage == SwStage::Vertex && hw_stage == HwStage::Vertex &&
+               runtime_info.hw.vs.remix_capture;
+    }
     [[nodiscard]] bool VertexMotion() const {
         return sw_stage == SwStage::Vertex && hw_stage == HwStage::Vertex &&
                runtime_info.hw.vs.motion_vectors && MotionVectors::positions_address != 0;

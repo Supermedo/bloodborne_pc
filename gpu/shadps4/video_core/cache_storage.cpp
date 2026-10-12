@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/elf_info.h"
+#include "common/logging/log.h"
 #include "common/io_file.h"
 #include "common/polyfill_thread.h"
 #include "common/thread.h"
@@ -15,16 +16,14 @@
 
 #include <condition_variable>
 #include <functional>
-#include <future>
+#include <exception>
 #include <mutex>
 #include <queue>
 
 namespace {
 
-std::mutex submit_mutex{};
-u32 num_requests{};
 std::condition_variable_any request_cv{};
-std::queue<std::packaged_task<void()>> req_queue{};
+std::queue<std::function<void()>> req_queue{};
 std::mutex m_request{};
 
 mz_zip_archive zip_ar{};
@@ -37,33 +36,23 @@ namespace Storage {
 void ProcessIO(const std::stop_token& stoken) {
     Common::SetCurrentThreadName("shadPS4:PipelineCacheIO");
 
-    while (!stoken.stop_requested()) {
+    for (;;) {
+        std::function<void()> request;
         {
-            std::unique_lock lk{submit_mutex};
-            Common::CondvarWait(request_cv, lk, stoken, [&] { return num_requests; });
-        }
-
-        if (stoken.stop_requested()) {
-            break;
-        }
-
-        while (num_requests) {
-            std::packaged_task<void()> request{};
-            {
-                std::scoped_lock lock{m_request};
-                if (req_queue.empty()) {
-                    continue;
-                }
-                request = std::move(req_queue.front());
-                req_queue.pop();
+            std::unique_lock lk{m_request};
+            Common::CondvarWait(request_cv, lk, stoken, [&] { return !req_queue.empty(); });
+            // Close drains accepted writes before stopping. A separate request count
+            // raced between producers/consumer and could lose queued work.
+            if (req_queue.empty()) {
+                return;
             }
-
-            if (request.valid()) {
-                request();
-                request.get_future().wait();
-            }
-
-            --num_requests;
+            request = std::move(req_queue.front());
+            req_queue.pop();
+        }
+        try {
+            request();
+        } catch (const std::exception& e) {
+            LOG_ERROR(Render, "Cache write failed: {}", e.what());
         }
     }
 }
@@ -140,7 +129,8 @@ void DataBase::Close() {
 template <typename T>
 bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector<T>&& v) {
     {
-        auto request = std::packaged_task<void()>{[=]() {
+        // Ownership crosses the queue without copying the shader/pipeline payload.
+        std::function<void()> request = [type, path_ = std::move(path_), v = std::move(v)]() {
             auto path{path_};
             path.replace_extension(GetBlobFileExtension(type));
             if (EmulatorSettings.IsPipelineCacheArchived()) {
@@ -151,28 +141,31 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector
                     LOG_ERROR(Render, "Failed to add {} to the archive", path.string().c_str());
                 }
             } else {
-                // bbport: write beside and rename into place, so a game that ends during the
-                // write (the queue is not drained at exit) never leaves a truncated blob that
-                // the next start would load.
+                // bbport: written under a temporary name and renamed into place, so a crash or a
+                // power loss mid-write leaves the old file or none, never a cut-short one that
+                // the next start reads as a damaged entry (issue #28).
                 using namespace Common::FS;
-                auto temp{path};
+                auto temp = path;
                 temp += ".tmp";
+                bool written = false;
                 {
                     const auto file = IOFile{temp, FileAccessMode::Create};
-                    if (!file.IsOpen() || file.Write(v) != v.size()) {
-                        return;
-                    }
+                    written = file.IsOpen() && file.Write(v) == v.size();
                 }
-                std::error_code error;
-                std::filesystem::rename(temp, path, error);
+                std::error_code ec;
+                if (written) {
+                    std::filesystem::rename(temp, path, ec);
+                }
+                if (!written || ec) {
+                    LOG_ERROR(Render, "Failed to write {}", path.string());
+                    std::filesystem::remove(temp, ec);
+                }
             }
-        }};
+        };
         std::scoped_lock lock{m_request};
         req_queue.emplace(std::move(request));
     }
 
-    std::scoped_lock lk{submit_mutex};
-    ++num_requests;
     request_cv.notify_one();
     return true;
 }
@@ -226,7 +219,7 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u8>& dat
 
     auto path = EmulatorSettings.IsPipelineCacheArchived() ? std::filesystem::path{name}
                                                            : cache_path / name;
-    return LoadVector(type, path, data);
+    LoadVector(type, path, data);
 }
 
 void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& data) {
@@ -236,7 +229,7 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& da
 
     auto path = EmulatorSettings.IsPipelineCacheArchived() ? std::filesystem::path{name}
                                                            : cache_path / name;
-    return LoadVector(type, path, data);
+    LoadVector(type, path, data);
 }
 
 void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func) {
@@ -256,8 +249,11 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
             }
         }
     } else {
-        for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
-            if (file_name.path().extension().string().ends_with(ext)) {
+        if (std::filesystem::exists(cache_path)) {
+            for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
+                if (!file_name.path().extension().string().ends_with(ext)) {
+                    continue;
+                }
                 using namespace Common::FS;
                 const auto& file = IOFile{file_name, FileAccessMode::Read};
                 if (file.IsOpen()) {
@@ -277,6 +273,10 @@ void DataBase::Clear() {
     std::error_code ec;
     u64 removed = 0;
     for (const auto& entry : std::filesystem::directory_iterator(cache_path, ec)) {
+        // The driver's own pipeline cache does not depend on our serialization versions.
+        if (entry.path().filename() == "vk_pipeline_cache.bin") {
+            continue;
+        }
         if (entry.is_regular_file(ec) && std::filesystem::remove(entry.path(), ec)) {
             ++removed;
         }

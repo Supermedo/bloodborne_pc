@@ -37,9 +37,17 @@ void Swapchain::Create(u32 width_, u32 height_) {
     height = height_;
     needs_recreation = false;
 
-    Destroy();
-
+    // bbport: a minimised window has a 0x0 surface (issue #31); no swapchain can have that extent.
+    // The old one stays (presents are skipped) until the window is back.
     SetSurfaceProperties();
+    if (extent.width == 0 || extent.height == 0) {
+        zero_extent = true;
+        needs_recreation = true;
+        return;
+    }
+    zero_extent = false;
+
+    Destroy();
 
     const std::array queue_family_indices = {
         instance.GetGraphicsQueueFamilyIndex(),
@@ -77,6 +85,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
 
     SetupImages();
     RefreshSemaphores();
+    frame_index = image_index = 0;
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
@@ -112,6 +121,10 @@ bool Swapchain::AcquireNextImage() {
     case vk::Result::eSuccess:
         break;
     case vk::Result::eSuboptimalKHR:
+        // A suboptimal acquire still signals the semaphore and owns an image.
+        // Consume it in the normal submission before recreating the swapchain.
+        needs_recreation = true;
+        return true;
     case vk::Result::eErrorSurfaceLostKHR:
     case vk::Result::eErrorOutOfDateKHR:
     case vk::Result::eErrorUnknown:

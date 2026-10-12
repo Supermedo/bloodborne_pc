@@ -14,16 +14,21 @@ typedef struct {
     uint32_t psf_attributes;    /* param.sfo ATTRIBUTE */
     int32_t width, height;      /* initial window size */
 } BbGpuConfig;
+const char *bbgpu_version(void);
 /* Registers kernel event queues (needed with or without graphics). */
 void bbgpu_register_kernel(void);
 /* Co-op: the game folder and param.sfo identity for the network and PSN libraries. */
 void bbnet_configure(const char *app0, const char *serial, const char *title, const char *app_ver);
 /* Creates window, Vulkan device, presenter and GPU command processor. */
 int bbgpu_init(const BbGpuConfig *config);
+/* Finishes pending writes of the user's pipeline cache. Safe before `_Exit`, which skips destructors. */
+void bbgpu_flush_pipeline_cache(void);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
 uintptr_t bbgpu_resolve(const char *scoped_nid);
 /* Called first by the loader's SIGSEGV handler: 1 when a GPU page-tracking fault was handled. */
 int bbgpu_handle_fault(void *ucontext, void *address);
+/* Illegal instruction in SRT walker JIT: 1 when the walker was aborted. */
+int bbgpu_handle_illegal(void *ucontext);
 /* BB_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
 void bbgpu_dump_guest_writes(void *ucontext);
 /* Keyboard text entry through the game window (IME dialog). begin returns 0 when
@@ -32,7 +37,8 @@ int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
-
+/* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
+void bbgpu_patch_image(unsigned char *image, uint64_t size);
 /* Mouse input accumulated by the window thread since the last call; the call resets the
  * motion (dx/dy) but not held buttons. All zero (and captured=0) while capture is inactive
  * (mouse_to_joystick absent or off, no window focus, menu or text entry open). buttons uses

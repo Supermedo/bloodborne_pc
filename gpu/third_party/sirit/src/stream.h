@@ -42,6 +42,10 @@ struct OpId {
 
 struct EndOp {};
 
+/// Like EndOp, but skips declaration interning. OpSpecConstant values with the
+/// same type and default must remain distinct (they carry different SpecIds).
+struct UniqueEndOp {};
+
 inline size_t WordsInString(std::string_view string) {
     return string.size() / sizeof(u32) + 1;
 }
@@ -253,6 +257,10 @@ public:
         --*stream.bound;
 
         return Id{entry->second};
+    }
+
+    Id operator<<(UniqueEndOp) {
+        return stream << EndOp{};
     }
 
 private:

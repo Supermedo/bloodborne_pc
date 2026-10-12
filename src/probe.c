@@ -13,6 +13,8 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
+#include "crash_win.h"
+#include "respawn_patch.h"
 #else
 #include <sys/mman.h>
 #include <malloc.h>
@@ -22,6 +24,7 @@
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <pthread.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #endif
@@ -40,6 +43,7 @@ static int gpu_enabled;
 int vulkan_smoke(void);
 
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
+
 static uint64_t read64(FILE *f) {
     unsigned char b[8];
     if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
@@ -179,6 +183,22 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
     fprintf(stderr,"  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) bbgpu_dump_guest_writes(info);
+    /* Unwind with the PE exception tables first: system libraries (heap checks in ntdll) keep
+     * no frame pointers. Stops at the first frame without unwind data (guest code). */
+    {
+        CONTEXT unwind=*c;
+        fprintf(stderr,"  unwind:\n");
+        for (int depth=0; depth<40 && unwind.Rip; ++depth) {
+            describe_address(where,sizeof(where),(uintptr_t)unwind.Rip);
+            fprintf(stderr,"  @%d %s\n",depth,where);
+            DWORD64 base=0;
+            PRUNTIME_FUNCTION entry=RtlLookupFunctionEntry(unwind.Rip,&base,NULL);
+            if (!entry) break;
+            void *handler_data=NULL;
+            DWORD64 establisher=0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER,base,unwind.Rip,entry,&unwind,&handler_data,&establisher,NULL);
+        }
+    }
     /* rbp chain (guest and host code keep frame pointers). */
     uintptr_t rbp=(uintptr_t)c->Rbp;
     for (int depth=0; depth<24 && rbp; ++depth) {
@@ -189,6 +209,7 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
         fprintf(stderr,"  #%d %s\n",depth,where);
         rbp=frame[0];
     }
+    crash_win_dump(info);
     fflush(NULL);
     TerminateProcess(GetCurrentProcess(),3);
     return EXCEPTION_CONTINUE_SEARCH;
@@ -196,6 +217,19 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
 static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     DWORD code=record->ExceptionCode;
+    if (code==EXCEPTION_ILLEGAL_INSTRUCTION) {
+        if (gpu_enabled && bbgpu_handle_illegal(info)) return EXCEPTION_CONTINUE_EXECUTION;
+        if (runtime_fault_recover) {
+            unsigned long long *buffer=*runtime_fault_recover;
+            runtime_fault_recover=NULL;
+            CONTEXT *c=info->ContextRecord;
+            c->Rsp=((c->Rsp-128)&~(DWORD64)15)-40;
+            c->Rcx=(DWORD64)(uintptr_t)buffer;
+            c->Rdx=1;
+            c->Rip=(DWORD64)(uintptr_t)bb_longjmp;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
     if (code==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2) {
         /* GPU page tracking (write-protected guest pages) is resolved first. */
         if (gpu_enabled && bbgpu_handle_fault(info,(void *)record->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
@@ -225,6 +259,8 @@ static LONG CALLBACK vectored_fault(EXCEPTION_POINTERS *info) {
     }
     /* BB_STRICT_HANDLES=1: a closed or invalid handle used anywhere is reported (diagnostics). */
     if (code==0xC0000008 /* STATUS_INVALID_HANDLE */) return fatal_exception(info);
+    if (code==0xC0000374 /* STATUS_HEAP_CORRUPTION */ || code==0xC0000409 /* fail fast */)
+        return fatal_exception(info);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 static LONG WINAPI unhandled_fault(EXCEPTION_POINTERS *info) { return fatal_exception(info); }
@@ -273,6 +309,26 @@ static void fault(int sig, siginfo_t *info, void *context) {
         snprintf(line, sizeof(line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, info->si_addr);
     { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
     if (gpu_enabled) bbgpu_dump_guest_writes(context);
+    /* Outside the image and any shared object (generated code, a freed mapping): the mapping
+     * from /proc/self/maps, and the thread. */
+    if (rip - (uintptr_t)image >= 0x10000000 && !(dladdr((void *)rip, &where) && where.dli_fname)) {
+        char thread[32] = "?";
+        pthread_getname_np(pthread_self(), thread, sizeof(thread));
+        snprintf(line, sizeof(line), "  thread %s; mapping of RIP: ", thread);
+        { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
+        FILE *maps = fopen("/proc/self/maps", "r");
+        int found = 0;
+        while (maps && fgets(line, sizeof(line), maps)) {
+            unsigned long from, to;
+            if (sscanf(line, "%lx-%lx", &from, &to) == 2 && rip >= from && rip < to) {
+                ssize_t written_=write(2, line, strlen(line)); (void)written_;
+                found = 1;
+                break;
+            }
+        }
+        if (maps) fclose(maps);
+        if (!found) { ssize_t written_=write(2, "none\n", 5); (void)written_; }
+    }
     /* Host call chain (frames with unwind info; guest frames end it). */
     void *frames[32];
     int depth = backtrace(frames, 32);
@@ -402,6 +458,7 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
 /* Restarts the game through run.sh (the settings menu: a new render resolution is a patch
  * applied at start). Descriptors are closed first so the old GPU device and its memory are
  * released before the new process opens its own. */
+volatile int runtime_restarting;
 void runtime_restart(void) {
     fflush(NULL);
 #ifdef _WIN32
@@ -419,10 +476,16 @@ void runtime_restart(void) {
         fprintf(stderr,"runtime_restart: CreateProcess failed (%lu)\n",GetLastError()); _exit(1);
     }
     CloseHandle(process.hThread); CloseHandle(process.hProcess);
-    /* The new launch waits for this process's GPU device to go away (run.py --after). */
+    /* The new launch waits for this process's GPU device to go away (run.py --after).
+     * TerminateProcess skips destructors, so finish pending user-cache writes first. */
+    bbgpu_flush_pipeline_cache();
     TerminateProcess(GetCurrentProcess(),0);
 #else
     puts("Runtime: restarting through run.sh");
+    /* The GPU threads still run until exec: their Vulkan calls fail once the device fd is
+     * closed below, and an assertion there must not end the process (exit 23) before exec. */
+    runtime_restarting = 1;
+    __sync_synchronize();
     syscall(SYS_close_range, 3u, ~0u, 0u);
     execlp("bash", "bash", "run.sh", (char *)NULL);
     perror("runtime_restart: exec");
@@ -432,6 +495,11 @@ void runtime_restart(void) {
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+#ifdef _WIN32
+    crash_win_init();
+    if (argc == 2 && !strcmp(argv[1], "--version")) { puts(bbgpu_version()); return 0; }
+    printf("Bloodborne port %s\n", bbgpu_version());
+#endif
 #ifndef _WIN32
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
@@ -439,13 +507,13 @@ int main(int argc, char **argv) {
     mallopt(M_MMAP_THRESHOLD,32*1024*1024);
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
-    check_cpu();
 #ifdef _WIN32
     /* The PS4 user range must stay free of host allocations (GPU driver, heaps), and the guest
      * TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */
     runtime_memory_reserve();
     runtime_thread_tcb_offset();
 #endif
+    check_cpu();
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
     const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;
@@ -615,6 +683,9 @@ int main(int argc, char **argv) {
     image = allocate(round_page(size));
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
+#ifdef _WIN32
+    crash_win_set_guest(image, (size_t)size);
+#endif
     if (!cpu_only) {
         char title[128]="Bloodborne", serial[16]="UNKNOWN", sfo[4096];
         uint32_t attributes=0;
@@ -629,6 +700,11 @@ int main(int argc, char **argv) {
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());
     }
+#ifdef _WIN32
+    /* DLL initialization may replace the process-wide filter. Install ours
+     * again after the graphics runtimes have loaded, before guest execution. */
+    SetUnhandledExceptionFilter(unhandled_fault);
+#endif
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
     protect(data_traps, (import_count + 1) * page_size, 0);
@@ -659,8 +735,22 @@ int main(int argc, char **argv) {
     }
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
 #ifdef _WIN32
+    if (!cpu_only) {
+        const char *respawn_fix = getenv("BB_RESPAWN_DELAY_FIX");
+        if (respawn_fix && !strcmp(respawn_fix, "0")) {
+            puts("Respawn loading: original minimum delay requested (BB_RESPAWN_DELAY_FIX=0)");
+        } else {
+            int patched = bb_patch_respawn_delay(image, (size_t)size);
+            if (patched == BB_RESPAWN_APPLIED || patched == BB_RESPAWN_ALREADY_APPLIED)
+                printf("Respawn loading: 12-second minimum delay removed%s; readiness checks preserved\n",
+                       patched == BB_RESPAWN_ALREADY_APPLIED ? " (already patched)" : "");
+            else
+                puts("Respawn loading: unsupported or modified instructions; minimum-delay fix skipped");
+        }
+    }
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
+    if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;

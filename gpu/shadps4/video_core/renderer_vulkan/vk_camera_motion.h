@@ -7,6 +7,7 @@
 
 #include <array>
 #include <vector>
+#include "../../../dlss_bridge/bbport_frame_camera.h"
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -43,7 +44,7 @@ public:
     }
 
     [[nodiscard]] bool Enabled() const noexcept {
-        return debug_overlay || for_upscaler;
+        return debug_overlay || for_upscaler || for_remix;
     }
 
     /// Both cameras and the scene depth of the current frame are known.
@@ -63,17 +64,23 @@ public:
     [[nodiscard]] float Near() const noexcept;
     // Current projection, previous projection, and row Z of previous-view * inverse-view.
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
+    /// bbport: the matrices and jitter of the motion of this frame, printed with an upscaler dump
+    /// (BB_DUMP_TRIGGER) for offline checks of the vectors.
+    void PrintState(int frame) const;
+    BbFrameCamera FrameCamera() const;
 
-    /// Records the motion vector pass: `depth_view` (depth aspect, General layout) into
-    /// `motion_view` (RG16F storage, General), pixels, previous minus current.
-    void RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_view, vk::ImageView motion_view,
-                      u32 width, u32 height);
+    /// Records the motion vector pass (Scheduler::Record): `depth_view` (depth aspect, General
+    /// layout) into `motion_view` (RG16F storage, General), pixels, previous minus current.
+    void RecordMotion(vk::ImageView depth_view, vk::ImageView motion_view, u32 width, u32 height);
 
     /// A bound constant buffer of 864 bytes: checks the scene constant signature.
     void OnConstants(const float* data);
 
     /// The G-buffer pass (5+ color targets): its depth is the scene depth.
-    void OnGBufferPass(VideoCore::ImageId depth);
+    /// `x_sign`/`y_sign`: signs of the G-buffer pass's viewport x/y scale (window = ndc * scale +
+    /// offset). The motion shaders take ndc as +y down the screen, so the projection's scales are
+    /// multiplied by them: the game's viewport decides which way view +y goes, per frame.
+    void OnGBufferPass(VideoCore::ImageId depth, float x_sign = 1.0f, float y_sign = 1.0f);
 
     /// The pass copying the finished frame (`frame`, the last target drawn) to the display: the
     /// frame's depth and camera are complete. Records the debug overlay, starts a new frame.
@@ -95,6 +102,7 @@ private:
     Runtime& runtime;
     bool debug_overlay = false;
     bool for_upscaler = false;
+    bool for_remix = false;
     vk::UniqueDescriptorSetLayout motion_desc_layout;
     vk::UniquePipelineLayout motion_pipeline_layout;
     vk::UniquePipeline motion_pipeline;
@@ -102,9 +110,19 @@ private:
     ObjectMotion* object_motion = nullptr;
     Camera current, previous;
     bool frame_has_camera = false;
+    /// bbport: the camera of the G-buffer pass in progress (OnConstants), committed as the frame's
+    /// camera once per frame (CommitFrameCamera: the motion pass or the display pass).
+    Camera pass_camera;
+    bool pass_has_camera = false;
+    bool committed = false;
+    u32 frame_gbuffer_passes = 0;
+    std::array<std::array<float, 3>, 4> pass_positions{};
+    void CommitFrameCamera();
     std::array<float, 2> jitter{}, previous_jitter{};
     std::array<u32, 2> render_size{};
     VideoCore::ImageId depth_id{};
+    float gbuffer_x_sign = 1.0f; ///< bbport: signs of the G-buffer viewport scales (OnGBufferPass)
+    float gbuffer_y_sign = 1.0f;
 
     vk::UniqueDescriptorSetLayout desc_layout;
     vk::UniquePipelineLayout pipeline_layout;

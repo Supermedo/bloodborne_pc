@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <memory>
 #include <boost/container/static_vector.hpp>
 #include <xxhash.h>
 
@@ -44,6 +45,8 @@ struct GraphicsPipelineKey {
     std::array<u8, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
     u32 mrt_mask;
     u32 motion_vectors = 0;
+    u32 remix_capture = 0;
+    u16 remix_uv = 0xffff;
     struct {
         AmdGpu::DepthBuffer::ZFormat z_format : 2;
         AmdGpu::DepthBuffer::StencilFormat stencil_format : 1;
@@ -103,11 +106,14 @@ public:
     }
 
     /// Gets the attributes and bindings for vertex inputs.
+    /// bbport: `sharps`, when given, are the V#s of the fetch shader's attributes as the GPU
+    /// command thread read them (in the draw packet): the V# tables they come from may have been
+    /// rewritten by a later constant engine dump by the time the recording thread gets here.
     template <typename Attribute, typename Binding>
     void GetVertexInputs(VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
                          VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT>& divisors,
                          VertexInputs<AmdGpu::Buffer>& guest_buffers, u32 step_rate_0,
-                         u32 step_rate_1) const;
+                         u32 step_rate_1, std::span<const AmdGpu::Buffer> sharps = {}) const;
 
 private:
     void BuildDescSetLayout(bool preloading);
