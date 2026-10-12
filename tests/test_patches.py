@@ -5,7 +5,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
+from patches import (EBOOT_BASE, FIXES, FPS_PRESETS, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
@@ -129,6 +129,14 @@ class DebugPatchTests(unittest.TestCase):
                 validate_patch_requirements(names, game)
             (font / 'DbgFont14h.tpf').write_bytes(b'test')
             validate_patch_requirements(names, game)
+
+    def test_fixes_raise_the_frame_heaps_without_touching_other_patches(self):
+        writes = compile_patches(XML, FIXES, '01.09', SEGMENTS)
+        self.assertEqual(writes, [(0x2195c0a, b'\x00\x00\x10\x00'), (0x2195c47, b'\x00\x00\x10\x00')])
+        others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
+        for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):
+            for fix, value in writes:
+                self.assertFalse(offset < fix + len(value) and fix < offset + len(data), hex(offset))
 
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
