@@ -115,6 +115,9 @@ Dlss::Dlss() : impl{std::make_unique<Impl>()} {
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
     if (!impl->api || impl->api->abi != BBPORT_DLSS_BRIDGE_ABI) {
+        // An older bridge's table is shorter: calling through it (ReleaseFrameGeneration at the
+        // first upscaler setup) read past its end. Without a matching bridge there is no API.
+        impl->api = nullptr;
         impl->Disable("bbport_dlss.dll is missing or from another version");
         return;
     }
