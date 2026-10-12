@@ -36,10 +36,22 @@ scripts (`--script`) and the game without the window (`--play`): players need no
 `Play Bloodborne.exe` (`packaging/windows/play.c`) is a small native program that runs
 `Bloodborne.exe --play` from its folder and waits for it, for players who want to start the
 game directly with the saved settings.
-`patches.py` applies the 1.09 patches only to a 1.09 game (`BB_FORCE_PATCHES=1` overrides);
-`run.py` then runs other versions at 30 FPS with live resolution changes.
-From a source tree it adds `C:\msys64\clang64\bin` (or `$MSYS2_ROOT`) to `PATH` for the DLLs.
+Upstream 0.4 requires the supported decrypted executable of CUSA03173 1.09.
+`prepare.py` verifies its hash before preparation; other executables are rejected.
+`BB_FORCE_PATCHES` does not bypass this verification.
+From a source tree it adds `C:\msys64\clang64\bin` (or `$MSYS2_ROOT`) to `PATH` for the DLLs;
+without either, it also finds a local toolchain under `out/msys64`.
 `bash tools/fetch_fsr4_assets.sh` works in the CLANG64 shell as on Linux.
+
+Run `bash build.sh --test` for native CTest and Python regression tests, including
+Vulkan execution on the installed GPU. For a non-default MSYS2 installation set
+`MSYS2_ROOT` (for example `/e/bloooood-win/out/msys64` in Bash).
+See [upstream 0.4 migration and validation](../../docs/windows-upstream-0.4.md).
+
+FSR 4.1.1 assets: choose the prepared `fsr4_411` directory in Graphics, or set
+`BB_FSR411_DIR`. DLL extraction in `tools/fsr4cap/build_assets.sh` requires Linux/Proton;
+Windows runs the generated SPIR-V set. Experimental Linux dma-buf/userfaultfd memory
+and ELF diagnostic hooks are disabled; Windows retains its own memory backend.
 
 DLSS (optional): `DLSS_SDK_ROOT=<checkout of github.com/NVIDIA/DLSS> bash
 packaging/windows/build_dlss.sh` builds `bbport_dlss.dll` (`gpu/dlss_bridge`, the only code that

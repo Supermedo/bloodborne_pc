@@ -7,7 +7,8 @@
 //   fsr4cap.exe [version substring, default FSR4] [render WxH] [output WxH] [frames] [noise]
 // noise: the benchmark's pseudo-random inputs (tools/fsr4_bench.cpp, BENCH_NOISE) and the output
 // after the last frame in output_<output WxH>.raw (RGBA16F rows), for comparing the replay.
-// The loader (amd_fidelityfx_loader_dx12.dll) and the upscaler DLL are next to the exe.
+// The upscaler DLL is next to the exe (and, for a DLL not exporting the API, the loader
+// amd_fidelityfx_loader_dx12.dll).
 #define COBJMACROS
 #define WIDL_C_INLINE_WRAPPERS
 #define WIN32_LEAN_AND_MEAN
@@ -184,21 +185,34 @@ int main(int argc, char** argv) {
     CHECK(ID3D12Device_CreateFence(device, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence, (void**)&fence));
     fence_event = CreateEventA(NULL, FALSE, FALSE, NULL);
 
-    // Record everything the upscaler does with the device (capture/ next to the exe).
+    // Record everything the upscaler does with the device (capture_<sizes>/ next to the exe, or in
+    // the folder FSR4CAP_SUBDIR names there: fp8/ for the DLL's FP8 matrix variant).
     char capture_dir[MAX_PATH];
     GetModuleFileNameA(NULL, capture_dir, MAX_PATH);
+    char* name = strrchr(capture_dir, '\\') + 1;
+    const char* subdir = getenv("FSR4CAP_SUBDIR");
+    if (subdir && subdir[0]) {
+        snprintf(name, 64, "%s", subdir);
+        CreateDirectoryA(capture_dir, NULL);
+        name += strlen(name);
+        *name++ = '\\';
+    }
     // Test runs with pseudo-random inputs (verify.sh) record next to, not over, the captures.
-    snprintf(strrchr(capture_dir, '\\') + 1, 64, "%scapture_%ux%u_%ux%u",
+    snprintf(name, 64, "%scapture_%ux%u_%ux%u",
              argc > 5 && strcmp(argv[5], "noise") == 0 ? "noise_" : "", rw, rh, ow, oh);
     CaptureInstall(device, list, capture_dir);
 
-    HMODULE loader = LoadLibraryA("amd_fidelityfx_loader_dx12.dll");
-    if (!loader) {
-        fprintf(stderr, "no amd_fidelityfx_loader_dx12.dll\n");
+    // AMD's upscaler DLL exports the FidelityFX API itself; the loader only for one that does not.
+    HMODULE api = LoadLibraryA("amd_fidelityfx_upscaler_dx12.dll");
+    if (!api || !GetProcAddress(api, "ffxCreateContext")) {
+        api = LoadLibraryA("amd_fidelityfx_loader_dx12.dll");
+    }
+    if (!api) {
+        fprintf(stderr, "cannot load amd_fidelityfx_upscaler_dx12.dll (or a loader)\n");
         return 1;
     }
     ffxFunctions ffx;
-    ffxLoadFunctions(&ffx, loader);
+    ffxLoadFunctions(&ffx, api);
 
     // Versions of the upscaler.
     uint64_t count = 0;

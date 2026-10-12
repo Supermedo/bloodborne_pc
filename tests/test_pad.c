@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>
+#include "test_platform.h"
 #include "../src/runtime_pad.c"
 
 static int capture;
@@ -19,11 +20,20 @@ static void inject(const char *path, const char *tokens) {
 }
 
 int main(void) {
-    char path[]="/tmp/bbport-pad-test-XXXXXX";
-    int fd=mkstemp(path);
+    char path[4096];
+    int fd=bb_test_temp(path,sizeof(path),"bbport-pad-test");
     assert(fd>=0);
     close(fd);
     setenv("BB_PAD_FILE",path,1);
+    /* bbport.ini controls: buttons moved, a trigger as a button and a button as a trigger. */
+    char config[4096];
+    int config_fd=bb_test_temp(config,sizeof(config),"bbport-pad-config");
+    assert(config_fd>=0);
+    const char controls[]="upscaler=fsr3\npad.cross=b\npad.circle=a\npad.r2=rightshoulder\n"
+                          "pad.r1=righttrigger\nkey.cross=X, Space\npad.bogus=a\n";
+    assert(write(config_fd,controls,sizeof(controls)-1)==(ssize_t)(sizeof(controls)-1));
+    close(config_fd);
+    setenv("BB_CONFIG",config,1);
     setenv("SDL_VIDEODRIVER","dummy",1);
     /* Only the virtual test controller is a gamepad, whatever is plugged in. */
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT,"0x1d50/0x6189");
@@ -33,7 +43,8 @@ int main(void) {
     inject(path,"cross l3 touchpad_left");
     assert(pad_read_state(1,&data)==0);
     assert((data.buttons & (BTN_CROSS|BTN_L3|BTN_TOUCHPAD))==(BTN_CROSS|BTN_L3|BTN_TOUCHPAD));
-    assert(data.touch_count==1 && data.touches[0].x==480 && data.touches[0].y==471);
+    /* A new touch gets a new id (1..127), as from a DualShock 4: the game ignores id 0. */
+    assert(data.touch_count==1 && data.touches[0].x==480 && data.touches[0].y==471 && data.touches[0].id==1);
     inject(path,"touchpad_right");
     assert(pad_read_state(1,&data)==0 && data.touch_count==1 && data.touches[0].x==1440);
     inject(path,"");
@@ -63,8 +74,8 @@ int main(void) {
     SDL_UpdateGamepads();
     assert(pad_read_state(1,&data)==0);
     assert(gamepad && data.touch_count==2 && (data.buttons & BTN_TOUCHPAD));
-    assert(data.touches[0].x==1439 && data.touches[0].y==471 && data.touches[0].id==0);
-    assert(data.touches[1].x==480 && data.touches[1].y==942 && data.touches[1].id==1);
+    assert(data.touches[0].x==1439 && data.touches[0].y==471 && data.touches[0].id==2);
+    assert(data.touches[1].x==480 && data.touches[1].y==942 && data.touches[1].id==3);
     capture=1;
     assert(pad_read_state(1,&data)==0 && data.touch_count==0 && data.buttons==0);
     capture=0;
@@ -72,12 +83,27 @@ int main(void) {
     assert(SDL_SetJoystickVirtualTouchpad(joystick,0,1,false,0,0,0));
     SDL_UpdateJoysticks();
     SDL_UpdateGamepads();
-    assert(pad_read_state(1,&data)==0 && data.touch_count==1 && data.touches[0].x==480);
+    // A touchpad/button still held when the menu closes must not become a new gesture.
+    assert(pad_read_state(1,&data)==0 && data.touch_count==0 && data.buttons==0);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_TOUCHPAD,false));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==0 && data.touch_count==0);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_EAST,true));
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,true));
+    assert(SDL_SetJoystickVirtualAxis(joystick,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,32767));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0);
+    assert(data.buttons==(BTN_CROSS|BTN_R2|BTN_R1) && data.r2==255);
+    assert(bindings[IN_CROSS].key_count==2 && bindings[IN_CROSS].keys[0]==SDL_SCANCODE_X &&
+           bindings[IN_CROSS].keys[1]==SDL_SCANCODE_SPACE);
     SDL_CloseJoystick(joystick);
     if (gamepad) SDL_CloseGamepad(gamepad);
     gamepad=NULL;
     assert(SDL_DetachVirtualJoystick(id));
     SDL_Quit();
     unlink(path);
-    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture");
+    unlink(config);
+    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture, controls");
 }

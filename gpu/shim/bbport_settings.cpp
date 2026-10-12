@@ -5,8 +5,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace BbSettings {
 
@@ -24,7 +27,11 @@ float Clamp(float v, float lo, float hi) {
 void Set(Values& v, const std::string& key, const std::string& value) {
     const float f = float(std::atof(value.c_str()));
     const int i = std::atoi(value.c_str());
-    if (key == "upscaler") {
+    if (key == "menu_language") {
+        if (value == "en") v.menu_language = MenuLanguage::English;
+        else if (value == "ru") v.menu_language = MenuLanguage::Russian;
+        else std::printf("Settings: unknown menu_language '%s' (expected en or ru)\n", value.c_str());
+    } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
                 v.upscaler = u;
@@ -52,6 +59,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
     } else if (key == "show_fps") {
         v.show_fps = i != 0;
+    } else if (key == "menu_pos") {
+        float x = -1.0f, y = -1.0f;
+        if (std::sscanf(value.c_str(), "%f,%f", &x, &y) == 2 && x >= 0.0f && x <= 1.0f && y >= 0.0f &&
+            y <= 1.0f) {
+            v.menu_x = x;
+            v.menu_y = y;
+        }
     } else if (key == "fsr4_auto_exposure") {
         v.fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
@@ -82,10 +96,30 @@ Values& Get() {
     return values;
 }
 
+const char* MenuText(const char* english, const char* russian) {
+    return Get().menu_language == MenuLanguage::Russian ? russian : english;
+}
+
 void Load() {
     auto& v = Get();
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
+    }
+    // bbport: the menu's language until one is chosen in it (menu_language in bbport.ini): the
+    // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
+    {
+        const char* lang = std::getenv("BB_MENU_LANGUAGE");
+        if (!lang || !*lang) {
+            for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+                if (const char* value = std::getenv(key); value && *value) {
+                    lang = value;
+                    break;
+                }
+            }
+        }
+        v.menu_language = lang && (lang[0] == 'r' || lang[0] == 'R') && (lang[1] == 'u' || lang[1] == 'U')
+                              ? MenuLanguage::Russian
+                              : MenuLanguage::English;
     }
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
@@ -179,32 +213,90 @@ bool ResolutionNeedsRestart() {
 
 void Save() {
     const auto& v = Get();
-    FILE* file = std::fopen(Path(), "w");
-    if (!file) {
-        std::printf("Settings: cannot write %s\n", Path());
-        return;
-    }
-    std::fprintf(file,
-                 "# bbport settings (in-game menu: Insert / L3+R3)\n"
-                 "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
-                 "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
-                 UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
-                 v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
-                 int(v.object_motion.load()),
-                 v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
-                 v.debug_view.load(), int(v.show_fps.load()),
-                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()));
+    // The keys the menu writes, in this order; the rest of the file stays as it is: the
+    // launcher's controls (key.* / pad.*) and its other keys, comments.
+    std::vector<std::pair<std::string, std::string>> keys;
+    const auto put = [&](const char* key, std::string value) { keys.emplace_back(key, std::move(value)); };
+    const auto fixed = [](float value, int digits) {
+        char text[32];
+        std::snprintf(text, sizeof(text), "%.*f", digits, value);
+        return std::string(text);
+    };
+    const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
+    put("menu_language", v.menu_language == MenuLanguage::Russian ? "ru" : "en");
+    put("upscaler", UpscalerName(v.upscaler));
+    put("preset", std::to_string(v.preset.load()));
+    put("sharpen", flag(v.sharpen));
+    put("sharpness", fixed(v.sharpness, 2));
+    put("jitter", flag(v.jitter));
+    put("reactive", flag(v.reactive));
+    put("object_motion", flag(v.object_motion));
+    put("reactive_scale", fixed(v.reactive_scale, 2));
+    put("reactive_threshold", fixed(v.reactive_threshold, 2));
+    put("reactive_max", fixed(v.reactive_max, 2));
+    put("debug_view", std::to_string(v.debug_view.load()));
+    put("show_fps", flag(v.show_fps));
+    put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
+    put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
-        std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
+        put(Effects[e].key, flag(v.effects[e]));
     }
-    std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
-                 OutputWidths[v.output_res], OutputHeights[v.output_res]);
+    put("model_lod", std::to_string(v.model_lod.load()));
+    put("output_res", std::to_string(OutputWidths[v.output_res]) + "x" +
+                          std::to_string(OutputHeights[v.output_res]));
     // Read by run.sh at start.
-    std::fprintf(file, "live_resolution=%s\n", v.live_resolution < 0 ? "auto"
-                                                  : v.live_resolution ? "1" : "0");
-    std::fclose(file);
+    put("live_resolution", v.live_resolution < 0 ? "auto" : flag(v.live_resolution != 0));
+    if (v.menu_x >= 0.0f && v.menu_y >= 0.0f) {
+        put("menu_pos", fixed(v.menu_x, 4) + "," + fixed(v.menu_y, 4));
+    }
+
+    std::string out;
+    bool had_lines = false;
+    std::vector<bool> written(keys.size());
+    if (FILE* file = std::fopen(Path(), "r")) {
+        char line[512];
+        while (std::fgets(line, sizeof(line), file)) {
+            had_lines = true;
+            std::string text{line};
+            text.erase(text.find_last_not_of("\r\n") + 1);
+            const auto eq = text.find('=');
+            if (!text.empty() && text[0] != '#' && eq != std::string::npos) {
+                std::string key = text.substr(0, eq);
+                key.erase(key.find_last_not_of(" \t") + 1);
+                key.erase(0, key.find_first_not_of(" \t"));
+                const auto it = std::find_if(keys.begin(), keys.end(),
+                                             [&](const auto& k) { return k.first == key; });
+                if (it != keys.end()) {
+                    out += it->first + "=" + it->second + "\n";
+                    written[size_t(it - keys.begin())] = true;
+                    continue;
+                }
+            }
+            out += text + "\n";
+        }
+        std::fclose(file);
+    }
+    if (!had_lines) {
+        out = "# bbport settings (in-game menu: Insert / L3+R3)\n";
+    }
+    for (size_t k = 0; k < keys.size(); ++k) {
+        if (!written[k]) {
+            out += keys[k].first + "=" + keys[k].second + "\n";
+        }
+    }
+    // Replaced whole: a crash while writing leaves the old file.
+    const std::string temporary = std::string(Path()) + ".tmp";
+    FILE* file = std::fopen(temporary.c_str(), "wb");
+    bool ok = file && std::fwrite(out.data(), 1, out.size(), file) == out.size();
+    ok = file && std::fclose(file) == 0 && ok;
+    // filesystem::rename replaces an existing destination on Windows as well as POSIX.
+    std::error_code ec;
+    if (ok) std::filesystem::rename(temporary, Path(), ec);
+    if (!ok || ec) {
+        std::printf("Settings: cannot write %s\n", Path());
+        std::filesystem::remove(temporary, ec);
+    }
 }
 
 float PresetScale(int preset) {

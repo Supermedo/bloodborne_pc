@@ -14,7 +14,10 @@ from pathlib import Path
 
 EBOOT_BASE=0x400000
 # BB_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
-FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++'],'uncap':['Uncap FPS++']}
+# Above 60 FPS the sprint fix always goes with the frame rate patch: without it sprinting drops to
+# half speed (the game's wall detector measured distance per frame, a 30 FPS rule).
+FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)'],
+             'uncap':['Uncap FPS++','Sprint Fix (High FPS)']}
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
@@ -48,6 +51,25 @@ EFFECTS={
     'tweak_easy_run':(None,'Sensitive Analog Input (easier to run)'),
     'tweak_ragdoll':(None,'DS1-like physics'),
 }
+# Intel CPUs: the game's tone mapping turns black (DLC areas most; reported as darker than on the
+# PS4): the game code runs natively, and Intel's approximate float instructions differ from the
+# PS4's AMD CPU, so a block the game gates on a computed flag never runs. The community fix runs
+# it always; on by default on Intel. BB_INTEL_TONEMAP_FIX=0/1 forces it off or on.
+INTEL_TONEMAP='Intel Black Tonemap Fix'
+
+
+def intel_cpu(cpuinfo='/proc/cpuinfo'):
+    try:
+        with open(cpuinfo) as f:
+            return any(line.startswith('vendor_id') and 'GenuineIntel' in line for line in f)
+    except OSError:
+        return False
+
+
+def intel_tonemap_fix(env=os.environ, cpuinfo='/proc/cpuinfo'):
+    forced=env.get('BB_INTEL_TONEMAP_FIX')
+    return forced=='1' if forced in ('0','1') else intel_cpu(cpuinfo)
+
 # model_lod: -2 highest, 0 the game's, 1 lower, 2 lowest.
 MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LOD 2 (Lowest)'}
 
@@ -303,6 +325,8 @@ def main():
         return
     names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
+    if intel_tonemap_fix() and INTEL_TONEMAP not in names:
+        names.append(INTEL_TONEMAP)
     validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)

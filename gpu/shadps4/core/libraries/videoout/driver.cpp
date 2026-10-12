@@ -9,9 +9,17 @@
 #include <time.h>
 #ifndef _WIN32
 #include <sys/resource.h>
+#else
+#include <windows.h>
+#include <psapi.h>
 #endif
+#include <cstring>
+#include <dirent.h>
+#include <unistd.h>
 #include "common/assert.h"
 #include "bbport_toggles.h"
+#include "bbport_heap_sites.h"
+#include "bbport_wait_trace.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
 #include "common/thread.h"
@@ -19,9 +27,16 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/videoout/driver.h"
+#include "core/libraries/kernel/equeue.h"
+
+extern "C" void runtime_sleep_stats(uint64_t* calls, uint64_t* ns);
+extern "C" void runtime_wait_report(double frames);
+#include "video_core/page_manager.h"
 #include "core/libraries/videoout/videoout_error.h"
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/renderer_vulkan/vk_breadcrumbs.h"
+#include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
@@ -289,6 +304,81 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
     return 0;
 }
 
+/// bbport: memory per statistics window: the kernel's count for the game (VRAM and GTT of its
+/// DRM clients, RSS) and the parts we know of. GTT holds the game's direct memory (fixed).
+static void PrintMemory() {
+    u64 vram_kib = 0, gtt_kib = 0;
+#ifndef _WIN32
+    std::vector<u64> clients;
+    if (DIR* dir = opendir("/proc/self/fdinfo")) {
+        while (const dirent* entry = readdir(dir)) {
+            char path[64];
+            std::snprintf(path, sizeof(path), "/proc/self/fdinfo/%s", entry->d_name);
+            FILE* file = std::fopen(path, "r");
+            if (!file) {
+                continue;
+            }
+            char line[160];
+            bool drm = false;
+            unsigned long long client = 0, vram = 0, gtt = 0;
+            while (std::fgets(line, sizeof(line), file)) {
+                drm |= std::strncmp(line, "drm-driver:", 11) == 0;
+                std::sscanf(line, "drm-client-id: %llu", &client);
+                std::sscanf(line, "drm-memory-vram: %llu", &vram);
+                std::sscanf(line, "drm-memory-gtt: %llu", &gtt);
+            }
+            std::fclose(file);
+            // Duplicated descriptors share a client.
+            if (drm && std::find(clients.begin(), clients.end(), client) == clients.end()) {
+                clients.push_back(client);
+                vram_kib += vram;
+                gtt_kib += gtt;
+            }
+        }
+        closedir(dir);
+    }
+    unsigned long long size_pages = 0, rss_pages = 0;
+    if (FILE* statm = std::fopen("/proc/self/statm", "r")) {
+        if (std::fscanf(statm, "%llu %llu", &size_pages, &rss_pages) != 2) {
+            rss_pages = 0;
+        }
+        std::fclose(statm);
+    }
+    const u64 rss = u64(rss_pages) * u64(sysconf(_SC_PAGESIZE));
+#else
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters));
+    const u64 rss = counters.WorkingSetSize;
+#endif
+    const u64 device = BbStats::device_alloc_bytes.load() - BbStats::device_free_bytes.load();
+    u64 vma_blocks = 0, vma_used = 0;
+    Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
+    std::printf("Memory: VRAM %llu MiB, GTT %llu MiB, RSS %llu MiB; Vulkan memory %llu MiB "
+                "allocated (VMA blocks %llu MiB, %llu MiB of them used); Vulkan images %llu MiB; "
+                "cached images %llu MiB in %llu; guest blocks in VRAM %llu MiB allocated, "
+                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); texture collector: usage %llu MiB, starts at %llu MiB, %llu images freed, %llu GPU-written kept\n",
+                (unsigned long long)(vram_kib >> 10), (unsigned long long)(gtt_kib >> 10),
+                (unsigned long long)(rss >> 20), (unsigned long long)(device >> 20),
+                (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_used >> 20),
+                (unsigned long long)(BbStats::vk_image_bytes.load() >> 20),
+                (unsigned long long)(BbStats::live_image_bytes.load() >> 20),
+                (unsigned long long)BbStats::live_images.load(),
+                (unsigned long long)(BbStats::residency_alloc_bytes.load() >> 20),
+                (unsigned long long)(BbStats::residency_unused_bytes.load() >> 20),
+                (unsigned long long)(BbStats::vram_idle_bytes.exchange(0) >> 20),
+                (unsigned long long)(BbStats::vram_unmapped_bytes.exchange(0) >> 20),
+                (unsigned long long)(BbStats::vram_chunks_freed_bytes.exchange(0) >> 20),
+                (unsigned long long)BbStats::residency_chunk_count.load(),
+                (unsigned long long)BbStats::evacuations.exchange(0),
+                (unsigned long long)BbStats::evac_kept_gpu.exchange(0),
+                (unsigned long long)BbStats::evac_kept_other.exchange(0),
+                (unsigned long long)(BbStats::gc_used_bytes.load() >> 20),
+                (unsigned long long)(BbStats::gc_trigger_bytes.load() >> 20),
+                (unsigned long long)BbStats::gc_freed_images.exchange(0),
+                (unsigned long long)BbStats::gc_kept_images.exchange(0));
+}
+
 void VideoOutDriver::Flip(const Request& req) {
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
@@ -399,6 +489,59 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(copy_flt - last_copy_flt),
                         double(copy_bytes - last_copy_bytes) / double(copy_ns - last_copy_ns));
         }
+        // bbport: BB_FRAME_LOG=path (with BB_FRAME_STATS): one line per flip, to find what the
+        // long frames (stutter) have in common.
+        static FILE* const frame_log = [] () -> FILE* {
+            const char* path = std::getenv("BB_FRAME_LOG");
+            FILE* file = path && *path ? std::fopen(path, "w") : nullptr;
+            if (file) {
+                std::fprintf(file, "t_s,frame_ms,present_wait_ms,tick_wait_ms,stage_a_cpu_ms,"
+                                   "images,image_mb,buffer_mb,protect_ms,resident_ms,create_ms,"
+                                   "refresh_ms,write_fault_ms,read_faults,guest_copy_mb,draws,"
+                                   "dispatches,submissions,compiles,preupload_mb,kernel_ms,alloc_mb,"
+                                   "free_mb\n");
+            }
+            return file;
+        }();
+        if (frame_log) {
+            static const auto log_start = now;
+            static u64 log_twf, log_tick, log_present, log_compiles, log_rf, log_preupload;
+            static u64 log_alloc, log_free;
+            const u64 tick = BbStats::tick_wait_ns.load(), present = BbStats::present_wait_ns.load();
+            const u64 compiles_now = Vulkan::g_bb_compiles.load();
+            // tick_wait_ns and the compile count are reset every stats window.
+            const auto delta = [](u64 now_value, u64& last_value) {
+                const u64 d = now_value >= last_value ? now_value - last_value : now_value;
+                last_value = now_value;
+                return d;
+            };
+            std::fprintf(frame_log,
+                         "%.4f,%.2f,%.2f,%.2f,%.2f,%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%llu,"
+                         "%.2f,%llu,%llu,%llu,%llu,%.2f,%.2f,%.1f,%.1f\n",
+                         std::chrono::duration<double>(now - log_start).count(), frame_ms,
+                         delta(present, log_present) / 1e6, delta(tick, log_tick) / 1e6,
+                         last_gpu_ns ? (gpu_ns - last_gpu_ns) / 1e6 : 0.0,
+                         static_cast<unsigned long long>(images - last_images),
+                         (image_bytes - last_image_bytes) / 1e6,
+                         (buffer_bytes - last_buffer_bytes) / 1e6, (t_now[1] - last_t[1]) / 1e6,
+                         (t_now[0] - last_t[0]) / 1e6, (t_now[2] - last_t[2]) / 1e6,
+                         (t_now[3] - last_t[3]) / 1e6, delta(twf, log_twf) / 1e6,
+                         static_cast<unsigned long long>(delta(rf, log_rf)),
+                         (copy_bytes - last_copy_bytes) / 1e6,
+                         static_cast<unsigned long long>(draws - last_draws),
+                         static_cast<unsigned long long>(dispatches - last_dispatches),
+                         static_cast<unsigned long long>(subs - last_subs),
+                         static_cast<unsigned long long>(delta(compiles_now, log_compiles)),
+                         delta(BbStats::preupload_bytes.load(), log_preupload) / 1e6,
+                         last_gpu_ns ? (sys_us - last_sys) / 1e3 : 0.0,
+                         delta(BbStats::device_alloc_bytes.load(), log_alloc) / 1e6,
+                         delta(BbStats::device_free_bytes.load(), log_free) / 1e6);
+            static u32 unflushed = 0;
+            if (++unflushed >= 120) {
+                std::fflush(frame_log);
+                unflushed = 0;
+            }
+        }
         last_copy_ns = copy_ns;
         last_copy_cpu = copy_cpu;
         last_copy_sys = copy_sys;
@@ -440,7 +583,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         "%u shader/pipeline compiles, %.1f ms; %llu recorder syncs; "
                         "%.0f write faults/s, %lld hot pages; GPU thread %.2f us/draw, "
                         "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
-                        "%.1f%% (%.0f/frame), copy threads %.1f%%, GPU ticks %.1f%%; "
+                        "%.1f%% (%.0f/frame, %.0f/frame not needed), copy threads %.1f%%, GPU ticks %.1f%%; "
                         "reduced-size draws %.0f/frame of %.0f in the scene\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
@@ -450,10 +593,94 @@ void VideoOutDriver::Flip(const Request& req) {
                         BbStats::sync_recording_ns.exchange(0) / (window * 1e7),
                         BbStats::host_copies_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::host_copy_waits.exchange(0)) / frames : 0.0,
+                        frames ? double(BbStats::host_copy_waits_skipped.exchange(0)) / frames : 0.0,
                         BbStats::copy_threads_wait_ns.exchange(0) / (window * 1e7),
                         BbStats::tick_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::reduced_draws.exchange(0)) / frames : 0.0,
                         frames ? double(BbStats::scene_draws.exchange(0)) / frames : 0.0);
+            VideoCore::PageManager::ReportFaultSites();
+            if (const u64 notes = BbStats::cpu_write_notes.exchange(0)) {
+                std::printf("Write notices: %.0f/s, %.2f MB/s (libc copies over pages the GPU side "
+                            "watches)\n",
+                            notes / window, BbStats::cpu_write_note_bytes.exchange(0) / (window * 1e6));
+            }
+            Vulkan::Breadcrumbs::PrintProgress();
+            PrintMemory();
+            if (const u64 in_place = BbStats::bound_in_place_bytes.exchange(0)) {
+                std::printf("Buffer bindings: %.1f MB/frame in place (%.1f GPU-written), %.1f MB/frame "
+                            "VRAM copies\n",
+                            in_place / (frames * 1e6),
+                            BbStats::bound_in_place_written_bytes.exchange(0) / (frames * 1e6),
+                            BbStats::bound_vram_bytes.exchange(0) / (frames * 1e6));
+            }
+            {
+                const u64 updates = BbStats::gpu_data_updates.exchange(0);
+                const u64 copied_back = BbStats::copied_back_blocks.exchange(0);
+                const u64 readbacks = BbStats::readbacks.exchange(0);
+                const u64 late = BbStats::late_vram_writes.exchange(0);
+                if (updates + copied_back + readbacks + late != 0) {
+                    std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f exact writes/s "
+                                "(labels, CPU bytes beside GPU data), %.1f blocks/s copied back, "
+                                "%.1f readbacks/s\n",
+                                updates / window, late / window, copied_back / window,
+                                readbacks / window);
+                }
+            }
+            Libraries::Kernel::ReportEqueueWaits(frames);
+            if (static int heap_reports = 0; ++heap_reports % 6 == 1) {
+                BbHeapSites::Report();
+            }
+            runtime_wait_report(frames);
+            for (std::size_t i = 0; i < BbStats::range_allocators.size(); ++i) {
+                if (const u64 a = BbStats::range_allocators[i].load()) {
+                    std::printf("%s %#llx: %llu live, %.1f MB", i ? ";" : "GPU range allocators:",
+                                (unsigned long long)a, (unsigned long long)BbStats::range_live[i].load(),
+                                BbStats::range_bytes[i].load() / 1e6);
+                }
+            }
+            if (BbStats::range_allocators[0].load()) {
+                std::printf("\n");
+            }
+            std::printf("Gnm: %.1f sceGnmSubmitDone/frame, %.1f sceGnmAreSubmitsAllowed/frame, %.1f refused/frame; "
+                        "guest waited for the previous frame %.1fx %.2f ms/frame; %.1f compute queue submissions/frame\n",
+                        BbStats::submit_done_calls.exchange(0) / double(frames),
+                        BbStats::submits_allowed_queries.exchange(0) / double(frames),
+                        BbStats::submits_refused.exchange(0) / double(frames),
+                        BbStats::gnm_frame_waits.exchange(0) / double(frames),
+                        BbStats::gnm_frame_wait_ns.exchange(0) / (1e6 * double(frames)),
+                        BbStats::asc_submits.exchange(0) / double(frames));
+            std::printf("EOP fences: %llu decoded, %llu labels written, %lld pending\n",
+                        (unsigned long long)BbStats::eop_decoded.load(),
+                        (unsigned long long)BbStats::eop_written.load(),
+                        (long long)(BbStats::eop_decoded.load() - BbStats::eop_written.load()));
+            if (const u64 early = BbStats::idle_flushes.exchange(0)) {
+                std::printf("Honest labels: %.1f submissions/frame sent early (GPU idle)\n",
+                            early / double(frames));
+            }
+            {
+                uint64_t sleeps = 0, sleep_ns = 0;
+                runtime_sleep_stats(&sleeps, &sleep_ns);
+                if (sleeps != 0 && frames != 0) {
+                    std::printf("Guest sleeps per frame: %.1f, %.2f ms\n", sleeps / double(frames),
+                                sleep_ns / (frames * 1e6));
+                }
+            }
+            if (const u64 copies = BbStats::shadow_copies.exchange(0)) {
+                std::printf("Shadow copies: %.0f/frame, %.1f MB/frame (in-place data the CPU writes, "
+                            "copied into VRAM for reading)\n",
+                            copies / double(frames), BbStats::shadow_bytes.exchange(0) / (frames * 1e6));
+            }
+            if (const u64 allocs = BbStats::gpu_range_allocs.exchange(0)) {
+                std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
+                            BbStats::gpu_range_alloc_bytes.exchange(0) / (window * 1e6));
+            }
+            // bbport: parallel Vulkan recording (vk_scheduler.h): command buffer segments.
+            if (const u64 submits = Vulkan::Scheduler::recorded_submissions.exchange(0)) {
+                const u64 segments = Vulkan::Scheduler::recorded_segments.exchange(0);
+                std::printf("Recording: %.1f submissions/frame, %.2f command buffers each\n",
+                            frames ? double(submits) / frames : 0.0, double(segments) / submits);
+            }
+            BbWaitTrace::Report(window);
             // Frame pacing: spread of the guest flip intervals (judder that the mean hides).
             if (intervals.size() > 2) {
                 std::vector<double> sorted = intervals;
@@ -610,9 +837,10 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         return {};
     };
 
-    // bbport: with a frame limit (uncapped presets) a queued flip is presented as soon as it
-    // arrives and its slot allows, between vblanks, instead of on the next vblank tick.
-    const bool immediate_flips = frame_limit != 0;
+    // bbport: with a frame limit or the uncapped presets a queued flip is presented as soon as
+    // it arrives and its slot allows (no limit: at once), between vblanks, instead of on the
+    // next vblank tick.
+    const bool immediate_flips = frame_limit != 0 || EmulatorSettings.IsUncappedVblank();
 
     while (!token.stop_requested()) {
         timer.Start();

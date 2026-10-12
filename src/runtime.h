@@ -1,5 +1,6 @@
 #ifndef BB_RUNTIME_H
 #define BB_RUNTIME_H
+#include <time.h>
 #include <stdint.h>
 #include <stddef.h>
 #ifdef _WIN32
@@ -26,6 +27,23 @@ void runtime_mutex_report(void);
 uintptr_t runtime_memory_resolve(const char *name);
 void runtime_memory_report(void);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
+/* Host copies bypass guest-page protection while retaining shared backing and small-store
+ * fence semantics. Unmapped reads are zero-filled; unmapped writes fail. */
+int runtime_memory_write_backing(uintptr_t address, const void *data, uint64_t size);
+void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size);
+int runtime_memory_direct_phys(uintptr_t address, uint64_t *phys, uintptr_t *end);
+int runtime_memory_vma_info(uintptr_t address, int *prot, int *type, uintptr_t *end);
+void runtime_memory_gpu_protect(uintptr_t address, uint64_t size, int read, int write);
+/* The CPU is about to write the range outside guest code (a file read): tells the GPU side. */
+void runtime_memory_note_write(uintptr_t address, uint64_t size);
+void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size);
+/* bbport (frame stats): a guest thread was blocked `ns` in the runtime (0 cond, 1 mutex, 2 sema, 3 sleep). */
+void runtime_wait_note(int kind, uint64_t ns);
+void runtime_wait_report(double frames);
+void runtime_guest_call_sites(uint64_t out[3]);
+/* bbport: times the game's heap asked for more memory (posix_mmap): a sign it leaks. */
+uint64_t runtime_heap_growths(void);
+static inline uint64_t runtime_wait_clock(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec; }
 const char *runtime_import_name(const char *name);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);

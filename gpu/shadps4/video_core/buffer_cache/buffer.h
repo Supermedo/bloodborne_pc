@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -25,6 +26,33 @@ VK_DEFINE_HANDLE(VmaAllocator)
 struct VmaAllocationInfo;
 
 namespace VideoCore {
+
+namespace Detail {
+/// bbport: GuestInPlace() and WriteTracking() once known (every buffer binding asks): 0 not yet,
+/// 1 on, 2 off.
+inline std::atomic<u8> guest_in_place{0}, write_tracking{0};
+bool ComputeGuestInPlace();
+bool ComputeWriteTracking();
+} // namespace Detail
+
+/// bbport BB_GUEST_IN_PLACE=1: the GPU uses the game's direct memory where it is (the arena is bound to
+/// the Vulkan chunks it lives in, gpu/shim/bbport_guest_memory.cpp) instead of copies in VRAM.
+inline bool GuestInPlace() {
+    const u8 state = Detail::guest_in_place.load(std::memory_order_relaxed);
+    return state != 0 ? state == 1 : Detail::ComputeGuestInPlace();
+}
+/// The driver cannot bind guest memory to the arena: BB_GUEST_IN_PLACE stays off from now on.
+void DisableGuestInPlace();
+/// Whether CPU writes to GPU memory are caught by page protection. Off with BB_GUEST_IN_PLACE: the
+/// GPU side learns of writes from the writers (file reads, the game's resource loaders, its own
+/// DMA and command writes); BB_WRITE_TRACKING=1 brings the protection back.
+inline bool WriteTracking() {
+    const u8 state = Detail::write_tracking.load(std::memory_order_relaxed);
+    return state != 0 ? state == 1 : Detail::ComputeWriteTracking();
+}
+/// BB_WRITE_VERIFY=1 (diagnostics, without write tracking): pages the GPU side watches are protected as
+/// well, so writes into them that nothing announced show up as write faults (their sites).
+bool WriteVerify();
 
 /// Hints and requirements for the backing memory type of a commit
 enum class MemoryType : u8 {
@@ -83,6 +111,10 @@ struct UniqueBuffer {
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                     MemoryType mem_type, std::string_view debug_name = "");
+    /// bbport BB_GUEST_IN_PLACE: a buffer over memory owned elsewhere (a guest memory chunk,
+    /// exported as a dma-buf): transfers and texel/storage reads, no device address.
+    explicit Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
+                    std::string_view debug_name);
 
     Buffer& operator=(const Buffer&) = delete;
     Buffer(const Buffer&) = delete;

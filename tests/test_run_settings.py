@@ -11,6 +11,7 @@ import tempfile
 import unittest
 
 
+@unittest.skipIf(os.name == 'nt', 'Linux run.sh; Windows startup is covered by test_windows_launch')
 class RestartResolutionTests(unittest.TestCase):
     def run_restarts(self, explicit=False, live=False, ini_extra='', caps=None, bare_path=False):
         with tempfile.TemporaryDirectory() as directory:

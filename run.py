@@ -8,6 +8,8 @@ The in-game "Apply and restart" runs this script again through BB_RESTART_COMMAN
 `--after PID` waits for the previous game process to end first (its GPU device and memory).
 """
 import ctypes
+from ctypes import wintypes
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -75,11 +77,18 @@ def fail(message):
 
 def wait_for(pid):
     kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     SYNCHRONIZE = 0x00100000
     handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
     if handle:
-        kernel32.WaitForSingleObject(handle, 30000)
-        kernel32.CloseHandle(handle)
+        try:
+            if kernel32.WaitForSingleObject(handle, 30000) != 0:
+                fail(f'Previous game process {pid} has not exited; restart cancelled.')
+        finally:
+            kernel32.CloseHandle(handle)
 
 
 def no_console():
@@ -124,6 +133,46 @@ def find_executable(name):
     return None
 
 
+def configure_runtime(env, fps, data):
+    """Shared renderer defaults from upstream 0.4, with the Windows memory backend."""
+    env.setdefault('BB_PREUPLOAD', '1')
+    env.setdefault('BB_COPY_GPU_BUFFERS', '1')
+    env.setdefault('BB_GPU_WRITE_TWINS', '1')
+    env.setdefault('BB_GPU_WRITE_TWINS_MAX', '65536')
+    # dma-buf and userfaultfd do not exist on Windows; never enable partial substitutes.
+    env['BB_PC_MODEL'] = '0'
+    env['BB_GUEST_IN_PLACE'] = '0'
+    env['BB_GUEST_GPU_MEMORY'] = '0'
+    env['BB_UFFD'] = '0'
+    if env.get('BB_AS_0_3') == '1':
+        env.update(BB_HOST_COPY_WAITS='all', BB_PRODUCER_CHECK='1')
+    env.setdefault('BB_VBLANK_HZ', {'uncap': '480', '90': '90'}.get(fps, '60'))
+    if env.get('BB_SAVE_LOG') == '1':
+        logs = Path(data) / 'logs'
+        logs.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        env['BB_FRAME_STATS'] = '1'
+        env.setdefault('BB_FRAME_LOG', str(logs / f'{stamp}.frames.csv'))
+        env.setdefault('BB_READBACK_LOG', str(logs / f'{stamp}.readbacks.csv'))
+        return logs / f'{stamp}.log'
+    return None
+
+
+def launch_probe(command, log_path=None):
+    if log_path is None:
+        return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
+    print(f'Log: {log_path}')
+    with Path(log_path).open('w', encoding='utf-8') as log:
+        with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
+                              creationflags=no_console()) as process:
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                print(line, end='', flush=True)
+            return process.wait()
+
+
 def main():
     args = sys.argv[1:]
     if len(args) >= 2 and args[0] == '--after':
@@ -145,9 +194,12 @@ def main():
         fail('bb-probe.exe not found: build it with build.sh (MSYS2 CLANG64) or use a packaged build.')
     # Development builds run from the MSYS2 tree: its CLANG64 DLLs (SDL3, FFmpeg, ...).
     if not (probe.parent / 'SDL3.dll').is_file():
-        clang64 = Path(env.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
-        if clang64.is_dir():
-            env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
+        roots = [Path(env['MSYS2_ROOT'])] if env.get('MSYS2_ROOT') else [Path(r'C:\msys64'), PORT / 'out/msys64']
+        for root in roots:
+            clang64 = root / 'clang64/bin'
+            if clang64.is_dir():
+                env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
+                break
 
     game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03173'))
     if not (game / 'eboot.bin').is_file():
@@ -203,8 +255,7 @@ def main():
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
                    '--patches-dir', env.get('BB_PATCHES_DIR', data / 'patches'),
                    '--patches-config', env.get('BB_PATCHES_CONFIG', data / 'patches.json'))
-        if not env.get('BB_VBLANK_HZ'):
-            env['BB_VBLANK_HZ'] = {'uncap': '0', '90': '90'}.get(fps, '60')
+        log_path = configure_runtime(env, fps, data)
 
         # The in-game restart starts this script again once this process is gone.
         # GPU caches (shaders, pipelines) beside the saves; read before main(), so set here.
@@ -221,7 +272,7 @@ def main():
                    '--user', str(user_dir),
                    '--timeout', env.get('BB_TIMEOUT', '0'), *args]
         # No stdin: an inherited pipe (shells such as Git Bash) cost the game its console output.
-        return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
+        return launch_probe(command, log_path)
     finally:
         if mod_view:
             shutil.rmtree(mod_view, ignore_errors=True)

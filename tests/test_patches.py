@@ -5,6 +5,8 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import patches
+
 from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
@@ -160,6 +162,27 @@ class ExternalPatchTests(unittest.TestCase):
 
     def test_built_in_file_is_not_external(self):
         self.assertEqual(external_patches(XML.parent), [])
+
+
+class IntelTonemapTests(unittest.TestCase):
+    def cpuinfo(self, vendor):
+        path = Path(tempfile.mkdtemp()) / 'cpuinfo'
+        path.write_text(f'processor\t: 0\nvendor_id\t: {vendor}\nmodel name\t: x\n')
+        return str(path)
+
+    def test_on_for_intel_off_for_amd(self):
+        self.assertTrue(patches.intel_tonemap_fix({}, self.cpuinfo('GenuineIntel')))
+        self.assertFalse(patches.intel_tonemap_fix({}, self.cpuinfo('AuthenticAMD')))
+
+    def test_environment_forces_it(self):
+        amd, intel = self.cpuinfo('AuthenticAMD'), self.cpuinfo('GenuineIntel')
+        self.assertTrue(patches.intel_tonemap_fix({'BB_INTEL_TONEMAP_FIX': '1'}, amd))
+        self.assertFalse(patches.intel_tonemap_fix({'BB_INTEL_TONEMAP_FIX': '0'}, intel))
+
+    def test_patch_exists_for_109(self):
+        xml = ET.parse(ROOT / 'patches/Bloodborne.xml')
+        names = [m.get('Name') for m in xml.iter('Metadata')]
+        self.assertIn(patches.INTEL_TONEMAP, names)
 
 
 if __name__ == '__main__':

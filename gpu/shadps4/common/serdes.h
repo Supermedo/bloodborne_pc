@@ -7,9 +7,17 @@
 #include "common/types.h"
 
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace Serialization {
+
+/// bbport: a cache entry that cannot be used: shorter than what it claims to hold (a file cut
+/// short by a crash or a power loss, issue #28), or rejected by the driver while preloading. The
+/// pipeline cache drops the entry and compiles it again instead of stopping the game.
+struct CorruptData : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 template <typename T>
 concept Container = requires(T t) {
@@ -42,8 +50,9 @@ struct Archive {
     }
 
     void Advance(size_t size) {
-        ASSERT_MSG(offset + size <= container.size(),
-                   "Invalid or corrupted deserialization container/shader cache");
+        if (size > container.size() - offset) {
+            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+        }
         offset += size;
     }
 
@@ -105,8 +114,9 @@ struct Writer {
 struct Reader {
     template <typename T>
     void Read(T* ptr, size_t size) {
-        ASSERT_MSG(ar.offset + size <= ar.container.size(),
-                   "Invalid or corrupted deserialization container/shader cache");
+        if (size > ar.container.size() - ar.offset) {
+            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+        }
         std::memcpy(reinterpret_cast<void*>(ptr), ar.CurrPtr(), size);
         ar.Advance(size);
     }
@@ -121,6 +131,9 @@ struct Reader {
     void Read(auto& v) {
         size_t num_elements{};
         Read(num_elements);
+        if (num_elements > ar.container.size() - ar.offset) {
+            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+        }
         for (int i = 0; i < num_elements; ++i) {
             v.emplace_back();
             Read(v.back());
@@ -130,6 +143,9 @@ struct Reader {
     void Read(std::string& s) {
         size_t length{};
         Read(length);
+        if (length > ar.container.size() - ar.offset) {
+            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+        }
         s.resize(length);
         Read(s.data(), length);
     }
