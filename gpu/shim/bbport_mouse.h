@@ -1,20 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: mousecam sampling on its own thread. The camera reads SDL relative
+// motion at 1 kHz here instead of from the window event pump, so queued SDL
+// events and pump timing stay out of the input-to-guest path.
 #pragma once
-#include <cstddef>
-#include <cstdint>
 
 namespace BbMouse {
-// Called by the loader while the image is writable, before any guest code runs.
-bool Install(unsigned char* image, std::uint64_t size);
-bool Available();
-const char* Problem();
-// Window thread: raw SDL relative motion and capture transitions. No sampler thread.
+// Starts the sampler; safe to call once per window lifetime.
+void Start();
+// Stops the sampler and joins the thread; the window pump must not run after.
+void Stop();
+// Gate snapshot published by the window thread once per pump.
 void SetActive(bool active);
-void Motion(float dx, float dy);
-// Final pad state, including keyboard look bindings. A deliberate stick movement
-// returns camera ownership to the game; mouse motion takes it back after release.
-void Stick(std::uint8_t x, std::uint8_t y);
-void Pad(std::uint8_t lx, std::uint8_t ly, std::uint8_t rx, std::uint8_t ry, std::uint32_t buttons);
-// Runs on the guest camera thread, before its update prologue/angle calculations.
-void Apply(void* camera);
 } // namespace BbMouse

@@ -29,6 +29,11 @@ void SetThreadName(void* thread, const char* name);
 bool AccurateSleep(std::chrono::nanoseconds duration, std::chrono::nanoseconds* remaining,
                    bool interruptible);
 
+/// bbport: returns at `deadline`, within microseconds. Sleeps until shortly before it (a
+/// high-resolution timer on Windows), then spins. For the frame limiter, where the standard
+/// sleeps (millisecond granularity on Windows) woke late and made the next interval short.
+void PreciseSleepUntil(std::chrono::steady_clock::time_point deadline);
+
 class AccurateTimer {
     std::chrono::nanoseconds target_interval{};
     std::chrono::nanoseconds total_wait{};

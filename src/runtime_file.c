@@ -109,6 +109,45 @@ static int translate(const char *guest,char *out,size_t size) {
     if (!m) result=ENOENT;
     else if ((size_t)snprintf(out,size,"%s%s",m->host,buffer+best)>=size) result=ENAMETOOLONG;
     pthread_mutex_unlock(&lock);
+    if (!result && strstr(out,"/dvdroot_ps4/")) {
+        const char *language=getenv("BB_LANGUAGE");
+        if (language && !strcmp(language,"17")) {
+            /* Some game paths use the Portuguese or English fallback directory. */
+            const char *folders[]={"/msg/porpt/","/menu/porpt/","/msg/engus/","/menu/engus/"};
+            for (size_t i=0;i<sizeof(folders)/sizeof(folders[0]);++i) {
+                char *segment=strstr(out,folders[i]);
+                if (!segment) continue;
+                char *folder=segment+strlen(folders[i])-6;
+                char original[5];
+                memcpy(original,folder,5);
+                memcpy(folder,"porbr",5);
+                HostStat file;
+                if (host_stat(out,&file)) memcpy(folder,original,5);
+                break;
+            }
+        }
+        /* Voice tracks are independent of the game's text language. */
+        const char *voice=getenv("BB_VOICE_LANGUAGE");
+        const char *codes[]={"eng","ptb","ded","esa","ese","frf","iti","jaj"};
+        int valid=0;
+        for (size_t i=0;i<sizeof(codes)/sizeof(codes[0]);++i)
+            if (voice && !strcmp(voice,codes[i])) { valid=1; break; }
+        if (valid && strstr(out,"/dvdroot_ps4/sound/")) {
+            char *suffix=strrchr(out,'_');
+            if (suffix && strlen(suffix)==8 && !strcmp(suffix+4,".fsb")) {
+                int localized=0;
+                for (size_t i=0;i<sizeof(codes)/sizeof(codes[0]);++i)
+                    if (!strncmp(suffix+1,codes[i],3)) { localized=1; break; }
+                if (localized) {
+                    char original[3];
+                    memcpy(original,suffix+1,3);
+                    memcpy(suffix+1,voice,3);
+                    HostStat file;
+                    if (host_stat(out,&file)) memcpy(suffix+1,original,3);
+                }
+            }
+        }
+    }
     if (result==ENOENT) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
     return result;
 }

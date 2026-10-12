@@ -1212,29 +1212,30 @@ LANGUAGE_NAMES = [('', ('System', 'Как в системе')), ('en', ('English
 WINDOWS_LANGUAGES = {0x19: 'ru', 0x01: 'ar', 0x0a: 'es', 0x16: 'pt', 0x0c: 'fr', 0x07: 'de', 0x10: 'it',
                      0x15: 'pl', 0x1f: 'tr', 0x04: 'zh', 0x11: 'ja', 0x12: 'ko'}
 
+from bbport_lang_more import MORE, MORE_KEYS  # noqa: E402 (texts added later, Russian included)
+
 EXTRA_TRANSLATIONS = {
-    'ar': {'Walk (hold)': 'المشي (اضغط باستمرار)'},
-    'es': {'Walk (hold)': 'Caminar (mantener)'},
-    'pt': {'Walk (hold)': 'Caminhar (segurar)'},
-    'fr': {'Walk (hold)': 'Marcher (maintenir)'},
-    'de': {'Walk (hold)': 'Gehen (gedrückt halten)'},
-    'it': {'Walk (hold)': 'Cammina (tieni premuto)'},
-    'pl': {'Walk (hold)': 'Chód (przytrzymaj)'},
-    'tr': {'Walk (hold)': 'Yürü (basılı tut)'},
-    'zh': {'Walk (hold)': '步行（按住）'},
-    'ja': {'Walk (hold)': '歩く（長押し）'},
-    'ko': {'Walk (hold)': '걷기 (누르고 있기)'},
+    'pt': {
+        'Text language': 'Idioma dos textos',
+        'Voice language': 'Idioma da dublagem',
+        'As in the game uses the original voice setting; other choices use available tracks.':
+            'Como no jogo usa a voz original; as outras opções usam as faixas disponíveis.',
+    },
 }
 
 _tables = {}
 
 
 def table(language):
-    """English text -> translation for one language ({} for English and Russian)."""
+    """English text -> translation for one language ({} for English)."""
     if language not in _tables:
         texts = TRANSLATIONS.get(language)
         if texts and len(texts) != len(KEYS):
             raise ValueError(f'launcher translation {language}: {len(texts)} texts for {len(KEYS)} keys')
-        _tables[language] = dict(zip(KEYS, texts)) if texts else {}
-        _tables[language].update(EXTRA_TRANSLATIONS.get(language, {}))
+        more = MORE.get(language)
+        if more and len(more) != len(MORE_KEYS):
+            raise ValueError(f'launcher translation {language}: {len(more)} texts for {len(MORE_KEYS)} new keys')
+        _tables[language] = {**(dict(zip(KEYS, texts)) if texts else {}),
+                             **(dict(zip(MORE_KEYS, more)) if more else {}),
+                             **EXTRA_TRANSLATIONS.get(language, {})}
     return _tables[language]

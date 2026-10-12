@@ -111,14 +111,12 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     };
     auto [pipeline_result, pipe] =
         instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
-    if (preloading && pipeline_result != vk::Result::eSuccess) {
-        // bbport: a pipeline from the cache the driver rejects is a damaged cache entry: the
-        // cache is rebuilt (PipelineCache::WarmUp) instead of stopping the game at every start.
-        throw Serialization::CorruptData{"cached compute pipeline rejected by the driver: " +
-                                         vk::to_string(pipeline_result)};
+    // bbport: as for graphics pipelines, a driver failure skips its dispatches.
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR(Render_Vulkan, "Failed to create compute pipeline {}: {}; its dispatches are skipped",
+                  debug_str, vk::to_string(pipeline_result));
+        return;
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-               vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
     SetObjectName(device, *pipeline, "Compute Pipeline {}", debug_str);
 }

@@ -181,6 +181,9 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     auto pipe = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
                                                   *pipeline_cache, key, *local.infos[0],
                                                   local.modules[0], sdata, true);
+    if (!pipe->IsValid()) {
+        return false;
+    }
     std::unique_lock lk{pipelines_mutex};
     const auto [it, is_new] = compute_pipelines.try_emplace(key);
     if (is_new) {
@@ -229,6 +232,17 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     PipelineSelection local{};
     local.graphics_key.Deserialize(ar);
 
+    // bbport: motion-vector pipelines are never preloaded. Their vertex shader embeds session-
+    // local buffer addresses (see LoadShaderMeta), and the shader metadata is stored once per
+    // program, not per permutation: the meta found for a motion pipeline's stages could be the
+    // plain permutation, so LoadShaderMeta's motion check missed it and the preload built the
+    // 8-attachment motion key with plain shaders. The AMD driver refused some of these
+    // (ErrorUnknown: the startup crash), and the ones it accepted were registered under the
+    // motion key without motion output. Built at first use instead, like the vertex shaders.
+    if (local.graphics_key.motion_vectors) {
+        return false;
+    }
+
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
 
@@ -255,6 +269,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     auto pipe = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, local.graphics_key, *pipeline_cache, local.infos,
         local.runtime_infos, local.fetch_shader, local.modules, sdata, true);
+    if (!pipe->IsValid()) {
+        return false;
+    }
     std::unique_lock lk{pipelines_mutex};
     const auto [it, is_new] = graphics_pipelines.try_emplace(local.graphics_key);
     if (is_new) {

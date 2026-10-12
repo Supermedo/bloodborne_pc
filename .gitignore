@@ -1,8 +1,10 @@
 out/
+/out
 __pycache__/
 user/
 *.mp4
 bbport.ini
+input.ini
 fsr4_shaders/
 pgo/
 *.png
@@ -37,3 +39,6 @@ patches.json
 /rtx-remix/
 /metrics.txt
 /*.dxvk-cache
+# IDE/session-local
+.claude/
+.vscode/

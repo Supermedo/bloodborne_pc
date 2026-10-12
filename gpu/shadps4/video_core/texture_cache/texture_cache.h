@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <string>
 #include <atomic>
 #include <chrono>
@@ -373,6 +374,7 @@ private:
     void UntrackImageTail(ImageId image_id);
 
     void MarkAsMaybeDirty(ImageId image_id, Image& image);
+    static u64 MaybeDirtyHash(const Image& image);
 
     /// Removes the image and any views/surface metas that reference it.
     void DeleteImage(ImageId image_id);
@@ -404,6 +406,7 @@ private:
     std::unordered_set<ImageId> download_images;
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< bbport: pressure report
+    u64 gc_kept = 0, gc_kept_bytes = 0; ///< bbport: old images the latest pass could not evict
     std::chrono::steady_clock::time_point gc_report_time{};
     /// bbport: gc_tick at each of the last 64 seconds (GarbageCollectImages).
     std::array<u64, 64> gc_tick_at_second{};

@@ -19,6 +19,9 @@
 #elif defined(_WIN32)
 #include <windows.h>
 #include "common/string_util.h"
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 #else
 #if defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <pthread_np.h>
@@ -223,6 +226,37 @@ void SetThreadName(void* thread, const char* name) {
 #endif
 
 #endif
+
+void PreciseSleepUntil(std::chrono::steady_clock::time_point deadline) {
+    using namespace std::chrono;
+    // Woken this long before the deadline, the rest is spun: covers the timer's lateness.
+    constexpr auto spin_margin = microseconds(500);
+    const auto now = steady_clock::now();
+    if (deadline - now > spin_margin) {
+#ifdef _WIN32
+        static thread_local HANDLE timer = CreateWaitableTimerExW(
+            nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        LARGE_INTEGER due{
+            .QuadPart = -static_cast<LONGLONG>(
+                duration_cast<nanoseconds>(deadline - spin_margin - now).count() / 100),
+        };
+        if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+            WaitForSingleObject(timer, INFINITE);
+        } else {
+            // No high-resolution timer (before Windows 10 1803): millisecond sleeps.
+            const auto coarse = deadline - milliseconds(2);
+            if (coarse > now) {
+                std::this_thread::sleep_until(coarse);
+            }
+        }
+#else
+        std::this_thread::sleep_until(deadline - spin_margin);
+#endif
+    }
+    while (steady_clock::now() < deadline) {
+        __builtin_ia32_pause();
+    }
+}
 
 AccurateTimer::AccurateTimer(std::chrono::nanoseconds target_interval)
     : target_interval(target_interval) {}

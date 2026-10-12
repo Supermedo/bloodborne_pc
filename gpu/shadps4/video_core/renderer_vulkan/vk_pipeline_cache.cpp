@@ -1383,6 +1383,9 @@ const ComputePipeline* PipelineCache::CreateComputePipeline(const ComputePipelin
     auto pipe = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
                                                   *pipeline_cache, key, *info, module, sdata,
                                                   false);
+    if (!pipe->IsValid()) {
+        return nullptr;
+    }
     const ComputePipeline* result = nullptr;
     {
         std::unique_lock lk{pipelines_mutex};
@@ -1419,6 +1422,10 @@ const GraphicsPipeline* PipelineCache::CreateGraphicsPipeline(PipelineSelection&
             instance, scheduler, desc_heap, profile, target.graphics_key, *pipeline_cache,
             target.infos, target.runtime_infos, target.fetch_shader, target.modules, sdata,
             preloading);
+    }
+    if (!pipe->IsValid()) {
+        target.fetch_shader.reset();
+        return nullptr;
     }
 
     const GraphicsPipeline* result = nullptr;

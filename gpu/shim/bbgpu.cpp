@@ -33,6 +33,7 @@
 #include "core/memory.h"
 #include "core/signals.h"
 #include "sdl_window.h"
+#include "bloodborne_cam.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
@@ -311,11 +312,13 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
 }
 
 namespace Libraries::Kernel { void StartKernelService(); }
+extern "C" void bbnet_register(void); // bbnet/bbnet_glue.cpp: network and PSN (co-op)
 extern "C" void bbgpu_register_kernel(void) {
     Libraries::Kernel::StartKernelService();
     Core::Loader::SymbolsResolver resolver;
     Libraries::Kernel::RegisterEventQueue(&resolver);
     Libraries::AvPlayer::RegisterLib(&resolver);
+    bbnet_register();
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
@@ -344,7 +347,6 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
 
 extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
     BbGnmHooks::PatchImage(image, size);
-    BbMouse::Install(image, size);
 }
 
 extern "C" int bbgpu_handle_illegal(void* ucontext) {
@@ -410,14 +412,6 @@ extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
 }
 
-extern "C" uint32_t bbgpu_mouse_buttons(void) {
-    return g_window ? g_window->GetMouseButtons() : 0;
-}
-
-extern "C" void bbgpu_camera_pad(uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry, uint32_t buttons) {
-    BbMouse::Pad(lx, ly, rx, ry, buttons);
-}
-
 extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {
     if (!g_window) return 0;
     g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");
@@ -434,4 +428,30 @@ extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
         out[n] = 0;
     }
     return state;
+}
+
+extern "C" void bbgpu_mouse_take(BbMouseInput* out) {
+    if (!out) return;
+    if (!g_window) { std::memset(out, 0, sizeof(*out)); return; }
+    Frontend::MouseInput mouse;
+    g_window->TakeMouseInput(mouse);
+    out->dx = mouse.dx;
+    out->dy = mouse.dy;
+    out->buttons = mouse.buttons;
+    out->wheel = mouse.wheel;
+    out->captured = mouse.captured ? 1 : 0;
+}
+
+extern "C" void bbgpu_input_configure(int mouse_mode_available, int32_t toggle_scancode, int32_t reload_scancode) {
+    if (!g_window) return;
+    g_window->ConfigureInput(mouse_mode_available != 0, toggle_scancode, reload_scancode);
+}
+
+extern "C" int bbgpu_input_reload_requested(void) {
+    if (!g_window) return 0;
+    return g_window->TakeInputReloadRequested();
+}
+
+extern "C" void bbgpu_mouse_camera_configure(int direct, float sensitivity) {
+    Core::BloodborneCam::Instance().Configure(direct != 0, sensitivity);
 }

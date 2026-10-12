@@ -44,41 +44,6 @@ int vulkan_smoke(void);
 
 static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message); exit(1); }
 
-/* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
- * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
- * them stops at the first one with SIGILL (exit code 132, issue #26), and lzcnt/tzcnt even run as
- * bsr/bsf there, with other results. Said before the game starts; BB_SKIP_CPU_CHECK=1 skips it. */
-static void check_cpu(void) {
-    const char *skip = getenv("BB_SKIP_CPU_CHECK");
-    if (skip && !strcmp(skip, "1")) return;
-    unsigned a, b, c, d, leaf1_c = 0, leaf7_b = 0, ext1_c = 0;
-    if (__get_cpuid(1, &a, &b, &c, &d)) leaf1_c = c;
-    if (__get_cpuid_count(7, 0, &a, &b, &c, &d)) leaf7_b = b;
-    if (__get_cpuid(0x80000001u, &a, &b, &c, &d)) ext1_c = c;
-    int avx = (leaf1_c & bit_AVX) && (leaf1_c & bit_OSXSAVE);
-    if (avx) {
-        unsigned lo, hi;
-        __asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
-        avx = (lo & 6) == 6; /* the OS saves SSE and AVX state */
-    }
-    const struct { int present; const char *name; } features[] = {
-        {avx, "AVX"}, {(leaf7_b & bit_BMI) != 0, "BMI1"}, {(leaf1_c & bit_MOVBE) != 0, "MOVBE"},
-        {(ext1_c & bit_LZCNT) != 0, "LZCNT"}, {(leaf1_c & bit_POPCNT) != 0, "POPCNT"},
-        {(leaf1_c & bit_SSE4_2) != 0, "SSE4.2"},
-    };
-    char missing[64] = "";
-    for (unsigned i = 0; i < sizeof(features) / sizeof(features[0]); ++i) {
-        if (features[i].present) continue;
-        if (missing[0]) strcat(missing, ", ");
-        strcat(missing, features[i].name);
-    }
-    if (!missing[0]) return;
-    fprintf(stderr,
-            "ERROR: this CPU lacks %s. Bloodborne's code was compiled for the PS4's CPU and uses "
-            "these instructions directly: it needs an Intel Haswell (4th generation Core, 2013) or "
-            "newer, or an AMD Ryzen. BB_SKIP_CPU_CHECK=1 starts anyway.\n", missing);
-    exit(1);
-}
 static uint64_t read64(FILE *f) {
     unsigned char b[8];
     if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
@@ -137,6 +102,58 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+/* The game is built for the PS4's AMD Jaguar CPU: AVX throughout, and BMI1 (andn, bextr, blsi, blsr,
+ * tzcnt), MOVBE, LZCNT and POPCNT in thousands of places, its libc's string functions among them.
+ * Without them it stopped at the first one with an illegal instruction (0xc000001d in libc.prx
+ * while module 0 initialized), except LZCNT, which older Intel CPUs run as BSR (other results).
+ * Exit code 24 with a message instead; BB_SKIP_CPU_CHECK=1 starts anyway. The Legacy CPU profile
+ * (scripts/cpu_compat.py; run.py sets BB_CPU_COMPAT=1) translates BMI1, LZCNT and MOVBE in the
+ * linked image, so only the others stop the game then. */
+static void check_cpu(void) {
+    if (getenv("BB_SKIP_CPU_CHECK")) return;
+    const int translated=getenv("BB_CPU_COMPAT")!=NULL;
+    unsigned a=0, b=0, c=0, d=0, basic=0, leaf7=0, extended=0;
+    if (__get_cpuid(1,&a,&b,&c,&d)) basic=c;
+    if (__get_cpuid_max(0,NULL)>=7) { __cpuid_count(7,0,a,b,c,d); leaf7=b; }
+    if (__get_cpuid(0x80000001,&a,&b,&c,&d)) extended=c;
+    int avx=0;
+    if (((basic>>27)&1) && ((basic>>28)&1)) { /* OSXSAVE and AVX: the OS also has to save YMM state */
+        unsigned low, high;
+        __asm__ volatile("xgetbv" : "=a"(low), "=d"(high) : "c"(0));
+        avx=(low&6)==6;
+    }
+    const struct { int present, translatable; const char *name; } features[]={
+        {avx,0,"AVX"}, {(leaf7>>3)&1,1,"BMI1"}, {(basic>>22)&1,1,"MOVBE"}, {(extended>>5)&1,1,"LZCNT"},
+        {(basic>>23)&1,0,"POPCNT"}, {(basic>>20)&1,0,"SSE4.2"},
+    };
+    char missing[64]="", translations[64]="";
+    for (size_t i=0;i<sizeof(features)/sizeof(*features);++i) {
+        if (features[i].present) continue;
+        char *list=translated && features[i].translatable ? translations : missing;
+        if (*list) strcat(list,", ");
+        strcat(list,features[i].name);
+    }
+    if (*translations) printf("CPU: no %s; the Legacy CPU translations run instead (best effort)\n",translations);
+    if (!*missing) return;
+    unsigned words[12]={0};
+    char brand[49]="";
+    if (__get_cpuid_max(0x80000000,NULL)>=0x80000004)
+        for (unsigned i=0;i<3;++i) __get_cpuid(0x80000002+i,&words[i*4],&words[i*4+1],&words[i*4+2],&words[i*4+3]);
+    memcpy(brand,words,48);
+    for (size_t n=strlen(brand); n && brand[n-1]==' '; --n) brand[n-1]=0;
+    const char *name=brand;
+    while (*name==' ') ++name;
+    if (!*name) name="unknown processor";
+    fprintf(stderr,"STOP: unsupported CPU %s: missing %s (needs Intel Core 4th generation or newer, or AMD Ryzen)\n",name,missing);
+#ifdef _WIN32
+    char text[512];
+    snprintf(text,sizeof(text),"This processor cannot run the game:\n%s\n\nMissing instructions: %s\n\n"
+             "The game uses instructions of the PS4's processor. They need an Intel Core of the 4th "
+             "generation (Haswell, 2013) or newer, or an AMD Ryzen.",name,missing);
+    MessageBoxA(NULL,text,"Bloodborne",MB_OK|MB_ICONERROR|MB_SETFOREGROUND);
+#endif
+    exit(24);
+}
 #ifdef _WIN32
 static void describe_address(char *out, size_t size, uintptr_t address) {
     HMODULE module=NULL;
@@ -533,6 +550,11 @@ int main(int argc, char **argv) {
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
             runtime_savedata_configure(id);
+        char serial[16]="", title[128]="", version[16]="";
+        sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
+        sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
+        sfo_value(sfo,"APP_VER",version,sizeof(version),NULL);
+        bbnet_configure(app0,serial,title,version);
     }
     bbgpu_register_kernel();
 #ifdef _WIN32

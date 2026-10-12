@@ -5,6 +5,7 @@ image places eboot vaddr 0 at image offset 0. Only literal writes are supported
 (bytes, bytes16/32/64, float32/64, utf8, utf16); pattern ("mask") patches are rejected.
 """
 import argparse
+import hashlib
 import json
 import os
 import struct
@@ -50,6 +51,7 @@ EFFECTS={
     'tweak_no_camera_rotation':(None,'Disable Camera Auto Rotation via Movement'),
     'tweak_easy_run':(None,'Sensitive Analog Input (easier to run)'),
     'tweak_ragdoll':(None,'DS1-like physics'),
+    'tweak_circle_confirm':(None,'Circle Confirm (Japanese/Asian button layout)'),
 }
 # Intel CPUs: the game's tone mapping turns black (DLC areas most; reported as darker than on the
 # PS4): the game code runs natively, and Intel's approximate float instructions differ from the
@@ -120,9 +122,11 @@ UI_HEIGHT=0x0235855D-EBOOT_BASE
 
 
 def read_settings(path):
+    # Path.read_text() defaults to the process locale; bbport.ini may contain
+    # UTF-8 outside that encoding. Match the Windows launcher (encoding='utf-8').
     settings={}
     if path.exists():
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding='utf-8').splitlines():
             key,sep,value=line.partition('=')
             if sep and not line.startswith('#'): settings[key.strip()]=value.strip()
     return settings
@@ -199,6 +203,57 @@ def eboot_segments(elf):
     return segments
 
 
+def eboot_bytes(elf,start,end):
+    """The eboot's memory image at [start, end): its PT_LOAD file bytes, zero past their file size."""
+    phoff,=struct.unpack_from('<Q',elf,0x20)
+    phentsize,phnum=struct.unpack_from('<HH',elf,0x36)
+    out=bytearray(end-start)
+    for i in range(phnum):
+        kind,_,offset,vaddr,_,filesz,_,_=struct.unpack_from('<IIQQQQQQ',elf,phoff+i*phentsize)
+        low,high=max(start,vaddr),min(end,vaddr+filesz)
+        if kind==1 and low<high: out[low-start:high-start]=elf[offset+low-vaddr:offset+high-vaddr]
+    return bytes(out)
+
+
+# The patches write bytes into the code of one build of the game. A game whose param.sfo says 01.09
+# but whose eboot.bin holds other code (a base-game eboot beside an update's param.sfo, a modified
+# eboot) got them written over other instructions and crashed at start (write fault at guest
+# offset 0x20348b8). The fingerprint covers the game's original bytes everywhere the FPS and
+# resolution patches write, so another region's build with the same code passes. Recompute it
+# with --print-fingerprint (after a run of CUSA03173 v01.09) when those patches change.
+BUILTIN_XML=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'
+FINGERPRINT_PATCHES=sorted({n for names in FPS_PRESETS.values() for n in names}|{RESOLUTION_TEMPLATE})
+PATCH_FINGERPRINTS={'01.09':'34e41d1df9e3805762bfd59054e69fe60c330b9b6df7906fa7f66a43c939fbf0'}
+
+
+def patch_sites(xml,app_version,names=FINGERPRINT_PATCHES):
+    """Sorted, merged [start, end) eboot ranges the named patches write."""
+    ranges=[]
+    for meta in ET.parse(xml).getroot().iter('Metadata'):
+        if meta.get('Name') not in names or meta.get('AppVer')!=app_version: continue
+        for line in meta.iter('Line'):
+            offset=int(line.get('Address'),0)-EBOOT_BASE
+            ranges.append((offset,offset+len(encode(line))))
+    merged=[]
+    for start,end in sorted(ranges):
+        if merged and start<=merged[-1][1]: merged[-1]=(merged[-1][0],max(merged[-1][1],end))
+        else: merged.append((start,end))
+    return merged
+
+
+def patch_fingerprint(elf,xml=BUILTIN_XML,app_version='01.09'):
+    digest=hashlib.sha256()
+    for start,end in patch_sites(xml,app_version):
+        digest.update(struct.pack('<QQ',start,end)+eboot_bytes(elf,start,end))
+    return digest.hexdigest()
+
+
+def eboot_matches_patches(elf_path,app_version='01.09'):
+    """False when eboot.elf (prepare.py) differs from the build the patches were made for."""
+    expected=PATCH_FINGERPRINTS.get(app_version)
+    return not expected or patch_fingerprint(Path(elf_path).read_bytes(),BUILTIN_XML,app_version)==expected
+
+
 def encode(line):
     kind,value=line.get('Type'),line.get('Value')
     if kind=='bytes': return bytes.fromhex(value.replace(' ',''))
@@ -258,7 +313,7 @@ def external_selection(found, config):
     each file's isEnabled."""
     settings={}
     if config and Path(config).is_file():
-        settings=json.loads(Path(config).read_text())
+        settings=json.loads(Path(config).read_text(encoding='utf-8'))
     enabled,disabled=set(settings.get('enabled',[])),set(settings.get('disabled',[]))
     return [(key,path,meta) for key,path,meta in found
             if key in enabled or (key not in disabled and meta.get('isEnabled','false').lower()=='true')]
@@ -300,7 +355,12 @@ def main():
     p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
     p.add_argument('--print-scaled',action='store_true',
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
+    p.add_argument('--print-fingerprint',action='store_true',
+                   help='print the patch fingerprint of <out>/eboot.elf (PATCH_FINGERPRINTS)')
     a=p.parse_args()
+    if a.print_fingerprint:
+        print(patch_fingerprint((a.out/'eboot.elf').read_bytes(),BUILTIN_XML,a.app_version))
+        return
     if a.print_scaled:
         sizes=scaled_sizes(read_settings(a.settings))
         if sizes: print(f'{sizes[0][0]}x{sizes[0][1]} {sizes[1][0]}x{sizes[1][1]}')
@@ -317,11 +377,16 @@ def main():
     # The patches are byte writes at the addresses of one game version: on another version they
     # would corrupt code. Such a game runs unpatched (run.sh/run.py then choose 30 FPS).
     version=game_app_version(a.game_dir)
-    if version and version!=a.app_version and not os.environ.get('BB_FORCE_PATCHES'):
-        blob=struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,0)
-        (a.out/'patches.bin').write_bytes(blob)
+    force=os.environ.get('BB_FORCE_PATCHES')
+    if version and version!=a.app_version and not force:
+        (a.out/'patches.bin').write_bytes(struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,0))
         print(f'Patches: game version {version}, patches are for {a.app_version}: none applied '
               '(30 FPS, no effect or resolution patches)')
+        return
+    if not force and not eboot_matches_patches(a.out/'eboot.elf',a.app_version):
+        (a.out/'patches.bin').write_bytes(struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,0))
+        print(f'Patches: eboot.bin is not the {a.app_version} build the patches were made for: none '
+              'applied (30 FPS, no effect or resolution patches; BB_FORCE_PATCHES=1 applies them)')
         return
     names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]

@@ -437,14 +437,13 @@ GraphicsPipeline::GraphicsPipeline(
 
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
-    if (preloading && pipeline_result != vk::Result::eSuccess) {
-        // bbport: a pipeline from the cache the driver rejects is a damaged cache entry: the
-        // cache is rebuilt (PipelineCache::WarmUp) instead of stopping the game at every start.
-        throw Serialization::CorruptData{"cached graphics pipeline rejected by the driver: " +
-                                         vk::to_string(pipeline_result)};
+    // bbport: a driver that cannot build one pipeline (ErrorUnknown on some AMD drivers) stopped
+    // the game here; the pipeline stays empty instead and the draws that use it are skipped.
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR(Render_Vulkan, "Failed to create graphics pipeline {}: {}; its draws are skipped",
+                  debug_str, vk::to_string(pipeline_result));
+        return;
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 }

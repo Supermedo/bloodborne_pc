@@ -7,7 +7,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 source ./msys2-env.sh
-[[ -f out/bb-probe.exe && -f out/bb-gpu-capabilities.exe && -f out/bb-play.exe && -f out/bb-crash-monitor.exe ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
+[[ -f out/bb-probe.exe && -f out/bb-gpu-capabilities.exe && -f out/bb-play.exe ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
 
 # A Windows Python (not MSYS2's) for PyInstaller.
 python=${WINPYTHON:-}
@@ -25,13 +25,11 @@ fi
 out/pyenv/Scripts/python.exe -m pip install -q --disable-pip-version-check pyinstaller
 # The scripts run inside Bloodborne.exe (--script): the standard modules they import come along.
 hidden=()
-for module in argparse base64 collections hashlib json re shutil struct tempfile xml.etree.ElementTree \
-              urllib.request ctypes.wintypes; do
+for module in argparse base64 bisect collections contextlib hashlib json re shutil struct tempfile \
+              xml.etree.ElementTree urllib.request ctypes.wintypes; do
     hidden+=(--hidden-import "$module")
 done
-out/pyenv/Scripts/python.exe packaging/windows/version_info.py out/launcher-version.txt
 out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --windowed \
-    --version-file "$(cygpath -w "$PWD/out/launcher-version.txt")" --add-data "$(cygpath -w "$PWD/VERSION.txt"):." \
     --name Bloodborne --icon "$(cygpath -w "$PWD/launcher/bloodborne.ico")" --distpath out/pyi-dist \
     --workpath out/pyi-work --specpath out/pyi-work --paths "$(cygpath -w "$PWD/scripts")" "${hidden[@]}" \
     "$(cygpath -w "$PWD/launcher/bbport_launcher_win.py")"
@@ -45,42 +43,37 @@ cp -r out/pyi-dist/Bloodborne/. "$dest/"
 llvm-strip -o "$dest/Play Bloodborne.exe" out/bb-play.exe
 cp launcher/bloodborne.ico launcher/bloodborne.png "$dest/launcher/"
 # The executables without debug information (out/ keeps the symbols for crash reports).
-for exe in bb-probe.exe bb-gpu-capabilities.exe bb-crash-monitor.exe; do
+for exe in bb-probe.exe bb-gpu-capabilities.exe; do
     llvm-strip --strip-debug -o "$dest/bin/$exe" "out/$exe"
 done
-if [[ -f out/bb-remix-host.exe ]]; then
-    llvm-strip --strip-debug -o "$dest/bin/bb-remix-host.exe" out/bb-remix-host.exe
-    mkdir -p "$dest/licenses"
-    cp gpu/remix/LICENSE.txt "$dest/licenses/RTX-Remix-SDK-LICENSE.txt"
-fi
 # Every DLL the executables load from the CLANG64 tree (SDL3, FFmpeg, Vulkan loader, ...).
-runtime_bins=("$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" "$dest/bin/bb-crash-monitor.exe")
-[[ ! -f "$dest/bin/bb-remix-host.exe" ]] || runtime_bins+=("$dest/bin/bb-remix-host.exe")
-ldd "${runtime_bins[@]}" |
+ldd "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" |
     awk '/\/clang64\/bin\// {print $3}' | sort -u | while read -r dll; do
         cp -u "$dll" "$dest/bin/"
     done
-cp -r scripts patches docs "$dest/"
-cp run.py LICENSE VERSION.txt README.md packaging/windows/README-Windows.txt "$dest/"
-cp "packaging/windows/Trace Mouse Camera.cmd" "$dest/"
-cp "packaging/windows/Trace Keyboard Movement.cmd" "$dest/"
-cp "packaging/windows/Trace Respawn Loading.cmd" "$dest/"
-cp "packaging/windows/Trace Crash.cmd" "$dest/"
-mkdir -p "$dest/licenses"
-cp gpu/third_party/fsr-vulkan/LICENSE.txt "$dest/licenses/FSR-Vulkan-LICENSE.txt"
-cp gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt "$dest/licenses/FidelityFX-SDK-LICENSE.txt"
+cp -r scripts patches "$dest/"
+# Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
+mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
+cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
-if [[ -d fsr4_411 ]]; then cp -r fsr4_411 "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
 # (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
 if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
     cp out/bbport_dlss.dll out/nvngx_dlss.dll "$dest/bin/"
-    if [[ -f out/nvngx_dlssg.dll ]]; then cp out/nvngx_dlssg.dll "$dest/bin/"; fi
     mkdir -p "$dest/licenses" && cp out/NVIDIA-DLSS-LICENSE.txt "$dest/licenses/"
     cp gpu/dlss_bridge/LICENSE.txt "$dest/licenses/bbport_dlss-LICENSE.txt"
 else
     echo "DLSS bridge not built (packaging/windows/build_dlss.sh): no DLSS in this package" >&2
 fi
+# Online co-op: the libraries compiled in (wepoll, cpp-httplib) and the MSYS2 DLLs it loads.
+mkdir -p "$dest/licenses"
+cp gpu/third_party/wepoll/LICENSE "$dest/licenses/wepoll-LICENSE.txt"
+cp gpu/third_party/httplib/LICENSE "$dest/licenses/cpp-httplib-LICENSE.txt"
+cp packaging/windows/licenses/*.txt "$dest/licenses/"
+for package in protobuf abseil-cpp openssl miniupnpc zlib; do
+    license=/clang64/share/licenses/$package/LICENSE
+    if [[ -f $license ]]; then cp "$license" "$dest/licenses/$package-LICENSE.txt"; fi
+done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
 mkdir -p dist
 rm -f dist/bbport-windows.zip

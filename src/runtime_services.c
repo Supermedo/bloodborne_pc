@@ -291,6 +291,16 @@ static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_I
 static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) { (void)ctx; (void)handle; (void)options; return 0; }
 static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
     (void)ctx; (void)handle;
+    /* <user>/trophies.log ("id unix-time" per line) is read by the launcher's Trophies page,
+     * also when the game was started without it (shortcut, Steam). */
+    if (id>=0 && id<128) {
+        char path[600];
+        snprintf(path,sizeof(path),"%s/trophies.log",runtime_file_user_dir());
+        pthread_mutex_lock(&lock);
+        FILE *log=fopen(path,"a");
+        if (log) { fprintf(log,"%d %lld\n",id,(long long)time(NULL)); fclose(log); }
+        pthread_mutex_unlock(&lock);
+    }
     printf("Runtime: trophy %d unlocked\n",id);
     if (platinum) *platinum=-1;
     return 0;
@@ -481,4 +491,28 @@ static const RuntimeExport exports[]={
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceVoiceInit",ok_void}, {"sceVoiceEnd",ok_void},
 };
-uintptr_t runtime_services_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+/* Co-op (BB_ONLINE=1): network and PSN calls go to the shadNet libraries in bbgpu when they
+ * implement them. Trophies, voice and the store/profile dialogs stay here. */
+static int online_symbol(const char *symbol) {
+    static const char *const online[]={"sceNet","sceNp","sceHttp","sceSsl"};
+    static const char *const local[]={"sceNpTrophy","sceNpCommerce","sceNpProfileDialog"};
+    int match=0;
+    for (size_t i=0;i<sizeof(online)/sizeof(*online);++i)
+        if (!strncmp(symbol,online[i],strlen(online[i]))) match=1;
+    for (size_t i=0;i<sizeof(local)/sizeof(*local);++i)
+        if (!strncmp(symbol,local[i],strlen(local[i]))) match=0;
+    return match;
+}
+uintptr_t runtime_services_resolve(const char *name) {
+    static int online=-1;
+    if (online<0) { const char *v=getenv("BB_ONLINE"); online=v && v[0]=='1'; }
+    if (online) {
+        const char *symbol=runtime_symbol(name);
+        if (symbol && online_symbol(symbol)) {
+            uintptr_t address=bbgpu_resolve(name);
+            if (address) return address;
+            printf("Co-op: %s has no online version; using the offline one\n",symbol);
+        }
+    }
+    return RUNTIME_LOOKUP(exports,name);
+}

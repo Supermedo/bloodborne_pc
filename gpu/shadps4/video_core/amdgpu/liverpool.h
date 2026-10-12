@@ -11,6 +11,7 @@
 #include <memory>
 #include <coroutine>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <semaphore>
 #include <span>
@@ -19,6 +20,7 @@
 #include <queue>
 
 #include "common/assert.h"
+#include "bbport_command_buffers.h"
 #include "common/slot_vector.h"
 #include "common/types.h"
 #include "common/unique_function.h"
@@ -114,8 +116,6 @@ public:
         if (frame != 0) {
             frame_ends.emplace_back(submissions_total, frame);
         }
-        mapped_queues[GfxQueueId].ccb_buffer_offset = 0;
-        mapped_queues[GfxQueueId].dcb_buffer_offset = 0;
         submit_done = true;
         submit_cv.notify_one();
     }
@@ -165,14 +165,6 @@ public:
             ++num_commands;
             submit_cv.notify_one();
         }
-    }
-
-    void ReserveCopyBufferSpace() {
-        GpuQueue& gfx_queue = mapped_queues[GfxQueueId];
-        std::scoped_lock lk(gfx_queue.m_access);
-        constexpr size_t GfxReservedSize = 2_MB >> 2;
-        gfx_queue.ccb_buffer.reserve(GfxReservedSize);
-        gfx_queue.dcb_buffer.reserve(GfxReservedSize);
     }
 
     inline ComputeProgram& GetCsRegs() {
@@ -259,10 +251,6 @@ private:
 
     struct GpuQueue {
         std::mutex m_access{};
-        std::atomic<u32> dcb_buffer_offset;
-        std::atomic<u32> ccb_buffer_offset;
-        std::vector<u32> dcb_buffer;
-        std::vector<u32> ccb_buffer;
         std::queue<Task::Handle> submits{};
         ComputeProgram cs_state{};
     };

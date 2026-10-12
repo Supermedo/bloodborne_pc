@@ -8,8 +8,7 @@ The in-game "Apply and restart" runs this script again through BB_RESTART_COMMAN
 `--after PID` waits for the previous game process to end first (its GPU device and memory).
 """
 import ctypes
-from ctypes import wintypes
-from datetime import datetime
+import json
 import os
 from pathlib import Path
 import re
@@ -20,6 +19,75 @@ import sys
 PORT = Path(__file__).resolve().parent
 
 
+# Co-op: the community service that answers Bloodborne's own game-server requests
+# (messages, bloodstains, sign-in); summon requests go to the shadNet server instead.
+COMMUNITY_SERVER = 'https://thehuntersdream.com'
+GAME_SERVER = 'https://ss4.scej-network.jp:20443'
+# The server's ss.info sends the game to this port for its API (summons among them).
+COMMUNITY_API_PORT = 18671
+
+
+def summon_service(webapi):
+    """True when a shadNet WebAPI answers Bloodborne's summon calls: the route exists there
+    (an empty request is refused with 400), where other servers answer 404."""
+    import urllib.error
+    import urllib.request
+    request = urllib.request.Request(webapi.rstrip('/') + '/summon_messenger/create', data=b'',
+                                     method='POST')
+    try:
+        urllib.request.urlopen(request, timeout=4).close()
+        return True
+    except urllib.error.HTTPError as error:
+        return error.code != 404
+    except (OSError, ValueError):
+        return False
+
+
+def online_overrides(env, user_dir):
+    """Writes user/host_overrides.json for this launch. A player who needs other addresses
+    puts them in user/host_overrides.custom.json, which is then used as it is."""
+    custom = user_dir / 'host_overrides.custom.json'
+    path = custom if custom.exists() else user_dir / 'host_overrides.json'
+    if path != custom:
+        community = (env.get('BB_COMMUNITY_SERVER') or COMMUNITY_SERVER).rstrip('/')
+        if '://' not in community:
+            community = 'https://' + community
+        host = community.split('://', 1)[1]
+        webapi = env.get('BB_SHADNET_WEBAPI') or 'http://127.0.0.1:31315'
+        # Game server -> community server (same port, 20443). Summon signs -> the shadNet
+        # WebAPI when that server has the Bloodborne summon service (the shadp2p server),
+        # otherwise they stay with the community server.
+        overrides = {GAME_SERVER: community}
+        if summon_service(webapi):
+            overrides.update({f'{scheme}://{host}:{COMMUNITY_API_PORT}/summon_messenger': webapi
+                              for scheme in ('https', 'http')})
+            print(f'Co-op: summon signs through {webapi}')
+        else:
+            print(f'Co-op: {webapi} has no summon service; summon signs through {community}')
+        path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
+    env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
+
+
+# The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
+# (seen on US CUSA00900): one of its edits inverts a branch in the menu code (+0xf6d90d) and the
+# gestures menu crashes the game. The port has its own 60 fps; the clean 1.09 eboot.bin is needed.
+LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
+
+
+def image_sha256(game):
+    """The SHA-256 of eboot.bin's loaded image (its loadable segments at their addresses): the
+    same whatever tool dumped it, unlike the SELF around it."""
+    import hashlib
+    sys.path.insert(0, str(PORT / 'scripts'))
+    from prepare import parse_self, span
+    elf, _header, ph, _segments, _missing = parse_self((Path(game) / 'eboot.bin').read_bytes())
+    loads = [p for p in ph if p['type'] in (1, 0x61000010)]
+    image = bytearray(max(p['vaddr'] + p['memsz'] for p in loads))
+    for p in loads:
+        image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
+    return hashlib.sha256(image).hexdigest()
+
+
 def fail(message):
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -27,18 +95,11 @@ def fail(message):
 
 def wait_for(pid):
     kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     SYNCHRONIZE = 0x00100000
     handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
     if handle:
-        try:
-            if kernel32.WaitForSingleObject(handle, 30000) != 0:
-                fail(f'Previous game process {pid} has not exited; restart cancelled.')
-        finally:
-            kernel32.CloseHandle(handle)
+        kernel32.WaitForSingleObject(handle, 30000)
+        kernel32.CloseHandle(handle)
 
 
 def no_console():
@@ -52,7 +113,7 @@ def run_script(name, *args, capture=False):
     command = [sys.executable, *script, str(PORT / 'scripts' / name), *map(str, args)]
     if capture:
         result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
-                                encoding='utf-8', errors='replace', creationflags=no_console())
+                                creationflags=no_console())
         if result.returncode:
             sys.exit(result.returncode)
         return result.stdout
@@ -83,64 +144,6 @@ def find_executable(name):
     return None
 
 
-def configure_runtime(env, fps, data):
-    """Shared renderer defaults from upstream 0.4, with the Windows memory backend."""
-    env.setdefault('BB_PREUPLOAD', '1')
-    env.setdefault('BB_COPY_GPU_BUFFERS', '1')
-    env.setdefault('BB_GPU_WRITE_TWINS', '1')
-    env.setdefault('BB_GPU_WRITE_TWINS_MAX', '65536')
-    # dma-buf and userfaultfd do not exist on Windows; never enable partial substitutes.
-    env['BB_PC_MODEL'] = '0'
-    env['BB_GUEST_IN_PLACE'] = '0'
-    env['BB_GUEST_GPU_MEMORY'] = '0'
-    env['BB_UFFD'] = '0'
-    if env.get('BB_AS_0_3') == '1':
-        env.update(BB_HOST_COPY_WAITS='all', BB_PRODUCER_CHECK='1')
-    env.setdefault('BB_VBLANK_HZ', {'uncap': '480', '90': '90'}.get(fps, '60'))
-    if env.get('BB_SAVE_LOG') == '1':
-        logs = Path(data) / 'logs'
-        logs.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        env['BB_FRAME_STATS'] = '1'
-        env.setdefault('BB_FRAME_LOG', str(logs / f'{stamp}.frames.csv'))
-        env.setdefault('BB_READBACK_LOG', str(logs / f'{stamp}.readbacks.csv'))
-        return logs / f'{stamp}.log'
-    return None
-
-
-def launch_probe(command, log_path=None):
-    if os.environ.get('BB_CRASH_MONITOR') == '1':
-        monitor = find_executable('bb-crash-monitor.exe')
-        if not monitor:
-            fail('bb-crash-monitor.exe missing; use the complete crash diagnostics package.')
-        command = [str(monitor), *command]
-        print('Crash monitor: enabled for this launch (diagnostic mode)', flush=True)
-    if log_path is None:
-        code = subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
-        return report_native_exit(code)
-    print(f'Log: {log_path}')
-    with Path(log_path).open('w', encoding='utf-8') as log:
-        with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
-                              creationflags=no_console()) as process:
-            for line in process.stdout:
-                log.write(line)
-                log.flush()
-                print(line, end='', flush=True)
-            return report_native_exit(process.wait(), log)
-
-
-def report_native_exit(code, log=None):
-    """Preserve Windows DWORD status through Python's signed C-long SystemExit."""
-    status = code & 0xffffffff
-    message = f'Native process exited: {status} (0x{status:08x})\n'
-    print(message, end='', flush=True)
-    if log is not None:
-        log.write(message)
-        log.flush()
-    return status if status < 0x80000000 else status - 0x100000000
-
-
 def main():
     args = sys.argv[1:]
     if len(args) >= 2 and args[0] == '--after':
@@ -152,23 +155,8 @@ def main():
     data = Path(env.get('BB_DATA_DIR', PORT))
     out = data / 'out'
     out.mkdir(parents=True, exist_ok=True)
-    # Keep native driver crash dumps with this portable installation's logs.
-    crash_dir = Path(env.setdefault('BB_CRASH_DIR', str(data / 'logs' / 'crashes')))
-    try:
-        crash_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        print(f'Crash dumps unavailable: {error}')
-        env['BB_CRASH_DUMP'] = '0'
     env.setdefault('BB_CONFIG', str(data / 'bbport.ini'))
     config = env['BB_CONFIG']
-    remix = env.get('BB_RTX_REMIX') == '1'
-    if remix:
-        # The official SDK owns reconstruction. Leave saved player settings intact.
-        env.update(BB_UPSCALER='none', BB_FRAME_GENERATION='off', BB_OBJECT_MOTION='0',
-                   BB_UPSCALE_PRESET='0', BB_HDR='0', BB_LIVE_RES='1')
-        for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
-            env.pop(key, None)
-        print('Renderer: official RTX Remix (experimental game scene capture; see logs/rtx-remix-game.log)')
     if not env.get('BB_FSR411_DIR') and not (PORT / 'fsr4_411').is_dir() and (data / 'fsr4_411').is_dir():
         env['BB_FSR411_DIR'] = str(data / 'fsr4_411')
 
@@ -177,42 +165,66 @@ def main():
         fail('bb-probe.exe not found: build it with build.sh (MSYS2 CLANG64) or use a packaged build.')
     # Development builds run from the MSYS2 tree: its CLANG64 DLLs (SDL3, FFmpeg, ...).
     if not (probe.parent / 'SDL3.dll').is_file():
-        roots = [Path(env['MSYS2_ROOT'])] if env.get('MSYS2_ROOT') else [Path(r'C:\msys64'), PORT / 'out/msys64']
-        for root in roots:
-            clang64 = root / 'clang64/bin'
-            if clang64.is_dir():
-                env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
-                break
+        clang64 = Path(env.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
+        if clang64.is_dir():
+            env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
 
     game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03173'))
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()
+    if env.get('BB_SKIP_GAME_CHECK') != '1':
+        try:
+            prepatched = image_sha256(game) == LANCE_60FPS_IMAGE
+        except (OSError, ValueError, KeyError, IndexError):
+            prepatched = False  # prepare.py reports unreadable executables itself
+        if prepatched:
+            fail("This eboot.bin has Lance McDonald's 60 fps patch applied to it, which crashes the "
+                 'game when the gestures menu opens (the port has its own 60 fps): copy eboot.bin '
+                 'from a clean dump of the 1.09 update into the game folder, replacing this one. '
+                 'BB_SKIP_GAME_CHECK=1 starts it anyway.')
     game = Path(run_script('mods.py', game, '--out', out,
                            '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                            '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
                            '--enabled', env.get('BB_MODS_ENABLED', '1'), capture=True).strip())
     mod_view = game if game.resolve() != original_game else None
     try:
-        sys.path.insert(0, str(PORT / 'scripts'))
-        from prepare_cache import prepare_game
-        prepare_game(game, out, run_script)
+        run_script('prepare.py', game, '--out', out)
+        run_script('link_libc.py', game, '--out', out)
+        run_script('link_modules.py', game, '--out', out)
+        # Legacy CPU profile (scripts/cpu_compat.py): the image no longer needs BMI1, LZCNT or
+        # MOVBE, and bb-probe's CPU check lets such a CPU start.
+        try:
+            compat = json.loads((out / 'link.json').read_text(encoding='utf-8')).get('cpu_compat', {})
+        except (OSError, ValueError):
+            compat = {}
+        if compat.get('enabled'):
+            env['BB_CPU_COMPAT'] = '1'
+        else:
+            env.pop('BB_CPU_COMPAT', None)
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
 
         # Patches exist for game version 01.09 only (patches.py applies none to others): other
         # versions keep the game's 30 FPS timing and change resolutions live.
-        from patches import game_app_version
+        sys.path.insert(0, str(PORT / 'scripts'))
+        from patches import eboot_matches_patches, game_app_version
         version = game_app_version(game)
-        patched = version in (None, '01.09') or bool(env.get('BB_FORCE_PATCHES'))
+        forced = bool(env.get('BB_FORCE_PATCHES'))
+        patched = version in (None, '01.09') or forced
         if not patched:
             print(f'Game version {version}: community patches need 01.09; 30 FPS, no effect patches')
+        elif not forced and not eboot_matches_patches(out / 'eboot.elf'):
+            # param.sfo says 01.09, the code is another build's: the patches would break it.
+            patched = False
+            print('Game files: eboot.bin is not the 01.09 build the community patches were made for; '
+                  '30 FPS, no effect patches')
         # Sizes chosen below for the previous launch are recomputed after an in-game restart.
         if env.get('BB_AUTO_RENDER_RES') == '1':
             for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
                 env.pop(key, None)
         fps = env.get('BB_FPS', 'uncap') if patched else '30'
         scaled_render = scaled_output = None
-        if not env.get('BB_RENDER_RES') and not remix:
+        if not env.get('BB_RENDER_RES'):
             printed = run_script('patches.py', '--print-scaled', '--settings', config, capture=True).split()
             if len(printed) == 2:
                 scaled_render, scaled_output = printed
@@ -237,13 +249,16 @@ def main():
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
                    '--patches-dir', env.get('BB_PATCHES_DIR', data / 'patches'),
                    '--patches-config', env.get('BB_PATCHES_CONFIG', data / 'patches.json'))
-        log_path = configure_runtime(env, fps, data)
+        if not env.get('BB_VBLANK_HZ'):
+            env['BB_VBLANK_HZ'] = {'uncap': '0', '90': '90'}.get(fps, '60')
 
         # The in-game restart starts this script again once this process is gone.
         # GPU caches (shaders, pipelines) beside the saves; read before main(), so set here.
         user_dir = Path(env.get('BB_USER_DIR', data / 'user')).resolve()
         user_dir.mkdir(parents=True, exist_ok=True)
         env.setdefault('BB_GPU_USER_DIR', str(user_dir))
+        if env.get('BB_ONLINE') == '1':
+            online_overrides(env, user_dir)
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         restart = [sys.executable, *this, '--after', str(os.getpid()), *args]
         env['BB_RESTART_COMMAND'] = subprocess.list2cmdline(restart)
@@ -252,7 +267,7 @@ def main():
                    '--user', str(user_dir),
                    '--timeout', env.get('BB_TIMEOUT', '0'), *args]
         # No stdin: an inherited pipe (shells such as Git Bash) cost the game its console output.
-        return launch_probe(command, log_path)
+        return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
     finally:
         if mod_view:
             shutil.rmtree(mod_view, ignore_errors=True)

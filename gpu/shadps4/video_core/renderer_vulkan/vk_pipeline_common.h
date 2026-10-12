@@ -36,6 +36,11 @@ public:
         return *pipeline;
     }
 
+    /// bbport: false when the driver could not create the pipeline.
+    bool IsValid() const noexcept {
+        return static_cast<bool>(pipeline);
+    }
+
     vk::PipelineLayout GetLayout() const noexcept {
         return *pipeline_layout;
     }

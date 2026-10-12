@@ -1,161 +1,153 @@
-<p align="center">
-  <img src="launcher/bloodborne.png" width="112" height="112" alt="Bloodborne port icon">
-</p>
+# Bloodborne for Windows
+<a href="https://trendshift.io/repositories/286547?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-286547" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/286547/daily?language=C%2B%2B" alt="Supermedo%2Fbloodborne_pc | Trendshift" width="250" height="55"/></a>
 
-<h1 align="center">Enhanced Native Bloodborne Port for Windows</h1>
+**Bloodborne running natively on Windows 10 and 11, by [Supermedo](https://github.com/Supermedo) Mohammed Albarghouthi.**
 
-<p align="center">
-  <strong>v2 · Native x86-64 game execution · Vulkan rendering · Windows launcher</strong>
-</p>
+The original PlayStation 4 game runs directly on your PC: its own x86-64 code runs natively,
+and the graphics are translated to Vulkan. No emulator window, no setup scripts: unpack the zip,
+start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Port-v2-981b1e?style=flat-square" alt="Port v2">
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-242424?style=flat-square" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/Renderer-Vulkan-981b1e?style=flat-square" alt="Vulkan renderer">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--2.0--or--later-242424?style=flat-square" alt="GPL 2.0 or later"></a>
-</p>
+**[Download the latest version](https://github.com/Supermedo/bloodborne_pc/releases/latest)** · **[Join the Discord](https://discord.gg/yTMG8c4Bqm)**  **[Join X,com](https://x.com/SuperMedoPorts)**
+Check my other ports 
+https://nativeretro.com/
 
-<p align="center">
-  <a href="https://github.com/AwesomeObserver/bloodborne_pc/releases"><strong>Download builds</strong></a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#controls">Controls</a> ·
-  <a href="#documentation">Documentation</a> ·
-  <a href="https://github.com/AwesomeObserver/bloodborne_pc/issues">Report an issue</a>
-</p>
+> **No game files are included.** You need your own decrypted dump of Bloodborne
+> (CUSA03173). Version 1.09 is needed for the community patches (60/90/unlocked FPS,
+> resolution, effects); other versions run at 30 FPS.
+> This project is not affiliated with Sony Interactive Entertainment or FromSoftware.
 
-Run Bloodborne's original x86-64 game code natively with Vulkan rendering.
-Packaged builds include runtime dependencies and a Windows launcher; no separate
-Python installation is needed.
+## Features
 
-> **Bring your own game files.** Requires a decrypted **CUSA03173** dump, updated to
-> **1.09**, with the supported executable. The launcher verifies it before preparation
-> and launch. No game files are distributed with this project.
+- **Online play (beta):** messages, bloodstains and wandering ghosts from other hunters through
+  [The Hunter's Dream](https://thehuntersdream.com), and bells and summons through a shadNet
+  server (shadPS4's public one by default).
+- **Launcher with every setting in one window**, in 13 languages: English, Arabic, Russian,
+  Spanish, Portuguese, French, German, Italian, Polish, Turkish, Chinese, Japanese, Korean.
+- **Updates from the launcher:** when a new version is out it tells you, and **Update**
+  installs it. Your saves, settings and mods are kept.
+- **NVIDIA DLSS** on GeForce RTX cards (RTX 20 series and newer).
+- **AMD FSR 3.1 and FSR 4** upscaling, plus native-resolution TAA.
+- **Unlocked frame rate** with a frame cap (up to 120 by default), or 30/60/90 FPS.
+- **Output resolutions** from 720p to 4K, presets from Native AA to Ultra Performance.
+- **Cheats page:** never die, stealth, silent footsteps, Rally that never fades, enemy control,
+  and gameplay tweaks (camera distance, no camera auto-rotation, easier running, ragdoll
+  physics, the Japanese/Asian button layout with Circle to confirm and Cross to dodge).
+- **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
+  game's own AA, dynamic light shadows, screen-space reflections, model detail.
+- **Mods and third-party patches**, loaded without changing your game files.
+- **DLC** from your own dump (The Old Hunters on base-game dumps), with a DLC folder setting.
+- **Add to Steam** puts the game in your Steam library in one click.
+- **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a
+  desktop shortcut).
+- **Controller and keyboard**, an in-game settings menu (Insert or L3+R3), name entry on
+  screen, a desktop shortcut, and a button to clear the shader cache.
+- **Keyboard and mouse:** remap keys and buttons on the Controls page, mouse look, and an
+  optional direct 1:1 mouse camera ([docs/INPUT.md](docs/INPUT.md)).
+- **Text and voice language** chosen separately, Brazilian Portuguese text included.
+- **Achievements page** in the launcher with the trophies you have earned, updated live.
 
-## Highlights
+## Requirements
 
-| Feature | What you get |
-| :--- | :--- |
-| **DLSS & FSR upscaling** | DLSS Super Resolution / DLAA, FSR 3.1, FSR 4, FSR 4.1.1/FP8 and native TAA. **720p–4K**, Native AA through Ultra Performance. |
-| **RTX Remix (experimental)** | Official SDK connected to captured game geometry, textures and camera, with native HUD composition. Original lighting and scene coverage are incomplete. [Status and limitations](docs/rtx-path-tracing-windows.md). |
-| **DLSS model presets** | Auto, **A–F, J, K, M, L**. CNN/transformer selection follows the preset automatically, independently of render scale. |
-| **Frame generation** | **DLSS FG ×2** or **FSR 3.1 FG ×2**, independent of upscaling. FSR FG also works with DLSS or native TAA. |
-| **Raw mouse camera** | Windows Raw Input, direct orbit response, equal-axis sensitivity, invert Y and automatic controller handoff. No added acceleration or virtual stick conversion. |
-| **Press-to-bind controls** | Keyboard, mouse, wheel and controller inputs. **Four bindings per action**, controller selection and touchpad gestures. |
-| **Graphics & frame rate** | Unlocked FPS, configurable cap, sharpening and model detail. Toggle motion blur, depth of field, chromatic aberration, SSAO, shadows and reflections. |
-| **In-game settings** | **Insert / L3 + R3**. Mouse navigation, supported live changes, saved configuration and restart controls. |
-| **Mods & gameplay tweaks** | Mod ordering, external XML patches, camera tweaks and optional cheats. Source game files stay intact. |
-| **Windows launcher** | **13 languages**, updates that preserve saves/settings/mods, direct shortcuts, shader-cache cleanup, session logs and local crash dumps. |
-| **Respawn loading** | Removes the original death-triggered **12-second minimum loading timer**, retaining resource and character readiness checks. |
-| **Launch & render caches** | Verified prepared-image reuse, shared shader-module reuse during preload and asynchronous cache writes without payload copies. |
+- Windows 10 (1903 or later) or Windows 11, 64-bit
+- An Intel Core 4th generation (Haswell, 2013) or newer, or an AMD Ryzen: the game uses
+  instructions of the PS4's processor (AVX, BMI1, MOVBE, LZCNT). Intel 2nd and 3rd generation
+  (Sandy and Ivy Bridge) run with translated instructions, best effort; processors without AVX
+  (many Pentium and Celeron models) cannot run it
+- A graphics card with Vulkan 1.3 and a current driver
+- About 6 GB of free memory (RAM + page file), 10 GB for 1440p or 4K output
+- DLSS: NVIDIA GeForce RTX 20 series or newer
 
-Feature availability is checked at runtime. FSR 4 variants also need their matching
-shader assets. DLSS presets A–D are legacy requests that current DLLs may substitute;
-E/F are deprecated. See [DLSS presets and frame generation](docs/dlss-frame-generation-windows.md).
+Nothing else to install: everything the game needs is in the zip.
 
-## Quick start
+## How to play
 
-**Platform:** Windows 10 (1903+) or Windows 11, 64-bit, with a Vulkan 1.3 runtime
-and an up-to-date graphics driver.
+1. Download the zip from [Releases](https://github.com/Supermedo/bloodborne_pc/releases/latest)
+   and unpack it anywhere.
+2. Start `Bloodborne.exe`.
+3. On **Game & effects**, choose your game folder (the one with `eboot.bin`).
+4. Press **PLAY**.
 
-1. Download a Windows archive from [Releases](https://github.com/AwesomeObserver/bloodborne_pc/releases) and extract it.
-2. Open **`Bloodborne.exe`**.
-3. On **Game & effects**, select your game folder containing `eboot.bin`.
-4. Choose graphics and controls, then press **PLAY**.
+**DLC.** The Game of the Year edition (CUSA03173) already has The Old Hunters. With a base-game
+dump, also dump your add-ons: each is a folder named like `SPEXPANSIONDLC03` with only
+`sce_sys` inside, since their data ships with the 1.09 update. Put them in one folder and choose
+it as **DLC folder** on **Game & effects**, or copy them to `user\addcont\<title id>\` (the
+layout shadPS4 and bbport use).
 
-After setup, **`Play Bloodborne.exe`** launches directly with your saved settings.
-You can add it to Steam or use **Advanced → Desktop shortcut**.
+In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
+Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, V Triangle,
+1/3 L1/R1, R/F L2/R2, Z L3, Q/C R3 (lock-on), I/K/J/L d-pad, Enter Options, Tab touchpad.
+The keyboard now works together with a connected controller instead of only without one.
+All of this is configurable in `input.ini` (shadPS4's input config syntax: a Bloodborne file
+made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.md](docs/INPUT.md).
 
-## Controls
+## Playing online (beta)
 
-| Action | Default input |
-| :--- | :--- |
-| Move / keyboard camera | **WASD** / **Arrow keys** |
-| Walk (hold) | **Alt + WASD** (either Alt) |
-| Toggle raw mouse camera | **F4** |
-| Open port settings | **Insert** / **L3 + R3** |
-| Cross / Circle / Square / Triangle | **Space** / **Left Shift** / **E** / **Q** |
-| L1 / R1 · L2 / R2 | **1** / **3** · **R** / **F** |
-| L3 / R3 · D-pad | **Z** / **C** · **I / K / J / L** |
-| Options / Touchpad | **Enter** / **Tab** |
+1. Register a shadNet account at [shadnet.shadps4.net](https://shadnet.shadps4.net).
+2. In the launcher, open **Online co-op**, tick **Play online** and enter your account name
+   (not your email) and password.
+3. Press **Test connection**: all three lines should say "reachable". Then press **PLAY** and
+   choose online at the title screen. The Hunter's Dream welcome message means you are online.
 
-On **Controls**, click a binding and press the desired input. **+** adds an
-alternative; **Clear** removes bindings. Remaps apply at the next game launch.
+Everyone you want to play with needs game version 1.09 and the same co-op server. A private
+shadNet server (from the [shadp2p](https://github.com/Wozzardman/shadp2p) project) works too:
+put its address in **Server address**.
 
-Keyboard movement uses symmetric diagonals within the circular stick range,
-including after rounding to the game's input format. Adding a strafe key preserves
-the held axis. Releasing that first key uses a brief directional handoff (8 ms)
-at the current movement strength. Hold **Alt** to walk; release it to return to
-normal movement. Remap **Walk (hold)** on **Controls**. Releasing all movement keys
-stops keyboard input immediately; opposite movement keys cancel.
+## Known issues
 
-Mouse sensitivity and invert Y are available in the launcher and in-game menu.
-Opening the port menu, name entry or switching windows releases capture; lock-on
-uses the game's camera. [Mouse camera details →](docs/mouse-camera-windows.md)
+- Some AMD graphics cards may still crash when the game world loads; please send
+  `user\last_run.log` if yours does.
+- Online play is new. Messages, bloodstains, ghosts and summons with the bells work on the
+  default server; please report how it goes on Discord.
+- Keep the frame cap at 120 or lower. The sprint that stayed at half speed above 90 FPS is
+  fixed, but the game's own timing above 120 FPS has not been checked everywhere.
+- Intel 2nd and 3rd generation processors run with translated instructions (best effort):
+  a few rarely used ones are not translated yet.
 
-## Compatibility notes
+## Problems and feedback
 
-- **Keep the render cap at 120 FPS or below.** Higher rates can slow movement and rolls;
-  the automatic cap respects this limit.
-- **Frame generation is experimental:** ×2 only; requires SDR output and object motion vectors.
-  DLSS FG gameplay validation is pending. See the [validation and limits](docs/dlss-frame-generation-windows.md#validation-and-limits).
-- **Some settings require a restart.** Effects, model detail and motion-vector patches
-  use **Apply and restart game**. Resolution and quality also need a restart when live
-  resolution changes are disabled.
-- **Character creation preview can be empty.** The created character still appears in game.
+Ask on the [Discord server](https://discord.gg/yTMG8c4Bqm), or open an [issue](https://github.com/Supermedo/bloodborne_pc/issues) and attach
+`user\last_run.log` from the game folder, with your graphics card and what happened.
+If the game shows only a black screen, try **Advanced → Clear shader cache** first.
+Crashes on AMD RDNA2 cards, slow FSR 4 and online errors are collected in
+[docs/WINDOWS_TROUBLESHOOTING.md](docs/WINDOWS_TROUBLESHOOTING.md).
 
-## Saves & troubleshooting
+## Building from source
 
-Saves and shader caches default to **`user\` beside `Bloodborne.exe`**; choose another
-save folder in the launcher. Port settings live in `bbport.ini`, launcher options in
-`%APPDATA%\bbport-launcher`.
+See [packaging/windows/README.md](packaging/windows/README.md): MSYS2 CLANG64, `bash build.sh`,
+then `bash packaging/windows/package.sh`. DLSS is built separately with
+`packaging/windows/build_dlss.sh`.
 
-For a black screen, try **Advanced → Clear shader cache** and relaunch. For a crash,
-[open an issue](https://github.com/AwesomeObserver/bloodborne_pc/issues) with reproduction
-steps, the build version and **`user\last_run.log`** (or `last_run.log` in your selected
-save folder). Native crash dumps are saved locally in **`logs\crashes\`** under the
-port's data folder. **Advanced → Save session log** enables additional session logs.
-If the game closes without a dump, run **Trace Crash.cmd** and reproduce it in that
-launch. Send the resulting **logs/crash-trace-*.zip**. This optional diagnostic mode
-captures terminal Windows exceptions from a separate process and can reduce performance.
+## Credits
 
-## Documentation
+Built on [bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux port of
+Bloodborne by deadinside28, and on the [shadPS4](https://github.com/shadps4-emu/shadPS4)
+renderer. The original README is in [docs/original-readme](docs/original-readme/README.md).
 
-- [Windows build and packaging](packaging/windows/README.md)
-- [DLSS presets, sharpening and frame generation](docs/dlss-frame-generation-windows.md)
-- [Raw mouse camera and validation](docs/mouse-camera-windows.md)
-- [Windows 0.4 migration and validation](docs/windows-upstream-0.4.md)
-- [Windows crash analysis](docs/crash-analysis-windows-v1.5.md)
-- [October 8 gameplay crash investigation](docs/crash-analysis-2026-10-08.md)
-- [Vulkan command-data crash and missing dump fix](docs/crash-analysis-2026-10-09.md)
-- [Respawn loading fix and timing capture](docs/respawn-loading-windows.md)
-- [Windows performance audit, optimizations and measurements](docs/performance-windows.md)
-- [Official RTX Remix SDK backend and integration status](docs/rtx-path-tracing-windows.md)
+Online play uses the network and PSN code of [shadp2p](https://github.com/Wozzardman/shadp2p)
+by Wozzardman (the shadPS4 Bloodborne co-op project), the shadNet server of the
+[shadPS4](https://shadps4.net) team, and [The Hunter's Dream](https://thehuntersdream.com) server
+by droogie and its team.
 
-## Credits & license
+Also used: [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) and the AMD FidelityFX SDK
+(FSR), FSR 4 assets from [FireBurn/Q2RTX](https://github.com/FireBurn/Q2RTX), the DLSS bridge
+adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR),
+the [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS) (`nvngx_dlss.dll` under NVIDIA's license),
+[LibAtrac9](https://github.com/Thealexbarney/LibAtrac9), [SDL3](https://github.com/libsdl-org/SDL),
+[FFmpeg](https://ffmpeg.org), [Dear ImGui](https://github.com/ocornut/imgui),
+[sirit](https://github.com/shadps4-emu/sirit), [magic_enum](https://github.com/Neargye/magic_enum),
+[miniz](https://github.com/richgel999/miniz), [xbyak](https://github.com/herumi/xbyak),
+[wepoll](https://github.com/piscisaureus/wepoll), [cpp-httplib](https://github.com/yhirose/cpp-httplib),
+[Protocol Buffers](https://protobuf.dev), [OpenSSL](https://www.openssl.org),
+[miniupnpc](https://miniupnp.tuxfamily.org), [JSON for Modern C++](https://github.com/nlohmann/json),
+[Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator),
+[MSYS2](https://www.msys2.org) / [LLVM](https://llvm.org), [PyInstaller](https://pyinstaller.org)
+and [Pillow](https://python-pillow.org). Game patches by Kyo, Lance McDonald, auser1337,
+illusion, emoose and the Bloodborne community.
 
-Licensed under **[GNU GPL v2 or later](LICENSE)**. Third-party components retain their
-own licenses; packaged builds include a `licenses\` directory.
+NVIDIA, GeForce RTX and DLSS are trademarks of NVIDIA Corporation. The icon is original
+artwork.
 
-<details>
-<summary>Third-party components and patch credits</summary>
+## License
 
-- Rendering: [shadPS4](https://github.com/shadps4-emu/shadPS4),
-  [sirit](https://github.com/shadps4-emu/sirit),
-  [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator).
-- Upscaling: [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), AMD FidelityFX SDK,
-  FSR 4 assets from [FireBurn/Q2RTX](https://github.com/FireBurn/Q2RTX),
-  [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS), and DLSS bridge work adapted from
-  [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR).
-- Runtime and interface: [SDL3](https://github.com/libsdl-org/SDL), [FFmpeg](https://ffmpeg.org),
-  [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9), [Dear ImGui](https://github.com/ocornut/imgui),
-  [magic_enum](https://github.com/Neargye/magic_enum), [miniz](https://github.com/richgel999/miniz),
-  [xbyak](https://github.com/herumi/xbyak).
-- Build and packaging: [MSYS2](https://www.msys2.org), [LLVM](https://llvm.org),
-  [PyInstaller](https://pyinstaller.org), [Pillow](https://python-pillow.org).
-- Game patches: Kyo, Lance McDonald, auser1337, illusion, emoose and the Bloodborne community.
-
-NVIDIA and DLSS are trademarks of NVIDIA Corporation. The port icon is original artwork.
-
-</details>
-
-This project is not affiliated with Sony Interactive Entertainment or FromSoftware.
+GNU GPL v2 or later ([LICENSE](LICENSE)). Third-party components keep their own licenses
+(see `licenses\` in the download).

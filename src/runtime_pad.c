@@ -1,21 +1,27 @@
-/* libScePad on SDL3 gamepads and the keyboard. SDL events are pumped by the window thread
- * (gpu/shim/window.cpp); here state is only sampled.
+/* libScePad on SDL3 gamepads, with a keyboard fallback. SDL events are pumped
+ * by the window thread (gpu/shim/window.cpp); here state is only sampled.
  *
- * Keyboard layout (also with a gamepad connected: both drive the game):
- *   WASD left stick (hold either Alt to walk), arrow keys right stick, Space Cross, LShift Circle,
- *   E Square, Q Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, C R3,
+ * Bindings (keyboard, controller and mouse) come from input.ini, parsed by
+ * runtime_input_config.c; see specs/keyboard-and-mouse/spec-design-keyboard-mouse-input.md.
+ * Without an input.ini (a fresh install), the defaults it generates reproduce the previous
+ * fixed layout, except: the keyboard now works together with a connected controller (MIX-001,
+ * where it used to be keyboard-only-without-a-controller), Q is R3 (lock-on) instead of
+ * Triangle, and C is also R3 (kept, so existing muscle memory for lock-on does not break):
+ *   WASD left stick, arrow keys right stick, Space Cross, LShift Circle,
+ *   E Square, V Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, Q/C R3,
  *   Enter Options, Tab left touchpad, Backspace right touchpad,
  *   IJKL d-pad (I up, K down, J left, L right). */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
+#include "runtime_input_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <math.h>
 #include <SDL3/SDL.h>
-#include "host_input.h"
 #include <sys/stat.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80920001)
@@ -61,9 +67,10 @@ static int initialized, opened, sdl_ready;
 static SDL_Gamepad *gamepad;
 static size_t reads;
 static uint8_t connected_count;
+static uint64_t last_mouse_sample_us; /* CNV-003: dt since the previous mouse-to-stick sample */
+static double smoothed_mouse_stick_x, smoothed_mouse_stick_y; /* mouse_to_axis's EMA state */
 
 static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
-static uint8_t axis(int16_t v) { int x=(v+32768)>>8; return (uint8_t)(x<0 ? 0 : x>255 ? 255 : x); }
 static uint8_t trigger(int16_t v) { int x=v>>7; return (uint8_t)(x<0 ? 0 : x>255 ? 255 : x); }
 static uint16_t touch_axis(float v, int max) {
     return (uint16_t)(v<=0.0f ? 0 : v>=1.0f ? max : (int)(v*max+0.5f));
@@ -74,312 +81,417 @@ static void touch_click(PadData *d, int right) {
     d->touches[0]=(PadTouch){.x=right ? 1440 : 480,.y=471,.id=0};
 }
 
-/* BB_GAMEPAD (the launcher's controller choice): its SDL GUID, or part of its name. Issue #15:
- * wheels and other controllers connected for good came first. */
-static const char *preferred_gamepad(void) {
-    static const char *want; static int read;
-    if (!read) { want=getenv("BB_GAMEPAD"); if (want && !*want) want=NULL; read=1; }
-    return want;
-}
-static int is_preferred(SDL_JoystickID id, const char *want) {
-    char guid[33];
-    SDL_GUIDToString(SDL_GetGamepadGUIDForID(id),guid,sizeof guid);
-    const char *name=SDL_GetGamepadNameForID(id);
-    return !strcasecmp(guid,want) || (name && SDL_strcasestr(name,want));
-}
-/* The chosen gamepad, else the first while it is not connected (checked again every second, it
- * is taken as soon as it connects); called under lock. */
+/* Opens the first gamepad SDL knows about; called under lock. */
 static SDL_Gamepad *current_gamepad(void) {
-    static int on_preferred; static uint64_t last_scan;
     if (!sdl_ready) sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     if (sdl_ready<0) return NULL;
     if (gamepad && !SDL_GamepadConnected(gamepad)) { SDL_CloseGamepad(gamepad); gamepad=NULL; }
-    const char *want=preferred_gamepad();
-    const uint64_t now=now_us();
-    if (!gamepad || (want && !on_preferred && now-last_scan>1000000)) {
-        last_scan=now;
-        int count=0, pick=-1;
+    if (!gamepad) {
+        int count=0;
         SDL_JoystickID *ids=SDL_GetGamepads(&count);
-        for (int i=0; want && ids && i<count && pick<0; ++i) if (is_preferred(ids[i],want)) pick=i;
-        if (pick<0 && !gamepad && ids && count>0) pick=0;
-        if (pick>=0 && (!gamepad || SDL_GetGamepadID(gamepad)!=ids[pick])) {
-            if (gamepad) SDL_CloseGamepad(gamepad);
-            gamepad=SDL_OpenGamepad(ids[pick]);
-            on_preferred=want && gamepad && is_preferred(ids[pick],want);
-            if (gamepad) {
-                ++connected_count;
-                printf("Runtime: gamepad connected: %s%s\n",SDL_GetGamepadName(gamepad),
-                       !want ? "" : on_preferred ? " (the chosen one)" : " (the chosen one is not connected)");
-            }
+        if (ids && count>0) {
+            gamepad=SDL_OpenGamepad(ids[0]);
+            if (gamepad) { ++connected_count; printf("Runtime: gamepad connected: %s\n",SDL_GetGamepadName(gamepad)); }
         }
         SDL_free(ids);
     }
     return gamepad;
 }
-/* bbport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
- * with libc.prx's malloc_stats (export stub at libc.prx+0x1f8c0; malloc_stats_fast returns 1 in this libc, the module at image +0x56e0000):
- * in use now and at most, and what it took from the system. A heap that keeps growing is a leak. */
-typedef struct { uint16_t size, version; uint32_t reserved; uint64_t max_system, system, max_in_use, in_use; } MallocManagedSize;
-static void report_guest_heap(void) {
-    static int enabled=-1; static uint64_t last;
-    if (enabled<0) enabled=getenv("BB_FRAME_STATS")!=NULL;
-    const uint64_t now=now_us();
-    if (!enabled || now-last<5000000) return;
-    last=now;
-    const uint8_t *stub=(const uint8_t *)(0x800000000ull+0x56e0000+0x1f8c0);
-    if (stub[0]!=0xff || stub[1]!=0x25) return; /* another libc */
-    ABI int (*stats)(MallocManagedSize *)=(ABI int (*)(MallocManagedSize *))(uintptr_t)stub;
-    MallocManagedSize m={.size=sizeof(m),.version=1};
-    const int result=stats(&m);
-    if (result!=0) { static int told; if (!told++) printf("Guest heap: malloc_stats returned %#x\n",(unsigned)result); return; }
-    {
-        printf("Guest heap: %.1f MB in use (most %.1f), %.1f MB from the system (most %.1f)\n",
-               m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
+/* Button-like outputs (not the stick/axis ones): the bit each sets in d->buttons, or 0 for
+ * l2/r2 (handled separately, since they also carry an analog value) and for outputs that are
+ * not plain buttons (touchpad sides, half-axes, halfmode, hotkeys). */
+static uint32_t button_bit(InputOutput out) {
+    switch (out) {
+    case OUT_CROSS: return BTN_CROSS; case OUT_CIRCLE: return BTN_CIRCLE;
+    case OUT_SQUARE: return BTN_SQUARE; case OUT_TRIANGLE: return BTN_TRIANGLE;
+    case OUT_L1: return BTN_L1; case OUT_R1: return BTN_R1;
+    case OUT_L3: return BTN_L3; case OUT_R3: return BTN_R3; case OUT_OPTIONS: return BTN_OPTIONS;
+    case OUT_PAD_UP: return BTN_UP; case OUT_PAD_DOWN: return BTN_DOWN;
+    case OUT_PAD_LEFT: return BTN_LEFT; case OUT_PAD_RIGHT: return BTN_RIGHT;
+    default: return 0;
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; bbport.ini (BB_CONFIG) lines
- * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
- * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
- * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
- * (right), walk (hold for reduced keyboard movement strength). Gamepad names as SDL's:
- * a b x y back start leftstick rightstick leftshoulder
- * rightshoulder dpup dpdown dpleft dpright touchpad misc1 paddle1-4, plus lefttrigger and
- * righttrigger. The keyboard works next to a gamepad (the Steam Deck always has one): its buttons
- * add to the gamepad's; move keys use the circular stick range, reduced while walking. */
-enum {
-    IN_CROSS, IN_CIRCLE, IN_SQUARE, IN_TRIANGLE, IN_L1, IN_R1, IN_L2, IN_R2, IN_L3, IN_R3,
-    IN_OPTIONS, IN_TOUCHPAD, IN_TOUCHPAD_RIGHT, IN_UP, IN_DOWN, IN_LEFT, IN_RIGHT,
-    IN_MOVE_UP, IN_MOVE_DOWN, IN_MOVE_LEFT, IN_MOVE_RIGHT, IN_LOOK_UP, IN_LOOK_DOWN, IN_LOOK_LEFT,
-    IN_LOOK_RIGHT, IN_WALK, IN_COUNT
-};
-static const char *const input_names[IN_COUNT]={
-    "cross","circle","square","triangle","l1","r1","l2","r2","l3","r3","options","touchpad",
-    "touchpad_right","up","down","left","right","move_up","move_down","move_left","move_right",
-    "look_up","look_down","look_left","look_right","walk",
-};
-static const uint32_t input_buttons[IN_COUNT]={
-    BTN_CROSS,BTN_CIRCLE,BTN_SQUARE,BTN_TRIANGLE,BTN_L1,BTN_R1,BTN_L2,BTN_R2,BTN_L3,BTN_R3,
-    BTN_OPTIONS,BTN_TOUCHPAD,0,BTN_UP,BTN_DOWN,BTN_LEFT,BTN_RIGHT,
-};
-#define MAX_BIND 4
-enum { PAD_LEFT_TRIGGER=SDL_GAMEPAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* triggers as buttons */
-typedef struct {
-    int key_count, mouse_count, pad_count;
-    SDL_Scancode keys[MAX_BIND];
-    Uint32 mouse[MAX_BIND];
-    int pad[MAX_BIND];
-} Binding;
-static Binding bindings[IN_COUNT];
-static int bindings_ready;
 
-static void bind_defaults(void) {
-    static const struct { int input; SDL_Scancode key; } keys[]={
-        {IN_CROSS,SDL_SCANCODE_SPACE}, {IN_CIRCLE,SDL_SCANCODE_LSHIFT}, {IN_SQUARE,SDL_SCANCODE_E},
-        {IN_TRIANGLE,SDL_SCANCODE_Q}, {IN_L1,SDL_SCANCODE_1}, {IN_R1,SDL_SCANCODE_3},
-        {IN_L2,SDL_SCANCODE_R}, {IN_R2,SDL_SCANCODE_F}, {IN_L3,SDL_SCANCODE_Z}, {IN_R3,SDL_SCANCODE_C},
-        {IN_OPTIONS,SDL_SCANCODE_RETURN}, {IN_TOUCHPAD,SDL_SCANCODE_TAB},
-        {IN_TOUCHPAD_RIGHT,SDL_SCANCODE_BACKSPACE},
-        {IN_UP,SDL_SCANCODE_I}, {IN_DOWN,SDL_SCANCODE_K}, {IN_LEFT,SDL_SCANCODE_J}, {IN_RIGHT,SDL_SCANCODE_L},
-        {IN_MOVE_UP,SDL_SCANCODE_W}, {IN_MOVE_DOWN,SDL_SCANCODE_S}, {IN_MOVE_LEFT,SDL_SCANCODE_A},
-        {IN_MOVE_RIGHT,SDL_SCANCODE_D}, {IN_LOOK_UP,SDL_SCANCODE_UP}, {IN_LOOK_DOWN,SDL_SCANCODE_DOWN},
-        {IN_LOOK_LEFT,SDL_SCANCODE_LEFT}, {IN_LOOK_RIGHT,SDL_SCANCODE_RIGHT},
-        {IN_WALK,SDL_SCANCODE_LALT}, {IN_WALK,SDL_SCANCODE_RALT},
-    };
-    static const struct { int input, button; } pads[]={
-        {IN_CROSS,SDL_GAMEPAD_BUTTON_SOUTH}, {IN_CIRCLE,SDL_GAMEPAD_BUTTON_EAST},
-        {IN_SQUARE,SDL_GAMEPAD_BUTTON_WEST}, {IN_TRIANGLE,SDL_GAMEPAD_BUTTON_NORTH},
-        {IN_L1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {IN_R1,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
-        {IN_L2,PAD_LEFT_TRIGGER}, {IN_R2,PAD_RIGHT_TRIGGER},
-        {IN_L3,SDL_GAMEPAD_BUTTON_LEFT_STICK}, {IN_R3,SDL_GAMEPAD_BUTTON_RIGHT_STICK},
-        {IN_OPTIONS,SDL_GAMEPAD_BUTTON_START},
-        {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_BACK}, {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_TOUCHPAD},
-        {IN_UP,SDL_GAMEPAD_BUTTON_DPAD_UP}, {IN_DOWN,SDL_GAMEPAD_BUTTON_DPAD_DOWN},
-        {IN_LEFT,SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {IN_RIGHT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
-    };
-    memset(bindings,0,sizeof bindings);
-    for (size_t i=0;i<sizeof(keys)/sizeof(*keys);++i) {
-        Binding *b=&bindings[keys[i].input]; b->keys[b->key_count++]=keys[i].key;
+/* Host state read once per sample() so every binding is evaluated against the same instant
+ * (pressing a key exactly as SDL delivers the gamepad event would otherwise see different
+ * states depending on which binding happens to be checked first). */
+typedef struct {
+    const bool *keys;      /* SDL_GetKeyboardState result, or NULL if no video subsystem */
+    SDL_Gamepad *gamepad;   /* current_gamepad() result, or NULL if none connected */
+    uint32_t mouse_buttons; /* bbgpu_mouse_take's buttons: SDL_BUTTON_MASK() bits (T5) */
+    uint32_t mouse_wheel;   /* bbgpu_mouse_take's wheel: bit 0 up, 1 down, 2 left, 3 right */
+} HostState;
+
+/* Evaluates one binding against the current host state (MIX-002/003/004): for a button-like
+ * binding, 1 if held, 0 otherwise; for an axis-like binding, the signed contribution in axis
+ * units (-127..127, OUT_AXIS_LEFT_X etc. included, scaled from the physical stick/trigger).
+ * `is_button_output` tells which of the two readings the caller wants (an axis binding on a
+ * button-like output, or vice versa, each have their own threshold rule, applied by the
+ * caller -- see OUT-004/OUT-005). */
+static int binding_held(const HostState *host, const InputBinding *b) {
+    switch (b->kind) {
+    case IN_KEY: return host->keys && host->keys[b->value];
+    case IN_CBUTTON: return host->gamepad && SDL_GetGamepadButton(host->gamepad,(SDL_GamepadButton)b->value);
+    case IN_AXIS: {
+        /* OUT-004: a trigger (l2/r2) bound to a button-like output uses the 0..255 trigger
+         * threshold. A full stick axis (axis_left_x etc.) bound to a button-like output is not
+         * covered by name in the spec; treated like a half-axis (OUT-005's threshold) since it
+         * is the same physical reading, just not split by sign at the binding site. */
+        if (!host->gamepad) return 0;
+        int16_t raw=SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value);
+        if (b->value==SDL_GAMEPAD_AXIS_LEFT_TRIGGER || b->value==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+            return trigger(raw)>INPUT_TRIGGER_BUTTON_THRESHOLD;
+        return abs(raw>>8)>INPUT_HALF_AXIS_BUTTON_THRESHOLD;
     }
-    for (size_t i=0;i<sizeof(pads)/sizeof(*pads);++i) {
-        Binding *b=&bindings[pads[i].input]; b->pad[b->pad_count++]=pads[i].button;
+    case IN_AXIS_HALF: {
+        if (!host->gamepad) return 0;
+        int16_t raw=SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value);
+        int v=raw>>8; /* -128..127 */
+        return b->half_sign>0 ? v>INPUT_HALF_AXIS_BUTTON_THRESHOLD : -v>INPUT_HALF_AXIS_BUTTON_THRESHOLD;
+    }
+    /* MOU-006: mouse bindings only ever fire while bbgpu_mouse_take reported captured=1 --
+     * enforced by sample_host() zeroing host->mouse_buttons/mouse_wheel outright when not
+     * captured, so this function does not need to re-check capture itself. */
+    case IN_MOUSE_BUTTON: return (host->mouse_buttons & SDL_BUTTON_MASK(b->value))!=0;
+    case IN_MOUSE_WHEEL: return (host->mouse_wheel & (1u<<b->value))!=0;
+    case IN_NONE: default: return 0;
     }
 }
-static int pad_button_from_name(const char *name) {
-    if (!SDL_strcasecmp(name,"lefttrigger")) return PAD_LEFT_TRIGGER;
-    if (!SDL_strcasecmp(name,"righttrigger")) return PAD_RIGHT_TRIGGER;
-    const SDL_GamepadButton b=SDL_GetGamepadButtonFromString(name);
-    return b==SDL_GAMEPAD_BUTTON_INVALID ? -1 : (int)b;
-}
-/* key.<input>= / pad.<input>= lines of the settings file. */
-static void load_bindings(void) {
-    bind_defaults();
-    const char *path=getenv("BB_CONFIG");
-    FILE *f=path ? fopen(path,"r") : NULL;
-    if (!f) return;
-    char line[512];
-    while (fgets(line,sizeof line,f)) {
-        const int keyboard=!strncmp(line,"key.",4), pad=!strncmp(line,"pad.",4);
-        char *eq=strchr(line,'=');
-        if ((!keyboard && !pad) || !eq) continue;
-        *eq=0;
-        int input=-1;
-        for (int i=0;i<IN_COUNT;++i) if (!strcmp(line+4,input_names[i])) input=i;
-        if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s\n",line); continue; }
-        Binding *b=&bindings[input];
-        if (keyboard) b->key_count=b->mouse_count=0; else b->pad_count=0;
-        for (char *name=strtok(eq+1,",\r\n"); name; name=strtok(NULL,",\r\n")) {
-            while (*name==' ') ++name;
-            for (char *end=name+strlen(name); end>name && end[-1]==' ';) *--end=0;
-            if (!*name) continue;
-            if (keyboard) {
-                const Uint32 mouse=bb_mouse_binding(name);
-                const SDL_Scancode s=mouse ? SDL_SCANCODE_UNKNOWN : bb_key_binding(name);
-                if (!mouse && s==SDL_SCANCODE_UNKNOWN) printf("Runtime: controls: unknown key \"%s\" for %s\n",name,line+4);
-                else if (b->key_count+b->mouse_count<MAX_BIND) {
-                    if (mouse) b->mouse[b->mouse_count++]=mouse;
-                    else b->keys[b->key_count++]=s;
-                }
-            } else {
-                const int button=pad_button_from_name(name);
-                if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s\n",name,line+4);
-                else if (b->pad_count<MAX_BIND) b->pad[b->pad_count++]=button;
-            }
-        }
+/* Signed axis-unit contribution (-127..127) of one binding toward the stick it is bound to;
+ * 0 for anything that is not an axis-like input. A plain key/button bound to a half-axis
+ * output contributes a full deflection (KBD-006), matching the previous fixed-layout behavior. */
+static int binding_axis_value(const HostState *host, const InputBinding *b, int half_sign) {
+    switch (b->kind) {
+    case IN_KEY: return (host->keys && host->keys[b->value]) ? 127*half_sign : 0;
+    case IN_CBUTTON: return (host->gamepad && SDL_GetGamepadButton(host->gamepad,(SDL_GamepadButton)b->value)) ? 127*half_sign : 0;
+    case IN_AXIS_HALF: {
+        if (!host->gamepad) return 0;
+        int16_t raw=SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value);
+        int v=raw>>8;
+        return b->half_sign>0 ? (v>0 ? v : 0) : (v<0 ? -v : 0);
     }
-    fclose(f);
+    case IN_AXIS: /* a full physical axis bound to another full axis output (axis_left_x=axis_right_x) */
+        return host->gamepad ? (SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value)>>8) : 0;
+    case IN_MOUSE_BUTTON: return (host->mouse_buttons & SDL_BUTTON_MASK(b->value)) ? 127*half_sign : 0;
+    case IN_MOUSE_WHEEL: return (host->mouse_wheel & (1u<<b->value)) ? 127*half_sign : 0;
+    default: return 0; /* IN_NONE */
+    }
 }
-static int key_down(const bool *k, Uint32 mouse, int input) {
-    for (int i=0;k && i<bindings[input].key_count;++i) if (k[bindings[input].keys[i]]) return 1;
-    for (int i=0;i<bindings[input].mouse_count;++i) if (mouse & bindings[input].mouse[i]) return 1;
+/* Sums every binding on `out` (MIX-003), clamped to -127..127. */
+static int axis_output_value(const HostState *host, const InputConfig *cfg, InputOutput out, int half_sign) {
+    long sum=0;
+    for (int i=0;i<cfg->table.binding_count[out];++i)
+        sum+=binding_axis_value(host,&cfg->table.bindings[out][i],half_sign);
+    return sum<-127 ? -127 : sum>127 ? 127 : (int)sum;
+}
+
+/* stick_socd: one axis's two half-axis outputs (minus <= 0, plus >= 0). With last_wins, holding
+ * both gives the direction pressed most recently (keyboard "snap tap"), so rolling from A to D
+ * never sums to a neutral stick that ends a sprint; otherwise (neutral) they add up and cancel,
+ * shadPS4's behavior. `*_since` is when each side became active (0 = not active). */
+typedef struct { uint64_t minus_since, plus_since; } AxisPairState;
+static AxisPairState axis_pairs[4]; /* left x, left y, right x, right y */
+static int resolve_axis_pair(AxisPairState *s, int minus, int plus, int last_wins, uint64_t now) {
+    if (minus) { if (!s->minus_since) s->minus_since=now; } else s->minus_since=0;
+    if (plus) { if (!s->plus_since) s->plus_since=now; } else s->plus_since=0;
+    if (last_wins && minus && plus) {
+        if (s->plus_since>s->minus_since) return plus;
+        if (s->minus_since>s->plus_since) return minus;
+    }
+    return minus+plus; /* one side only, or pressed in the same sample */
+}
+
+/* stick_release_delay_ms: when the (digital) left stick goes back to neutral, keep its last
+ * direction for this long, so releasing one key just before pressing the next one does not
+ * flash a neutral sample either. Any new direction replaces it immediately. */
+typedef struct { int x, y; uint64_t active_at; } StickReleaseState;
+static StickReleaseState left_release;
+static void hold_stick_on_release(StickReleaseState *s, int *x, int *y, int delay_ms, uint64_t now) {
+    if (*x || *y) { s->x=*x; s->y=*y; s->active_at=now; return; }
+    if (delay_ms>0 && (s->x || s->y) && now-s->active_at<(uint64_t)delay_ms*1000u) { *x=s->x; *y=s->y; return; }
+    s->x=s->y=0;
+}
+
+/* stick_circular / stick_turn_rate: make the digital left stick behave like a real thumbstick.
+ * Keys alone give 8 directions on a square: W+A is (-127,-127), about 1.41x the reach of a real
+ * (round) stick, and every change of direction is a jump within one sample. With `circular`,
+ * the vector is clamped to the circle (W+A becomes about (-90,-90), full deflection). With a
+ * turn rate (degrees per second), the direction rotates toward the new one instead of jumping,
+ * like a thumb sliding along the gate, at full deflection the whole way so a sprint is kept;
+ * a reversal (more than kStickSnapRad, e.g. A <-> D) still snaps, as a flick would. The angle
+ * starts fresh from the pressed direction whenever the stick was neutral. */
+#define kStickSnapRad (150.0*3.14159265358979323846/180.0)
+typedef struct { double angle; uint64_t at; int active; } StickShapeState;
+static StickShapeState left_shape;
+static void shape_digital_stick(StickShapeState *s, int *x, int *y, int circular, int turn_rate, uint64_t now) {
+    if (!*x && !*y) { s->active=0; return; }
+    const double pi=3.14159265358979323846;
+    double tx=*x, ty=*y, mag=sqrt(tx*tx+ty*ty), target=atan2(ty,tx);
+    if (circular && mag>127.0) mag=127.0;
+    if (turn_rate>0 && s->active) {
+        double dt=(double)(now-s->at)/1e6;
+        if (dt>0.1) dt=0.1;
+        double diff=fmod(target-s->angle+3.0*pi,2.0*pi)-pi; /* -pi..pi, shortest way round */
+        double step=turn_rate*pi/180.0*dt;
+        if (fabs(diff)>kStickSnapRad || fabs(diff)<=step) s->angle=target;
+        else s->angle+=diff>0 ? step : -step;
+    } else {
+        s->angle=target;
+    }
+    s->active=1; s->at=now;
+    if (!circular && turn_rate<=0) return; /* off: leave the raw square values untouched */
+    int ox=(int)lround(cos(s->angle)*mag), oy=(int)lround(sin(s->angle)*mag);
+    *x=ox<-127?-127:ox>127?127:ox;
+    *y=oy<-127?-127:oy>127?127:oy;
+}
+/* True if any binding on `out` is currently held (MIX-002: OR). */
+static int button_output_held(const HostState *host, const InputConfig *cfg, InputOutput out) {
+    for (int i=0;i<cfg->table.binding_count[out];++i)
+        if (binding_held(host,&cfg->table.bindings[out][i])) return 1;
     return 0;
 }
-/* The bound gamepad buttons' state; triggers as their analog value. */
-static int pad_value(SDL_Gamepad *g, int input) {
-    int value=0;
-    for (int i=0;i<bindings[input].pad_count;++i) {
-        const int b=bindings[input].pad[i];
-        const int v=b==PAD_LEFT_TRIGGER ? trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFT_TRIGGER))
-                  : b==PAD_RIGHT_TRIGGER ? trigger(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
-                  : SDL_GetGamepadButton(g,(SDL_GamepadButton)b) ? 255 : 0;
-        if (v>value) value=v;
-    }
-    return value;
+/* DZN-001: shadPS4's ApplyDeadzone, ported -- below inner: 0; inner..outer: linear ramp to 127;
+ * above outer: 127. Applied to the magnitude, sign preserved. */
+static int apply_deadzone(int value, int inner, int outer) {
+    int mag=abs(value);
+    if (mag<=inner) return 0;
+    if (mag>=outer) return value<0 ? -127 : 127;
+    long scaled=(127L*(mag-inner))/(outer-inner);
+    return value<0 ? -(int)scaled : (int)scaled;
 }
 
-/* key held for the negative / positive direction: the stick all the way, else the gamepad's. */
-static uint8_t key_axis(uint8_t value, int negative, int positive) {
-    return negative || positive ? (uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0)) : value;
+/* MOU-009: converts raw mouse motion straight into shadPS4's linear response (magnitude*speed +
+ * speed_offset*128, over a 33 ms window -- shadPS4's fixed poll interval, kept as the unit
+ * mouse_movement_params' defaults are tuned for), with no filtering of the raw delta itself, and
+ * then lerps the *output* stick value toward that target instead of jumping straight to it.
+ * `smoothed_mouse_stick_x`/`smoothed_mouse_stick_y` (module-level state, same pattern as
+ * `last_mouse_sample_us`, kept under their old names despite now holding a stick value rather
+ * than a velocity) persist across calls and are reset to 0 whenever capture starts or ends --
+ * MOU-005/CNV-002, see the caller in sample_host.
+ *
+ * History (four iterations, all found by playing, not by a test): the first port of shadPS4's
+ * EmulateJoystick clamped speed up to a hard floor (deadzone_offset*128) whenever any motion was
+ * seen -- a step function. At a high sample rate (this port's 150 FPS vs. shadPS4's fixed 33 ms/
+ * ~30 Hz poll), a slow mouse move delivers tiny per-sample deltas that each jumped straight to
+ * that floor and back to 0 the instant motion stopped: "micro-jumps". A second version replaced
+ * the floor with a ramp scaling the linear response by each sample's *instantaneous* magnitude
+ * (`1 - exp(-magnitude/k)`); that removed the magnitude=0 jump but was still stateless -- during
+ * a fast 180-degree reversal, magnitude dips near zero at the inflection point (the hand
+ * decelerates, reverses, accelerates), so the ramp reset mid-gesture and felt like the camera
+ * stalled exactly when the reversal needed to be fastest; the same statelessness made even a
+ * single fast flick from a standstill start slow, since the first sample always began the ramp
+ * at 0. A third version filtered *velocity* (dx/dt, dy/dt) with a per-component EMA before the
+ * formula, which fixed the reversal stall and slow start, but amplified the mouse's own sampling
+ * noise: velocity is a derivative, and dividing small, irregular per-sample dt/dx by each other
+ * at a high poll rate makes the filtered input itself noisy, which read as the camera starting
+ * "too fast" and feeling jittery/"crispy" even after turning sensitivity down (the jitter isn't
+ * in the sensitivity, it's upstream of it).
+ *
+ * This version moves the smoothing from input space (velocity) to output space (the stick value
+ * the player actually perceives as camera rotation): the raw-delta formula runs unfiltered every
+ * call (so it reacts immediately, with no reversal-stall or slow-start risk -- there is no
+ * velocity history to reset), and only the final x/y stick value is lerped toward that target
+ * with the same `alpha=1-exp(-dt_ms/tau_ms)` shape as before. This damps perceptual jitter
+ * (whatever noise is in one sample's raw delta can only move the stick part-way toward it) without
+ * reintroducing the reversal stall, since a lerp has no near-zero singularity to stall at -- it
+ * just lerps straight through a sign change. `tau_ms=25` keeps a flick's 90%-of-target response
+ * under 100 ms (imperceptible as lag) while still visibly damping single-pixel-level jitter at
+ * high poll rates (tried 15 ms first; 25 ms cut the residual jitter spread by about a fifth for
+ * under 35 ms of extra settle time, found by sweeping the constant and comparing both).
+ * deadzone_offset no longer gates a floor or a ramp (there is no branch left to gate): it
+ * is unused by this formula and kept in MouseParams only because mouse_movement_params still
+ * carries three values in input.ini and the launcher still exposes a "Smoothness" slider for it
+ * -- T5's follow-up may repurpose or retire it. */
+static void mouse_to_axis(float dx, float dy, double dt_ms, const MouseParams *mouse, int *out_x, int *out_y) {
+    const double tau_ms=25.0;
+    double alpha=1.0-exp(-dt_ms/tau_ms);
+    /* Scale the raw delta to "px per 33 ms" (shadPS4's fixed poll window) so the same physical
+     * mouse speed produces the same magnitude regardless of this port's actual frame rate --
+     * without this, a 150 FPS sample would see 1/4.5 of the delta a 33 ms/~30 Hz sample would for
+     * the same hand motion, making sensitivity depend on FPS. This is a plain per-sample scale,
+     * not a time filter, so it adds no state and no lag of its own. */
+    double sdx=(double)dx*(33.0/dt_ms), sdy=(double)dy*(33.0/dt_ms);
+    double magnitude=sqrt(sdx*sdx+sdy*sdy);
+    double target_x=0.0, target_y=0.0;
+    if (magnitude>=0.01) {
+        /* speed_offset*128 is a sizeable minimum push (shadPS4's default, 0.125, is ~16 of 128
+         * units) meant to raise the response for slow movement -- but switching it fully on/off
+         * right at this magnitude>=0.01 boundary means the slightest jitter around that boundary
+         * (the mouse delivering a 0 px sample, then a 1 px sample, then 0 again) toggles a 16-unit
+         * contribution on and off every sample. The output lerp smooths that over several frames,
+         * but doesn't remove it, since each toggle still perturbs the lerp's target. Fading
+         * speed_offset in linearly over a short ramp (0 to ramp_mag) instead of switching it on
+         * at full strength removes that remaining source of jitter without changing how a normal,
+         * continuous slow movement feels (the ramp covers less than a pixel of travel). */
+        const double ramp_mag=1.0;
+        double offset_fade=magnitude<ramp_mag ? magnitude/ramp_mag : 1.0;
+        double speed=magnitude*mouse->speed+mouse->speed_offset*128.0*offset_fade;
+        if (speed>128.0) speed=128.0;
+        double angle=atan2(sdy,sdx);
+        target_x=cos(angle)*speed;
+        target_y=sin(angle)*speed;
+    }
+    smoothed_mouse_stick_x+=(target_x-smoothed_mouse_stick_x)*alpha;
+    smoothed_mouse_stick_y+=(target_y-smoothed_mouse_stick_y)*alpha;
+    int x=(int)lround(smoothed_mouse_stick_x), y=(int)lround(smoothed_mouse_stick_y);
+    *out_x=x<-127?-127:x>127?127:x;
+    *out_y=y<-127?-127:y>127?127:y;
 }
-/* Resolved digital directions, updated under the pad lock. Retain the first
- * held axis, then briefly favor the remaining axis when that first key lifts.
- * The existing input timestamp keeps repeated polls on the same handoff. */
-enum { KEY_MOVEMENT_HANDOFF_US=8000, KEY_WALK_RADIUS=48 };
-static struct {
-    int x, y, horizontal;
-    int handoff_x, handoff_y, handoff;
-    uint64_t handoff_started;
-} key_movement_state;
-static void reset_key_movement(void) { memset(&key_movement_state,0,sizeof(key_movement_state)); }
 
-/* Use the nearest representable direction inside the final 8-bit stick circle.
- * Equal-error choices favor the already-held axis: vertical-first diagonals
- * use (90,91), horizontal-first use (91,90). Both retain near-full strength
- * and stay just below a 45-degree turn from their starting direction.
- * Walking uses the same rounding and handoff at a reduced radius; scaling an
- * already rounded running diagonal would lose its held-axis priority.
- * Controller-only samples remain untouched, even with the walk key held. */
-static void key_movement(PadData *d, int left, int right, int up, int down, int walk) {
-    const int key_x=(right!=0)-(left!=0), key_y=(down!=0)-(up!=0);
-    if (!(left || right || up || down)) { reset_key_movement(); return; }
-    const int changed=key_x!=key_movement_state.x || key_y!=key_movement_state.y;
-    if (changed) {
-        key_movement_state.handoff=0;
-        /* Releasing the primary used to jump 45.317 degrees straight to the
-         * remaining cardinal. Swap the two diagonal components first: this
-         * preserves strength and splits that turn into 0.633 and 44.683 degrees.
-         * Opposing held keys must still cancel their axis immediately. */
-        if (key_movement_state.x && key_movement_state.y &&
-            (key_movement_state.horizontal
-             ? !left && !right && key_y==key_movement_state.y
-             : !up && !down && key_x==key_movement_state.x)) {
-            key_movement_state.handoff=1;
-            key_movement_state.handoff_x=key_movement_state.x;
-            key_movement_state.handoff_y=key_movement_state.y;
-            key_movement_state.handoff_started=d->timestamp;
-        }
-    } else if (key_movement_state.handoff &&
-               (!d->timestamp || d->timestamp<key_movement_state.handoff_started ||
-                d->timestamp-key_movement_state.handoff_started>=KEY_MOVEMENT_HANDOFF_US)) {
-        key_movement_state.handoff=0;
+/* GUD-002: the loaded config is immutable once published; a reload (F8) builds a whole new one
+ * off the pad lock (I/O stays off the hot path) and only the pointer swap happens under `lock`,
+ * which already serializes every call into this file through pad_read_state. */
+static InputConfig default_config;
+static InputConfig *loaded_config; /* NULL until pad_open's first load; falls back to defaults */
+static int config_initialized;
+static void ensure_config_loaded(void) {
+    if (config_initialized) return;
+    config_initialized=1;
+    input_config_defaults(&default_config);
+    char path[1024];
+    InputConfig *fresh=malloc(sizeof(*fresh));
+    if (fresh && input_config_path(path,sizeof(path)) && input_config_load(fresh,path)) {
+        loaded_config=fresh;
+        if (fresh->warnings) printf("Input config: %s loaded, %u line(s) ignored (see above)\n",path,fresh->warnings);
+        else printf("Input config: %s loaded\n",path);
+    } else {
+        free(fresh);
+        puts("Input config: using built-in defaults");
     }
-    if ((left && right) || (up && down)) key_movement_state.handoff=0;
-    if (!key_x || !key_y) key_movement_state.horizontal=key_x!=0;
-    else if (key_movement_state.horizontal ? key_x!=key_movement_state.x : key_y!=key_movement_state.y)
-        key_movement_state.horizontal=key_x==key_movement_state.x;
-    key_movement_state.x=key_x; key_movement_state.y=key_y;
-    int x=left || right ? key_x*128 : (int)d->left_x-128;
-    int y=up || down ? key_y*128 : (int)d->left_y-128;
-    if (key_movement_state.handoff) {
-        x=key_movement_state.handoff_x*128;
-        y=key_movement_state.handoff_y*128;
-    }
-    const int radius=walk ? KEY_WALK_RADIUS : 128;
-    const int length2=x*x+y*y;
-    if (length2>radius*radius) {
-        const float scale=(float)radius/SDL_sqrtf((float)length2);
-        const float target_x=x*scale, target_y=y*scale;
-        const int base_x=(int)target_x, base_y=(int)target_y;
-        x=base_x; y=base_y;
-        float error=(x-target_x)*(x-target_x)+(y-target_y)*(y-target_y);
-        /* Round the held primary axis first, and keep that choice throughout
-         * the hold. Check bounds after rounding, not before. */
-        for (unsigned candidate=1;candidate<4;++candidate) {
-            const unsigned round=key_movement_state.horizontal && candidate<3 ? 3-candidate : candidate;
-            const int cx=base_x+((round&2) ? (target_x<0 ? -1 : 1) : 0);
-            const int cy=base_y+((round&1) ? (target_y<0 ? -1 : 1) : 0);
-            if (cx*cx+cy*cy>radius*radius) continue;
-            const float candidate_error=(cx-target_x)*(cx-target_x)+(cy-target_y)*(cy-target_y);
-            if (candidate_error<error) { x=cx; y=cy; error=candidate_error; }
-        }
-    }
-    d->left_x=(uint8_t)(x>127 ? 255 : x+128);
-    d->left_y=(uint8_t)(y>127 ? 255 : y+128);
+    bbgpu_input_configure(loaded_config ? loaded_config->mouse.stick!=0 : 0,
+                          loaded_config ? loaded_config->toggle_scancode : default_config.toggle_scancode,
+                          loaded_config ? loaded_config->reload_scancode : default_config.reload_scancode);
+    bbgpu_mouse_camera_configure(loaded_config ? loaded_config->mouse.camera_direct : 0,
+                                 loaded_config ? loaded_config->mouse.camera_sensitivity : 1.0f);
 }
-static void apply_keyboard(PadData *d, const bool *k, Uint32 mouse) {
-    for (int i=IN_CROSS;i<=IN_RIGHT;++i)
-        if (i!=IN_TOUCHPAD && i!=IN_TOUCHPAD_RIGHT && key_down(k,mouse,i)) d->buttons|=input_buttons[i];
-    if (key_down(k,mouse,IN_TOUCHPAD)) touch_click(d,0);
-    if (key_down(k,mouse,IN_TOUCHPAD_RIGHT)) touch_click(d,1);
-    if (key_down(k,mouse,IN_L2)) d->l2=255;
-    if (key_down(k,mouse,IN_R2)) d->r2=255;
-    key_movement(d,key_down(k,mouse,IN_MOVE_LEFT),key_down(k,mouse,IN_MOVE_RIGHT),
-                 key_down(k,mouse,IN_MOVE_UP),key_down(k,mouse,IN_MOVE_DOWN),key_down(k,mouse,IN_WALK));
-    d->right_x=key_axis(d->right_x,key_down(k,mouse,IN_LOOK_LEFT),key_down(k,mouse,IN_LOOK_RIGHT));
-    d->right_y=key_axis(d->right_y,key_down(k,mouse,IN_LOOK_UP),key_down(k,mouse,IN_LOOK_DOWN));
+/* CFG-008: called once per sample() (under `lock`), reloads if the window thread set the F8
+ * flag. The read of the new file (input_config_load, I/O) happens before the critical section
+ * that follows would matter, but since sample() itself always runs under `lock` already, the
+ * brief extra time here is the same class of work pad_read_state already does under that lock
+ * every frame (SDL calls); a config file is small and local, unlike a blocking I/O wait. */
+static void reload_config_if_requested(void) {
+    if (!bbgpu_input_reload_requested()) return;
+    char path[1024];
+    InputConfig *fresh=malloc(sizeof(*fresh));
+    if (!fresh) return;
+    if (input_config_path(path,sizeof(path)) && input_config_load(fresh,path)) {
+        InputConfig *old=loaded_config;
+        loaded_config=fresh;
+        free(old);
+        if (fresh->warnings) printf("Input config: %s reloaded, %u line(s) ignored (see above)\n",path,fresh->warnings);
+        else printf("Input config: %s reloaded\n",path);
+        bbgpu_input_configure(loaded_config->mouse.stick!=0,loaded_config->toggle_scancode,loaded_config->reload_scancode);
+        bbgpu_mouse_camera_configure(loaded_config->mouse.camera_direct,loaded_config->mouse.camera_sensitivity);
+    } else {
+        free(fresh);
+    }
+}
+/* CFG-003: loaded lazily on the first sample() after scePadOpen rather than inside pad_open
+ * itself -- both run under `lock`, and the first call into sample_host() is effectively
+ * "on open" from the game's point of view (nothing reads the pad before scePadOpen returns). */
+static const InputConfig *active_config(void) {
+    ensure_config_loaded();
+    return loaded_config ? loaded_config : &default_config;
 }
 
 static void sample_host(PadData *d) {
-    report_guest_heap();
     memset(d,0,sizeof(*d));
     d->left_x=d->left_y=d->right_x=d->right_y=128;
     d->orientation[3]=1.0f;
     d->connected=1; d->connected_count=connected_count ? connected_count : 1;
     d->timestamp=now_us();
     SDL_Gamepad *g=current_gamepad();
-    if (!bindings_ready) { load_bindings(); bindings_ready=1; }
-    if (bbgpu_overlay_captures_input()) { reset_key_movement(); return; } /* settings menu open */
-    const bool *k=SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL;
+    if (bbgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
+    const InputConfig *cfg=active_config();
+    BbMouseInput mouse; bbgpu_mouse_take(&mouse); /* MOU-008: drains dx/dy; buttons/wheel persist */
+    HostState host={SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL, g,
+        mouse.captured ? mouse.buttons : 0, mouse.captured ? mouse.wheel : 0};
+
+    /* MIX-001/002: keyboard, controller (and, from T5, mouse) are read together, buttons ORed.
+     * OUT_L2/OUT_R2 are skipped here (button_bit returns 0 for them anyway) and handled below,
+     * since they also carry an analog value that a plain button/key binding must snap to 255. */
+    static const InputOutput plain_buttons[]={
+        OUT_CROSS,OUT_CIRCLE,OUT_SQUARE,OUT_TRIANGLE,OUT_L1,OUT_R1,OUT_L3,OUT_R3,OUT_OPTIONS,
+        OUT_PAD_UP,OUT_PAD_DOWN,OUT_PAD_LEFT,OUT_PAD_RIGHT,
+    };
+    for (size_t i=0;i<sizeof(plain_buttons)/sizeof(*plain_buttons);++i) {
+        InputOutput out=plain_buttons[i];
+        if (button_output_held(&host,cfg,out)) d->buttons|=button_bit(out);
+    }
+    /* OUT-003/OUT-004: l2/r2 carry both a button bit and an analog value. A gatilho físico
+     * passes its own reading; a plain button/key bound to l2/r2 snaps the analog to 255,
+     * matching the pre-existing keyboard behavior (KBD-006). */
+    for (int i=0;i<cfg->table.binding_count[OUT_L2];++i) {
+        const InputBinding *b=&cfg->table.bindings[OUT_L2][i];
+        if (b->kind==IN_AXIS) { if (host.gamepad) d->l2=trigger(SDL_GetGamepadAxis(host.gamepad,(SDL_GamepadAxis)b->value)); }
+        else if (binding_held(&host,b)) d->l2=255;
+    }
+    for (int i=0;i<cfg->table.binding_count[OUT_R2];++i) {
+        const InputBinding *b=&cfg->table.bindings[OUT_R2][i];
+        if (b->kind==IN_AXIS) { if (host.gamepad) d->r2=trigger(SDL_GetGamepadAxis(host.gamepad,(SDL_GamepadAxis)b->value)); }
+        else if (binding_held(&host,b)) d->r2=255;
+    }
+    if (d->l2>INPUT_TRIGGER_BUTTON_THRESHOLD) d->buttons|=BTN_L2;
+    if (d->r2>INPUT_TRIGGER_BUTTON_THRESHOLD) d->buttons|=BTN_R2;
+
+    /* MIX-003/HLF-001/DZN-001: sticks, summed across sources, then deadzone, then halfmode. */
+    /* Half-axis outputs (keys, buttons, half sticks) first: opposite directions are resolved
+     * (stick_socd) and a left-stick release can be held briefly (stick_release_delay_ms), so
+     * switching A -> D never passes through neutral. Full-axis bindings are added after. */
+    const uint64_t now_sample=now_us();
+    const int last_wins=cfg->stick_socd_last;
+    int lx=resolve_axis_pair(&axis_pairs[0],axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_LEFT_X_PLUS,1),last_wins,now_sample);
+    int ly=resolve_axis_pair(&axis_pairs[1],axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y_PLUS,1),last_wins,now_sample);
+    int rx=resolve_axis_pair(&axis_pairs[2],axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X_PLUS,1),last_wins,now_sample);
+    int ry=resolve_axis_pair(&axis_pairs[3],axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_MINUS,-1),
+                             axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y_PLUS,1),last_wins,now_sample);
+    hold_stick_on_release(&left_release,&lx,&ly,cfg->stick_release_delay_ms,now_sample);
+    shape_digital_stick(&left_shape,&lx,&ly,cfg->stick_circular,cfg->stick_turn_rate,now_sample);
+    lx+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_X,1);
+    ly+=axis_output_value(&host,cfg,OUT_AXIS_LEFT_Y,1);
+    rx+=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_X,1);
+    ry+=axis_output_value(&host,cfg,OUT_AXIS_RIGHT_Y,1);
+    lx=lx<-127?-127:lx>127?127:lx; ly=ly<-127?-127:ly>127?127:ly;
+    rx=rx<-127?-127:rx>127?127:rx; ry=ry<-127?-127:ry>127?127:ry;
+    lx=apply_deadzone(lx,cfg->deadzone[DEADZONE_LEFT_STICK].inner,cfg->deadzone[DEADZONE_LEFT_STICK].outer);
+    ly=apply_deadzone(ly,cfg->deadzone[DEADZONE_LEFT_STICK].inner,cfg->deadzone[DEADZONE_LEFT_STICK].outer);
+    rx=apply_deadzone(rx,cfg->deadzone[DEADZONE_RIGHT_STICK].inner,cfg->deadzone[DEADZONE_RIGHT_STICK].outer);
+    ry=apply_deadzone(ry,cfg->deadzone[DEADZONE_RIGHT_STICK].inner,cfg->deadzone[DEADZONE_RIGHT_STICK].outer);
+
+    /* CNV-001/MOU-009: the mouse contribution is added after the stick's own deadzone, not
+     * before it -- mouse_to_axis's own output-value lerp already keeps small/slow motion from
+     * producing a jumpy or oversized contribution (see its doc comment), so running the result
+     * through apply_deadzone too would just chop off the small end of an already-smooth curve. */
+    if (mouse.captured && cfg->mouse.stick) {
+        uint64_t now=now_us();
+        double dt_ms=last_mouse_sample_us ? (double)(now-last_mouse_sample_us)/1000.0 : 33.0;
+        if (dt_ms<1.0) dt_ms=1.0;
+        if (dt_ms>100.0) dt_ms=100.0;
+        last_mouse_sample_us=now;
+        int mx=0, my=0;
+        mouse_to_axis(mouse.dx,mouse.dy,dt_ms,&cfg->mouse,&mx,&my);
+        int *tx=cfg->mouse.stick==1 ? &lx : &rx, *ty=cfg->mouse.stick==1 ? &ly : &ry;
+        *tx+=mx; *ty+=my;
+        *tx=*tx<-127?-127:*tx>127?127:*tx; *ty=*ty<-127?-127:*ty>127?127:*ty;
+    } else {
+        /* MOU-005/CNV-002: no stale dt or velocity-filter memory survives a capture gap -- the
+         * next capture must start the EMA fresh, not carry over speed from before the gap. */
+        last_mouse_sample_us=0;
+        smoothed_mouse_stick_x=smoothed_mouse_stick_y=0.0;
+    }
+
+    if (button_output_held(&host,cfg,OUT_LEFTJOYSTICK_HALFMODE)) { lx/=2; ly/=2; }
+    if (button_output_held(&host,cfg,OUT_RIGHTJOYSTICK_HALFMODE)) { rx/=2; ry/=2; }
+    d->left_x=(uint8_t)(128+lx); d->left_y=(uint8_t)(128+ly);
+    d->right_x=(uint8_t)(128+rx); d->right_y=(uint8_t)(128+ry);
+
+    /* OUT-002: the physical touchpad (real finger position/click) is unaffected by remap. */
     if (g) {
-        int touch_right=0;
-        for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
-            const int v=pad_value(g,i);
-            if (i==IN_L2) d->l2=(uint8_t)v;
-            if (i==IN_R2) d->r2=(uint8_t)v;
-            if (i==IN_TOUCHPAD_RIGHT) touch_right=v>30;
-            else if (v>30) d->buttons|=input_buttons[i];
-        }
-        d->left_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTX)); d->left_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_LEFTY));
-        d->right_x=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTX)); d->right_y=axis(SDL_GetGamepadAxis(g,SDL_GAMEPAD_AXIS_RIGHTY));
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK) || SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_TOUCHPAD))
+            d->buttons|=BTN_TOUCHPAD;
         if (SDL_GetNumGamepadTouchpads(g)>0) {
             const int fingers=SDL_GetNumGamepadTouchpadFingers(g,0);
             for (int finger=0;finger<fingers && d->touch_count<2;++finger) {
@@ -393,9 +505,11 @@ static void sample_host(PadData *d) {
         }
         // Back/Select on pads without a touch surface is a left-side click.
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
-        if (touch_right) touch_click(d,1);
     }
-    apply_keyboard(d,k,bbgpu_mouse_buttons());
+    /* OUT-001: touchpad_left/center/right outputs, remappable, independent of the physical pad. */
+    if (button_output_held(&host,cfg,OUT_TOUCHPAD_LEFT)) touch_click(d,0);
+    if (button_output_held(&host,cfg,OUT_TOUCHPAD_RIGHT)) touch_click(d,1);
+    if (button_output_held(&host,cfg,OUT_TOUCHPAD_CENTER)) { d->buttons|=BTN_TOUCHPAD; d->touch_count=1; d->touches[0]=(PadTouch){.x=960,.y=471,.id=0}; }
 }
 
 /* BB_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
@@ -520,28 +634,10 @@ static void replay_sample(PadData *d) {
 /* After the menu or the text dialog closes, buttons still held (the Cross that accepted a
  * name) stay hidden until released: the game would take them as a new press. */
 static int hold_after_capture;
-/* Touches as the DualShock 4 reports them: every finger that goes down gets a new id (1..127, kept
- * while it stays down) and the time since the first one went down. With id 0 and no hold time
- * the game ignored touchpad presses: no gesture menu from the touchpad, Back or Tab. */
-static void touch_ids(PadData *d) {
-    static uint8_t next_id=1, ids[2]; static int down[2]; static uint64_t since;
-    for (int i=0;i<2;++i) {
-        const int now=i<d->touch_count;
-        if (now && !down[i]) { ids[i]=next_id; next_id=next_id==127 ? 1 : next_id+1; }
-        down[i]=now;
-        if (now) d->touches[i].id=ids[i];
-    }
-    if (!d->touch_count) since=0;
-    else if (!since) since=d->timestamp;
-    d->touch_held_time=d->touch_count ? (uint32_t)(d->timestamp-since) : 0;
-}
 static void sample(PadData *d) {
+    reload_config_if_requested();
     sample_host(d);
-    if (bbgpu_overlay_captures_input()) {
-        reset_key_movement();
-        bbgpu_camera_pad(128,128,128,128,0);
-        hold_after_capture=1; touch_ids(d); return;
-    }
+    if (bbgpu_overlay_captures_input()) { hold_after_capture=1; return; }
     record_sample(d);
     read_inject();
     replay_sample(d);
@@ -553,16 +649,9 @@ static void sample(PadData *d) {
     uint8_t *axes[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
     if (hold_after_capture) {
-        if (d->buttons || d->l2 || d->r2 || d->touch_count) {
-            d->buttons=0;
-            d->l2=d->r2=0;
-            d->touch_count=0;
-            memset(d->touches,0,sizeof(d->touches));
-        }
+        if (d->buttons) d->buttons=0;
         else hold_after_capture=0;
     }
-    touch_ids(d);
-    bbgpu_camera_pad(d->left_x,d->left_y,d->right_x,d->right_y,d->buttons);
 }
 
 static ABI int32_t pad_init(void) { pthread_mutex_lock(&lock); initialized=1; pthread_mutex_unlock(&lock); return 0; }
@@ -574,7 +663,6 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t index, const voi
     if (index) return ERR_INVALID_ARG;
     pthread_mutex_lock(&lock);
     int already=opened; opened=1;
-    if (!already) reset_key_movement();
     pthread_mutex_unlock(&lock);
     if (already) return ERR_ALREADY_OPENED;
     puts("Runtime: pad opened for user 1 (SDL gamepad or keyboard)");
@@ -582,10 +670,7 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t index, const voi
 }
 static ABI int32_t pad_close(int32_t handle) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
-    pthread_mutex_lock(&lock);
-    opened=0; reset_key_movement();
-    pthread_mutex_unlock(&lock);
-    return 0;
+    opened=0; return 0;
 }
 static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
