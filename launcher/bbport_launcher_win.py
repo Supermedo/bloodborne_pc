@@ -198,7 +198,7 @@ INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': 
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '', 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'voice_language': 'auto',
-                'player_name': '', 'fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
+                'player_name': '', 'window_mode': 'windowed', 'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '',
                 'frames_ahead': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
@@ -223,6 +223,8 @@ LODS = [('0', ('As in the game', 'Как в игре')), ('-2', ('Highest (−2)
         ('1', ('Lower (1)', 'Ниже (1)')), ('2', ('Lowest (2)', 'Минимальная (2)'))]
 FPS_MODES = [('uncap', ('Unlocked (frame-time patch)', 'Без ограничения (патч)')), ('60', ('60 FPS',)),
              ('90', ('90 FPS',)), ('30', ('30 FPS (as on PS4)', '30 FPS (как на PS4)'))]
+WINDOW_MODES = [('windowed', ('Windowed', 'В окне')), ('borderless', ('Borderless', 'Без рамки')),
+                ('fullscreen', ('Fullscreen', 'Полный экран'))]
 PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (без разрывов)')),
                  ('Fifo', ('FIFO (VSync)',)), ('FifoRelaxed', ('FIFO Relaxed',)),
                  ('Immediate', ('Immediate (tearing)', 'Immediate (с разрывами)'))]
@@ -271,6 +273,13 @@ def load_json(path, default):
         return json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return default
+
+
+def load_app_settings():
+    saved = load_json(CONFIG_FILE, {})
+    if 'window_mode' not in saved and saved.get('fullscreen'):
+        saved['window_mode'] = 'borderless'  # the old Fullscreen checkbox was borderless
+    return {**APP_DEFAULTS, **saved}
 
 
 def ini_path():
@@ -440,7 +449,7 @@ def game_environment(s):
     env['BB_VOICE_LANGUAGE'] = s['voice_language']
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
-    env['BB_FULLSCREEN'] = '1' if s['fullscreen'] else '0'
+    env['BB_WINDOW_MODE'] = s['window_mode']
     env['BB_PRESENT_MODE'] = s['present_mode']
     if s['hdr']:
         env['BB_HDR'] = '1'
@@ -495,7 +504,7 @@ class Launcher:
     def __init__(self, root, tk, ttk, filedialog, messagebox):
         self.tk, self.ttk, self.filedialog, self.messagebox = tk, ttk, filedialog, messagebox
         self.root = root
-        self.app = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
+        self.app = load_app_settings()
         self.ini, self.ini_lines = load_ini()
         self.remap_ini_path = input_ini_path(ini_path())
         self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
@@ -834,8 +843,7 @@ class Launcher:
         self.row(quick, _('Upscaler', 'Апскейлер'), self.choice(quick, 'upscaler', 'ini', UPSCALERS, 26))
         self.row(quick, _('Preset', 'Пресет'), self.choice(quick, 'preset', 'ini', PRESETS, 26))
         self.row(quick, _('Output', 'Разрешение'), self.choice(quick, 'output_res', 'ini', OUTPUTS, 26))
-        ttk.Checkbutton(quick, text=_('Fullscreen', 'Полный экран'), variable=self.var('fullscreen', 'app')).grid(
-            row=self.next_row(quick), column=1, sticky='w', pady=(8, 0))
+        self.row(quick, _('Window', 'Окно'), self.choice(quick, 'window_mode', 'app', WINDOW_MODES, 26))
         ttk.Checkbutton(quick, text=_('Play online'), variable=self.var('online', 'app')).grid(
             row=self.next_row(quick), column=1, sticky='w', pady=(4, 0))
         ttk.Button(quick, text=_('Add to Steam'), command=self.add_to_steam).grid(
@@ -959,7 +967,7 @@ class Launcher:
                  _('1 keeps frame pacing even; more can raise FPS when the graphics card is the limit.',
                    '1 — ровная подача кадров; больше может поднять FPS, если упирается в видеокарту.'))
         self.section(f, _('Window', 'Окно'))
-        self.check(f, 'fullscreen', 'app', _('Fullscreen', 'Полноэкранный режим'))
+        self.row(f, _('Mode', 'Режим'), self.choice(f, 'window_mode', 'app', WINDOW_MODES))
         self.row(f, _('Presentation', 'Режим показа кадров'), self.choice(f, 'present_mode', 'app', PRESENT_MODES))
         self.check(f, 'hdr', 'app', _('Allow HDR output', 'Разрешить HDR'),
                    _('When HDR is on in Windows and the display supports it.',
@@ -2238,7 +2246,7 @@ def main():
     args = sys.argv[1:]
     if args and args[0] in ('--run', '--script'):
         sys.exit(run_role(args))
-    settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
+    settings = load_app_settings()
     LANG = settings.get('ui_language') or windows_language()
     if args[:1] == ['--install-update'] and len(args) == 3:
         sys.exit(install_update(args[1], args[2]))

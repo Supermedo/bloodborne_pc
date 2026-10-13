@@ -71,6 +71,9 @@ EN = {
     "Разрешение вывода": "Output resolution",
     "Апскейлер дорисовывает кадр; Steam Deck — 720p": "The upscaler fills the frame; Steam Deck: 720p",
     "Полноэкранный режим": "Fullscreen",
+    "Режим окна": "Window mode",
+    "В окне": "Windowed",
+    "Без рамки": "Borderless",
     "Смена разрешения на лету": "Live resolution changes",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":
         "No restart needed, but slower on the Steam Deck and older GPUs",
