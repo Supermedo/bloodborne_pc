@@ -290,6 +290,11 @@ def main():
                  'game when the gestures menu opens (the port has its own 60 fps): copy eboot.bin '
                  'from a clean dump of the 1.09 update into the game folder, replacing this one. '
                  'BB_SKIP_GAME_CHECK=1 starts it anyway.')
+        # A broken extraction: the game would hang loading its shaders, with no error.
+        sys.path.insert(0, str(PORT / 'scripts'))
+        import game_check
+        if broken := game_check.broken_files(game):
+            fail(game_check.explain(broken))
     game = Path(run_script('mods.py', game, '--out', out,
                            '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                            '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
