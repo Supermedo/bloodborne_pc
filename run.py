@@ -87,6 +87,10 @@ BRIDGE_OVERRIDES = {
     'http://thehuntersdream.com:18671/summon_messenger': BRIDGE_WEBAPI,
 }
 LIVE_MAP_PATCH = "Live map (The Hunter's Dream)"
+# The title's PLAY ONLINE / PLAY OFFLINE dialog: offline, the game goes straight to its main menu
+# (PLAY ONLINE would only fail there). Online play keeps the dialog. BB_SKIP_NETWORK_CHOICE=0 shows
+# it offline too. (From bbport 0.5-pre1, deadinside28/bloodborne_pc 39940f2.)
+SKIP_NETWORK_CHOICE_PATCH = 'Skip Online/Offline Choice'
 
 
 def bridge_files(user_dir):
@@ -355,6 +359,8 @@ def main():
         extra = env.get('BB_PATCHES', '')
         if env.get('BB_ONLINE') == '1' and env.get('BB_BRIDGE') == '1' and env.get('BB_BRIDGE_LIVE_MAP') == '1':
             extra = ';'.join(filter(None, (extra, LIVE_MAP_PATCH)))
+        if env.get('BB_ONLINE') != '1' and env.get('BB_SKIP_NETWORK_CHOICE', '1') != '0':
+            extra = ';'.join(filter(None, (extra, SKIP_NETWORK_CHOICE_PATCH)))
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
