@@ -198,7 +198,7 @@ INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': 
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '', 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'voice_language': 'auto',
-                'player_name': '', 'fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
+                'player_name': '', 'fullscreen': False, 'display': '', 'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '',
                 'frames_ahead': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
@@ -441,6 +441,8 @@ def game_environment(s):
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
     env['BB_FULLSCREEN'] = '1' if s['fullscreen'] else '0'
+    if s.get('display'):
+        env['BB_DISPLAY'] = str(s['display'])
     env['BB_PRESENT_MODE'] = s['present_mode']
     if s['hdr']:
         env['BB_HDR'] = '1'
@@ -960,6 +962,13 @@ class Launcher:
                    '1 — ровная подача кадров; больше может поднять FPS, если упирается в видеокарту.'))
         self.section(f, _('Window', 'Окно'))
         self.check(f, 'fullscreen', 'app', _('Fullscreen', 'Полноэкранный режим'))
+        holder = self.ttk.Frame(f)
+        self.display_box = self.ttk.Combobox(holder, state='readonly', width=38)
+        self.display_box.pack(side='left')
+        self.ttk.Button(holder, text=_('Refresh', 'Обновить'), command=self.refresh_displays).pack(side='left', padx=6)
+        self.row(f, _('Monitor', 'Монитор'), holder,
+                 _('The monitor the game window and fullscreen go to.', 'Монитор для окна и полного экрана игры.'))
+        self.refresh_displays()
         self.row(f, _('Presentation', 'Режим показа кадров'), self.choice(f, 'present_mode', 'app', PRESENT_MODES))
         self.check(f, 'hdr', 'app', _('Allow HDR output', 'Разрешить HDR'),
                    _('When HDR is on in Windows and the display supports it.',
@@ -1678,6 +1687,47 @@ class Launcher:
         if self.var('online', 'app').get() and self.var('online_pool', 'app').get() == 'huntersdream':
             online = _("Online (The Hunter's Dream)")
         return f'{_(*fps)}   ·   {upscaler}   ·   {output}   ·   {online}'
+
+    def refresh_displays(self):
+        """The Monitor choice: bb-gpu-capabilities --displays (off the Tk thread: it starts SDL's
+        video subsystem), numbered as the game counts them."""
+        self.show_displays(None)
+        threading.Thread(target=self.list_displays, daemon=True).start()
+
+    def list_displays(self):
+        exe = PORT_DIR / 'bin' / 'bb-gpu-capabilities.exe'
+        if not exe.is_file():
+            exe = PORT_DIR / 'out' / 'bb-gpu-capabilities.exe'
+        env = dict(os.environ)
+        if not (exe.parent / 'SDL3.dll').is_file():
+            clang64 = Path(os.environ.get('MSYS2_ROOT', r'C:\msys64')) / 'clang64' / 'bin'
+            env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
+        displays = []
+        try:
+            result = subprocess.run([str(exe), '--displays'], capture_output=True, text=True, encoding='utf-8',
+                                    errors='replace', timeout=10, env=env, creationflags=NO_WINDOW)
+            displays = [line.split('\t') for line in result.stdout.splitlines() if line.count('\t') == 2]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        self.ui_calls.put(lambda: self.show_displays(displays))
+
+    def show_displays(self, displays):
+        """displays: (name, WxH, primary) per monitor, or None while they are being listed."""
+        options = [('', _('Primary monitor', 'Основной монитор'))]
+        for number, (name, size, primary) in enumerate(displays or [], 1):
+            label = f'{number}: {name} ({size})' + (_(', primary', ', основной') if primary == '1' else '')
+            options.append((str(number), label))
+        var = self.var('display', 'app')
+        current = var.get()
+        if current and current not in [value for value, _label in options]:
+            # Not connected now: the game then opens on the primary monitor.
+            options.append((current, current if displays is None else
+                            _('{0} (not found: primary monitor used)',
+                              '{0} (не найден: используется основной)').format(current)))
+        box = self.display_box
+        box.configure(values=[label for _value, label in options])
+        box.current([value for value, _label in options].index(current))
+        box.bind('<<ComboboxSelected>>', lambda _event: var.set(options[box.current()][0]))
 
     def detect_gpu(self):
         exe = PORT_DIR / 'bin' / 'bb-gpu-capabilities.exe'

@@ -264,7 +264,7 @@ if (WIN32)
     # The guest main thread runs on the process stack: 16 MiB, committed (no stack probes).
     target_link_options(bb-probe PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
     add_executable(bb-gpu-capabilities ../tools/gpu_capabilities.c ../packaging/windows/bb-gpu-capabilities.rc)
-    target_link_libraries(bb-gpu-capabilities PRIVATE Vulkan::Vulkan)
+    target_link_libraries(bb-gpu-capabilities PRIVATE Vulkan::Vulkan PkgConfig::SDL3)
     # "Play Bloodborne.exe": the game with the launcher's saved settings, no launcher window.
     add_executable(bb-play WIN32 ../packaging/windows/play.c ../packaging/windows/play.rc)
     target_compile_options(bb-play PRIVATE -municode)
