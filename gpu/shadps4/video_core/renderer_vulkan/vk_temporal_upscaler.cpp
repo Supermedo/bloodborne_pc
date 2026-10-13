@@ -1304,6 +1304,22 @@ void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
 void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
                               VideoCore::ImageId depth, bool native_viewport) {
     if (!Scaled() && vs_hash == ui_trigger_vs) done_this_frame = true;
+    // bbport (issue #67, patch by bmy): a UI draw without a color target (a Scaleform mask, color
+    // writes off) writes the stencil the UI's next draws test, so it must go into the UI's
+    // output-size depth like them. Left in the guest depth, the mask was lost when the next UI
+    // draw switched to the UI depth (PrepareUiDepth clears its stencil): masked images (the
+    // loading screen's item picture, cut out of a sheet) vanished.
+    if (ui_phase && !color && depth && depth != ui_depth && ui_color) {
+        const auto& depth_image = texture_cache.GetImage(depth);
+        const auto& ui_target = texture_cache.GetImage(ui_color);
+        if (depth_image.info.size.width == ui_target.info.size.width &&
+            depth_image.info.size.height == ui_target.info.size.height) {
+            EnsureUiResources(ui_width, ui_height, ui_format, depth_image.info.pixel_format);
+            PrepareUiDepth(depth);
+            ui_depth = depth;
+        }
+        return;
+    }
     if (!Scaled() || !color) {
         return;
     }
