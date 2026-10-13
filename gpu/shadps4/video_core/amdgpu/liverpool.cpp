@@ -746,12 +746,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
         switch (type) {
         default:
-            UNREACHABLE_MSG("Wrong PM4 type {}", type);
-            break;
         case 0:
-            UNREACHABLE_MSG("Unimplemented PM4 type 0, base reg: {}, size: {}",
-                            header->type0.base.Value(), header->type0.NumWords());
-            break;
+            // bbport: a garbage dword read as a packet header (host data, a reused buffer)
+            // aborted the whole process here. The rest of this buffer is dropped instead; the
+            // loop ends normally, so the submission's cleanup below still runs.
+            if (static int reported = 0; reported < 16) {
+                ++reported;
+                LOG_WARNING(Render, "PM4 header {:#010x} (type {}) at +{:#x}: rest of the buffer "
+                            "dropped", header->raw, type,
+                            reinterpret_cast<uintptr_t>(dcb.data()) - base_addr);
+            }
+            dcb = {};
+            continue;
         case 2:
             // Type-2 packet are used for padding purposes
             dcb = NextPacket(dcb, 1);
@@ -1375,6 +1381,21 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
 
         auto* header = reinterpret_cast<const PM4Header*>(acb.data());
+        if (queue.tmp_dwords == 0 && header->type != 2 && header->type != 3) [[unlikely]] {
+            // bbport: a garbage header. Drop the rest of this buffer instead of aborting the
+            // process; the ring's read pointer moves past it. Checked before its count is used:
+            // a garbage count would be buffered below as a packet split across the ring's end.
+            if (static int reported = 0; reported < 16) {
+                ++reported;
+                LOG_WARNING(Render, "PM4 header {:#010x} (type {}) in compute: rest of the buffer "
+                            "dropped", header->raw, header->type.Value());
+            }
+            if constexpr (!is_indirect) {
+                *queue.read_addr += acb.size();
+                *queue.read_addr %= queue.ring_size_dw;
+            }
+            break;
+        }
         u32 next_dw_off = header->type3.NumWords() + 1;
 
         // If we have a buffered packet, use it.
