@@ -13,7 +13,7 @@ add_compile_options(-fno-omit-frame-pointer)
 if (MINGW)
     # Headers newer libc++ no longer includes transitively (see the file).
     add_compile_options(
-        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/mingw_libcxx_compat.h>")
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/mingw_libcxx_compat.h\">")
 endif()
 
 # bbport: link-time optimization (BB_LTO, default on) and profile-guided optimization
