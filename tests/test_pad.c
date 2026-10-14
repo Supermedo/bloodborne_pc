@@ -482,7 +482,49 @@ int main(void) {
     if (gamepad) SDL_CloseGamepad(gamepad);
     gamepad=NULL;
     assert(SDL_DetachVirtualJoystick(id));
+
+    /* A pad without a touch surface (Xbox): Back + d-pad left/right clicks that half while the
+     * d-pad is held and hides the d-pad; Back alone clicks the left half on release. */
+    desc.ntouchpads=0;
+    desc.touchpads=NULL;
+    id=SDL_AttachVirtualJoystick(&desc);
+    assert(id!=0);
+    joystick=SDL_OpenJoystick(id);
+    assert(joystick);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_BACK,true));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && gamepad && data.buttons==0 && data.touch_count==0);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_DPAD_RIGHT,true));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==BTN_TOUCHPAD);
+    assert(data.touch_count==1 && data.touches[0].x==1440);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_DPAD_RIGHT,false));
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_DPAD_LEFT,true));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==BTN_TOUCHPAD && data.touches[0].x==480);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_DPAD_LEFT,false));
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_BACK,false));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==0 && data.touch_count==0); /* combo: no click */
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_BACK,true));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==0);
+    assert(SDL_SetJoystickVirtualButton(joystick,SDL_GAMEPAD_BUTTON_BACK,false));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.buttons==BTN_TOUCHPAD && data.touches[0].x==480);
+    usleep(200000);
+    assert(pad_read_state(1,&data)==0 && data.buttons==0 && data.touch_count==0);
+    SDL_CloseJoystick(joystick);
+    if (gamepad) SDL_CloseGamepad(gamepad);
+    gamepad=NULL;
+    assert(SDL_DetachVirtualJoystick(id));
     SDL_Quit();
     unlink(path);
-    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture");
+    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture, Back + d-pad");
 }

@@ -35,7 +35,9 @@ Starting
   keeps the original voice selection. A missing translated file falls back to the original.
 - In the game, Insert (or L3+R3 on a gamepad) opens the port's menu (upscaler, resolution,
   effects). Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square,
-  Q Triangle, 1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad.
+  Q Triangle, 1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad
+  (left half), Backspace touchpad (right half). Xbox pads: Back + d-pad left/right clicks the
+  left/right touchpad half (gestures / key items), Back alone the left half.
 
 Data
 - Saves and shader caches: user\ next to Bloodborne.exe (the launcher can pick another folder).

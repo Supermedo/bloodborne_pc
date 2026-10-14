@@ -10,7 +10,10 @@
  *   WASD left stick, arrow keys right stick, Space Cross, LShift Circle,
  *   E Square, V Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, Q/C R3,
  *   Enter Options, Tab left touchpad, Backspace right touchpad,
- *   IJKL d-pad (I up, K down, J left, L right). */
+ *   IJKL d-pad (I up, K down, J left, L right).
+ *
+ * Gamepads without a touchpad (Xbox): Back + d-pad left/right clicks the left/right touchpad
+ * half, Back alone the left half (on release). */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
@@ -248,6 +251,15 @@ static void shape_digital_stick(StickShapeState *s, int *x, int *y, int circular
 static int button_output_held(const HostState *host, const InputConfig *cfg, InputOutput out) {
     for (int i=0;i<cfg->table.binding_count[out];++i)
         if (binding_held(host,&cfg->table.bindings[out][i])) return 1;
+    return 0;
+}
+/* button_output_held without bindings to the controller's Back button. */
+static int back_free_output_held(const HostState *host, const InputConfig *cfg, InputOutput out) {
+    for (int i=0;i<cfg->table.binding_count[out];++i) {
+        const InputBinding *b=&cfg->table.bindings[out][i];
+        if (b->kind==IN_CBUTTON && b->value==SDL_GAMEPAD_BUTTON_BACK) continue;
+        if (binding_held(host,b)) return 1;
+    }
     return 0;
 }
 /* DZN-001: shadPS4's ApplyDeadzone, ported -- below inner: 0; inner..outer: linear ramp to 127;
@@ -490,8 +502,8 @@ static void sample_host(PadData *d) {
 
     /* OUT-002: the physical touchpad (real finger position/click) is unaffected by remap. */
     if (g) {
-        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK) || SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_TOUCHPAD))
-            d->buttons|=BTN_TOUCHPAD;
+        // Back is handled below (touchpad halves on pads without a touch surface).
+        if (SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_TOUCHPAD)) d->buttons|=BTN_TOUCHPAD;
         if (SDL_GetNumGamepadTouchpads(g)>0) {
             const int fingers=SDL_GetNumGamepadTouchpadFingers(g,0);
             for (int finger=0;finger<fingers && d->touch_count<2;++finger) {
@@ -503,11 +515,34 @@ static void sample_host(PadData *d) {
                 }
             }
         }
-        // Back/Select on pads without a touch surface is a left-side click.
+        // Back/Select stands in for the touchpad on pads without one (Xbox): Back + d-pad left or
+        // right clicks that half (left: gestures, right: key items and the right-side choices of
+        // some prompts) while the d-pad is held; Back alone clicks the left half for 150 ms when
+        // it is released, so that a Back + right combo does not open the gestures first.
+        static bool back_was_down, back_combo;
+        static uint64_t back_click_until;
+        const bool back=SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK);
+        int back_side=-1;
+        if (back) {
+            if (!back_was_down) back_combo=false;
+            if (d->buttons & (BTN_LEFT|BTN_RIGHT)) {
+                back_side=(d->buttons & BTN_RIGHT) ? 1 : 0;
+                back_combo=true;
+            }
+            d->buttons&=~(uint32_t)(BTN_LEFT|BTN_RIGHT);
+        } else if (back_was_down && !back_combo) {
+            back_click_until=d->timestamp+150000;
+        }
+        back_was_down=back;
+        if (back_side<0 && d->timestamp<back_click_until) back_side=0;
+        if (back_side>=0 && !d->touch_count) touch_click(d,back_side);
+        // The touchpad button of a pad whose touch surface SDL does not report: a left-side click.
         if ((d->buttons & BTN_TOUCHPAD) && !d->touch_count) touch_click(d,0);
     }
-    /* OUT-001: touchpad_left/center/right outputs, remappable, independent of the physical pad. */
-    if (button_output_held(&host,cfg,OUT_TOUCHPAD_LEFT)) touch_click(d,0);
+    /* OUT-001: touchpad_left/center/right outputs, remappable, independent of the physical pad.
+     * A touchpad_left binding to the controller's Back (the default input.ini) is left to the
+     * Back handling above, so that Back + d-pad right does not click the left half too. */
+    if (back_free_output_held(&host,cfg,OUT_TOUCHPAD_LEFT)) touch_click(d,0);
     if (button_output_held(&host,cfg,OUT_TOUCHPAD_RIGHT)) touch_click(d,1);
     if (button_output_held(&host,cfg,OUT_TOUCHPAD_CENTER)) { d->buttons|=BTN_TOUCHPAD; d->touch_count=1; d->touches[0]=(PadTouch){.x=960,.y=471,.id=0}; }
 }

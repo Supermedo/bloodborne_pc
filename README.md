@@ -75,7 +75,9 @@ layout shadPS4 and bbport use).
 
 In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
 Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, V Triangle,
-1/3 L1/R1, R/F L2/R2, Z L3, Q/C R3 (lock-on), I/K/J/L d-pad, Enter Options, Tab touchpad.
+1/3 L1/R1, R/F L2/R2, Z L3, Q/C R3 (lock-on), I/K/J/L d-pad, Enter Options, Tab / Backspace left / right touchpad half.
+Xbox controllers: Back + d-pad left / right clicks the left / right touchpad half (gestures / key items),
+Back alone the left half.
 The keyboard now works together with a connected controller instead of only without one.
 All of this is configurable in `input.ini` (shadPS4's input config syntax: a Bloodborne file
 made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.md](docs/INPUT.md).
