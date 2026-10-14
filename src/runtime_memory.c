@@ -741,6 +741,28 @@ int runtime_memory_write_backing(uintptr_t address, const void *data, uint64_t s
     read_unlock();
     return ok;
 }
+/* Reads through the backing view: the host's copies of guest memory (uploads), which the GPU's
+ * read protection (BB_READBACKS=2: GPU-written pages) must not stop. A fault there would ask the
+ * GPU thread for a readback while it waits for these very copies (a hang at start). Gaps read
+ * as zeros. */
+void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size) {
+    unsigned char *out=data;
+    read_lock();
+    for (uintptr_t at=address, end=address+size; at<end;) {
+        const size_t i=vma_index(at);
+        uint64_t n;
+        if (i<vma_count && vmas[i].start<=at && vmas[i].kind!=KIND_RESERVED) {
+            n=(vmas[i].end<end ? vmas[i].end : end)-at;
+            memcpy(out+(at-address),backing_base+vmas[i].phys+(at-vmas[i].start),n);
+        } else {
+            const uintptr_t next=i==vma_count ? end : vmas[i].start>at ? vmas[i].start : vmas[i].end;
+            n=(next<end ? next : end)-at;
+            memset(out+(at-address),0,n);
+        }
+        at+=n;
+    }
+    read_unlock();
+}
 /* Per-thread cache of recently found regions for the GPU's per-draw queries:
  * entries hold for as long as the table generation they were read at. */
 typedef struct { uint64_t generation; uintptr_t start, end; int kind; } CachedRegion;

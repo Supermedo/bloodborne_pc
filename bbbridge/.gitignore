@@ -1,0 +1,20 @@
+# Your account (token + recovery code): never commit or share it.
+bbbridge_state.json
+bbbridge_state.json.*
+# Per-PC settings (the chosen bbport folder, ...)
+bbbridge_config.json
+
+# Logs and trace captures (they can hold session ids)
+*.log
+captures/
+
+# Build output
+build/
+bin/
+bbbridge.exe
+.vs/
+out/
+__pycache__/
+
+# Release packages (tools\make_release.ps1)
+dist/

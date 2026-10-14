@@ -70,6 +70,10 @@ void ConvertPositionToClipSpace(EmitContext& ctx) {
 // clip position for this frame and loads the one of the previous frame (same draw, same
 // vertex), both by buffer device address. Disabled accesses are branched around: a shared
 // scratch element would race between all the inactive vertex invocations.
+// Indexed draws may invoke the same vertex more than once; those invocations write the same
+// clip position, so one aligned store is enough. Device-scope atomics on PhysicalStorageBuffer
+// are illegal under the GLSL450 memory model and hang RDNA2: the first submit loses the device
+// as soon as any upscaler turns object motion on.
 static void EmitVertexMotion(EmitContext& ctx) {
     const Id u32_type = ctx.U32[1];
     const Id position = ctx.OpLoad(ctx.F32[4], ctx.output_position);
@@ -120,16 +124,8 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.AddLabel(store_label);
     const Id store_address = address(MotionVectors::positions_address,
                                      ctx.OpIAdd(u32_type, store_base, slot), 16);
-    // Indexed draws may invoke the same vertex more than once. Atomic component stores
-    // avoid write/write races; all these invocations produce the same clip position.
-    const Id scalar_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
-    const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
-    for (u32 i = 0; i < 4; ++i) {
-        const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
-            ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
-        const Id bits = ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
-        ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
-    }
+    ctx.OpStore(ctx.OpConvertUToPtr(f32x4_ptr, store_address), position,
+                spv::MemoryAccessMask::Aligned, 16u);
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);
 

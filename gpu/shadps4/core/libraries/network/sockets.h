@@ -232,6 +232,7 @@ u16 GetP2PConfiguredPort();
 u32 GetP2PAdvertisedAddr();
 bool EnsureP2PTransport();
 bool P2PTransportIsReady();
+void SetP2PServerEndpoint(u32 addr_nbo, u16 port_nbo);
 int P2PSignalingSendTo(const void* data, u32 len, u32 dest_addr, u16 dest_port);
 int P2PSignalingRecvFrom(void* buf, u32 len, u32* from_addr, u16* from_port);
 int P2PControlSendTo(const void* data, u32 len, u32 dest_addr, u16 dest_port);

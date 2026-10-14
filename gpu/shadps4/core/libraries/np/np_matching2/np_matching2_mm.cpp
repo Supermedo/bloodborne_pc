@@ -673,6 +673,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
     }
     LOG_INFO(Lib_NpMatching2, "ShadNet features: matching2_enabled={}", matching2_enabled);
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(matching2_enabled);
+    Net::SetP2PServerEndpoint(client ? server_addr : 0, client ? server_udp_port : 0);
 
     if (!client) {
         NpSignaling::Stubs::SetTransportHooks({});
@@ -1215,6 +1216,8 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
         g_mm.sig_replies.erase(pkt_id);
     }
     if (reply.first != ShadNet::ErrorType::NoError) {
+        LOG_WARNING(Lib_NpMatching2, "'{}': server error {}", target_online_id,
+                    static_cast<int>(reply.first));
         return false;
     }
 

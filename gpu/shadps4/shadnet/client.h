@@ -67,6 +67,7 @@ enum class CommandType : u16 {
     AddBlock = 10,
     RemoveBlock = 11,
     GetServerFeatures = 12,
+    SetClientVersion = 13,
     GetBoardInfos = 30,
     RecordScore = 31,
     RecordScoreData = 32,
@@ -105,6 +106,7 @@ enum class NotificationType : u16 {
     RoomEvent = 10,
     RoomMessage = 11,
     WebApiPushEvent = 17, // Generic NP WebApi push event
+    ClientRejected = 19,  // The server is signing this client out and says why
 };
 
 enum class ErrorType : uint8_t {
@@ -328,6 +330,9 @@ private:
     void HandleServerFeaturesReply(const std::vector<u8>& payload);
     void HandleNotification(u16 cmd_raw, const std::vector<u8>& payload);
     bool RequestServerFeatures();
+    // Tell the server which client this is; a shadNet server may deny clients that stay silent.
+    u64 ReportClientVersion();
+    static std::string BuildVersionString();
 
     // Helper: read a u32-LE-prefixed proto blob from a byte vector at pos.
     static std::string ExtractBlob(const std::vector<u8>& p, int pos);

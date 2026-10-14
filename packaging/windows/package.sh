@@ -25,8 +25,8 @@ fi
 out/pyenv/Scripts/python.exe -m pip install -q --disable-pip-version-check pyinstaller
 # The scripts run inside Bloodborne.exe (--script): the standard modules they import come along.
 hidden=()
-for module in argparse base64 collections hashlib json re shutil struct tempfile xml.etree.ElementTree \
-              urllib.request ctypes.wintypes; do
+for module in argparse base64 bisect collections contextlib hashlib json re shutil struct tempfile \
+              xml.etree.ElementTree urllib.request ctypes.wintypes; do
     hidden+=(--hidden-import "$module")
 done
 out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --windowed \
@@ -52,6 +52,8 @@ ldd "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" |
         cp -u "$dll" "$dest/bin/"
     done
 cp -r scripts patches "$dest/"
+# Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
+mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
@@ -62,6 +64,16 @@ if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
     cp gpu/dlss_bridge/LICENSE.txt "$dest/licenses/bbport_dlss-LICENSE.txt"
 else
     echo "DLSS bridge not built (packaging/windows/build_dlss.sh): no DLSS in this package" >&2
+fi
+# The Hunter's Dream co-op pool: bbbridge by MaskZeus (GPL-3.0-or-later, source in bbbridge/),
+# built with MSVC by packaging/windows/build_bbbridge.sh.
+if [[ -f out/bbbridge-cli.exe ]]; then
+    cp out/bbbridge-cli.exe "$dest/bin/"
+    mkdir -p "$dest/licenses"
+    cp bbbridge/LICENSE "$dest/licenses/bbbridge-LICENSE.txt"
+    cp bbbridge/THIRD_PARTY_NOTICES.txt "$dest/licenses/bbbridge-THIRD_PARTY_NOTICES.txt"
+else
+    echo "bbbridge not built (packaging/windows/build_bbbridge.sh): no Hunter's Dream pool in this package" >&2
 fi
 # Online co-op: the libraries compiled in (wepoll, cpp-httplib) and the MSYS2 DLLs it loads.
 mkdir -p "$dest/licenses"
@@ -88,7 +100,7 @@ if [[ ${running:-0} != 0 ]]; then
 else
     mkdir -p "$play"
     find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini \
-        ! -name mods.json ! -name patches.json -exec rm -rf {} +
+        ! -name input.ini ! -name mods.json ! -name patches.json ! -name last_run.log -exec rm -rf {} +
     cp -r "$dest/." "$play/"
 fi
 du -sh "$dest" dist/bbport-windows.zip

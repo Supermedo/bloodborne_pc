@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <xxhash.h>
+#include <mutex>
+#include <set>
 #include "video_core/renderer_vulkan/ui_composition.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -976,6 +978,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     motion_geometry = 0;
 
     PrepareRenderState(pipeline);
+    if (SkipOutputlessDraw(pipeline)) {
+        bind_prepared = nullptr;
+        ResetBindings(false);
+        return;
+    }
     if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
@@ -1191,6 +1198,10 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     motion_draw = false;
     motion_geometry = 0;
     PrepareRenderState(pipeline);
+    if (SkipOutputlessDraw(pipeline)) {
+        ResetBindings(false);
+        return;
+    }
     if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
@@ -3517,6 +3528,70 @@ u32 Rasterizer::GetGpuCommandProcessorThreadId() {
 } // namespace Vulkan
 
 namespace Vulkan {
+
+// bbport: drops draws that cannot change anything: no color target (mask 0 or color
+// disabled), no depth/stencil target (both tests off), and no shader stage that writes memory.
+// On the PS4 such draws only feed occlusion counters, which this port answers with fixed
+// values (EventWrite ZpassDone in liverpool.cpp), so the host GPU would rasterize and shade
+// them for nothing. The GPU profile shows them as "pass ... [] depth -". On by default;
+// BB_SKIP_EMPTY_DRAWS=0 draws them. With BB_FRAME_STATS=1 each new shader pair that
+// qualifies is printed once, skipped or not.
+bool Rasterizer::SkipOutputlessDraw(const GraphicsPipeline* pipeline) {
+    static const bool skip = [] {
+        const char* value = std::getenv("BB_SKIP_EMPTY_DRAWS");
+        return !value || value[0] != '0';
+    }();
+    if ((!skip && !BbStats::enabled) || db_desc.first) {
+        return false;
+    }
+    const auto& key = pipeline->GetGraphicsKey();
+    for (u32 cb = 0; cb < u32(std::bit_width(key.mrt_mask)); ++cb) {
+        if (cb_descs[cb].first) {
+            return false;
+        }
+    }
+    for (const auto* stage : pipeline->GetStages()) {
+        if (!stage) {
+            continue;
+        }
+        if (stage->uses_dma) {
+            return false;
+        }
+        for (const auto& buffer : stage->buffers) {
+            if (buffer.is_written) {
+                return false;
+            }
+        }
+        for (const auto& image : stage->images) {
+            if (image.is_written || image.is_atomic) {
+                return false;
+            }
+        }
+    }
+    if (BbStats::enabled) {
+        const auto& regs = Regs();
+        const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+        const u64 vs_hash = pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash;
+        const u64 ps_hash = ps ? ps->pgm_hash : 0;
+        static std::mutex mutex;
+        static std::set<std::pair<u64, u64>> seen;
+        std::scoped_lock lock{mutex};
+        if (seen.emplace(vs_hash, ps_hash).second) {
+            std::printf("Empty draw (%s): vs %016llx ps %016llx, %u indices x %u instances, "
+                        "mrt_mask %#x, color mode %u, cb0 %s mask %#x, depth test %u (valid %u), "
+                        "stencil %u (valid %u)\n",
+                        skip ? "skipped" : "drawn", static_cast<unsigned long long>(vs_hash),
+                        static_cast<unsigned long long>(ps_hash), regs.num_indices,
+                        regs.num_instances.NumInstances(), u32(key.mrt_mask),
+                        u32(regs.color_control.mode), regs.color_buffers[0] ? "set" : "unset",
+                        regs.color_target_mask.GetMask(0), u32(regs.depth_control.depth_enable),
+                        u32(regs.depth_buffer.DepthValid()),
+                        u32(regs.depth_control.stencil_enable),
+                        u32(regs.depth_buffer.StencilValid()));
+        }
+    }
+    return skip;
+}
 
 void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& state) {
     auto* profiler = GpuProfiler::Get();

@@ -75,7 +75,7 @@ static size_t mounts_done, memory_writes;
  * (e.g. the player's weapon sounds) never play. It is set before the game reads the save.
  * BB_SOUND_HACK=0 leaves saves untouched. */
 static void bloodborne_sound_hack(void) {
-    static const char *const ids[]={"CUSA00207","CUSA00208","CUSA00299","CUSA00900","CUSA01363","CUSA03014","CUSA03023","CUSA03173"};
+    static const char *const ids[]={"CUSA00207","CUSA00208","CUSA00299","CUSA00900","CUSA01363","CUSA03014","CUSA03023","CUSA03173","CUSA03179"};
     const char *env=getenv("BB_SOUND_HACK");
     if (env && env[0]=='0') return;
     int bloodborne=0;

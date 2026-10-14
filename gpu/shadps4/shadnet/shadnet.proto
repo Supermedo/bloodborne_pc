@@ -29,6 +29,22 @@ message SetAppearOfflineRequest {
     bool appear_offline = 1;
 }
 
+// Sent right after signing in. A server with clientversions.cfg rules signs out a client
+// that reports nothing, or a version it denies.
+message SetClientVersionRequest {
+    string version = 1;
+}
+
+// Notification 19: the server is signing this client out, then disconnects.
+//   reason:  1 = client version not accepted
+//   message: text for the player, from the rule that matched
+//   version: the version the server checked ("" = none reported)
+message NotifyClientRejected {
+    uint32 reason  = 1;
+    string message = 2;
+    string version = 3;
+}
+
 message ServerFeaturesReply {
     bool matching2_enabled = 1;
 }

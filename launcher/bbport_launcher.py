@@ -105,7 +105,7 @@ INI_DEFAULTS = {
 def load_settings():
     settings = dict(DEFAULTS)
     try:
-        settings.update(json.loads(CONFIG_FILE.read_text()))
+        settings.update(json.loads(CONFIG_FILE.read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
     return settings
@@ -113,7 +113,7 @@ def load_settings():
 
 def save_settings(settings):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False))
+    CONFIG_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding='utf-8')
 
 
 def ini_path():
@@ -124,7 +124,7 @@ def load_ini():
     values = dict(INI_DEFAULTS)
     lines = []
     try:
-        lines = ini_path().read_text().splitlines()
+        lines = ini_path().read_text(encoding='utf-8').splitlines()
     except OSError:
         pass
     for line in lines:
@@ -151,7 +151,7 @@ def save_ini(values, lines):
     for key, value in values.items():
         if key not in written:
             out.append(f"{key}={value}")
-    ini_path().write_text("\n".join(out) + "\n")
+    ini_path().write_text("\n".join(out) + "\n", encoding='utf-8')
 
 
 def patches_dir(settings):
@@ -615,13 +615,14 @@ class LauncherWindow(Adw.ApplicationWindow):
         rows = self.mod_list.rows
         profile = {"order": [name for name, _ in rows],
                    "disabled": [name for name, row in rows if not row.get_active()]}
-        (DATA_DIR / "mods.json").write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
+        (DATA_DIR / "mods.json").write_text(
+            json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
 
     def refresh_mods(self):
         self.mod_list.clear()
         self.mods_folder_row.set_subtitle(str(self.mods_dir()))
         try:
-            profile = json.loads((DATA_DIR / "mods.json").read_text())
+            profile = json.loads((DATA_DIR / "mods.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         available = discover_mods(self.mods_dir())
@@ -668,7 +669,7 @@ class LauncherWindow(Adw.ApplicationWindow):
                 (enabled if row.get_active() else disabled).append(key)
         path = DATA_DIR / "patches.json"
         try:
-            profile = json.loads(path.read_text())
+            profile = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         # Patches of files not listed now (another folder) keep their choice.
@@ -676,13 +677,13 @@ class LauncherWindow(Adw.ApplicationWindow):
         profile = {"enabled": sorted({k for k in profile.get("enabled", []) if k not in shown} | set(enabled)),
                    "disabled": sorted({k for k in profile.get("disabled", []) if k not in shown} | set(disabled))}
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
+        path.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding='utf-8')
 
     def refresh_patches(self):
         self.patch_list.clear()
         directory = patches_dir(self.settings)
         try:
-            profile = json.loads((DATA_DIR / "patches.json").read_text())
+            profile = json.loads((DATA_DIR / "patches.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
         found = external_patches(directory)

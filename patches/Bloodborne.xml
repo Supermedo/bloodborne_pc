@@ -422,7 +422,7 @@
             <Line Type="bytes" Address="0x018407DB" Value="41C785400200009A99993E"/>
             <Line Type="bytes" Address="0x018407E6" Value="E91E000000"/>
             <Line Type="bytes" Address="0x047DF584" Value="0000803E"/>
-            <Line Type="bytes" Address="0x011383ca" Value="8988883D"/>
+            <Line Type="bytes" Address="0x00F383CA" Value="8988883C"/>
             <Line Type="bytes" Address="0x01972A80" Value="8988883D"/>
             <Line Type="bytes" Address="0x04caf1c0" Value="8988883D"/>
             <Line Type="bytes" Address="0x04d2577c" Value="8988883D"/>
@@ -610,7 +610,7 @@
             <Line Type="bytes32" Address="0x0183a59f" Value="0x3F7BA901"/>
             <Line Type="bytes32" Address="0x0183a99d" Value="0x3F7BA901"/>
             <Line Type="bytes" Address="0x01CBDB42" Value="C7857CFFFFFF0AD7A33C909090909090"/>
-            <Line Type="bytes" Address="0x011383ca" Value="8988883D"/>
+            <Line Type="bytes" Address="0x00F383CA" Value="8988883C"/>
             <Line Type="bytes" Address="0x01972A80" Value="8988883D"/>
             <Line Type="bytes" Address="0x04caf1c0" Value="8988883D"/>
             <Line Type="bytes" Address="0x04d2577c" Value="8988883D"/>
@@ -623,6 +623,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="60 FPS++" Note="Changes some frame settings like the frame skip, vsync, frame tearing, etc.. \nWill help with better input delay/response times for 60 FPS." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x00a3fc3f" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b5458" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b55b6" Value="8988883C"/>
@@ -806,7 +808,7 @@
             <Line Type="bytes" Address="0x03ABC8CF" Value="EB"/>
             <Line Type="bytes" Address="0x03ABC8FB" Value="C8000000"/>
             <Line Type="bytes" Address="0x03ABCB20" Value="EB"/>
-            <Line Type="bytes" Address="0x011383ca" Value="8988883D"/>
+            <Line Type="bytes" Address="0x00F383CA" Value="8988083D"/>
             <Line Type="bytes" Address="0x01972A80" Value="8988883D"/>
             <Line Type="bytes" Address="0x04caf1c0" Value="8988883D"/>
             <Line Type="bytes" Address="0x04d2577c" Value="8988883D"/>
@@ -819,6 +821,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="90 FPS++" Note="Changes some frame settings like the frame skip, vsync, frame tearing, etc.. \nWill help with better input delay/response times for 90 FPS. Remember to change Vblank to 90 or higher." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x00a3fc3f" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b5458" Value="8988883C"/>
             <Line Type="bytes" Address="0x012b55b6" Value="8988883C"/>
@@ -1002,7 +1006,7 @@
             <Line Type="bytes" Address="0x03ABC8CF" Value="EB"/>
             <Line Type="bytes" Address="0x03ABC8FB" Value="C8000000"/>
             <Line Type="bytes" Address="0x03ABCB20" Value="EB"/>
-            <Line Type="bytes" Address="0x011383ca" Value="8988083D"/>
+            <Line Type="bytes" Address="0x00F383CA" Value="610B363C"/>
             <Line Type="bytes" Address="0x01972A80" Value="8988083D"/>
             <Line Type="bytes" Address="0x04caf1c0" Value="8988083D"/>
             <Line Type="bytes" Address="0x04d2577c" Value="8988083D"/>
@@ -1015,6 +1019,8 @@
     </Metadata>
     <Metadata Title="Bloodborne" Name="Uncap FPS++" Note="Not really recommended as a lot of the timestep fixes would vary with fluctuating frame cap. Remember to increase vblank frequency." Author="Lance McDonald (manfightdragon), Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
+            <!-- bbport: above ~90 FPS the sprint stayed at half speed after bumping into something. The "blocked against a wall" check turns the per-frame displacement into a speed by multiplying it by 30 (it assumes 30 FPS); divide it by the frame time instead. -->
+            <Line Type="bytes" Address="0x01914C24" Value="C5FA5E458C0F1F00"/>
             <Line Type="bytes" Address="0x024347F3" Value="31D2"/>
             <Line Type="bytes" Address="0x024348A2" Value="EB3D"/>
             <Line Type="bytes" Address="0x024348F0" Value="EB08"/>
@@ -1042,7 +1048,7 @@
             <Line Type="bytes" Address="0x01BF9B74" Value="8988883C"/>
             <Line Type="bytes" Address="0x02418E39" Value="8988883C"/>
             <Line Type="bytes" Address="0x02434883" Value="8988883B"/>
-            <Line Type="bytes" Address="0x011383CA" Value="8988883B"/>
+            <Line Type="bytes" Address="0x00F383CA" Value="8988083C"/>
             <Line Type="bytes" Address="0x01972A80" Value="8988883B"/>
             <Line Type="bytes" Address="0x025B3271" Value="4831F6"/>
             <Line Type="bytes" Address="0x04B693F0" Value="0000003F"/>
@@ -1258,6 +1264,11 @@
             <Line Type="bytes" Address="0x023b9190" Value="b805000000c3"/>
             <Line Type="bytes" Address="0x023B8730" Value="31C0C3909090909090909090909090"/>
             <Line Type="bytes" Address="0x01C2C890" Value="31C0C3909090909090909090909090"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="Circle Confirm (Japanese/Asian button layout)" Note="The game's check for the regions where Circle confirms (Japan, Asia) always answers yes: Circle confirms and interacts, Cross cancels and dodges, and the on-screen button icons follow. Applied after Unlock Game Region, which clears the same check." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x023B8730" Value="B801000000C3"/>
         </PatchList>
     </Metadata>
     <Metadata Title="Bloodborne" Name="Bookmark and Capture outputs" Author="Foxy Hooligans" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
@@ -3433,6 +3444,12 @@
             <Line Type="bytes" Address="0x01de367d" Value="4183bc24c400000001" />
             <Line Type="bytes" Address="0x01de3686" Value="e934f3b8ff" />
             <Line Type="bytes" Address="0x01de368b" Value="c3" />
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="Live map (The Hunter's Dream)" Note="Uploads the play log every 5 s instead of 300 s and samples the position every 0.5 s instead of 1.5 s, as bbhost does, so the player shows on thehuntersdream.com's live map. Only with The Hunter's Dream co-op pool (bbbridge)." Author="bbbridge (from bbhost)" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="float32" Address="0x023F9B8C" Value="5.0"/>
+            <Line Type="float32" Address="0x023F9B6E" Value="0.5"/>
         </PatchList>
     </Metadata>
 </Patch>

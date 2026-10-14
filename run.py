@@ -68,6 +68,133 @@ def online_overrides(env, user_dir):
     env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
 
 
+# The Hunter's Dream co-op pool (BB_BRIDGE=1, with bbhost players): bbbridge (bbbridge/, by
+# MaskZeus) stands in for the shadNet server on this PC and talks to The Hunter's Dream the way
+# bbhost does. Its account (Discord sign-in) is in user/bbbridge/bbbridge_state.json.
+BRIDGE_PORT = 31313
+BRIDGE_SERVER = f'127.0.0.1:{BRIDGE_PORT}'
+BRIDGE_WEBAPI = 'http://127.0.0.1:31315'
+BRIDGE_P2P_PORT = '3658'   # the game's P2P UDP port, as bbbridge expects it
+# The game's own server traffic through the bridge (bbbridge/src/setup.cpp, overrides()).
+BRIDGE_OVERRIDES = {
+    GAME_SERVER: 'http://127.0.0.1:31316',
+    'https://thehuntersdream.com:20443': 'http://127.0.0.1:31316',
+    'https://thehuntersdream.com:18671': 'http://127.0.0.1:31317',
+    'http://thehuntersdream.com:18671': 'http://127.0.0.1:31317',
+    'https://bb-playlog-test.s3.amazonaws.com:443': 'http://127.0.0.1:31317',
+    'https://bb-playlog-prod.s3.amazonaws.com:443': 'http://127.0.0.1:31317',
+    'https://thehuntersdream.com:18671/summon_messenger': BRIDGE_WEBAPI,
+    'http://thehuntersdream.com:18671/summon_messenger': BRIDGE_WEBAPI,
+}
+LIVE_MAP_PATCH = "Live map (The Hunter's Dream)"
+
+
+def bridge_files(user_dir):
+    """user/bbbridge: bbbridge's config, account and log. Returns (folder, config file)."""
+    folder = user_dir / 'bbbridge'
+    folder.mkdir(parents=True, exist_ok=True)
+    config = folder / 'bbbridge_config.json'
+    wanted = {'state_file': str(folder / 'bbbridge_state.json')}
+    try:
+        current = json.loads(config.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        current = None
+    if not isinstance(current, dict) or any(current.get(k) != v for k, v in wanted.items()):
+        config.write_text(json.dumps({**(current if isinstance(current, dict) else {}), **wanted},
+                                     indent=2) + '\n', encoding='utf-8')
+    return folder, config
+
+
+def bridge_accounts(user_dir):
+    """The Hunter's Dream ids signed in with Discord (bbbridge's account file)."""
+    try:
+        state = json.loads((user_dir / 'bbbridge' / 'bbbridge_state.json').read_text(encoding='utf-8'))
+        return list(state.get('accounts', {}))
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def bridge_listening():
+    import socket
+    try:
+        socket.create_connection(('127.0.0.1', BRIDGE_PORT), timeout=0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+def start_bridge(env, user_dir):
+    """Points the game at bbbridge and starts bbbridge-cli.exe for this launch (none when a bridge
+    already listens: bbbridge's own app). Returns the process to stop when the game ends."""
+    import time
+    accounts = bridge_accounts(user_dir)
+    if env.get('BB_SHADNET_NPID') not in accounts:
+        if not accounts and not bridge_listening():
+            fail("The Hunter's Dream: not signed in. Sign in with Discord on the launcher's Online page.")
+        if accounts:
+            env['BB_SHADNET_NPID'] = accounts[0]
+    env.update(BB_SHADNET_SERVER=BRIDGE_SERVER, BB_SHADNET_WEBAPI=BRIDGE_WEBAPI)
+    # The game signs in only with a password; the bridge never reads it.
+    env['BB_SHADNET_PASSWORD'] = env.get('BB_SHADNET_PASSWORD') or 'bbbridge'
+    env.setdefault('SHADPS4_P2P_PORT', BRIDGE_P2P_PORT)
+    path = user_dir / 'host_overrides.json'
+    path.write_text(json.dumps(BRIDGE_OVERRIDES, indent=2) + '\n', encoding='utf-8')
+    env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
+    if bridge_listening():
+        print(f"Co-op: The Hunter's Dream as {env.get('BB_SHADNET_NPID')}, through the bbbridge already running")
+        return None
+    cli = find_executable('bbbridge-cli.exe')
+    if not cli:
+        fail('bbbridge-cli.exe not found: build it with packaging/windows/build_bbbridge.sh.')
+    folder, config = bridge_files(user_dir)
+    log = folder / 'bbbridge.log'
+    process = subprocess.Popen([str(cli), '--config', str(config), '--log', str(log)], cwd=folder,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+    for _ in range(100):
+        if bridge_listening():
+            break
+        if process.poll() is not None:
+            tail = ''
+            try:
+                tail = ''.join(log.read_text(encoding='utf-8', errors='replace').splitlines(True)[-5:])
+            except OSError:
+                pass
+            fail(f'bbbridge stopped at start (exit code {process.returncode}):\n{tail}')
+        time.sleep(0.1)
+    print(f"Co-op: The Hunter's Dream as {env['BB_SHADNET_NPID']}, through bbbridge (log: {log})")
+    return process
+
+
+def stop_bridge(process):
+    if process and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+# The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
+# (seen on US CUSA00900): one of its edits inverts a branch in the menu code (+0xf6d90d) and the
+# gestures menu crashes the game. The port has its own 60 fps; the clean 1.09 eboot.bin is needed.
+LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
+
+
+def image_sha256(game):
+    """The SHA-256 of eboot.bin's loaded image (its loadable segments at their addresses): the
+    same whatever tool dumped it, unlike the SELF around it."""
+    import hashlib
+    sys.path.insert(0, str(PORT / 'scripts'))
+    from prepare import parse_self, span
+    elf, _header, ph, _segments, _missing = parse_self((Path(game) / 'eboot.bin').read_bytes())
+    loads = [p for p in ph if p['type'] in (1, 0x61000010)]
+    image = bytearray(max(p['vaddr'] + p['memsz'] for p in loads))
+    for p in loads:
+        image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
+    return hashlib.sha256(image).hexdigest()
+
+
 def fail(message):
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -153,25 +280,52 @@ def main():
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()
+    if env.get('BB_SKIP_GAME_CHECK') != '1':
+        try:
+            prepatched = image_sha256(game) == LANCE_60FPS_IMAGE
+        except (OSError, ValueError, KeyError, IndexError):
+            prepatched = False  # prepare.py reports unreadable executables itself
+        if prepatched:
+            fail("This eboot.bin has Lance McDonald's 60 fps patch applied to it, which crashes the "
+                 'game when the gestures menu opens (the port has its own 60 fps): copy eboot.bin '
+                 'from a clean dump of the 1.09 update into the game folder, replacing this one. '
+                 'BB_SKIP_GAME_CHECK=1 starts it anyway.')
     game = Path(run_script('mods.py', game, '--out', out,
                            '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                            '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
                            '--enabled', env.get('BB_MODS_ENABLED', '1'), capture=True).strip())
     mod_view = game if game.resolve() != original_game else None
+    bridge = None
     try:
         run_script('prepare.py', game, '--out', out)
         run_script('link_libc.py', game, '--out', out)
         run_script('link_modules.py', game, '--out', out)
+        # Legacy CPU profile (scripts/cpu_compat.py): the image no longer needs BMI1, LZCNT or
+        # MOVBE, and bb-probe's CPU check lets such a CPU start.
+        try:
+            compat = json.loads((out / 'link.json').read_text(encoding='utf-8')).get('cpu_compat', {})
+        except (OSError, ValueError):
+            compat = {}
+        if compat.get('enabled'):
+            env['BB_CPU_COMPAT'] = '1'
+        else:
+            env.pop('BB_CPU_COMPAT', None)
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
 
         # Patches exist for game version 01.09 only (patches.py applies none to others): other
         # versions keep the game's 30 FPS timing and change resolutions live.
         sys.path.insert(0, str(PORT / 'scripts'))
-        from patches import game_app_version
+        from patches import eboot_matches_patches, game_app_version
         version = game_app_version(game)
-        patched = version in (None, '01.09') or bool(env.get('BB_FORCE_PATCHES'))
+        forced = bool(env.get('BB_FORCE_PATCHES'))
+        patched = version in (None, '01.09') or forced
         if not patched:
             print(f'Game version {version}: community patches need 01.09; 30 FPS, no effect patches')
+        elif not forced and not eboot_matches_patches(out / 'eboot.elf'):
+            # param.sfo says 01.09, the code is another build's: the patches would break it.
+            patched = False
+            print('Game files: eboot.bin is not the 01.09 build the community patches were made for; '
+                  '30 FPS, no effect patches')
         # Sizes chosen below for the previous launch are recomputed after an in-game restart.
         if env.get('BB_AUTO_RENDER_RES') == '1':
             for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
@@ -198,7 +352,10 @@ def main():
             env.setdefault('BB_DMEM_MB', '9152')
             print(f'Output {scaled_output}: scene {scaled_render}, direct memory {env["BB_DMEM_MB"]} MiB '
                   '(live_resolution=1: live changes)')
-        run_script('patches.py', '--out', out, '--fps', fps, '--extra', env.get('BB_PATCHES', ''),
+        extra = env.get('BB_PATCHES', '')
+        if env.get('BB_ONLINE') == '1' and env.get('BB_BRIDGE') == '1' and env.get('BB_BRIDGE_LIVE_MAP') == '1':
+            extra = ';'.join(filter(None, (extra, LIVE_MAP_PATCH)))
+        run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
                    '--patches-dir', env.get('BB_PATCHES_DIR', data / 'patches'),
@@ -211,7 +368,9 @@ def main():
         user_dir = Path(env.get('BB_USER_DIR', data / 'user')).resolve()
         user_dir.mkdir(parents=True, exist_ok=True)
         env.setdefault('BB_GPU_USER_DIR', str(user_dir))
-        if env.get('BB_ONLINE') == '1':
+        if env.get('BB_ONLINE') == '1' and env.get('BB_BRIDGE') == '1':
+            bridge = start_bridge(env, user_dir)
+        elif env.get('BB_ONLINE') == '1':
             online_overrides(env, user_dir)
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         restart = [sys.executable, *this, '--after', str(os.getpid()), *args]
@@ -223,6 +382,7 @@ def main():
         # No stdin: an inherited pipe (shells such as Git Bash) cost the game its console output.
         return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
     finally:
+        stop_bridge(bridge)
         if mod_view:
             shutil.rmtree(mod_view, ignore_errors=True)
 

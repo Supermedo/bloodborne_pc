@@ -63,6 +63,17 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
         std::printf("Object motion: vertexPipelineStoresAndAtomics unsupported, off\n");
         return;
     }
+    // AMD before RDNA3 (RX 6000 and older, device ids below 0x7440): the GPU is lost at the first
+    // frame of the world with object motion on (RX 6600, 6650 XT, 6700 XT, 6900 XT), also with
+    // its stores made plain. Off there unless BB_OBJECT_MOTION=1 asks for it; the upscalers work
+    // without it, with motion from the camera only.
+    const auto props = instance.GetPhysicalDevice().getProperties();
+    const char* forced = std::getenv("BB_OBJECT_MOTION");
+    if (props.vendorID == 0x1002 && props.deviceID < 0x7440 && !(forced && forced[0] == '1')) {
+        std::printf("Object motion: off on this AMD GPU (RX 6000 and older lose the device with it; "
+                    "BB_OBJECT_MOTION=1 turns it on)\n");
+        return;
+    }
     void* mapped = nullptr;
     u64 params_address = 0, positions_address = 0;
     if (!CreateBuffer(instance, vk::DeviceSize(1 + FrameSlots * ParamsPerFrame) * 32, true,

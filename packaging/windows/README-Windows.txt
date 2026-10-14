@@ -7,6 +7,10 @@ the community patches (60/90/unlocked FPS, resolution, effects); other versions 
 
 Requirements
 - Windows 10 (1903 or later) or Windows 11, 64-bit.
+- An Intel Core of the 4th generation (Haswell, 2013) or newer, or an AMD Ryzen: the game uses
+  instructions of the PS4's processor (AVX, BMI1, MOVBE, LZCNT). Intel 2nd and 3rd generation
+  (Sandy and Ivy Bridge) run with translated instructions, best effort. On a processor without
+  AVX (many Pentium and Celeron models) the game says what is missing.
 - A Vulkan 1.3 graphics card with a current driver.
 - About 6 GB of free memory commit (RAM + page file), 10 GB for 1440p/4K output.
   Nothing else: Python and the libraries are inside this folder.
@@ -26,6 +30,9 @@ Starting
   Advanced -> "Check for updates" checks by hand.
 - Advanced -> "Launcher language": English, Russian, Arabic, Spanish, Portuguese, French,
   German, Italian, Polish, Turkish, Chinese, Japanese, Korean (default: the Windows language).
+- Game & effects -> "Text language" and "Voice language" are separate. Brazilian Portuguese
+  text uses the game's porbr files; voice tracks can use a different language. "As in the game"
+  keeps the original voice selection. A missing translated file falls back to the original.
 - In the game, Insert (or L3+R3 on a gamepad) opens the port's menu (upscaler, resolution,
   effects). Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square,
   Q Triangle, 1/3 L1/R1, R/F L2/R2, Z/C L3/R3, I/K/J/L d-pad, Enter Options, Tab touchpad
@@ -44,12 +51,17 @@ Online play (beta)
 - Messages, bloodstains and ghosts come from The Hunter's Dream (https://thehuntersdream.com);
   bells and summons go through the shadNet server. Everyone needs game version 1.09 and the
   same co-op server. Summoning between players is not confirmed yet.
+- To play with bbhost players (The Hunter's Dream's own PC port), choose "The Hunter's Dream"
+  under "Co-op pool" and press "Sign in with Discord" (no shadNet account needed). The game goes
+  online through bbbridge by MaskZeus, started with the game. Never share
+  user\bbbridge\bbbridge_state.json: it holds your account.
 
 Cheats
 - The "Cheats" page has cheats (never die, enemies do not see or hear you, Rally never fades,
   control the targeted enemy) and gameplay tweaks (no Rally, camera further away, no camera
-  auto-rotation, run with less stick tilt, ragdoll physics). They are game patches for 1.09,
-  applied when the game starts.
+  auto-rotation, run with less stick tilt, ragdoll physics, the Japanese/Asian button layout:
+  Circle confirms and interacts, Cross cancels and dodges, and the button icons follow). They
+  are game patches for 1.09, applied when the game starts.
 
 Problems
 - Black screen at start: Advanced -> "Clear shader cache", then start again (the first minutes
@@ -72,7 +84,8 @@ Mods and patches
 
 Credits
 - Online play: shadp2p by Wozzardman (https://github.com/Wozzardman/shadp2p), shadNet by the
-  shadPS4 team, The Hunter's Dream by droogie.
+  shadPS4 team, The Hunter's Dream by droogie, bbbridge by MaskZeus
+  (https://github.com/MaskZeus/bbbridge-bbport-online-tool, GPL-3.0-or-later).
 - bbport (the Linux port this is built on): https://github.com/deadinside28/bloodborne_pc
 - Windows port: https://github.com/Supermedo/bloodborne_pc
 - The full list of projects and patch authors is in README.md (Credits and licenses).

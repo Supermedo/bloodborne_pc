@@ -23,6 +23,7 @@
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/libraries/kernel/kernel.h"
+#include "core/libraries/network/net_upnp.h"
 #include "core/libraries/network/net_util.h"
 #include "net.h"
 #include "net_error.h"
@@ -33,6 +34,10 @@ namespace {
 
 constexpr u16 kSignalingVPortNbo = 0xffff;
 constexpr size_t kVPortHeaderSize = 4;
+// The shadPS4 team's shadNet server frames its UDP (STUN) packets as a PS4 P2P datagram:
+// [0xFF][0x80 | 3][src vport FFFF][dst vport FFFF][payload]. The shadp2p server takes the
+// 4-byte vport header above; each server drops the other's frames.
+constexpr u8 kServerSignalingHeader[] = {0xFF, 0x83, 0xFF, 0xFF, 0xFF, 0xFF};
 constexpr size_t kMaxUdpPayload = 65507;
 constexpr size_t kMaxP2PPayload = kMaxUdpPayload - kVPortHeaderSize;
 
@@ -53,6 +58,17 @@ struct QueuedPacket {
     u16 source_port{};
     std::vector<u8> payload;
 };
+
+// Two instances on one machine (SHADPS4_P2P_SAME_HOST=1): the server gives the peer as this
+// network's own public address, which reaches it only through a router that loops such traffic
+// back; the peer's socket is on this host, so the transport uses loopback for that address.
+bool SameHostPeers() {
+    static const bool enabled = [] {
+        const char* env = std::getenv("SHADPS4_P2P_SAME_HOST");
+        return env != nullptr && *env != '\0' && *env != '0';
+    }();
+    return enabled;
+}
 
 int FailWith(int error) {
     *Libraries::Kernel::__Error() = error;
@@ -217,6 +233,9 @@ public:
         LOG_INFO(Lib_Net,
                  "P2P transport ready: UDP physical_port={} (set SHADPS4_P2P_PORT to pin it)",
                  physical_port);
+        // Peers reach this port from outside only through a mapping on the router (no-op until
+        // the router has been found; UPnPClient asks again then).
+        UPnPClient::Instance().AddMapping(physical_port);
         return true;
 #endif
     }
@@ -304,6 +323,13 @@ public:
             std::memcpy(framed.data() + kVPortHeaderSize, data, len);
         }
 
+        if (SameHostPeers()) {
+            const u32 own = Common::Singleton<NetUtil::NetUtilInternal>::Instance()->GetExternalIp();
+            if (own != 0 && dest_addr_nbo == own) {
+                dest_addr_nbo = htonl(INADDR_LOOPBACK);
+            }
+        }
+
         sockaddr_in dest{};
         dest.sin_family = AF_INET;
         dest.sin_addr.s_addr = dest_addr_nbo;
@@ -326,8 +352,19 @@ public:
     }
 
     int SendInternal(const void* data, u32 len, u32 dest_addr_nbo, u16 dest_port_nbo) {
+        // To the shadNet server: once in each server's framing, as which one it is is not known
+        // (it answers only its own, and the reply is taken in either).
+        if (dest_addr_nbo != 0 && dest_addr_nbo == server_addr.load(std::memory_order_relaxed) &&
+            dest_port_nbo == server_port.load(std::memory_order_relaxed)) {
+            SendServerFrame(data, len, dest_addr_nbo, dest_port_nbo);
+        }
         return SendFrame(kSignalingVPortNbo, kSignalingVPortNbo, data, len, dest_addr_nbo,
                          dest_port_nbo);
+    }
+
+    void SetServerEndpoint(u32 addr_nbo, u16 port_nbo) {
+        server_addr.store(addr_nbo, std::memory_order_relaxed);
+        server_port.store(port_nbo, std::memory_order_relaxed);
     }
 
     int ReceiveInternal(InternalChannel channel, void* buf, u32 len, u32* from_addr,
@@ -356,6 +393,26 @@ public:
 
 private:
     P2PTransport() = default;
+
+    void SendServerFrame(const void* data, u32 len, u32 dest_addr_nbo, u16 dest_port_nbo) {
+#if defined(__linux__) || defined(_WIN32)
+        if (!Start() || !IsValidSocket(host_socket) || data == nullptr || len == 0 ||
+            len > kMaxUdpPayload - sizeof(kServerSignalingHeader)) {
+            return;
+        }
+        std::vector<u8> framed(sizeof(kServerSignalingHeader) + len);
+        std::memcpy(framed.data(), kServerSignalingHeader, sizeof(kServerSignalingHeader));
+        std::memcpy(framed.data() + sizeof(kServerSignalingHeader), data, len);
+
+        sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_addr.s_addr = dest_addr_nbo;
+        dest.sin_port = dest_port_nbo;
+        (void)::sendto(host_socket, reinterpret_cast<const char*>(framed.data()),
+                       static_cast<int>(framed.size()), 0,
+                       reinterpret_cast<const sockaddr*>(&dest), sizeof(dest));
+#endif
+    }
 
     std::deque<QueuedPacket>& QueueFor(InternalChannel channel) {
         switch (channel) {
@@ -424,6 +481,26 @@ private:
                 continue;
             }
 
+            // The other instance of SameHostPeers(): seen at the address the server gives for
+            // it, so the game and the signaling state know one address for the peer.
+            if (SameHostPeers() && from.sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
+                const u32 own =
+                    Common::Singleton<NetUtil::NetUtilInternal>::Instance()->GetExternalIp();
+                if (own != 0) {
+                    from.sin_addr.s_addr = own;
+                }
+            }
+
+            if (static_cast<size_t>(rc) >= sizeof(kServerSignalingHeader) &&
+                std::memcmp(buffer.data(), kServerSignalingHeader,
+                            sizeof(kServerSignalingHeader)) == 0) {
+                const u8* payload = buffer.data() + sizeof(kServerSignalingHeader);
+                const size_t payload_size = static_cast<size_t>(rc) - sizeof(kServerSignalingHeader);
+                PushInternal(ClassifyInternal(payload, payload_size), from.sin_addr.s_addr,
+                             from.sin_port, payload, payload_size);
+                continue;
+            }
+
             u16 source_vport_nbo = 0;
             u16 dest_vport_nbo = 0;
             std::memcpy(&source_vport_nbo, buffer.data(), sizeof(source_vport_nbo));
@@ -462,6 +539,8 @@ private:
 
     net_socket host_socket{kInvalidSocket};
     u16 physical_port{0};
+    std::atomic<u32> server_addr{0};
+    std::atomic<u16> server_port{0};
 
     std::mutex registry_mutex;
     std::unordered_map<u16, P2PSocket*> game_sockets;
@@ -964,6 +1043,10 @@ bool EnsureP2PTransport() {
 
 bool P2PTransportIsReady() {
     return P2PTransport::Instance().IsReady();
+}
+
+void SetP2PServerEndpoint(u32 addr_nbo, u16 port_nbo) {
+    P2PTransport::Instance().SetServerEndpoint(addr_nbo, port_nbo);
 }
 
 int P2PSignalingSendTo(const void* data, u32 len, u32 dest_addr, u16 dest_port) {

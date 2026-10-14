@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import struct
 from prepare import parse_self, span, unpack
+from cpu_compat import atomic_output, patch_libc
 
 
 def encode_id(value):
@@ -74,6 +75,7 @@ def module(path):
 def link(game, out):
     main = module(game/'eboot.bin')
     libc = module(game/'sce_module/libc.prx')
+    cpu_compat = patch_libc(libc)
     raw = (out/'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)
     if magic != b'BBPROBE2':
@@ -182,7 +184,7 @@ def link(game, out):
         raise ValueError('unsupported TLS layout')
     procparam = next(p for p in main['ph'] if p['type']==0x61000001)
     metadata = (base,libsize,base+libc['tags'][12],base+tls['vaddr'],tls['memsz'],tls['filesz'],len(bindings),procparam['vaddr'])
-    with (out/'boot-libc.bin').open('wb') as f:
+    with atomic_output(out/'boot-libc.bin') as f:
         f.write(struct.pack('<8s6Q',b'BBPROBE4',len(image),entry,len(segments),len(relocs),len(names),flags))
         f.write(struct.pack('<8Q',*metadata))
         f.write(struct.pack('<4Q',*main_tls_values))
@@ -193,13 +195,14 @@ def link(game, out):
             f.write(name.encode().ljust(128,b'\0'))
         for relocation in relocs: f.write(struct.pack('<QQqq',*relocation))
         f.write(image)
-    report = dict(base=hex(base),size=libsize,sha256=libc['sha256'],init=hex(metadata[2]),
+    report = dict(base=hex(base),size=libsize,sha256=libc['sha256'],cpu_compat=cpu_compat,init=hex(metadata[2]),
                   bindings=len(bindings),tls_module_id=2,fs_loads_patched=patched,
                   main_tls=dict(zip(('vaddr','filesz','memsz','align'),main_tls_values)),tls_relocations=tls_count,
                   tls_template_bytes=tls['filesz'],tls_memory_bytes=tls['memsz'],
                   imports=names,relocation_counts=dict(collections.Counter(r[1] for r in libc['relocs'])),
                   symbol_bindings=[dict(import_name=names[i],address=hex(a),kind=k) for i,a,k in bindings])
-    (out/'libc-link.json').write_text(json.dumps(report,indent=2)+'\n')
+    with atomic_output(out/'libc-link.json') as f:
+        f.write((json.dumps(report,indent=2)+'\n').encode('utf-8'))
     print(f'Linked native libc: base={base:#x}, {len(bindings)} fallback exports, TLS={tls["memsz"]} bytes; '
           f'eboot TLS={main_tls_values[2]} bytes, fs->gs patched={patched}')
 

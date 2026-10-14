@@ -20,6 +20,10 @@ VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace Vulkan {
 
+/// bbport: an allocation the VRAM budget refused, made past it instead (system memory if need
+/// be). Logged once per kind ("image", "buffer").
+void NoteOverBudget(const char* what);
+
 class Instance {
 public:
     explicit Instance(bool validation = false, bool crash_diagnostic = false);

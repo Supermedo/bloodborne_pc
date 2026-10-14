@@ -230,6 +230,19 @@ void CameraMotion::OnConstants(const float* data) {
     previous = current;
     std::memcpy(current.view.data(), data + 8, 12 * sizeof(float));
     std::memcpy(current.inv_view.data(), data + 180, 12 * sizeof(float));
+    // bbport: BB_CAMERA_LOG=<file>: one line per frame, "seconds x y z" of the main camera (the
+    // inverse view's translation), for measuring movement speed against the frame rate.
+    static FILE* camera_log = [] {
+        const char* path = std::getenv("BB_CAMERA_LOG");
+        return path && *path ? std::fopen(path, "w") : nullptr;
+    }();
+    if (camera_log) {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        std::fprintf(camera_log, "%.6f %.4f %.4f %.4f\n",
+                     std::chrono::duration<double>(now).count(), current.inv_view[3],
+                     current.inv_view[7], current.inv_view[11]);
+        std::fflush(camera_log);
+    }
     current.proj = {data[52], data[57], data[62], data[63]};
     current.valid = current.proj[0] != 0.0f && current.proj[1] != 0.0f;
     const std::array<u32, 2> size{u32(data[4]), u32(data[5])};

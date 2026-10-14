@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 
 #include "client.h"
@@ -537,6 +538,21 @@ bool ShadNetClient::RequestServerFeatures() {
     return true;
 }
 
+// BB_CLIENT_VERSION replaces the default, for a server whose clientversions.cfg expects
+// another format.
+std::string ShadNetClient::BuildVersionString() {
+    if (const char* version = std::getenv("BB_CLIENT_VERSION"); version && *version)
+        return version;
+    return "shadPS4 bbport";
+}
+
+u64 ShadNetClient::ReportClientVersion() {
+    shadnet::SetClientVersionRequest req;
+    req.set_version(BuildVersionString());
+    LOG_INFO(ShadNet, "Reporting client version '{}'", req.version());
+    return SubmitRequest(CommandType::SetClientVersion, MakeProtoPayload(req));
+}
+
 // Packet dispatch
 
 void ShadNetClient::DispatchPacket(PacketType type, u16 cmd_raw, u64 pkt_id,
@@ -552,6 +568,12 @@ void ShadNetClient::DispatchPacket(PacketType type, u16 cmd_raw, u64 pkt_id,
             break;
         case CommandType::GetServerFeatures:
             HandleServerFeaturesReply(payload);
+            break;
+        case CommandType::SetClientVersion:
+            // Nobody waits for this reply; a refusal arrives as a ClientRejected notification.
+            if (!payload.empty() && static_cast<ErrorType>(payload[0]) != ErrorType::NoError)
+                LOG_WARNING(ShadNet, "SetClientVersion returned error={}",
+                            static_cast<int>(payload[0]));
             break;
         default:
             if (onAsyncReply) {
@@ -622,6 +644,9 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                 m_authenticated = true;
                 LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", m_npid, m_user_id,
                          m_friends.size());
+
+                // First, before the server's version timeout runs out.
+                ReportClientVersion();
 
                 const u64 pkt_id = m_pkt_counter.fetch_add(1);
                 std::vector<u8> empty_payload;
@@ -909,6 +934,16 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
                  n.npServiceName, n.dataType, n.fromNpid, n.data.size(), n.extdData.size());
         if (onWebApiPushEvent)
             onWebApiPushEvent(n);
+        break;
+    }
+    case NotificationType::ClientRejected: {
+        shadnet::NotifyClientRejected pb;
+        if (!pb.ParseFromString(blob)) {
+            LOG_WARNING(ShadNet, "ClientRejected parse error");
+            break;
+        }
+        LOG_ERROR(ShadNet, "Server rejected this client (reason={}, version='{}'): {}",
+                  pb.reason(), pb.version(), pb.message());
         break;
     }
     default:

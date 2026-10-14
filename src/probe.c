@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <cpuid.h>
 #include "runtime.h"
 #include "gpu/bbgpu.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
@@ -97,6 +98,58 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+/* The game is built for the PS4's AMD Jaguar CPU: AVX throughout, and BMI1 (andn, bextr, blsi, blsr,
+ * tzcnt), MOVBE, LZCNT and POPCNT in thousands of places, its libc's string functions among them.
+ * Without them it stopped at the first one with an illegal instruction (0xc000001d in libc.prx
+ * while module 0 initialized), except LZCNT, which older Intel CPUs run as BSR (other results).
+ * Exit code 24 with a message instead; BB_SKIP_CPU_CHECK=1 starts anyway. The Legacy CPU profile
+ * (scripts/cpu_compat.py; run.py sets BB_CPU_COMPAT=1) translates BMI1, LZCNT and MOVBE in the
+ * linked image, so only the others stop the game then. */
+static void check_cpu(void) {
+    if (getenv("BB_SKIP_CPU_CHECK")) return;
+    const int translated=getenv("BB_CPU_COMPAT")!=NULL;
+    unsigned a=0, b=0, c=0, d=0, basic=0, leaf7=0, extended=0;
+    if (__get_cpuid(1,&a,&b,&c,&d)) basic=c;
+    if (__get_cpuid_max(0,NULL)>=7) { __cpuid_count(7,0,a,b,c,d); leaf7=b; }
+    if (__get_cpuid(0x80000001,&a,&b,&c,&d)) extended=c;
+    int avx=0;
+    if (((basic>>27)&1) && ((basic>>28)&1)) { /* OSXSAVE and AVX: the OS also has to save YMM state */
+        unsigned low, high;
+        __asm__ volatile("xgetbv" : "=a"(low), "=d"(high) : "c"(0));
+        avx=(low&6)==6;
+    }
+    const struct { int present, translatable; const char *name; } features[]={
+        {avx,0,"AVX"}, {(leaf7>>3)&1,1,"BMI1"}, {(basic>>22)&1,1,"MOVBE"}, {(extended>>5)&1,1,"LZCNT"},
+        {(basic>>23)&1,0,"POPCNT"}, {(basic>>20)&1,0,"SSE4.2"},
+    };
+    char missing[64]="", translations[64]="";
+    for (size_t i=0;i<sizeof(features)/sizeof(*features);++i) {
+        if (features[i].present) continue;
+        char *list=translated && features[i].translatable ? translations : missing;
+        if (*list) strcat(list,", ");
+        strcat(list,features[i].name);
+    }
+    if (*translations) printf("CPU: no %s; the Legacy CPU translations run instead (best effort)\n",translations);
+    if (!*missing) return;
+    unsigned words[12]={0};
+    char brand[49]="";
+    if (__get_cpuid_max(0x80000000,NULL)>=0x80000004)
+        for (unsigned i=0;i<3;++i) __get_cpuid(0x80000002+i,&words[i*4],&words[i*4+1],&words[i*4+2],&words[i*4+3]);
+    memcpy(brand,words,48);
+    for (size_t n=strlen(brand); n && brand[n-1]==' '; --n) brand[n-1]=0;
+    const char *name=brand;
+    while (*name==' ') ++name;
+    if (!*name) name="unknown processor";
+    fprintf(stderr,"STOP: unsupported CPU %s: missing %s (needs Intel Core 4th generation or newer, or AMD Ryzen)\n",name,missing);
+#ifdef _WIN32
+    char text[512];
+    snprintf(text,sizeof(text),"This processor cannot run the game:\n%s\n\nMissing instructions: %s\n\n"
+             "The game uses instructions of the PS4's processor. They need an Intel Core of the 4th "
+             "generation (Haswell, 2013) or newer, or an AMD Ryzen.",name,missing);
+    MessageBoxA(NULL,text,"Bloodborne",MB_OK|MB_ICONERROR|MB_SETFOREGROUND);
+#endif
+    exit(24);
+}
 #ifdef _WIN32
 static void describe_address(char *out, size_t size, uintptr_t address) {
     HMODULE module=NULL;
@@ -386,6 +439,7 @@ int main(int argc, char **argv) {
     mallopt(M_MMAP_THRESHOLD,32*1024*1024);
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
+    check_cpu();
 #ifdef _WIN32
     /* The PS4 user range must stay free of host allocations (GPU driver, heaps), and the guest
      * TCB needs one of the 64 TEB TLS slots before DLLs (Vulkan drivers) take them. */

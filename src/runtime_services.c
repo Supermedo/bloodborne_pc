@@ -291,6 +291,16 @@ static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_I
 static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) { (void)ctx; (void)handle; (void)options; return 0; }
 static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
     (void)ctx; (void)handle;
+    /* <user>/trophies.log ("id unix-time" per line) is read by the launcher's Trophies page,
+     * also when the game was started without it (shortcut, Steam). */
+    if (id>=0 && id<128) {
+        char path[600];
+        snprintf(path,sizeof(path),"%s/trophies.log",runtime_file_user_dir());
+        pthread_mutex_lock(&lock);
+        FILE *log=fopen(path,"a");
+        if (log) { fprintf(log,"%d %lld\n",id,(long long)time(NULL)); fclose(log); }
+        pthread_mutex_unlock(&lock);
+    }
     printf("Runtime: trophy %d unlocked\n",id);
     if (platinum) *platinum=-1;
     return 0;

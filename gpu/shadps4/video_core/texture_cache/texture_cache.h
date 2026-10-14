@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include "bbport_toggles.h"
@@ -369,6 +370,7 @@ private:
     void UntrackImageTail(ImageId image_id);
 
     void MarkAsMaybeDirty(ImageId image_id, Image& image);
+    static u64 MaybeDirtyHash(const Image& image);
 
     /// Removes the image and any views/surface metas that reference it.
     void DeleteImage(ImageId image_id);
@@ -399,8 +401,16 @@ private:
     tsl::robin_map<u64, Sampler> samplers;
     std::unordered_set<ImageId> download_images;
     u64 total_used_memory = 0;
-    u64 gc_evictions = 0, gc_downloads = 0; ///< bbport: pressure report
+    u64 gc_evictions = 0, gc_downloads = 0, gc_dropped = 0; ///< bbport: pressure report
+    u64 gc_kept = 0, gc_kept_bytes = 0; ///< bbport: old images the latest pass could not evict
     std::chrono::steady_clock::time_point gc_report_time{};
+    /// bbport: registered images and their guest size, for the once-a-minute memory line.
+    u64 image_count = 0, image_bytes = 0;
+    std::chrono::steady_clock::time_point memory_report_time{};
+    void ReportMemory();
+    /// bbport: gc_tick at each of the last 64 seconds (GarbageCollectImages).
+    std::array<u64, 64> gc_tick_at_second{};
+    u64 gc_second = 0;
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;
     u64 critical_gc_memory = 0;
