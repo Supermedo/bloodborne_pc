@@ -504,7 +504,7 @@ void input_config_defaults(InputConfig *out) {
  * (tests/test_input_defaults.py checks that they match). */
 #define DEFAULT_HEADER \
 "# bbport input (shadPS4 syntax: output = input, one input per line).\n" \
-"# A shadPS4 input config (user/input_config/CUSA03173.ini) can be copied over this file.\n" \
+"# A shadPS4 input config (user/input_config/CUSA03694.ini) can be copied over this file.\n" \
 "# F7 toggles the mouse, F8 reloads this file.\n" \
 "\n"
 

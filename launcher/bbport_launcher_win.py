@@ -195,7 +195,7 @@ INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': 
                 'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080', 'model_lod': '0',
                 'live_resolution': 'auto',
                 **{key: '1' if on else '0' for key, _t, on in EFFECTS + EXTRAS + CHEATS + TWEAKS}}
-APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '', 'dlc_dir': '',
+APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03694'), 'user_dir': '', 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'voice_language': 'auto',
                 'player_name': '', 'fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
@@ -315,9 +315,9 @@ def game_info(folder):
     try:
         from prepare import sfo
         values = sfo((folder / 'sce_sys/param.sfo').read_bytes())
-        return values.get('TITLE', 'Bloodborne').replace('™', '').strip(), values.get('APP_VER', '?')
+        return values.get('TITLE', 'Gravity Rush 2').replace('™', '').strip(), values.get('APP_VER', '?')
     except (OSError, ValueError, ImportError):
-        return 'Bloodborne', '?'
+        return 'Gravity Rush 2', '?'
 
 
 def webapi_address(server):
@@ -516,7 +516,7 @@ class Launcher:
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
         self.tracker = trophies.Tracker(self.trophy_dir())
         self.trophies_loaded, self.toasts = False, []
-        root.title('Bloodborne — bbport')
+        root.title('Gravity Rush 2')
         root.configure(bg=BG)
         self.dpi = root.winfo_fpixels('1i') / 96.0
         root.geometry(f'{self.px(1120)}x{self.px(740)}')
@@ -537,7 +537,7 @@ class Launcher:
 
     def set_icon(self):
         try:
-            self.root.iconbitmap(default=str(PORT_DIR / 'launcher' / 'bloodborne.ico'))
+            self.root.iconbitmap(default=str(PORT_DIR / 'launcher' / 'gravity.ico'))
             return
         except self.tk.TclError:
             pass
@@ -868,9 +868,9 @@ class Launcher:
                                                        'Выберите папку игры («Игра и эффекты»)'),
                           fill=MUTED, font=('Segoe UI', 11))
         if not self.banner_image:
-            c.create_text(30, h - 70, text='Bloodborne', anchor='w', fill='#f2ead9', font=('Georgia', 36))
+            c.create_text(30, h - 70, text='Gravity Rush 2', anchor='w', fill='#f2ead9', font=('Georgia', 36))
         info = game_info(self.var('game_dir', 'app').get())
-        sub = (_('CUSA03173 · game version {}', 'CUSA03173 · версия игры {}').format(info[1]) if info
+        sub = (_('Gravity Rush 2 · version {}', 'Gravity Rush 2 · версия игры {}').format(info[1]) if info
                else _('Game folder not set', 'Папка игры не выбрана'))
         c.create_text(33, h - 30, text=sub, anchor='w', fill=GOLD, font=('Segoe UI', 11))
 
@@ -971,16 +971,14 @@ class Launcher:
         self.section(f, _('Game', 'Игра'), top=4)
         self.folder(f, 'game_dir', _('Game folder', 'Папка игры'),
                     _('Choose the folder with eboot.bin', 'Выберите папку с eboot.bin'),
-                    _('Your own dump of CUSA03173 (eboot.bin, sce_module, sce_sys, dvdroot_ps4); version 1.09 '
-                      'for the community patches.', 'Ваш дамп CUSA03173 (eboot.bin, sce_module, sce_sys, '
-                      'dvdroot_ps4); версия 1.09 для патчей сообщества.'), on_change=self.game_changed)
+                    _('Your decrypted dump of Gravity Rush 2 (CUSA03694, CUSA04943, etc.) containing eboot.bin.',
+                      'Ваш дамп Gravity Rush 2 (CUSA03694, CUSA04943 и др.) с eboot.bin.'), on_change=self.game_changed)
         self.folder(f, 'user_dir', _('Saves folder', 'Папка сохранений'),
                     _('Choose the saves folder', 'Выберите папку сохранений'),
                     _('Empty: {} (shader caches are kept there too).',
                       'Пусто: {} (там же кэш шейдеров).').format(DATA_DIR / 'user'), on_change=self.refresh_status)
         self.folder(f, 'dlc_dir', _('DLC folder'), _('Choose the DLC folder'),
-                    _('Your dumped add-ons, one folder each named like SPEXPANSIONDLC03 (The Old Hunters). '
-                      'Only needed with a base-game dump; the Game of the Year edition (CUSA03173) has it.'))
+                    _('Your dumped Gravity Rush 2 add-ons / DLC folders (e.g. Another Story: Raven\'s Choice).'))
         self.row(f, _('Text language', '\u042f\u0437\u044b\u043a \u0442\u0435\u043a\u0441\u0442\u0430'), self.choice(f, 'language', 'app', LANGUAGES))
         self.row(f, _('Voice language', '\u042f\u0437\u044b\u043a \u043e\u0437\u0432\u0443\u0447\u043a\u0438'), self.choice(f, 'voice_language', 'app', VOICE_LANGUAGES),
                  _('As in the game uses the original voice setting; other choices use available tracks.'))
@@ -1858,8 +1856,8 @@ class Launcher:
             return
         self.collect()
         if not game_info(self.app['game_dir']):
-            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
-                                                      'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.messagebox.showerror('Gravity Rush 2', _('Choose the game folder with eboot.bin (CUSA03694).',
+                                                      'Выберите папку игры с eboot.bin (CUSA03694).'))
             self.show('game')
             return
         self.set_log('')
@@ -2077,17 +2075,17 @@ class Launcher:
         else:  # a source tree: the launcher script with the windowless Python
             pythonw = Path(sys.executable).with_name('pythonw.exe')
             target = str(pythonw if pythonw.exists() else sys.executable)
-            arguments, icon = Path(__file__).resolve(), PORT_DIR / 'launcher' / 'bloodborne.ico'
+            arguments, icon = Path(__file__).resolve(), PORT_DIR / 'launcher' / 'gravity.ico'
         script = ('$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath("Desktop")'
-                  '+"\\Bloodborne.lnk");'
+                  '+"\\Gravity Rush 2.lnk");'
                   f'$s.TargetPath="{target}";$s.WorkingDirectory="{PORT_DIR}";$s.IconLocation="{icon}";'
                   + (f"$s.Arguments='\"{arguments}\"';" if arguments else '') + '$s.Save()')
         result = subprocess.run(['powershell', '-NoProfile', '-Command', script], capture_output=True,
                                 creationflags=NO_WINDOW)
         if result.returncode == 0:
-            self.messagebox.showinfo('Bloodborne', _('Shortcut created on the desktop.', 'Ярлык создан на рабочем столе.'))
+            self.messagebox.showinfo('Gravity Rush 2', _('Shortcut created on the desktop.', 'Ярлык создан на рабочем столе.'))
         else:
-            self.messagebox.showerror('Bloodborne', result.stderr.decode(errors='replace')[:400])
+            self.messagebox.showerror('Gravity Rush 2', result.stderr.decode(errors='replace')[:400])
 
     def add_to_steam(self):
         """Bloodborne in the Steam library (a non-Steam game that starts Play Bloodborne.exe)."""

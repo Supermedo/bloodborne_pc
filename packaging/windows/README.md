@@ -50,8 +50,7 @@ FSR 3 (scene color, depth, render-pixel motion vectors, jitter). `BB_DLSS=0` tur
 
 The launcher texts are written in English with the Russian beside them; the other languages
 are in `launcher/bbport_lang.py` (one list per language in the order of `KEYS`; a missing or
-empty text falls back to English). The icon (`launcher/bloodborne.ico`/`.png`) is drawn by
-`packaging/windows/make_icon.py` and built into `Bloodborne.exe`, `bb-probe.exe` (the game
+empty text falls back to English). The icon (`launcher/gravity.ico`) is built into `Gravity Rush 2.exe`, `bb-probe.exe` (the game
 window) and `bb-gpu-capabilities.exe`.
 
 ## What is different from Linux

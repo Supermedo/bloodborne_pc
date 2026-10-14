@@ -77,7 +77,7 @@ static size_t mounts_done, memory_writes;
 static void bloodborne_sound_hack(void) {
     static const char *const ids[]={"CUSA00207","CUSA00208","CUSA00299","CUSA00900","CUSA01363","CUSA03014","CUSA03023","CUSA03173","CUSA03179"};
     const char *env=getenv("BB_SOUND_HACK");
-    if (env && env[0]=='0') return;
+    if (!env || env[0]!='1') return; /* Disabled by default for non-Bloodborne games */
     int bloodborne=0;
     for (size_t i=0;i<sizeof(ids)/sizeof(*ids);++i) if (!strcmp(title_id,ids[i])) bloodborne=1;
     if (!bloodborne) return;

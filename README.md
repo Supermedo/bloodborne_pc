@@ -1,10 +1,10 @@
-# Gravity Rush 2 for Windows
+# <img src="launcher/gravity.ico" width="36" height="36" alt="Gravity Rush 2 Icon" valign="middle"> Gravity Rush 2 for Windows
 
 **Gravity Rush 2 running natively on Windows 10 and 11.** Forked from [Supermedo's](https://github.com/Supermedo) PC port project.
 
 The original PlayStation 4 game runs directly on your PC: its own x86-64 code runs natively,
 and the graphics are translated to Vulkan. No emulator window, no setup scripts: unpack the release,
-start the launcher, pick your game folder and press **PLAY**.
+start the launcher (`Gravity Rush 2.exe` / `bbport_launcher_win.py`), pick your game folder and press **PLAY**.
 
 > **No game files are included.** You need your own decrypted dump of Gravity Rush 2
 > (e.g. CUSA03694 / CUSA04943).

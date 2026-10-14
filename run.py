@@ -276,20 +276,18 @@ def main():
         if clang64.is_dir():
             env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
 
-    game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03173'))
+    game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03694'))
     if not (game / 'eboot.bin').is_file():
-        fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
+        # Check alternative regional serials if present
+        for alt_id in ('CUSA04943', 'CUSA00547', 'CUSA04934', 'CUSA02443', 'CUSA03173'):
+            alt = PORT.parent / alt_id
+            if (alt / 'eboot.bin').is_file():
+                game = alt
+                break
+    if not (game / 'eboot.bin').is_file():
+        fail(f'No eboot.bin in {game} (set BB_GAME_DIR to your Gravity Rush 2 game dump).')
     original_game = game.resolve()
-    if env.get('BB_SKIP_GAME_CHECK') != '1':
-        try:
-            prepatched = image_sha256(game) == LANCE_60FPS_IMAGE
-        except (OSError, ValueError, KeyError, IndexError):
-            prepatched = False  # prepare.py reports unreadable executables itself
-        if prepatched:
-            fail("This eboot.bin has Lance McDonald's 60 fps patch applied to it, which crashes the "
-                 'game when the gestures menu opens (the port has its own 60 fps): copy eboot.bin '
-                 'from a clean dump of the 1.09 update into the game folder, replacing this one. '
-                 'BB_SKIP_GAME_CHECK=1 starts it anyway.')
+
     game = Path(run_script('mods.py', game, '--out', out,
                            '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                            '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),

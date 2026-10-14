@@ -19,10 +19,10 @@ class TrophyTests(unittest.TestCase):
 
     def test_list(self):
         ids = [t[0] for t in trophies.TROPHIES]
-        self.assertEqual(ids, list(range(40)))
+        self.assertEqual(ids, list(range(38)))
         self.assertEqual(trophies.BY_ID[0][3], trophies.PLATINUM)
-        self.assertEqual(len(trophies.PLATINUM_NEEDS), 33)
-        self.assertEqual(sum(t[4] == trophies.DLC for t in trophies.TROPHIES), 6)
+        self.assertEqual(len(trophies.PLATINUM_NEEDS), 36)
+        self.assertEqual(sum(t[4] == trophies.DLC for t in trophies.TROPHIES), 1)
 
     def test_read_log_keeps_earliest_and_skips_garbage(self):
         (self.user / 'trophies.log').write_text('14 200\n14 100\nbroken\n21 300 extra\n\n', encoding='utf-8')

@@ -22,10 +22,15 @@ KEYBOARD_OUTPUTS = BUTTON_OUTPUTS + STICK_OUTPUTS
 # are grouped by direction so the UI can show one row per direction instead of exposing the
 # _minus/_plus split (the UI combines a pair into "Move left"/"Move right" etc.).
 OUTPUT_LABELS = {
-    'cross': ('Cross', 'Крест'), 'circle': ('Circle', 'Круг'),
-    'square': ('Square', 'Квадрат'), 'triangle': ('Triangle', 'Треугольник'),
-    'l1': ('L1', 'L1'), 'r1': ('R1', 'R1'), 'l2': ('L2', 'L2'), 'r2': ('R2', 'R2'),
-    'l3': ('L3', 'L3'), 'r3': ('R3 (lock-on)', 'R3 (захват цели)'),
+    'cross': ('Cross (Jump / Air recover)', 'Крест (Прыжок)'),
+    'circle': ('Circle (Stasis field / Throw)', 'Круг (Стазис-поле / Бросок)'),
+    'square': ('Square (Attack / Gravity Kick)', 'Квадрат (Атака / Грави-удар)'),
+    'triangle': ('Triangle (Special Attack / Finisher)', 'Треугольник (Спецатака)'),
+    'l1': ('L1 (Gravity cancel / Reset orientation)', 'L1 (Сброс гравитации)'),
+    'r1': ('R1 (Gravity shift / Fall)', 'R1 (Падение / Гравитация)'),
+    'l2': ('L2 (Slide / Evade)', 'L2 (Скольжение / Уклонение)'),
+    'r2': ('R2 (Evade / Slide)', 'R2 (Уклонение / Скольжение)'),
+    'l3': ('L3', 'L3'), 'r3': ('R3 (Reset camera / Center)', 'R3 (Центрировать камеру)'),
     'options': ('Options', 'Options'),
     'pad_up': ('D-pad up', 'Крестовина вверх'), 'pad_down': ('D-pad down', 'Крестовина вниз'),
     'pad_left': ('D-pad left', 'Крестовина влево'), 'pad_right': ('D-pad right', 'Крестовина вправо'),
@@ -142,7 +147,7 @@ def input_ini_path(bbport_ini_path):
 # write only the edited lines, and the controller would then do nothing.
 DEFAULT_INPUT_INI = '''\
 # bbport input (shadPS4 syntax: output = input, one input per line).
-# A shadPS4 input config (user/input_config/CUSA03173.ini) can be copied over this file.
+# A shadPS4 input config (user/input_config/CUSA03694.ini) can be copied over this file.
 # F7 toggles the mouse, F8 reloads this file.
 
 # Keyboard
