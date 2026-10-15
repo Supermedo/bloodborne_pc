@@ -77,6 +77,23 @@ int main() {
     setenv("BB_RENDER_RES", "", 1);
     assert(!FixedRenderSession() && !ResolutionNeedsRestart());
     unsetenv("BB_RENDER_RES");
+    // A failed optional DLSS device must fall back before rendering and keep the saved
+    // choice so fixing the driver restores DLSS on the next launch.
+    {
+        FILE* config = std::fopen(path, "w");
+        assert(config);
+        std::fputs("upscaler=dlss\npreset=3\noutput_res=2560x1440\n", config);
+        std::fclose(config);
+        Load();
+        ConfigureDlssSupport(false, "Vulkan device creation failed with DLSS extensions");
+        assert(s.upscaler == UpscalerFsr3 && !s.dlss_supported);
+        assert(s.dlss_problem.load() && s.startup_upscaler == UpscalerDlss);
+        assert(s.preset == Performance && s.output_res == 2);
+        Load();
+        assert(s.upscaler == UpscalerDlss);
+        ConfigureDlssSupport(true, nullptr);
+        assert(s.upscaler == UpscalerDlss && s.dlss_supported && !s.dlss_problem.load());
+    }
     std::remove(path);
     std::puts("Upscaler support: saved choices and FSR 3.1 fallback PASS");
 }
