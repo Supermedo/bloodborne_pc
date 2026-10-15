@@ -289,7 +289,8 @@ static void ParseStickSocd(InputConfig *cfg, const char *value) {
 }
 
 /* stick_release_delay_ms = 0..200: how long the left stick keeps its last direction after the
- * keys are released (runtime_pad.c, hold_stick_on_release). 0 = off (default). */
+ * keys are released (runtime_pad.c, hold_stick_on_release). 60 by default, so tapping A then D
+ * turns from A instead of starting D from neutral; 0 = off. */
 static void ParseStickReleaseDelay(InputConfig *cfg, const char *value) {
     char *end;
     long ms = strtol(value, &end, 10);
@@ -297,8 +298,9 @@ static void ParseStickReleaseDelay(InputConfig *cfg, const char *value) {
     cfg->stick_release_delay_ms = (int)ms;
 }
 
-/* stick_circular = on|off: clamp the keyboard left stick to a round gate (runtime_pad.c,
- * shape_digital_stick). On by default. */
+/* stick_circular = on|off: put the keyboard left stick on a round gate instead of the square one
+ * (runtime_pad.c, shape_digital_stick). Off by default: the game picks walk or run by the larger
+ * axis, so a round diagonal (about 71% per axis) walks. */
 static void ParseStickCircular(InputConfig *cfg, const char *value) {
     if (EqualsCaseInsensitive(value, "on")) cfg->stick_circular = 1;
     else if (EqualsCaseInsensitive(value, "off")) cfg->stick_circular = 0;
@@ -306,7 +308,8 @@ static void ParseStickCircular(InputConfig *cfg, const char *value) {
 }
 
 /* stick_turn_rate = 0..5000: degrees per second the keyboard left stick rotates toward a new
- * direction (runtime_pad.c, shape_digital_stick). 0 = instant (default). */
+ * direction (runtime_pad.c, shape_digital_stick). 900 by default: an instant jump of 45 degrees
+ * or more ends a sprint; 0 = instant. */
 static void ParseStickTurnRate(InputConfig *cfg, const char *value) {
     char *end;
     long rate = strtol(value, &end, 10);
@@ -481,9 +484,9 @@ void input_config_parse(InputConfig *out, const char *text) {
     out->mouse.camera_sensitivity = 1.0f;
     for (int i = 0; i < DEADZONE_COUNT; ++i) { out->deadzone[i].inner = 1; out->deadzone[i].outer = 127; }
     out->stick_socd_last = 1;
-    out->stick_release_delay_ms = 0;
-    out->stick_circular = 1;
-    out->stick_turn_rate = 0;
+    out->stick_release_delay_ms = 60;
+    out->stick_circular = 0;
+    out->stick_turn_rate = 900;
     out->toggle_scancode = SDL_SCANCODE_F7;
     out->reload_scancode = SDL_SCANCODE_F8;
 

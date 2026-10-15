@@ -139,6 +139,20 @@ static void test_socd_and_release_delay(void) {
     x=0; y=0;
     hold_stick_on_release(&r,&x,&y,0,1101001);
     assert(x==0 && y==0);
+    /* An analog half stick is never held: back at the center, it is at the center at once. */
+    StickReleaseState an={0,0,0};
+    x=-90; y=0;
+    hold_stick_on_release(&an,&x,&y,60,2000000);
+    x=0; y=0;
+    hold_stick_on_release(&an,&x,&y,60,2010000);
+    assert(x==0 && y==0);
+    /* ...while a key is, under the same delay. */
+    StickReleaseState key={0,0,0};
+    x=-127; y=-127;
+    hold_stick_on_release(&key,&x,&y,60,2000000);
+    x=0; y=0;
+    hold_stick_on_release(&key,&x,&y,60,2010000);
+    assert(x==-127 && y==-127);
     puts("PASS: stick_socd last-wins and stick_release_delay_ms");
 }
 
@@ -169,10 +183,11 @@ static void test_digital_stick_shape(void) {
     assert(x*x+y*y>=125*125);
     for (int i=0;i<2;++i) { x=-127; y=-127; now+=frame; shape_digital_stick(&t,&x,&y,1,900,now); }
     assert(x==-90 && y==-90);
-    /* reversal (more than 150 degrees): snaps, like a flick. */
+    /* reversal: turns too (no snap), on the circle, starting through forward (y < 0). */
     x=127; y=127; now+=frame;
     shape_digital_stick(&t,&x,&y,1,900,now);
-    assert(x==90 && y==90);
+    assert(!(x==90 && y==90) && y<0);
+    assert(x*x+y*y>=125*125);
     /* neutral, then a new key: starts at that key's direction, no rotation from the old one. */
     x=0; y=0; now+=frame;
     shape_digital_stick(&t,&x,&y,1,900,now);
@@ -180,7 +195,89 @@ static void test_digital_stick_shape(void) {
     x=-127; y=0; now+=frame;
     shape_digital_stick(&t,&x,&y,1,900,now);
     assert(x==-127 && y==0);
+
+    /* Only digital input is shaped: an analog half stick passes through untouched, with the
+     * turn rate and circular on, and leaves the turn state inactive. */
+    StickShapeState a={0,0,0};
+    x=-64; y=0;
+    shape_digital_stick(&a,&x,&y,1,900,1000000);
+    assert(x==-64 && y==0 && !a.active);
+    x=-127; y=-64; /* one axis at the edge is not enough */
+    shape_digital_stick(&a,&x,&y,0,900,1000000+frame);
+    assert(x==-127 && y==-64 && !a.active);
+
+    /* Square gate (circular off): W, then W+A at 900 deg/s. The larger axis stays at 127 on
+     * every sample, since the game picks walk or run by it, and the turn ends exactly on the
+     * corner. */
+    StickShapeState q={0,0,0};
+    now=2000000;
+    x=0; y=-127;
+    shape_digital_stick(&q,&x,&y,0,900,now);
+    assert(x==0 && y==-127);
+    x=-127; y=-127; now+=frame;
+    shape_digital_stick(&q,&x,&y,0,900,now);
+    assert(x<=-30 && x>=-36 && y==-127); /* about -105 degrees, on the square */
+    for (int i=0;i<2;++i) {
+        x=-127; y=-127; now+=frame;
+        shape_digital_stick(&q,&x,&y,0,900,now);
+        assert((abs(x)>abs(y) ? abs(x) : abs(y))==127);
+    }
+    assert(x==-127 && y==-127);
     puts("PASS: stick_circular and stick_turn_rate");
+}
+
+/* Direction of a stick sample in degrees, and the unsigned angle between two of them. */
+static double stick_deg(int x, int y) { return atan2((double)y,(double)x)*180.0/3.14159265358979323846; }
+static double deg_between(double a, double b) { return fabs(fmod(b-a+540.0,360.0)-180.0); }
+/* Turns from (x0,y0) toward (x1,y1) at 900 deg/s and 60 FPS on the square gate, checking that
+ * no sample moves 30 degrees or more (the game drops a sprint at 45) and that the larger axis
+ * never leaves 127 (the game would walk). Returns the samples taken; *right / *forward tell
+ * whether any intermediate sample had x > 0 / y < 0. */
+static int turn_and_check(int x0, int y0, int x1, int y1, int *right, int *forward) {
+    const uint64_t frame=16667;
+    StickShapeState s={0,0,0};
+    uint64_t now=5000000;
+    int x=x0, y=y0, n=0;
+    shape_digital_stick(&s,&x,&y,0,900,now);
+    double prev=stick_deg(x,y);
+    *right=*forward=0;
+    while (!(x==x1 && y==y1)) {
+        assert(++n<100);
+        x=x1; y=y1; now+=frame;
+        shape_digital_stick(&s,&x,&y,0,900,now);
+        assert(deg_between(prev,stick_deg(x,y))<30.5);
+        assert((abs(x)>abs(y) ? abs(x) : abs(y))==127);
+        if (!(x==x1 && y==y1)) { if (x>0) *right=1; if (y<0) *forward=1; }
+        prev=stick_deg(x,y);
+    }
+    return n;
+}
+
+/* stick_turn_rate turns every direction change, reversals included, never more than 30 degrees
+ * per sample. Half turns go through forward, or through the right for W <-> S. */
+static void test_digital_stick_turns(void) {
+    int right, forward;
+    /* A -> D: 180 degrees at 15 per frame, through forward. */
+    assert(turn_and_check(-127,0,127,0,&right,&forward)==12 && forward);
+    /* D -> A: through forward as well. */
+    assert(turn_and_check(127,0,-127,0,&right,&forward)==12 && forward);
+    /* W -> S and S -> W: through the right. */
+    turn_and_check(0,-127,0,127,&right,&forward);
+    assert(right);
+    turn_and_check(0,127,0,-127,&right,&forward);
+    assert(right);
+    /* W -> W+A: 45 degrees in 3 frames. */
+    assert(turn_and_check(0,-127,-127,-127,&right,&forward)==3);
+
+    /* A frame hitch (0.5 s at 900 deg/s would be 450 degrees) still turns 30 at most. */
+    StickShapeState h={0,0,0};
+    int x=0, y=-127;
+    shape_digital_stick(&h,&x,&y,0,900,1000000);
+    x=127; y=0;
+    shape_digital_stick(&h,&x,&y,0,900,1500000);
+    assert(deg_between(stick_deg(0,-127),stick_deg(x,y))<30.5);
+    assert(!(x==127 && y==0));
+    puts("PASS: stick_turn_rate turns reversals too, at most 30 degrees per sample");
 }
 
 /* T5: the shadPS4-based mouse formula (CNV-001..003, MOU-009). mouse_to_axis is stateful again
@@ -418,6 +515,7 @@ int main(void) {
     test_binding_evaluation();
     test_socd_and_release_delay();
     test_digital_stick_shape();
+    test_digital_stick_turns();
     test_mouse_to_axis();
     test_mouse_buttons_and_wheel();
 
@@ -478,11 +576,41 @@ int main(void) {
     SDL_UpdateJoysticks();
     SDL_UpdateGamepads();
     assert(pad_read_state(1,&data)==0 && data.touch_count==1 && data.touches[0].x==480);
+
+    /* A controller stick bound as a full axis (the controller default) never goes through the
+     * keyboard shaping, with its defaults on (900 deg/s turns, 60 ms release hold): a jump from
+     * one side to the other, and back to the center, reaches the game at once. */
+    char stick_config[]="/tmp/bbport-pad-test-stick-XXXXXX";
+    int sfd=mkstemp(stick_config);
+    assert(sfd>=0);
+    FILE *sf=fdopen(sfd,"w");
+    assert(sf);
+    fputs("axis_left_x = axis_left_x\naxis_left_y = axis_left_y\n"
+          "axis_left_x_minus = a\naxis_left_x_plus = d\n",sf);
+    fclose(sf);
+    setenv("BB_INPUT_CONFIG",stick_config,1);
+    free(loaded_config); config_initialized=0; loaded_config=NULL;
+    assert(SDL_SetJoystickVirtualAxis(joystick,SDL_GAMEPAD_AXIS_LEFTX,-32768));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.left_x==1 && data.left_y==128);
+    assert(SDL_SetJoystickVirtualAxis(joystick,SDL_GAMEPAD_AXIS_LEFTX,32767));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.left_x==255 && data.left_y==128);
+    assert(SDL_SetJoystickVirtualAxis(joystick,SDL_GAMEPAD_AXIS_LEFTX,0));
+    SDL_UpdateJoysticks();
+    SDL_UpdateGamepads();
+    assert(pad_read_state(1,&data)==0 && data.left_x==128 && data.left_y==128);
+    unsetenv("BB_INPUT_CONFIG");
+    unlink(stick_config);
+    free(loaded_config); config_initialized=0; loaded_config=NULL;
+
     SDL_CloseJoystick(joystick);
     if (gamepad) SDL_CloseGamepad(gamepad);
     gamepad=NULL;
     assert(SDL_DetachVirtualJoystick(id));
     SDL_Quit();
     unlink(path);
-    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture");
+    puts("PASS: pad ABI, debug camera chord, left/right clicks, SDL touch coordinates, overlay capture, full-axis controller stick unshaped");
 }

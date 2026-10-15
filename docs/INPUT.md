@@ -99,38 +99,50 @@ camera by imedved on Nexus Mods, ported to this port by mcrib884 in #3) and samp
   `Mouse camera: ... using the stick mode` once and the stick emulation above is used instead.
 - Latency is lowest with a locked frame rate (60 FPS works well).
 
-## Keyboard movement: opposite keys and quick direction changes
+## Keyboard movement: direction changes keep the sprint
 
 ```ini
+stick_turn_rate = 900          # degrees per second, 0..5000; default 900 (0 = instant)
+stick_circular = off           # off (default) | on
+stick_release_delay_ms = 60    # 0..200, left stick only; default 60 (0 = off)
 stick_socd = last              # last (default) | neutral
-stick_release_delay_ms = 60    # 0..200, left stick only; default 0 (off)
 ```
 
-A neutral stick ends a sprint, and two things used to produce one when strafing A <-> D:
+Keys drive the left stick like no real thumbstick can, and two things the game does with the
+stick decide whether a sprint survives a change of direction (measured by feeding the game raw
+stick values):
+
+- **A direction jump of 45 degrees or more between two reads ends a sprint.** A thumbstick slides
+  along its gate; keys jump: W to W+A is 45 degrees within one sample, A to D is 180. (Exactly 45
+  degrees passes to the right and fails to the left, which is why, before these settings, W+A
+  dropped the sprint and W+D did not.) `stick_turn_rate` rotates the stick toward the new
+  direction at that many degrees per second instead, never more than 30 degrees per sample, even
+  after a frame hitch: 900 turns 45 degrees in 50 ms and a half turn in 200 ms. Reversals turn
+  too: A <-> D goes through forward, W <-> S through the right. After all keys are released, the
+  next key starts straight at its own direction.
+- **The game picks walk or run by the larger axis**, a square gate like a DualShock 4's. So the
+  turning stick keeps its larger axis at full deflection, and W+A stays (-127,-127).
+  `stick_circular = on` puts it on a round gate instead, the way a round thumbstick looks: a
+  diagonal becomes about (-90,-90), about 71% per axis, which the game reads as a walk, so a
+  sprint drops on every diagonal.
+
+Two things can also put a neutral stick, or a sudden reversal, between two directions:
 
 - **Both keys down during the switch.** With `stick_socd = last`, two opposite directions held
   together give the one pressed most recently (keyboard "snap tap"), instead of cancelling out.
   `neutral` restores the old sum-and-cancel behavior (shadPS4's). Applies to both sticks' half-axis
   bindings (keys, buttons, half sticks); full-axis bindings are unaffected.
 - **A gap between releasing one key and pressing the next.** `stick_release_delay_ms` keeps the
-  left stick's last direction for that long after its keys are released; any new direction
-  replaces it immediately. 40-80 ms covers a fast key switch while still stopping on the spot
-  when you let go.
+  left stick's last direction for that long after its keys are released, so tapping A then D
+  turns from A instead of starting D from neutral; any new direction replaces it immediately.
+  The tradeoff: the character stops up to that long after you let go.
 
-```ini
-stick_circular = on            # on (default) | off
-stick_turn_rate = 900          # degrees per second, 0..5000; default 0 (instant)
-```
-
-Keys alone drive the left stick like no real thumbstick can:
-
-- **Square diagonals.** W+A is (-127,-127), about 1.41x the reach of a real (round) stick.
-  `stick_circular = on` clamps it to the circle: a diagonal is full deflection, like a controller.
-- **Direction jumps.** Going from W to W+A turns the stick 45 degrees within one sample.
-  `stick_turn_rate` rotates it toward the new direction at that many degrees per second instead,
-  at full deflection the whole way (so a sprint is kept), like a thumb sliding along the gate.
-  900 turns 45 degrees in 50 ms. A reversal of more than 150 degrees (A <-> D, W <-> S) still
-  snaps, as a flick would, and after a release the next key starts straight at its direction.
+**Controllers.** `stick_turn_rate`, `stick_circular` and `stick_release_delay_ms` shape only the
+left stick's digital half-axis input: keys, buttons, or a d-pad bound to
+`axis_left_*_minus`/`_plus`. A controller stick bound as a full axis (`axis_left_x =
+axis_left_x`, the default) never goes through them, and an analog half stick keeps its own value,
+unshaped and never held. To get the previous keyboard behavior back, set `stick_turn_rate = 0`,
+`stick_circular = on` and `stick_release_delay_ms = 0`.
 
 ## Analog deadzone
 

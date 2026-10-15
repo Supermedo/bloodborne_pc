@@ -245,46 +245,73 @@ static int resolve_axis_pair(AxisPairState *s, int minus, int plus, int last_win
     return minus+plus; /* one side only, or pressed in the same sample */
 }
 
-/* stick_release_delay_ms: when the (digital) left stick goes back to neutral, keep its last
+/* Keys, buttons and a d-pad give each half-axis output exactly 0 or +-127; an analog half stick
+ * gives anything in between. Only the digital kind is held or shaped below. */
+static int stick_value_is_digital(int v) { return v==0 || v==127 || v==-127; }
+
+/* stick_release_delay_ms: when the digital left stick goes back to neutral, keep its last
  * direction for this long, so releasing one key just before pressing the next one does not
- * flash a neutral sample either. Any new direction replaces it immediately. */
+ * flash a neutral sample either. Any new direction replaces it immediately. An analog half
+ * stick is never held: it reaches the center through in-between values, so its last direction
+ * before neutral is not a digital one. */
 typedef struct { int x, y; uint64_t active_at; } StickReleaseState;
 static StickReleaseState left_release;
 static void hold_stick_on_release(StickReleaseState *s, int *x, int *y, int delay_ms, uint64_t now) {
     if (*x || *y) { s->x=*x; s->y=*y; s->active_at=now; return; }
-    if (delay_ms>0 && (s->x || s->y) && now-s->active_at<(uint64_t)delay_ms*1000u) { *x=s->x; *y=s->y; return; }
+    if (delay_ms>0 && (s->x || s->y) && stick_value_is_digital(s->x) && stick_value_is_digital(s->y) &&
+        now-s->active_at<(uint64_t)delay_ms*1000u) { *x=s->x; *y=s->y; return; }
     s->x=s->y=0;
 }
 
 /* stick_circular / stick_turn_rate: make the digital left stick behave like a real thumbstick.
- * Keys alone give 8 directions on a square: W+A is (-127,-127), about 1.41x the reach of a real
- * (round) stick, and every change of direction is a jump within one sample. With `circular`,
- * the vector is clamped to the circle (W+A becomes about (-90,-90), full deflection). With a
- * turn rate (degrees per second), the direction rotates toward the new one instead of jumping,
- * like a thumb sliding along the gate, at full deflection the whole way so a sprint is kept;
- * a reversal (more than kStickSnapRad, e.g. A <-> D) still snaps, as a flick would. The angle
- * starts fresh from the pressed direction whenever the stick was neutral. */
-#define kStickSnapRad (150.0*3.14159265358979323846/180.0)
+ * Keys alone give 8 directions on a square, and every change of direction is a jump within one
+ * sample. Only digital input is shaped: each axis exactly 0 or +-127, which is what keys,
+ * buttons and a d-pad give. An analog half stick (a controller stick bound to
+ * axis_left_*_minus/_plus) passes through untouched, so it never gains latency; a full-axis
+ * binding (axis_left_x = axis_left_x, the controller default) is added after this function and
+ * never goes through it.
+ * The game picks walk or run by the larger axis, a square gate like a DualShock 4's, so the
+ * stick stays on that square: the larger axis is 127 at every angle and a sprint is kept. With
+ * `circular`, it is put on the round gate instead (W+A becomes about (-90,-90), which the game
+ * reads as a walk). With a turn rate (degrees per second), the direction rotates toward the new
+ * one instead of jumping, like a thumb sliding along the gate.
+ * The game ends a sprint when the stick's direction moves 45 degrees or more between two reads
+ * (measured: a W -> W+A jump drops it, the same turn in steps keeps it, and so does a full
+ * A -> D turn in steps). So no sample turns more than kStickMaxStepRad, whatever the time since
+ * the last one (a frame hitch would otherwise make one big jump), and reversals turn as well: a
+ * half turn (A <-> D, W <-> S) has no shortest way round, so it goes through forward, or through
+ * the right when both ways are sideways (W <-> S). The angle starts fresh from the pressed
+ * direction whenever the stick was neutral. */
+#define kStickMaxStepRad (30.0*3.14159265358979323846/180.0)
+#define kStickHalfTurnRad (170.0*3.14159265358979323846/180.0)
 typedef struct { double angle; uint64_t at; int active; } StickShapeState;
 static StickShapeState left_shape;
 static void shape_digital_stick(StickShapeState *s, int *x, int *y, int circular, int turn_rate, uint64_t now) {
     if (!*x && !*y) { s->active=0; return; }
+    if (!stick_value_is_digital(*x) || !stick_value_is_digital(*y)) { s->active=0; return; } /* analog: untouched */
     const double pi=3.14159265358979323846;
-    double tx=*x, ty=*y, mag=sqrt(tx*tx+ty*ty), target=atan2(ty,tx);
-    if (circular && mag>127.0) mag=127.0;
+    double target=atan2((double)*y,(double)*x);
     if (turn_rate>0 && s->active) {
-        double dt=(double)(now-s->at)/1e6;
-        if (dt>0.1) dt=0.1;
         double diff=fmod(target-s->angle+3.0*pi,2.0*pi)-pi; /* -pi..pi, shortest way round */
-        double step=turn_rate*pi/180.0*dt;
-        if (fabs(diff)>kStickSnapRad || fabs(diff)<=step) s->angle=target;
-        else s->angle+=diff>0 ? step : -step;
+        double step=fmin(turn_rate*pi/180.0*(double)(now-s->at)/1e6,kStickMaxStepRad);
+        double dir=diff>0 ? 1.0 : -1.0;
+        if (fabs(diff)>kStickHalfTurnRad) {
+            /* Half way round counter-clockwise is angle+pi/2; forward is y < 0. */
+            double hy=sin(s->angle+pi/2.0), hx=cos(s->angle+pi/2.0);
+            dir=hy<-1e-9 ? 1.0 : hy>1e-9 ? -1.0 : hx>0 ? 1.0 : -1.0;
+        }
+        if (fabs(diff)<=step) s->angle=target;
+        else s->angle=atan2(sin(s->angle+dir*step),cos(s->angle+dir*step)); /* kept in -pi..pi */
     } else {
         s->angle=target;
     }
     s->active=1; s->at=now;
     if (!circular && turn_rate<=0) return; /* off: leave the raw square values untouched */
-    int ox=(int)lround(cos(s->angle)*mag), oy=(int)lround(sin(s->angle)*mag);
+    /* On the square, the larger axis is 127; on the circle, the radius is. Once the angle has
+     * reached a key direction, the square gives back exactly (+-127,+-127) or (+-127,0). */
+    double c=cos(s->angle), sn=sin(s->angle);
+    double k=circular ? 127.0 : 127.0/fmax(fabs(c),fabs(sn));
+    int ox=(int)lround(c*k), oy=(int)lround(sn*k);
     *x=ox<-127?-127:ox>127?127:ox;
     *y=oy<-127?-127:oy>127?127:oy;
 }
