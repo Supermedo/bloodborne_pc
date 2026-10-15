@@ -356,7 +356,12 @@ constexpr NumberConversion MapNumberConversion(const NumberFormat num_fmt,
         case DataFormat::Format16_16_16_16:
             return NumberConversion::Sint16ToSnormNz;
         default:
-            UNREACHABLE_MSG("data_fmt = {}", u32(data_fmt));
+            // bbport: no such combination exists in a real descriptor (seen: SnormNz with
+            // Format11_11_10). A draw-preparation worker reads buffer sharps from game memory
+            // while the game may be rewriting them; a stale or half-written sharp must not stop
+            // the port (an assertion here killed a 7-minute session on 0.51). The specialization
+            // keyed by these values is never matched by a valid sharp again.
+            return NumberConversion::None;
         }
     }
     default:
