@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <xxhash.h>
+#include <chrono>
 #include <mutex>
 #include <set>
+#include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/ui_composition.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -988,6 +990,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (camera_motion->Enabled() && regs.color_buffers[0] &&
         FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) {
         scene_started = false;
+        previous_scene_depth = camera_motion->Depth(); // the last G-buffer pass's (bbport)
         camera_motion->OnDisplayPass(cb_descs[0].first);
         if (upscaler->OnFrameStart()) {
             object_motion->InvalidateHistory();
@@ -1139,6 +1142,10 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         (regs.num_indices > 6 || regs.num_instances.NumInstances() > 1)) {
         draw_jitter = upscaler->Jitter();
     }
+    if (occlusion && occlusion->SkipDraw()) {
+        ResetBindings(false);
+        return;
+    }
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
@@ -1147,25 +1154,40 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const auto& fetch_shader = pipeline->GetFetchShader();
     const auto [vertex_offset, instance_offset] = GetDrawOffsets(regs, vs_info, fetch_shader);
 
-    const vk::Pipeline handle = pipeline->Handle();
+    // bbport (BB_ASYNC_PIPELINES): a pipeline still compiling does not hold this thread: the
+    // draw is left out (scene geometry, for a moment) or a recording thread binds the pipeline
+    // once it is there. Only the draw itself is missing for those frames.
+    vk::Pipeline handle = pipeline->HandleIfReady();
+    if (!handle) [[unlikely]] {
+        if (pipeline->IsReady() || SkipUncompiledDraw(pipeline)) {
+            ResetBindings(false);
+            scheduler.KickRecording();
+            return;
+        }
+        handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
+        if (!handle && pipeline->IsReady() && !pipeline->HandleIfReady()) {
+            ResetBindings(false);
+            scheduler.KickRecording();
+            return;
+        }
+    }
     const u32 num_indices = regs.num_indices;
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
-    Occlusion::DrawQuery query{};
-    if (occlusion) {
-        if (occlusion->SkipDraw()) {
-            ResetBindings(false);
-            return;
-        }
-        query = occlusion->BeginDraw(push_data.scene_size);
-    }
+    // bbport: measured by an occlusion query around just this draw (vk_occlusion.h).
+    const auto query =
+        occlusion ? occlusion->BeginDraw(push_data.scene_size) : Occlusion::DrawQuery{};
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         if (query.pool) {
             cmdbuf.beginQuery(query.pool, query.index, query.flags);
         }
-        cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
-        if (is_indexed) {
+        if (handle) { // null: bound by the command before (BindWhenCompiled)
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        }
+        if (!handle && !pipeline->HandleIfReady()) {
+            // The driver could not create it (logged): nothing is bound for this draw.
+        } else if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
@@ -1285,31 +1307,44 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     if (upscaler->Enabled() && db_desc.first && db_desc.first == camera_motion->Depth()) {
         draw_jitter = upscaler->Jitter();
     }
+    if (occlusion && occlusion->SkipDraw()) {
+        ResetBindings(false);
+        return;
+    }
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
-    const vk::Pipeline handle = pipeline->Handle();
+    // bbport: never left out (what it draws is decided in GPU memory), bound late instead.
+    vk::Pipeline handle = pipeline->HandleIfReady();
+    if (!handle) [[unlikely]] {
+        if (!pipeline->IsReady()) {
+            handle = BindWhenCompiled(pipeline, vk::PipelineBindPoint::eGraphics);
+        }
+        if (!handle && pipeline->IsReady() && !pipeline->HandleIfReady()) {
+            ResetBindings(false);
+            scheduler.KickRecording();
+            return;
+        }
+    }
     const vk::Buffer args = buffer->Handle();
     const u64 args_offset = base;
     const vk::Buffer counts = count_address != 0 ? count_buffer->Handle() : vk::Buffer{};
     const u64 counts_offset = count_address != 0 ? count_offset : 0;
-    Occlusion::DrawQuery query{};
-    if (occlusion) {
-        if (occlusion->SkipDraw()) {
-            ResetBindings(false);
-            return;
-        }
-        query = occlusion->BeginDraw(push_data.scene_size);
-    }
+    const auto query =
+        occlusion ? occlusion->BeginDraw(push_data.scene_size) : Occlusion::DrawQuery{};
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         if (query.pool) {
             cmdbuf.beginQuery(query.pool, query.index, query.flags);
         }
-        cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
-        if (is_indexed) {
+        if (handle) { // null: bound by the command before (BindWhenCompiled)
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        }
+        if (!handle && !pipeline->HandleIfReady()) {
+            // The driver could not create it (logged): nothing is bound for this draw.
+        } else if (is_indexed) {
             if (counts) {
                 cmdbuf.drawIndexedIndirectCount(args, args_offset, counts, counts_offset, max_count,
                                                 stride);
@@ -3624,6 +3659,55 @@ u32 Rasterizer::GetGpuCommandProcessorThreadId() {
 
 namespace Vulkan {
 
+bool Rasterizer::SkipUncompiledDraw(const GraphicsPipeline* pipeline) {
+    const u64 budget = SkipUncompiledBudgetNs();
+    if (budget == 0) {
+        return false;
+    }
+    // Scene geometry only (the draws the upscaler jitters): drawn with the scene depth, which
+    // every frame draws again from a clear, and not a full-screen pass. The depth must also have
+    // been the scene's the frame before: a G-buffer pass of its own (a reflection, drawn now and
+    // then and kept) is not left out. Shadow maps, half-resolution effects, post-processing and
+    // UI wait: what they draw may be kept over frames or read as a whole. A draw the game
+    // measures (occlusion query) waits as well.
+    const auto& regs = Regs();
+    if (!db_desc.first || db_desc.first != camera_motion->Depth() ||
+        db_desc.first != previous_scene_depth ||
+        (regs.num_indices <= 6 && regs.num_instances.NumInstances() <= 1) ||
+        (occlusion && occlusion->Measuring()) || FrameCapture::Active()) {
+        return false;
+    }
+    const bool first = pipeline->first_skip_ns == 0;
+    const u64 now = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count());
+    if (!WithinSkipBudget(pipeline->first_skip_ns, now, budget)) {
+        return false;
+    }
+    pipeline_compile_stats.skipped_draws.fetch_add(1, std::memory_order_relaxed);
+    if (first) {
+        pipeline_compile_stats.skipped_pipelines.fetch_add(1, std::memory_order_relaxed);
+    }
+    return true;
+}
+
+vk::Pipeline Rasterizer::BindWhenCompiled(const Pipeline* pipeline,
+                                          vk::PipelineBindPoint bind_point) {
+    if (!LatePipelineBindEnabled() || !scheduler.IsRecordingDeferred()) {
+        return pipeline->Handle(); // waits here (and compiles it here when still queued)
+    }
+    // The recording thread that runs this waits for the compile (or compiles it, when still
+    // queued): the draws after it are recorded meanwhile, and drains of the GPU command thread
+    // (write faults, readbacks for guest threads) do not wait for the compile.
+    pipeline_compile_stats.late_binds.fetch_add(1, std::memory_order_relaxed);
+    scheduler.Record([pipeline, bind_point](vk::CommandBuffer cmdbuf) {
+        if (const vk::Pipeline handle = pipeline->Handle()) {
+            cmdbuf.bindPipeline(bind_point, handle);
+        }
+    });
+    return {};
+}
+
 // bbport: drops draws that cannot change anything: no color target (mask 0 or color
 // disabled), no depth/stencil target (both tests off), and no shader stage that writes memory.
 // On the PS4 such draws only feed occlusion counters, which this port answers with fixed
@@ -3636,6 +3720,9 @@ bool Rasterizer::SkipOutputlessDraw(const GraphicsPipeline* pipeline) {
         const char* value = std::getenv("BB_SKIP_EMPTY_DRAWS");
         return !value || value[0] != '0';
     }();
+    if (occlusion && occlusion->Measuring()) {
+        return false;
+    }
     if ((!skip && !BbStats::enabled) || db_desc.first) {
         return false;
     }

@@ -22,6 +22,8 @@
 #include "core/libraries/videoout/videoout_error.h"
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/renderer_vulkan/pipeline_compile_queue.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
@@ -454,6 +456,20 @@ void VideoOutDriver::Flip(const Request& req) {
                         BbStats::tick_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::reduced_draws.exchange(0)) / frames : 0.0,
                         frames ? double(BbStats::scene_draws.exchange(0)) / frames : 0.0);
+            if (Vulkan::AsyncPipelinesEnabled()) {
+                auto& ps = Vulkan::pipeline_compile_stats;
+                const u64 waits = ps.waits.exchange(0);
+                std::printf("Pipelines: %llu compiled on compile threads, %llu by the thread "
+                            "that needed them; %llu draws of %llu pipelines left out while "
+                            "compiling, %llu bound late; %llu waits, %.1f ms, longest %.1f ms\n",
+                            static_cast<unsigned long long>(ps.background.exchange(0)),
+                            static_cast<unsigned long long>(ps.taken.exchange(0)),
+                            static_cast<unsigned long long>(ps.skipped_draws.exchange(0)),
+                            static_cast<unsigned long long>(ps.skipped_pipelines.exchange(0)),
+                            static_cast<unsigned long long>(ps.late_binds.exchange(0)),
+                            static_cast<unsigned long long>(waits),
+                            ps.wait_ns.exchange(0) / 1e6, ps.longest_wait_ns.exchange(0) / 1e6);
+            }
             // Frame pacing: spread of the guest flip intervals (judder that the mean hides).
             if (intervals.size() > 2) {
                 std::vector<double> sorted = intervals;

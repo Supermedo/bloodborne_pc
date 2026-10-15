@@ -314,6 +314,12 @@ private:
     /// BB_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
     bool SkipOutputlessDraw(const GraphicsPipeline* pipeline);
+    /// bbport (BB_SKIP_UNCOMPILED): whether a scene draw of a pipeline still compiling is left
+    /// out (docs/pipeline_compiles.md).
+    bool SkipUncompiledDraw(const GraphicsPipeline* pipeline);
+    /// bbport: the handle to bind with the draw, or null when a command recorded before it
+    /// binds the pipeline once it is compiled (BB_LATE_PIPELINE_BIND, deferred recording).
+    vk::Pipeline BindWhenCompiled(const Pipeline* pipeline, vk::PipelineBindPoint bind_point);
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
     void BindIndexBuffer(u32 index_offset = 0);
@@ -348,6 +354,8 @@ private:
     std::unique_ptr<CameraMotion> camera_motion; // bbport: motion vectors (docs/upscaler.md)
     std::unique_ptr<SceneTargets> scene_targets;
     bool scene_started = false;
+    /// bbport: the scene depth of the frame before (SkipUncompiledDraw).
+    VideoCore::ImageId previous_scene_depth{};
     std::unique_ptr<ObjectMotion> object_motion;
     bool motion_draw = false;
     u64 motion_geometry{};    ///< vertex-stream identity of the current direct draw
