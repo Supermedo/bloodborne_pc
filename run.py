@@ -144,6 +144,15 @@ def run_script(name, *args, capture=False, optional=False):
     return None
 
 
+def auto_live_blurs_dof(output, config):
+    """live_resolution=auto keeps the startup patch for outputs above 1080p with depth of field on:
+    the live path renders such scenes into host targets larger than the guest's 1920x1080, and
+    the game's depth of field composite, built for its own half-resolution targets, blurs them
+    (Native at 4K came out softer than Performance)."""
+    width, height = (int(v) for v in output.split('x'))
+    return (width > 1920 or height > 1080) and ini_value(config, 'effect_dof') != '0'
+
+
 def ini_value(path, key):
     try:
         for line in Path(path).read_text(encoding='utf-8', errors='replace').splitlines():
@@ -298,6 +307,10 @@ def main():
         live = '0'
         if scaled_output:
             live = env.get('BB_LIVE_RES') or ini_value(config, 'live_resolution') or '0'
+            if live == 'auto' and auto_live_blurs_dof(scaled_output, config):
+                live = '0'
+                print(f'Output {scaled_output}: live resolution auto: startup patch (depth of field '
+                      'blurs live scenes above 1080p; live_resolution=1 forces live changes)')
             if live == 'auto':
                 caps = probe.parent / 'bb-gpu-capabilities.exe'
                 result = subprocess.run([str(caps), '--live-resolution'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
