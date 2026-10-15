@@ -101,6 +101,29 @@ class PhysicsStepTests(unittest.TestCase):
                 self.assertNotIn(0x011383CA - EBOOT_BASE, writes)
 
 
+class GuardedPatchTests(unittest.TestCase):
+    def test_skip_network_choice_needs_the_dialog_function(self):
+        from patches import PATCH_GUARDS, guarded_patches
+        name = 'Skip Online/Offline Choice'
+        offset, expected = PATCH_GUARDS[name]
+        code = bytearray(0x1000)
+        code[0x30:0x30 + len(bytes.fromhex(expected))] = bytes.fromhex(expected)
+        header = bytearray(0x1000)
+        struct.pack_into('<Q', header, 0x20, 0x40)
+        struct.pack_into('<HH', header, 0x36, 56, 1)
+        struct.pack_into('<IIQQQQQQ', header, 0x40, 1, 5, 0x1000, offset - 0x30, 0, len(code),
+                         len(code), 0x1000)
+        elf = bytes(header) + bytes(code)
+        self.assertEqual(guarded_patches([name, '60 FPS++'], elf), [name, '60 FPS++'])
+        other = bytes(header) + bytes(0x1000)
+        self.assertEqual(guarded_patches([name, '60 FPS++'], other), ['60 FPS++'])
+
+    def test_skip_network_choice_compiles(self):
+        writes = compile_patches(XML, ['Skip Online/Offline Choice'], '01.09', SEGMENTS)
+        self.assertEqual(writes[0][0], 0x1b39030)
+        self.assertEqual(len(writes[0][1]), 46)
+
+
 class DebugPatchTests(unittest.TestCase):
     def test_camera_patch_is_optional_and_compatible_with_fps_and_debug_menu(self):
         self.assertEqual(effect_patches({'debug_camera': '0', 'debug_menu': '0'}), [])

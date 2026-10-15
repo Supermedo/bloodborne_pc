@@ -273,6 +273,28 @@ def patch_fingerprint(elf,xml=BUILTIN_XML,app_version='01.09'):
     return digest.hexdigest()
 
 
+# Patches that replace code which the fingerprint above does not cover: the bytes they overwrite,
+# as the 1.09 build has them (eboot offset, hex). Another build there gets the patch left out.
+PATCH_GUARDS={
+    'Skip Online/Offline Choice':(0x1b39030,'554889e54157415641554154534881ec48130000'),
+}
+
+
+def guarded_patches(names,elf):
+    """`names` without the guarded patches whose site in eboot.elf is not the code they expect."""
+    kept=[]
+    for name in names:
+        guard=PATCH_GUARDS.get(name)
+        if guard:
+            offset,expected=guard
+            expected=bytes.fromhex(expected)
+            if eboot_bytes(elf,offset,offset+len(expected))!=expected:
+                print(f'Patches: {name} left out: this eboot.bin has other code at its address')
+                continue
+        kept.append(name)
+    return kept
+
+
 def eboot_matches_patches(elf_path,app_version='01.09'):
     """False when eboot.elf (prepare.py) differs from the build the patches were made for."""
     expected=PATCH_FINGERPRINTS.get(app_version)
@@ -419,7 +441,9 @@ def main():
     names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
     validate_patch_requirements(names,a.game_dir)
-    segments=eboot_segments((a.out/'eboot.elf').read_bytes())
+    elf=(a.out/'eboot.elf').read_bytes()
+    names=guarded_patches(names,elf)
+    segments=eboot_segments(elf)
     writes=compile_patches(a.xml,names,a.app_version,segments)
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws

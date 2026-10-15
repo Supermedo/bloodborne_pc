@@ -3452,4 +3452,9 @@
             <Line Type="float32" Address="0x023F9B6E" Value="0.5"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Skip Online/Offline Choice" Author="bbport (deadinside28)" Note="The title screen goes straight to the main menu in offline mode: the function that builds the PLAY ONLINE / PLAY OFFLINE dialog (image 0x1b39030) returns what its PLAY OFFLINE item returns (the item callback's operator() at 0x1b49cd0, item functor vtable 0x533be30), so the dialog is never shown. Used at start and after Quit Game. run.py applies it only while online play is off." PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x01f39030" Value="554889e5534883ec184889fb488d05ed2d80034889042448897424084889e6e87c0c01004889d84883c4185b5dc3"/>
+        </PatchList>
+    </Metadata>
 </Patch>
