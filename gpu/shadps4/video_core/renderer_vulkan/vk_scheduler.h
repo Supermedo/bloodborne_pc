@@ -809,7 +809,7 @@ public:
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
     /// (it may then rewrite the memory, e.g. UI vertices: flickering) and before the
     /// submission that reads them. Waits for all.
-    void WaitHostCopies();
+    void WaitHostCopies(std::source_location where = std::source_location::current());
 
     /// Runs `copy` on the recording thread in order with the commands (the thread spins for
     /// work anyway, so small copies cost no wakeup); WaitHostCopies() covers it.
@@ -831,9 +831,10 @@ public:
     /// fences, flip): waits until every signal handed to SignalAfterHostCopies ran, so that
     /// the write cannot overtake an earlier fence. Otherwise the guest, seeing the later value,
     /// may free memory the earlier fence then writes into (corrupted heap, guest fault).
-    void WaitDeferredSignals();
-    /// BB_FENCE_ORDER=ordered: wait only until `issued` (snapshot of DeferredSignalsIssued).
-    void WaitDeferredSignalsUpTo(u64 issued);
+    void WaitDeferredSignals(std::source_location where = std::source_location::current());
+    /// BB_FENCE_ORDER (default): wait only until `issued` (snapshot of DeferredSignalsIssued).
+    void WaitDeferredSignalsUpTo(u64 issued,
+                                 std::source_location where = std::source_location::current());
     [[nodiscard]] u64 DeferredSignalsIssued() const noexcept {
         return deferred_signals_issued.load(std::memory_order_relaxed);
     }

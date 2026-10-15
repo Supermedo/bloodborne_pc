@@ -30,6 +30,8 @@
 #include "core/signals.h"
 #include "sdl_window.h"
 #include "bloodborne_cam.h"
+#include "core/emulator_settings.h"
+#include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern "C" {
@@ -221,6 +223,23 @@ static void StartProfileWriter() {
 }
 #endif
 
+extern "C" void bbgpu_flush_cache(void) {
+    const char* env = std::getenv("BB_CACHE_FLUSH_ON_EXIT");
+    static const bool enabled = !(env && env[0] == '0');
+    auto& cache = Storage::DataBase::Instance();
+    if (!enabled || !cache.IsOpened()) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const bool done = cache.Flush(std::chrono::seconds(2));
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+    std::printf("Shader cache: %s at exit in %lld ms\n",
+                done ? "queued writes on disk" : "queued writes NOT finished",
+                static_cast<long long>(ms));
+}
+
 extern "C" int bbgpu_init(const BbGpuConfig* config) {
     BbSettings::Load();
 #ifdef BB_PGO_GENERATE
@@ -248,6 +267,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             SDL_Delay(2);
         }
         LOG_INFO(Frontend, "Window closed by user");
+        bbgpu_flush_cache();
         std::fflush(stdout);
         std::_Exit(0);
     });

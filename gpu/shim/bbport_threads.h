@@ -37,7 +37,7 @@ inline void MakeBackground() {
 inline void RaiseRenderPriority() {
     static const bool on = [] {
         const char* env = std::getenv("BB_GPU_THREAD_PRIORITY");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     if (on) {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
@@ -66,7 +66,7 @@ inline void MakeBackground() {
 inline void RaiseRenderPriority() {
     static const bool on = [] {
         const char* env = std::getenv("BB_GPU_THREAD_PRIORITY");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     if (on) {
         setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), -5);

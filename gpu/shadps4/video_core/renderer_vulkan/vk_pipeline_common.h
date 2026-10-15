@@ -28,7 +28,7 @@ class Instance;
 class Scheduler;
 class DescriptorHeap;
 
-/// bbport (BB_ASYNC_PIPELINES=1): graphics pipelines first created during play are created on
+/// bbport (BB_ASYNC_PIPELINES, 0 turns it off): graphics pipelines first created during play are created on
 /// compile threads; everything a pipeline reads from the draw is taken where it is selected.
 bool AsyncPipelinesEnabled();
 /// Runs `job`, which creates `owner`, on a compile thread, first in, first out.
@@ -37,10 +37,13 @@ void SubmitPipelineJob(const void* owner, std::function<void()> job);
 std::function<void()> TakePipelineJob(const void* owner);
 u32 PipelineCompileThreads();
 /// Scene geometry of a pipeline still compiling is left out for at most this long
-/// (BB_SKIP_UNCOMPILED=1, BB_SKIP_UNCOMPILED_MS default 1000); 0: never left out.
+/// (BB_SKIP_UNCOMPILED, BB_SKIP_UNCOMPILED_MS default 1000); 0: never left out.
 u64 SkipUncompiledBudgetNs();
-/// BB_LATE_PIPELINE_BIND=1: other draws bind the pipeline on a recording thread, which waits.
+/// BB_LATE_PIPELINE_BIND: other draws bind the pipeline on a recording thread, which waits.
 bool LatePipelineBindEnabled();
+/// BB_FAST_PRELOAD: the startup preload uses the driver pipeline cache of the session and
+/// reads a stage's SPIR-V only when its module is not loaded yet.
+bool FastPreloadEnabled();
 
 class Pipeline {
 public:

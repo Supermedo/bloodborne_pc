@@ -122,7 +122,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
 static u64 GuestMemoryHash(const void* data, u64 size) {
     static const bool parallel = [] {
         const char* env = std::getenv("BB_PARALLEL_IMAGE_HASH");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     constexpr u64 Chunk = 256 * 1024;
     if (!parallel || BbToggle::Disabled(BbToggle::ParallelImageHash) || size < 4 * Chunk ||
@@ -142,7 +142,7 @@ static u64 GuestMemoryHash(const void* data, u64 size) {
 static bool KeepMipHashes() {
     static const bool keep = [] {
         const char* env = std::getenv("BB_KEEP_MIP_HASHES");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     return keep && !BbToggle::Disabled(BbToggle::KeepMipHashes);
 }

@@ -86,7 +86,7 @@ Rasterizer::~Rasterizer() = default;
 void Rasterizer::FinishSubmissionIdle(std::function<void()> done) {
     static const bool submit_end = [] {
         const char* env = std::getenv("BB_SUBMIT_END_TASKS");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     if (!submit_end || !UseDrawPipe()) {
         DrainDrawPipe(DrawPipe::ReasonSubmissionEnd);
@@ -2583,7 +2583,7 @@ void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* pr
                               Shader::Backend::Bindings& binding, u32& write_index) {
     static const bool sampler_memo_on = [] {
         const char* env = std::getenv("BB_SAMPLER_MEMO");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     for (u32 sampler_index = 0; sampler_index < stage.samplers.size(); ++sampler_index) {
         const auto& sampler = stage.samplers[sampler_index];
@@ -2654,7 +2654,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
     }
     static const bool local_sets = [] {
         const char* env = std::getenv("BB_LOCAL_TEXTURE_SETS");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     if (!prepared &&
         !(local_sets && !BbToggle::Disabled(BbToggle::LocalTextureSets))) {
@@ -2682,7 +2682,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
     const u64 generation = texture_cache.RegistryGeneration();
     static const bool revalidate = [] {
         const char* env = std::getenv("BB_MEMO_REVALIDATE");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     const bool gen_ok = (revalidate && !BbToggle::Disabled(BbToggle::MemoRevalidate)) ||
                         set.generation == generation;

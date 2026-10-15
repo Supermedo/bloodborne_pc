@@ -181,6 +181,11 @@ std::unique_ptr<RecordChunk> Scheduler::AcquireChunk() {
     return chunk;
 }
 
+namespace {
+void NoteCopySite(const std::source_location& where, u64 ns);
+u64 NsSince(std::chrono::steady_clock::time_point start);
+} // namespace
+
 void Scheduler::SignalAfterHostCopies(std::function<void()> signal) {
     if (!IsRecordingDeferred()) {
         WaitHostCopies();
@@ -198,37 +203,51 @@ void Scheduler::SignalAfterHostCopies(std::function<void()> signal) {
     KickRecording(true);
 }
 
-void Scheduler::WaitDeferredSignals() {
-    WaitDeferredSignalsUpTo(deferred_signals_issued.load(std::memory_order_relaxed));
+void Scheduler::WaitDeferredSignals(std::source_location where) {
+    WaitDeferredSignalsUpTo(deferred_signals_issued.load(std::memory_order_relaxed), where);
 }
 
-void Scheduler::WaitDeferredSignalsUpTo(u64 issued) {
+void Scheduler::WaitDeferredSignalsUpTo(u64 issued, std::source_location where) {
     if (issued == 0 || deferred_signals_done->load(std::memory_order_acquire) >= issued ||
         BbToggle::Disabled(BbToggle::OrderedGuestWrites)) {
         return;
     }
     static const bool ordered = [] {
         const char* env = std::getenv("BB_FENCE_ORDER");
-        return env && std::strcmp(env, "ordered") == 0;
+        return !(env && env[0] == '0');
     }();
     if (!ordered) {
         issued = deferred_signals_issued.load(std::memory_order_relaxed);
     }
-    BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
-    KickRecording(true);
-    while (deferred_signals_done->load(std::memory_order_acquire) < issued) {
-        BbCopy::WaitAsync();
-        std::this_thread::yield();
+    const auto start = BbStats::enabled ? std::chrono::steady_clock::now()
+                                        : std::chrono::steady_clock::time_point{};
+    {
+        BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
+        KickRecording(true);
+        while (deferred_signals_done->load(std::memory_order_acquire) < issued) {
+            BbCopy::WaitAsync();
+            std::this_thread::yield();
+        }
+    }
+    if (BbStats::enabled) {
+        NoteCopySite(where, NsSince(start));
     }
 }
 
-void Scheduler::WaitHostCopies() {
+void Scheduler::WaitHostCopies(std::source_location where) {
     if (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
-        BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
-        BbStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
-        KickRecording(true);
-        while (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
-            std::this_thread::yield();
+        const auto start = BbStats::enabled ? std::chrono::steady_clock::now()
+                                            : std::chrono::steady_clock::time_point{};
+        {
+            BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
+            BbStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
+            KickRecording(true);
+            while (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
+                std::this_thread::yield();
+            }
+        }
+        if (BbStats::enabled) {
+            NoteCopySite(where, NsSince(start));
         }
     }
     BbStats::WaitTimer timer{BbStats::copy_threads_wait_ns};
@@ -360,12 +379,15 @@ struct WaitSite {
     u64 ns = 0;
     u64 count = 0;
 };
+using WaitSites = std::array<WaitSite, 48>;
 std::mutex wait_sites_mutex;
-std::array<WaitSite, 48> wait_sites{};
+WaitSites wait_sites{};
+/// Waits for guest memory copies and deferred fences (the "host copies" share of frame stats).
+WaitSites copy_sites{};
 
-void NoteWaitSite(const std::source_location& where, u64 ns) {
+void NoteSite(WaitSites& sites, const std::source_location& where, u64 ns) {
     std::scoped_lock lk{wait_sites_mutex};
-    for (auto& site : wait_sites) {
+    for (auto& site : sites) {
         if (!site.function) {
             site.function = where.function_name();
             site.line = where.line();
@@ -376,6 +398,42 @@ void NoteWaitSite(const std::source_location& where, u64 ns) {
             return;
         }
     }
+}
+
+void NoteWaitSite(const std::source_location& where, u64 ns) {
+    NoteSite(wait_sites, where, ns);
+}
+
+void NoteCopySite(const std::source_location& where, u64 ns) {
+    NoteSite(copy_sites, where, ns);
+}
+
+u64 NsSince(std::chrono::steady_clock::time_point start) {
+    return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   std::chrono::steady_clock::now() - start)
+                   .count());
+}
+
+void PrintSites(const char* title, WaitSites& table, double window_seconds) {
+    WaitSites sites;
+    {
+        std::scoped_lock lk{wait_sites_mutex};
+        sites = table;
+        table = {};
+    }
+    std::sort(sites.begin(), sites.end(),
+              [](const WaitSite& a, const WaitSite& b) { return a.ns > b.ns; });
+    if (!sites[0].function) {
+        return;
+    }
+    std::printf("%s:", title);
+    for (u32 i = 0; i < 5 && sites[i].function; ++i) {
+        std::printf(" %s:%u %.1f%% (%llu)%s", sites[i].function, sites[i].line,
+                    sites[i].ns / (window_seconds * 1e7),
+                    static_cast<unsigned long long>(sites[i].count),
+                    i + 1 < 5 && sites[i + 1].function ? ";" : "");
+    }
+    std::printf("\n");
 }
 } // namespace
 
@@ -402,25 +460,8 @@ void Scheduler::Wait(u64 tick, std::source_location where) {
 }
 
 void Scheduler::PrintWaitSites(double window_seconds) {
-    std::array<WaitSite, 48> sites;
-    {
-        std::scoped_lock lk{wait_sites_mutex};
-        sites = wait_sites;
-        wait_sites = {};
-    }
-    std::sort(sites.begin(), sites.end(),
-              [](const WaitSite& a, const WaitSite& b) { return a.ns > b.ns; });
-    if (!sites[0].function) {
-        return;
-    }
-    std::printf("GPU waits:");
-    for (u32 i = 0; i < 5 && sites[i].function; ++i) {
-        std::printf(" %s:%u %.1f%% (%llu)%s", sites[i].function, sites[i].line,
-                    sites[i].ns / (window_seconds * 1e7),
-                    static_cast<unsigned long long>(sites[i].count),
-                    i + 1 < 5 && sites[i + 1].function ? ";" : "");
-    }
-    std::printf("\n");
+    PrintSites("GPU waits", wait_sites, window_seconds);
+    PrintSites("Host copy waits", copy_sites, window_seconds);
 }
 
 void Scheduler::PopPendingOperations() {

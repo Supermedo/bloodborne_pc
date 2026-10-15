@@ -301,7 +301,7 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     ASSERT(dma_data->command.das == 0);
     static const int dma_waits = [] {
         const char* env = std::getenv("BB_DMA_WAITS");
-        if (!env || !env[0]) {
+        if (!env || !env[0] || env[0] == '0') {
             return 0;
         }
         return std::strcmp(env, "all") == 0 ? 2 : 1;

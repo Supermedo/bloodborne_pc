@@ -83,13 +83,13 @@ private:
                 }
             }).detach();
         }
-        std::printf("Pipelines: new ones compiled on %u threads (BB_ASYNC_PIPELINES=1); scene "
+        std::printf("Pipelines: new ones compiled on %u threads (BB_ASYNC_PIPELINES=0 waits); scene "
                     "draws of one still compiling %s, other draws %s\n",
                     threads,
-                    SkipUncompiledBudgetNs() ? "left out for a moment (BB_SKIP_UNCOMPILED=1)"
+                    SkipUncompiledBudgetNs() ? "left out for a moment (BB_SKIP_UNCOMPILED=0 waits)"
                                              : "wait for it",
                     LatePipelineBindEnabled()
-                        ? "bind it on the recording threads (BB_LATE_PIPELINE_BIND=1)"
+                        ? "bind it on the recording threads (BB_LATE_PIPELINE_BIND=0 waits)"
                         : "wait for it");
         std::fflush(stdout);
     }

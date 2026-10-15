@@ -67,7 +67,7 @@ class Rasterizer;
 
 class Occlusion {
 public:
-    /// BB_OCCLUSION=1. Off (default): the fake counts and SET_PREDICATION ignored.
+    /// On unless BB_OCCLUSION=0, which restores the fake counts and ignores SET_PREDICATION.
     static bool Wanted();
 
     /// Null when the device cannot do it (no host query reset, no query pool): the fake then.

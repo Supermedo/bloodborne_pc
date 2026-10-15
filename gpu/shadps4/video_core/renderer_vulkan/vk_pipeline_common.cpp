@@ -61,17 +61,23 @@ bool EnvOn(const char* name) {
     const char* env = std::getenv(name);
     return env && env[0] == '1';
 }
+
+/// The tested performance flags: on unless the variable is set to 0.
+bool EnvDefaultOn(const char* name) {
+    const char* env = std::getenv(name);
+    return !(env && env[0] == '0');
+}
 } // namespace
 
 bool AsyncPipelinesEnabled() {
     static const bool enabled =
-        EnvOn("BB_ASYNC_PIPELINES") && !BbToggle::Disabled(BbToggle::AsyncPipelines);
+        EnvDefaultOn("BB_ASYNC_PIPELINES") && !BbToggle::Disabled(BbToggle::AsyncPipelines);
     return enabled;
 }
 
 u64 SkipUncompiledBudgetNs() {
     static const u64 budget = [] {
-        if (!EnvOn("BB_SKIP_UNCOMPILED")) {
+        if (!EnvDefaultOn("BB_SKIP_UNCOMPILED")) {
             return u64{0};
         }
         const char* env = std::getenv("BB_SKIP_UNCOMPILED_MS");
@@ -82,7 +88,12 @@ u64 SkipUncompiledBudgetNs() {
 }
 
 bool LatePipelineBindEnabled() {
-    static const bool enabled = EnvOn("BB_LATE_PIPELINE_BIND");
+    static const bool enabled = EnvDefaultOn("BB_LATE_PIPELINE_BIND");
+    return enabled;
+}
+
+bool FastPreloadEnabled() {
+    static const bool enabled = EnvDefaultOn("BB_FAST_PRELOAD");
     return enabled;
 }
 

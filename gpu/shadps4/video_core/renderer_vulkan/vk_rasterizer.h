@@ -90,9 +90,9 @@ public:
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
-    void WaitHostCopies() {
+    void WaitHostCopies(std::source_location where = std::source_location::current()) {
         DrainDrawPipe();
-        scheduler.WaitHostCopies();
+        scheduler.WaitHostCopies(where);
     }
 
     /// bbport: GPU command thread: waits until the draw recording thread has recorded every
@@ -125,11 +125,12 @@ public:
     /// buffers, DMA, WriteData, fences); constants overlapping it are bound there, not copied here.
     void NotePendingGpuWrite(VAddr address, u64 size);
     /// Before a guest-visible write: fences deferred earlier are written first.
-    void WaitDeferredSignals() {
-        scheduler.WaitDeferredSignals();
+    void WaitDeferredSignals(std::source_location where = std::source_location::current()) {
+        scheduler.WaitDeferredSignals(where);
     }
-    void WaitDeferredSignalsUpTo(u64 issued) {
-        scheduler.WaitDeferredSignalsUpTo(issued);
+    void WaitDeferredSignalsUpTo(u64 issued,
+                                 std::source_location where = std::source_location::current()) {
+        scheduler.WaitDeferredSignalsUpTo(issued, where);
     }
     /// End of sceGnmSubmitDone: drain + wait, or hand that to the draw thread (BB_SUBMIT_END_TASKS).
     void FinishSubmissionIdle(std::function<void()> done);

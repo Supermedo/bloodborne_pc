@@ -113,7 +113,7 @@ struct Occlusion::Shared {
 bool Occlusion::Wanted() {
     static const bool on = [] {
         const char* env = std::getenv("BB_OCCLUSION");
-        return env && env[0] == '1';
+        return !(env && env[0] == '0');
     }();
     return on;
 }
@@ -124,7 +124,7 @@ Occlusion::Occlusion(const Instance& instance_, Scheduler& scheduler_, Rasterize
 std::unique_ptr<Occlusion> Occlusion::Create(const Instance& instance, Scheduler& scheduler,
                                              Rasterizer& rasterizer) {
     if (!Wanted()) {
-        std::printf("Occlusion: off (BB_OCCLUSION=1: real sample counts)\n");
+        std::printf("Occlusion: off (BB_OCCLUSION=0)\n");
         return nullptr;
     }
     std::unique_ptr<Occlusion> occlusion{new Occlusion(instance, scheduler, rasterizer)};

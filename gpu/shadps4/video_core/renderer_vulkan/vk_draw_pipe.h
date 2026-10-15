@@ -201,7 +201,7 @@ private:
             }
             static const u32 lookahead = [] {
                 const char* env = std::getenv("BB_DRAWREC_LOOKAHEAD");
-                return env && env[0] ? static_cast<u32>(std::strtoul(env, nullptr, 10)) : 0u;
+                return !env || !env[0] ? 4u : static_cast<u32>(std::strtoul(env, nullptr, 10));
             }();
             if (lookahead) {
                 u64 peek = at + header->size;
