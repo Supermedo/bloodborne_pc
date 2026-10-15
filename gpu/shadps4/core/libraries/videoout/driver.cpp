@@ -456,6 +456,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         BbStats::tick_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::reduced_draws.exchange(0)) / frames : 0.0,
                         frames ? double(BbStats::scene_draws.exchange(0)) / frames : 0.0);
+            Vulkan::Scheduler::PrintWaitSites(window);
             if (Vulkan::AsyncPipelinesEnabled()) {
                 auto& ps = Vulkan::pipeline_compile_stats;
                 const u64 waits = ps.waits.exchange(0);

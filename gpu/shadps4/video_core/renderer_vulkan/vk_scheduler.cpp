@@ -337,29 +337,90 @@ void Scheduler::Flush() {
     Flush(info);
 }
 
-void Scheduler::Finish() {
+void Scheduler::Finish(std::source_location where) {
     // When finishing, we need to wait for the submission to have executed on the device.
     const u64 presubmit_tick = CurrentTick();
     SubmitInfo info{};
     SubmitExecution(info);
-    Wait(presubmit_tick);
+    Wait(presubmit_tick, where);
 }
 
-void Scheduler::WaitSubmitted() {
+void Scheduler::WaitSubmitted(std::source_location where) {
     const u64 tick = CurrentTick();
     if (tick > 1) {
-        Wait(tick - 1);
+        Wait(tick - 1, where);
     }
 }
 
-void Scheduler::Wait(u64 tick) {
+namespace {
+/// bbport: GPU waits per call site (BB_FRAME_STATS), only those that blocked.
+struct WaitSite {
+    const char* function = nullptr;
+    u32 line = 0;
+    u64 ns = 0;
+    u64 count = 0;
+};
+std::mutex wait_sites_mutex;
+std::array<WaitSite, 48> wait_sites{};
+
+void NoteWaitSite(const std::source_location& where, u64 ns) {
+    std::scoped_lock lk{wait_sites_mutex};
+    for (auto& site : wait_sites) {
+        if (!site.function) {
+            site.function = where.function_name();
+            site.line = where.line();
+        }
+        if (site.line == where.line() && site.function == where.function_name()) {
+            site.ns += ns;
+            ++site.count;
+            return;
+        }
+    }
+}
+} // namespace
+
+void Scheduler::Wait(u64 tick, std::source_location where) {
     if (tick >= work_semaphore.CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         SubmitInfo info{};
         Flush(info);
     }
-    BbStats::WaitTimer timer{BbStats::tick_wait_ns};
+    if (!BbStats::enabled || work_semaphore.IsFree(tick)) {
+        BbStats::WaitTimer timer{BbStats::tick_wait_ns};
+        work_semaphore.Wait(tick);
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
     work_semaphore.Wait(tick);
+    const u64 ns = u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - start)
+                           .count());
+    BbStats::tick_wait_ns.fetch_add(ns, std::memory_order_relaxed);
+    if (ns > 20'000) {
+        NoteWaitSite(where, ns);
+    }
+}
+
+void Scheduler::PrintWaitSites(double window_seconds) {
+    std::array<WaitSite, 48> sites;
+    {
+        std::scoped_lock lk{wait_sites_mutex};
+        sites = wait_sites;
+        wait_sites = {};
+    }
+    std::sort(sites.begin(), sites.end(),
+              [](const WaitSite& a, const WaitSite& b) { return a.ns > b.ns; });
+    if (!sites[0].function) {
+        return;
+    }
+    std::printf("GPU waits:");
+    for (u32 i = 0; i < 5 && sites[i].function; ++i) {
+        std::printf(" %s:%u %.1f%% (%llu)%s", sites[i].function, sites[i].line,
+                    sites[i].ns / (window_seconds * 1e7),
+                    static_cast<unsigned long long>(sites[i].count),
+                    i + 1 < 5 && sites[i + 1].function ? ";" : "");
+    }
+    std::printf("\n");
 }
 
 void Scheduler::PopPendingOperations() {
