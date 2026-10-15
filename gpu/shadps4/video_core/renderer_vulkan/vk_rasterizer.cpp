@@ -8,6 +8,7 @@
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
+#include "common/hash.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -75,9 +76,34 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         runtime.FlushBarriers();
         buffer_cache.SubmitPendingArenaBinds(info);
     });
+    occlusion = Occlusion::Create(instance, scheduler, *this);
 }
 
 Rasterizer::~Rasterizer() = default;
+
+void Rasterizer::FinishSubmissionIdle(std::function<void()> done) {
+    static const bool submit_end = [] {
+        const char* env = std::getenv("BB_SUBMIT_END_TASKS");
+        return env && env[0] == '1';
+    }();
+    if (!submit_end || !UseDrawPipe()) {
+        DrainDrawPipe(DrawPipe::ReasonSubmissionEnd);
+        WaitDeferredSignals();
+        done();
+        return;
+    }
+    submit_end_done = std::move(done);
+    u8 dummy = 0;
+    RunInOrder(
+        [](Rasterizer& rasterizer, const u8*) {
+            rasterizer.WaitDeferredSignals();
+            if (rasterizer.submit_end_done) {
+                rasterizer.submit_end_done();
+                rasterizer.submit_end_done = nullptr;
+            }
+        },
+        &dummy, 0);
+}
 
 inline const AmdGpu::Regs& Rasterizer::Regs() const {
     return stage_regs ? *stage_regs : liverpool->regs;
@@ -915,6 +941,7 @@ bool Rasterizer::FilterDrawPasses() const {
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
     RENDERER_TRACE;
     BbStats::draws.fetch_add(1, std::memory_order_relaxed);
+    NoteIssuedDraw();
 
     // bbport: with the draw pipeline this thread only selects the pipeline and hands the draw
     // to the recording thread (DrawRecord there); draws FilterDraw handles itself run here.
@@ -1125,12 +1152,26 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
+    Occlusion::DrawQuery query{};
+    if (occlusion) {
+        if (occlusion->SkipDraw()) {
+            ResetBindings(false);
+            return;
+        }
+        query = occlusion->BeginDraw(push_data.scene_size);
+    }
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        if (query.pool) {
+            cmdbuf.beginQuery(query.pool, query.index, query.flags);
+        }
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
+        }
+        if (query.pool) {
+            cmdbuf.endQuery(query.pool, query.index);
         }
     });
     if (FrameCapture::Active()) {
@@ -1156,6 +1197,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
                               u32 max_count, VAddr count_address, u16 vertex_sgpr_offset,
                               u16 instance_sgpr_offset) {
     RENDERER_TRACE;
+    NoteIssuedDraw();
     // bbport: like direct draws, handed to the recording thread after the pipeline selection
     // (else the GPU thread waited here for a whole frame of queued draws).
     const bool pipelined = UseDrawPipe() && FilterDrawPasses() &&
@@ -1254,7 +1296,18 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u64 args_offset = base;
     const vk::Buffer counts = count_address != 0 ? count_buffer->Handle() : vk::Buffer{};
     const u64 counts_offset = count_address != 0 ? count_offset : 0;
+    Occlusion::DrawQuery query{};
+    if (occlusion) {
+        if (occlusion->SkipDraw()) {
+            ResetBindings(false);
+            return;
+        }
+        query = occlusion->BeginDraw(push_data.scene_size);
+    }
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        if (query.pool) {
+            cmdbuf.beginQuery(query.pool, query.index, query.flags);
+        }
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         if (is_indexed) {
             if (counts) {
@@ -1267,6 +1320,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             cmdbuf.drawIndirectCount(args, args_offset, counts, counts_offset, max_count, stride);
         } else {
             cmdbuf.drawIndirect(args, args_offset, max_count, stride);
+        }
+        if (query.pool) {
+            cmdbuf.endQuery(query.pool, query.index);
         }
     });
     DebugState.IncDrawCall();
@@ -2490,12 +2546,30 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
 
 void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* prepared,
                               Shader::Backend::Bindings& binding, u32& write_index) {
+    static const bool sampler_memo_on = [] {
+        const char* env = std::getenv("BB_SAMPLER_MEMO");
+        return env && env[0] == '1';
+    }();
     for (u32 sampler_index = 0; sampler_index < stage.samplers.size(); ++sampler_index) {
         const auto& sampler = stage.samplers[sampler_index];
         auto ssharp =
             prepared ? prepared->sampler_sharps[sampler_index] : sampler.GetSharp(stage);
-        const auto vk_sampler = texture_cache.GetSampler(
-            ssharp, Regs().ta_bc_base, sampler.is_depth, sampler.is_depth ? 0.0f : sampler_lod_bias);
+        const float lod = sampler.is_depth ? 0.0f : sampler_lod_bias;
+        vk::Sampler vk_sampler{};
+        if (sampler_memo_on && !BbToggle::Disabled(BbToggle::SamplerMemo)) {
+            const u64 hash = HashCombine(HashCombine(XXH3_64bits(&ssharp, sizeof(ssharp)),
+                                                     sampler.is_depth),
+                                         u64(std::bit_cast<u32>(lod)));
+            auto& memo = sampler_memo[hash % sampler_memo.size()];
+            if (memo.hash == hash && memo.sampler) {
+                vk_sampler = memo.sampler;
+            } else {
+                vk_sampler = texture_cache.GetSampler(ssharp, Regs().ta_bc_base, sampler.is_depth, lod);
+                memo = {hash, vk_sampler};
+            }
+        } else {
+            vk_sampler = texture_cache.GetSampler(ssharp, Regs().ta_bc_base, sampler.is_depth, lod);
+        }
         image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
         auto& set_write = set_writes[write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
@@ -2539,8 +2613,16 @@ Rasterizer::BeginSignature Rasterizer::MakeBeginSignature(const GraphicsPipeline
 bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedStage* prepared,
                                      u32 first_image_idx, bool& barrier, TextureSet*& slot) {
     const u32 count = static_cast<u32>(stage.images.size());
-    if (!prepared || count == 0 || count > TextureSet::MaxImages ||
+    if (count == 0 || count > TextureSet::MaxImages ||
         BbToggle::Disabled(BbToggle::TextureSetMemo) || FrameCapture::Active()) {
+        return false;
+    }
+    static const bool local_sets = [] {
+        const char* env = std::getenv("BB_LOCAL_TEXTURE_SETS");
+        return env && env[0] == '1';
+    }();
+    if (!prepared &&
+        !(local_sets && !BbToggle::Disabled(BbToggle::LocalTextureSets))) {
         return false;
     }
     for (const auto& image : stage.images) {
@@ -2548,17 +2630,30 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
             return false;
         }
     }
-    u64 key = XXH3_64bits_withSeed(prepared->image_hashes, count * sizeof(u64),
+    std::array<u64, TextureSet::MaxImages> hashes{};
+    if (prepared) {
+        std::copy_n(prepared->image_hashes, count, hashes.begin());
+    } else {
+        for (u32 i = 0; i < count; ++i) {
+            const auto sharp = stage.images[i].GetSharp(stage);
+            hashes[i] = XXH3_64bits(&sharp, sizeof(sharp));
+        }
+    }
+    u64 key = XXH3_64bits_withSeed(hashes.data(), count * sizeof(u64),
                                    reinterpret_cast<u64>(&stage));
     key |= 1; // 0 marks an empty slot
     auto& set = texture_sets[key % texture_sets.size()];
     slot = &set;
     const u64 generation = texture_cache.RegistryGeneration();
-    const bool match = set.key == key && set.stage == &stage && set.count == count &&
-                       set.generation == generation &&
+    static const bool revalidate = [] {
+        const char* env = std::getenv("BB_MEMO_REVALIDATE");
+        return env && env[0] == '1';
+    }();
+    const bool gen_ok = (revalidate && !BbToggle::Disabled(BbToggle::MemoRevalidate)) ||
+                        set.generation == generation;
+    const bool match = set.key == key && set.stage == &stage && set.count == count && gen_ok &&
                        set.scene_generation == scene_targets->Generation() &&
-                       std::equal(set.hashes.begin(), set.hashes.begin() + count,
-                                  prepared->image_hashes);
+                       std::equal(set.hashes.begin(), set.hashes.begin() + count, hashes.begin());
     if (!match) {
         ++texture_set_why[set.key != key ? 0 : set.generation != generation ? 1 : 3];
         ++texture_set_misses;
@@ -2566,7 +2661,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         set.stage = &stage;
         set.count = 0;
         set.generation = ~0ull;
-        std::copy_n(prepared->image_hashes, count, set.hashes.begin());
+        std::copy_n(hashes.begin(), count, set.hashes.begin());
         return false;
     }
     // Every image still has the backing its view belongs to and needs no refresh.

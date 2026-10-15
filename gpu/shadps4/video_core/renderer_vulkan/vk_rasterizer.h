@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <functional>
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -15,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
+#include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -124,6 +127,22 @@ public:
     /// Before a guest-visible write: fences deferred earlier are written first.
     void WaitDeferredSignals() {
         scheduler.WaitDeferredSignals();
+    }
+    void WaitDeferredSignalsUpTo(u64 issued) {
+        scheduler.WaitDeferredSignalsUpTo(issued);
+    }
+    /// End of sceGnmSubmitDone: drain + wait, or hand that to the draw thread (BB_SUBMIT_END_TASKS).
+    void FinishSubmissionIdle(std::function<void()> done);
+    Occlusion* GetOcclusion() const noexcept {
+        return occlusion.get();
+    }
+    void NoteLateCommandWrite(VAddr address, const void*, u64 size) {
+        NotePendingGpuWrite(address, size);
+    }
+    void NoteIssuedDraw() {
+        if (occlusion) {
+            occlusion->NoteIssued();
+        }
     }
     /// Runs `signal` after the guest memory copies issued so far, without waiting here.
     void SignalAfterHostCopies(std::function<void()> signal) {
@@ -515,6 +534,13 @@ private:
         return nullptr;
     }
     std::unique_ptr<ConstantRing> constant_ring;
+    std::unique_ptr<Occlusion> occlusion;
+    std::function<void()> submit_end_done;
+    struct SamplerMemoEntry {
+        u64 hash = 0;
+        vk::Sampler sampler{};
+    };
+    std::array<SamplerMemoEntry, 256> sampler_memo{};
     /// Submissions (prepared draws) kept alive until stage B reaches the position.
     std::deque<std::pair<u64, std::shared_ptr<const void>>> pipe_keepalive;
     std::unique_ptr<DrawPipe> draw_pipe;

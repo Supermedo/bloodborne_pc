@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "common/hash.h"
+#include "common/thread.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "core/debug_state.h"
@@ -28,6 +29,8 @@
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "bbport_threads.h"
+#include "bbport_toggles.h"
 
 namespace Vulkan {
 
@@ -351,9 +354,34 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+    static const bool async = [] {
+        const char* env = std::getenv("BB_ASYNC_PIPELINES");
+        return env && env[0] == '1';
+    }();
+    if (async && !BbToggle::Disabled(BbToggle::AsyncPipelines)) {
+        const unsigned workers = std::max(1u, BbThreads::Available() / 4);
+        std::printf("Pipelines: compile threads %u (BB_ASYNC_PIPELINES=1)\n", workers);
+        for (unsigned i = 0; i < workers; ++i) {
+            compile_threads.emplace_back([this](std::stop_token stop) {
+                Common::SetCurrentThreadName("bb:PipeComp");
+                while (!stop.stop_requested()) {
+                    auto job = compile_queue.Pop();
+                    if (!job) {
+                        break;
+                    }
+                    job();
+                }
+            });
+        }
+    }
 }
 
-PipelineCache::~PipelineCache() = default;
+PipelineCache::~PipelineCache() {
+    for (std::size_t i = 0; i < compile_threads.size(); ++i) {
+        compile_queue.Push(nullptr, {});
+    }
+    compile_threads.clear();
+}
 
 // bbport: shader/pipeline compile time on the GPU thread, reported by BB_FRAME_STATS.
 std::atomic<u64> g_bb_compile_ns;
@@ -369,6 +397,35 @@ struct CompileTimer {
     }
 };
 } // namespace
+
+const GraphicsPipeline* PipelineCache::FinishAsync(const GraphicsPipelineKey& key, bool wait) {
+    const auto it = pending_compiles.find(key);
+    if (it == pending_compiles.end()) {
+        return nullptr;
+    }
+    auto job = it->second;
+    if (wait && job->state.load(std::memory_order_acquire) == 0) {
+        if (auto taken = compile_queue.Take(job.get())) {
+            taken();
+        } else {
+            while (job->state.load(std::memory_order_acquire) == 0) {
+                std::this_thread::yield();
+            }
+        }
+    }
+    if (job->state.load(std::memory_order_acquire) != 1) {
+        return nullptr;
+    }
+    pending_compiles.erase(it);
+    auto [slot, _] = graphics_pipelines.try_emplace(key);
+    slot.value() = std::move(job->pipeline);
+    if (slot.value()) {
+        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(key);
+        RegisterPipelineData(key, pipeline_hash, job->sdata);
+        ++num_new_pipelines;
+    }
+    return slot.value().get();
+}
 
 bool PipelineCache::PrepareGraphicsPipeline(PipelineSelection& worker_sel) {
     // Tessellation stages read constant buffers from memory at selection time: not prepared.
@@ -423,6 +480,46 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     sel.draw_indirect_params = params;
     if (!RefreshGraphicsKey(sel)) {
         return nullptr;
+    }
+    static const bool async = [] {
+        const char* env = std::getenv("BB_ASYNC_PIPELINES");
+        return env && env[0] == '1';
+    }();
+    static const bool skip_uncompiled = [] {
+        const char* env = std::getenv("BB_SKIP_UNCOMPILED");
+        return env && env[0] == '1';
+    }();
+    static const bool late_bind = [] {
+        const char* env = std::getenv("BB_LATE_PIPELINE_BIND");
+        return env && env[0] == '1';
+    }();
+    if (async && !BbToggle::Disabled(BbToggle::AsyncPipelines)) {
+        if (auto ready = graphics_pipelines.find(sel.graphics_key);
+            ready != graphics_pipelines.end() && ready->second) {
+            return ready->second.get();
+        }
+        if (const auto* done = FinishAsync(sel.graphics_key, late_bind || !skip_uncompiled)) {
+            return done;
+        }
+        auto job = std::make_shared<AsyncCompile>();
+        job->key = sel.graphics_key;
+        job->infos = sel.infos;
+        job->runtime_infos = sel.runtime_infos;
+        job->modules = sel.modules;
+        job->fetch = sel.fetch_shader;
+        pending_compiles[sel.graphics_key] = job;
+        compile_queue.Push(job.get(), [this, job] {
+            CompileTimer timer;
+            job->pipeline = std::make_unique<GraphicsPipeline>(
+                instance, scheduler, desc_heap, profile, job->key, *pipeline_cache, job->infos,
+                job->runtime_infos, job->fetch, job->modules, job->sdata, false);
+            if (job->pipeline && !job->pipeline->IsValid()) {
+                job->pipeline.reset();
+            }
+            job->state.store(1, std::memory_order_release);
+        });
+        sel.fetch_shader.reset();
+        return skip_uncompiled && !late_bind ? nullptr : FinishAsync(sel.graphics_key, true);
     }
     const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key);
     if (is_new) {

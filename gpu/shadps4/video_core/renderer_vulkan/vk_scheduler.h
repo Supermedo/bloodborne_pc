@@ -827,6 +827,11 @@ public:
     /// the write cannot overtake an earlier fence. Otherwise the guest, seeing the later value,
     /// may free memory the earlier fence then writes into (corrupted heap, guest fault).
     void WaitDeferredSignals();
+    /// BB_FENCE_ORDER=ordered: wait only until `issued` (snapshot of DeferredSignalsIssued).
+    void WaitDeferredSignalsUpTo(u64 issued);
+    [[nodiscard]] u64 DeferredSignalsIssued() const noexcept {
+        return deferred_signals_issued.load(std::memory_order_relaxed);
+    }
 
     /// Whether a render pass with exactly this state is open.
     [[nodiscard]] bool IsRenderingWith(const RenderState& state) const {

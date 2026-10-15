@@ -11,9 +11,12 @@
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
+#include "video_core/renderer_vulkan/pipeline_compile_queue.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include <memory>
+#include <thread>
 
 template <>
 struct std::hash<vk::ShaderModule> {
@@ -195,6 +198,20 @@ private:
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
+    struct AsyncCompile {
+        std::atomic<int> state{0};
+        std::unique_ptr<GraphicsPipeline> pipeline;
+        GraphicsPipelineKey key{};
+        std::array<const Shader::Info*, MaxShaderStages> infos{};
+        std::array<Shader::RuntimeInfo, MaxShaderStages> runtime_infos{};
+        std::array<vk::ShaderModule, MaxShaderStages> modules{};
+        std::optional<Shader::Gcn::FetchShaderData> fetch{};
+        GraphicsPipeline::SerializationSupport sdata{};
+    };
+    tsl::robin_map<GraphicsPipelineKey, std::shared_ptr<AsyncCompile>> pending_compiles;
+    PipelineJobQueue compile_queue;
+    std::vector<std::jthread> compile_threads;
+    const GraphicsPipeline* FinishAsync(const GraphicsPipelineKey& key, bool wait);
     PipelineSelection sel{}; ///< GPU thread selection state
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
