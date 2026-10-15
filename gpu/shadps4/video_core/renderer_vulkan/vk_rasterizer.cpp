@@ -2493,7 +2493,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                     image_infos.emplace_back(VK_NULL_HANDLE, proxy->view, proxy->layout);
                     if (set_ok && binding_index < resolved.size()) {
                         resolved[binding_index] = {image_id, proxy->view, image.backing,
-                                                   desc.view_info.range, true};
+                                                   desc.view_info.range, true, image.image_uid};
                     }
                     ++proxy_samples;
                     continue;
@@ -2542,7 +2542,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
             if (set_ok && binding_index < resolved.size()) {
                 resolved[binding_index] = {image_id, *image_view.image_view, image.backing,
-                                           desc.view_info.range};
+                                           desc.view_info.range, false, image.image_uid};
                 set_ok = !is_storage && !binding.force_general && !binding.is_target;
             }
         }
@@ -2704,6 +2704,14 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         const auto& entry = set.entries[i];
         if (!entry.id) {
             continue;
+        }
+        // BB_MEMO_REVALIDATE skips the registry generation: the slot may since hold another
+        // image, or none.
+        if (!texture_cache.IsRegisteredImage(entry.id, entry.uid)) {
+            ++texture_set_why[2];
+            ++texture_set_misses;
+            set.generation = ~0ull;
+            return false;
         }
         const auto& image = texture_cache.GetImage(entry.id);
         // Proxy entries need a current proxy; native entries of a proxied image go through

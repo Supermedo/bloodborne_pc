@@ -281,6 +281,7 @@ private:
         const void* backing = nullptr;
         VideoCore::SubresourceRange range;
         bool proxy = false; ///< sampled from the scene proxy (view: SampleProxy on each use)
+        u64 uid = 0;        ///< Image::image_uid of `id`
     };
     struct TextureSet {
         u64 key = 0;
