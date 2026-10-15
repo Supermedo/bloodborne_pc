@@ -193,44 +193,55 @@ static void TestEscapeBindable(void) {
     assert(HasKeyBinding(&cfg, OUT_OPTIONS, SDL_SCANCODE_ESCAPE));
 }
 
-/* stick_socd / stick_release_delay_ms: last-wins and no delay by default. */
+/* stick_socd / stick_release_delay_ms: last-wins and a 60 ms hold by default. */
 static void TestStickSocdAndReleaseDelay(void) {
     InputConfig def;
     input_config_parse(&def, "cross = space\n");
     assert(def.stick_socd_last == 1);
-    assert(def.stick_release_delay_ms == 0);
+    assert(def.stick_release_delay_ms == 60);
 
     InputConfig cfg;
-    input_config_parse(&cfg, "stick_socd = Neutral\nstick_release_delay_ms = 60\n");
+    input_config_parse(&cfg, "stick_socd = Neutral\nstick_release_delay_ms = 120\n");
     assert(cfg.warnings == 0);
     assert(cfg.stick_socd_last == 0);
-    assert(cfg.stick_release_delay_ms == 60);
+    assert(cfg.stick_release_delay_ms == 120);
+
+    InputConfig off; /* opting out still works */
+    input_config_parse(&off, "stick_release_delay_ms = 0\n");
+    assert(off.warnings == 0);
+    assert(off.stick_release_delay_ms == 0);
 
     InputConfig bad;
     input_config_parse(&bad, "stick_socd = first\nstick_release_delay_ms = 500\nstick_release_delay_ms = 6x\n");
     assert(bad.warnings == 3);
-    assert(bad.stick_socd_last == 1);       /* default kept */
-    assert(bad.stick_release_delay_ms == 0); /* default kept */
+    assert(bad.stick_socd_last == 1);        /* default kept */
+    assert(bad.stick_release_delay_ms == 60); /* default kept */
 }
 
-/* stick_circular / stick_turn_rate: round gate on, instant turns by default. */
+/* stick_circular / stick_turn_rate: square gate and 900 deg/s turns by default. */
 static void TestStickCircularAndTurnRate(void) {
     InputConfig def;
     input_config_parse(&def, "cross = space\n");
-    assert(def.stick_circular == 1);
-    assert(def.stick_turn_rate == 0);
+    assert(def.stick_circular == 0);
+    assert(def.stick_turn_rate == 900);
 
     InputConfig cfg;
-    input_config_parse(&cfg, "stick_circular = OFF\nstick_turn_rate = 900\n");
+    input_config_parse(&cfg, "stick_circular = ON\nstick_turn_rate = 450\n");
     assert(cfg.warnings == 0);
-    assert(cfg.stick_circular == 0);
-    assert(cfg.stick_turn_rate == 900);
+    assert(cfg.stick_circular == 1);
+    assert(cfg.stick_turn_rate == 450);
+
+    InputConfig off; /* the previous keyboard behavior is one line each away */
+    input_config_parse(&off, "stick_circular = on\nstick_turn_rate = 0\n");
+    assert(off.warnings == 0);
+    assert(off.stick_circular == 1);
+    assert(off.stick_turn_rate == 0);
 
     InputConfig bad;
     input_config_parse(&bad, "stick_circular = round\nstick_turn_rate = -5\nstick_turn_rate = 9000\n");
     assert(bad.warnings == 3);
-    assert(bad.stick_circular == 1);
-    assert(bad.stick_turn_rate == 0);
+    assert(bad.stick_circular == 0);   /* default kept */
+    assert(bad.stick_turn_rate == 900); /* default kept */
 }
 
 /* Section 4.2: analog_deadzone, including inner > outer rejection. */
