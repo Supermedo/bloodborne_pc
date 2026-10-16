@@ -33,12 +33,25 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
-    const char* fullscreen = std::getenv("BB_FULLSCREEN");
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, fullscreen && fullscreen[0] == '1');
+    // BB_WINDOW_MODE: windowed (default), borderless (fullscreen at the desktop mode) or
+    // fullscreen (exclusive, switches the display mode). BB_FULLSCREEN=1 is the older
+    // spelling of borderless.
+    const char* mode_env = std::getenv("BB_WINDOW_MODE");
+    const char* legacy = std::getenv("BB_FULLSCREEN");
+    const bool exclusive = mode_env && !std::strcmp(mode_env, "fullscreen");
+    const bool borderless = mode_env ? !std::strcmp(mode_env, "borderless") : legacy && legacy[0] == '1';
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, exclusive || borderless);
     base_title = title;
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
+    if (exclusive) {
+        // A window in fullscreen state is borderless until it is given a display mode.
+        const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window));
+        if (!desktop || !SDL_SetWindowFullscreenMode(window, desktop)) {
+            LOG_WARNING(Frontend, "Exclusive fullscreen unavailable, staying borderless: {}", SDL_GetError());
+        }
+    }
 
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);

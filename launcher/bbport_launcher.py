@@ -57,6 +57,8 @@ MODEL_LOD = [("Как в игре", "0"), ("Максимальная (-2)", "-2"
              ("Минимальная (2)", "2")]
 FPS_MODES = [("Без ограничения (патч)", "uncap"), ("60", "60"), ("90", "90"),
              ("30 (как на PS4)", "30")]
+WINDOW_MODES = [("В окне", "windowed"), ("Без рамки", "borderless"),
+                ("Полноэкранный режим", "fullscreen")]
 PRESENT_MODES = [("Mailbox", "Mailbox"), ("FIFO (VSync)", "Fifo"),
                  ("FIFO Relaxed", "FifoRelaxed"), ("Immediate", "Immediate")]
 DRAW_PIPE = [("Авто (8+ потоков)", ""), ("Включён", "1"), ("Выключен (стабильнее)", "0")]
@@ -73,7 +75,7 @@ DEFAULTS = {
     "mods_enabled": True,
     "patches_dir": "",
     "language": "1",
-    "fullscreen": False,
+    "window_mode": "windowed",
     "hdr": False,
     "present_mode": "Mailbox",
     "fps_mode": "uncap",
@@ -105,7 +107,10 @@ INI_DEFAULTS = {
 def load_settings():
     settings = dict(DEFAULTS)
     try:
-        settings.update(json.loads(CONFIG_FILE.read_text(encoding='utf-8')))
+        saved = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+        if "window_mode" not in saved and saved.get("fullscreen"):
+            saved["window_mode"] = "borderless"  # the old fullscreen switch was borderless
+        settings.update(saved)
     except (OSError, ValueError):
         pass
     return settings
@@ -170,7 +175,7 @@ def game_environment(s):
     env["BB_PATCHES_DIR"] = str(patches_dir(s))
     env["BB_PATCHES_CONFIG"] = str(DATA_DIR / "patches.json")
     env["BB_LANGUAGE"] = s["language"]
-    env["BB_FULLSCREEN"] = "1" if s["fullscreen"] else "0"
+    env["BB_WINDOW_MODE"] = s["window_mode"]
     env["BB_PRESENT_MODE"] = s["present_mode"]
     if s["hdr"]:
         env["BB_HDR"] = "1"
@@ -375,9 +380,8 @@ class LauncherWindow(Adw.ApplicationWindow):
                                   tr("Без перезапуска, но медленнее на Steam Deck и старых GPU"),
                                   LIVE_RESOLUTION, self.ini.get("live_resolution", "0"))
         screen.add(self.live_row)
-        self.fullscreen_row = Adw.SwitchRow(title=tr("Полноэкранный режим"),
-                                            active=self.settings["fullscreen"])
-        screen.add(self.fullscreen_row)
+        self.window_row = combo_row(tr("Режим окна"), None, WINDOW_MODES, self.settings["window_mode"])
+        screen.add(self.window_row)
         self.present_row = combo_row(tr("Режим показа кадров"), None, PRESENT_MODES,
                                      self.settings["present_mode"])
         screen.add(self.present_row)
@@ -571,7 +575,7 @@ class LauncherWindow(Adw.ApplicationWindow):
     def store(self):
         s = self.settings
         s["language"] = combo_value(self.language_row)
-        s["fullscreen"] = self.fullscreen_row.get_active()
+        s["window_mode"] = combo_value(self.window_row)
         s["present_mode"] = combo_value(self.present_row)
         s["hdr"] = self.hdr_row.get_active()
         s["fps_mode"] = combo_value(self.fps_row)
