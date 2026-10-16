@@ -1,0 +1,66 @@
+diff --git a/include/ffx_vk_fsr3_3_1_5_bridge.h b/include/ffx_vk_fsr3_3_1_5_bridge.h
+index 863476c..733c2a1 100644
+--- a/include/ffx_vk_fsr3_3_1_5_bridge.h
++++ b/include/ffx_vk_fsr3_3_1_5_bridge.h
+@@ -235,6 +235,10 @@ typedef enum FfxVkFsr3_3_1_6FrameGenerationTransferFunction {
+     FFX_VK_FSR3_3_1_6_FRAMEGEN_TRANSFER_SCRGB = 2,
+ } FfxVkFsr3_3_1_6FrameGenerationTransferFunction;
+ 
++typedef enum FfxVkFsr3_3_1_6FrameGenerationDispatchFlags {
++    FFX_VK_FSR3_3_1_6_FRAMEGEN_DISPATCH_DRAW_DEBUG_VIEW = (1u << 2),
++} FfxVkFsr3_3_1_6FrameGenerationDispatchFlags;
++
+ typedef struct FfxVkFsr3_3_1_6FrameGenerationImage {
+     VkImage image;
+     VkFormat format;
+@@ -336,6 +340,10 @@ ffxVkFsr3_3_1_6FrameGenerationContextRecordDispatch(
+     FfxVkFsr3_3_1_6FrameGenerationContext* context,
+     const FfxVkFsr3_3_1_6FrameGenerationDispatchInfo* dispatchInfo);
+ 
++FfxVkFsr3_3_1_6FrameGenerationResult
++ffxVkFsr3_3_1_6FrameGenerationContextSetDispatchDebugFlags(
++    FfxVkFsr3_3_1_6FrameGenerationContext* context, uint32_t flags);
++
+ FfxVkFsr3_3_1_6FrameGenerationResult
+ ffxVkFsr3_3_1_6FrameGenerationContextRetireFrame(
+     FfxVkFsr3_3_1_6FrameGenerationContext* context,
+diff --git a/src/ffx_vk_fsr3_3_1_6_framegen.cpp b/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+index 9636cec..dc3a445 100644
+--- a/src/ffx_vk_fsr3_3_1_6_framegen.cpp
++++ b/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+@@ -305,6 +305,7 @@ struct FfxVkFsr3_3_1_6FrameGenerationContext {
+     uint32_t renderWidth = 0u;
+     uint32_t renderHeight = 0u;
+     VkFormat colorFormat = VK_FORMAT_UNDEFINED;
++    uint32_t dispatchDebugFlags = 0u;
+     VkImage preparedColorImage = VK_NULL_HANDLE;
+     VkImage preparedDepthImage = VK_NULL_HANDLE;
+     VkImage preparedMotionVectorImage = VK_NULL_HANDLE;
+@@ -638,6 +639,7 @@ ffxVkFsr3_3_1_6FrameGenerationContextRecordDispatch(
+     dispatch.dilatedMotionVectors = context->dilatedMotionVectors.resource;
+     dispatch.reconstructedPrevDepth = context->reconstructedPreviousDepth.resource;
+     dispatch.distortionField = distortionResource;
++    dispatch.flags = context->dispatchDebugFlags;
+     const FfxErrorCode result = ffxFrameInterpolationDispatch(&context->interpolation, &dispatch);
+     if (result != FFX_OK)
+         return result_from_ffx(result);
+@@ -650,6 +652,19 @@ ffxVkFsr3_3_1_6FrameGenerationContextRecordDispatch(
+     return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
+ }
+ 
++extern "C" FfxVkFsr3_3_1_6FrameGenerationResult
++ffxVkFsr3_3_1_6FrameGenerationContextSetDispatchDebugFlags(
++    FfxVkFsr3_3_1_6FrameGenerationContext* context, uint32_t flags)
++{
++    if (!context)
++        return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    const uint32_t allowed = FFX_VK_FSR3_3_1_6_FRAMEGEN_DISPATCH_DRAW_DEBUG_VIEW;
++    if ((flags & ~allowed) != 0u)
++        return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    context->dispatchDebugFlags = flags;
++    return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
++}
++
+ extern "C" FfxVkFsr3_3_1_6FrameGenerationResult
+ ffxVkFsr3_3_1_6FrameGenerationContextRetireFrame(
+     FfxVkFsr3_3_1_6FrameGenerationContext* context, uint64_t completedFrameId)

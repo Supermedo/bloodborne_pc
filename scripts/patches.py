@@ -135,7 +135,7 @@ def output_size(settings):
     """Output (UI) size from bbport.ini output_res, e.g. 3840x2160; 1920x1080 by default."""
     try:
         w,h=(int(v) for v in settings.get('output_res','').lower().split('x'))
-        if w>0 and h>0: return (w,h)
+        if 256<=w<=7680 and 144<=h<=4320 and not (w%2 or h%2): return (w,h)
     except ValueError:
         pass
     return OUTPUT_SIZE
@@ -146,17 +146,24 @@ def scaled_sizes(settings):
     the game renders at output / preset scale (or at the output size without upscaler) and the
     upscaler fills the output. None at 1080p and for TAA (native, live host targets only)."""
     out=output_size(settings)
-    if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
+    if out==OUTPUT_SIZE or (settings.get('upscaler')=='taa' and out[0]*9==out[1]*16): return None
     scale=1.0
-    if settings.get('upscaler','fsr3')!='off':
+    if settings.get('upscaler','fsr3') not in ('off','taa'):
         preset=int(settings.get('preset','0') or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     render=tuple(max(2,round(v/scale/2)*2) for v in out)
-    # A scene of exactly the UI coordinate space's size (1920x1080 at 4K Performance, the
-    # ultrawide HUD canvas at 2560x1080 or 3840x1080 native) is indistinguishable from it: the
-    # port's UI composition recognizes UI draws by that size (HUD gauges came out too long).
-    canvas=hud_canvas(out)
-    if render==canvas: render=(canvas[0]-4,canvas[1]-2)
+    # A scene of exactly the game's 1920x1080 UI coordinate space (4K Performance) is
+    # indistinguishable from a UI draw: the port's UI composition recognizes UI draws by that
+    # size and the HUD gauges came out too long. The ultrawide HUD canvas (hud_canvas) is the
+    # hud_layout mod layer's logical width only, never the guest UI space, so it does not matter
+    # here (BB_UI_RES is the output size at every ratio, run.py/patches.py main()).
+    if render==OUTPUT_SIZE:
+        render=(OUTPUT_SIZE[0]-4,OUTPUT_SIZE[1]-2)
+    elif out[0]*9!=out[1]*16 and render==out and settings.get('upscaler')!='taa':
+        # Non-16:9 movie viewports use the physical output too. Native/off scene targets
+        # otherwise alias the UI size and inventory draws sample the full icon atlas.
+        # Keep TAA's exact-size contract; its native path cannot accept a render nudge.
+        render=(out[0]-4,out[1]-2)
     return render,out
 
 
@@ -182,9 +189,11 @@ def resolution_writes(xml,size,app_version,segments,ui=OUTPUT_SIZE):
 
 
 def hud_canvas(output):
-    """The HUD's coordinate space for an output: 1920x1080 up to 16:9, wider (still 1080 high,
-    even width) for ultrawide outputs, e.g. 2580x1080 for 3440x1440. The port scales it to the
-    output uniformly (UiComposition, BB_UI_RES)."""
+    """The logical width the game's 1920x1080 stage has to grow to for an output, so its edges
+    meet the output's own: 1920x1080 up to 16:9, wider (still 1080 high, even width) above it,
+    e.g. 2580x1080 for 3440x1440. run.py passes the width to hud_layout.py, whose mod layer moves
+    the HUD's corner groups toward the physical screen edges. It is never the guest UI coordinate
+    space: BB_UI_RES is the output size for every ratio (centered-stage UiComposition)."""
     w,h=output
     if w*OUTPUT_SIZE[1]<=h*OUTPUT_SIZE[0]: return OUTPUT_SIZE
     return (round(OUTPUT_SIZE[1]*w/h/2)*2,OUTPUT_SIZE[1])
@@ -382,7 +391,7 @@ def main():
     p.add_argument('--game-dir',type=Path,default=Path(os.environ.get('BB_GAME_DIR','../CUSA03173')))
     p.add_argument('--render-res',default='',help='render resolution WxH (overrides the preset)')
     p.add_argument('--print-preset-size',action='store_true',help='print the selected preset size, if reduced')
-    p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
+    p.add_argument('--output-res',default='',help='output resolution WxH (centered 1920x1080 logical HUD stage)')
     p.add_argument('--print-scaled',action='store_true',
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
     p.add_argument('--print-fingerprint',action='store_true',
@@ -424,17 +433,17 @@ def main():
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
-    # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
-    # it into the output-size image with a viewport scaled by output / 1920
-    # (UiComposition::NativeViewport), so it is rasterized at the output resolution. Ultrawide
-    # outputs widen those coordinates (hud_canvas; run.py passes the same size as BB_UI_RES).
-    output=tuple(int(v) for v in a.output_res.lower().split('x')) if a.output_res else OUTPUT_SIZE
-    ui=hud_canvas(output)
+    # Scaleform's logical stage remains 1920x1080. At non-16:9 output sizes,
+    # give its show-all mode the actual physical viewport so it centers the stage.
+    # The renderer uses that coordinate space for native-resolution UI draws.
+    # The HUD's own corner groups are moved by the hud_layout mod layer (run.py,
+    # hud_canvas width), not by these writes: the camera stays at the output aspect.
+    ui=OUTPUT_SIZE
+    if a.output_res:
+        out=output_size({'output_res': a.output_res})
+        if out[0]*9 != out[1]*16: ui=out
     if size:
         writes+=resolution_writes(a.xml,size,a.app_version,segments,ui)
-        if ui!=OUTPUT_SIZE:
-            writes+=ultrawide_writes(a.xml,output,a.app_version,segments)
-            names.append(f'ultrawide {output[0]}x{output[1]} (HUD {ui[0]}x{ui[1]})')
         if size[0]*size[1]>OUTPUT_SIZE[0]*OUTPUT_SIZE[1]:
             heap='Increased Graphics Heap Sizes'
             writes+=compile_patches(a.xml,[heap],a.app_version,segments)

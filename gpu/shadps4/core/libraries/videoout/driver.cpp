@@ -534,7 +534,7 @@ void VideoOutDriver::DrawLastFrame() {
 }
 
 bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
-                                bool is_eop /*= false*/) {
+                                bool is_eop, u64 content_frame_id, u64 flip_ticket) {
     {
         std::unique_lock lock{port->port_mutex};
         if (index != -1 && port->flip_status.flip_pending_num > 16) {
@@ -551,24 +551,35 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
 
     if (!is_eop) {
         // Non EOP flips can arrive from any thread so ask GPU thread to perform them
-        liverpool->SendCommand([=, this]() { SubmitFlipInternal(port, index, flip_arg, is_eop); });
+        liverpool->SendCommand([=, this]() { SubmitFlipInternal(port, index, flip_arg, is_eop, content_frame_id, flip_ticket); });
     } else {
-        SubmitFlipInternal(port, index, flip_arg, is_eop);
+        SubmitFlipInternal(port, index, flip_arg, is_eop, content_frame_id, flip_ticket);
     }
 
     return true;
 }
 
-void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop) {
+void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop,
+                                       u64 content_frame_id, u64 flip_ticket) {
     Vulkan::Frame* frame;
     if (index == -1) {
-        frame = presenter->PrepareBlankFrame(false);
+        frame = presenter->PrepareBlankFrame(false, content_frame_id);
     } else {
         const auto& buffer = port->buffer_slots[index];
         ASSERT_MSG(buffer.group_index >= 0, "Trying to flip an unregistered buffer!");
         const auto& group = port->groups[buffer.group_index];
-        frame = presenter->PrepareFrame(group, buffer.address_left);
+        frame = presenter->PrepareFrame(group, buffer.address_left, content_frame_id);
     }
+    // Capture identity at the guest's accepted flip request, not from a later
+    // global simulation counter on the GPU/presentation worker.
+    frame->content_frame_id = content_frame_id;
+    // Zero is also an explicitly captured identity (startup without a pad poll).
+    // Preserve it rather than borrowing the following frame's live counter.
+    frame->reflex_frame_id = content_frame_id;
+    // bbport: the bounded backlog registers/retires by this accepted-flip ticket, kept separate
+    // from content_frame_id (the Reflex/latency identity). Set unconditionally, including 0, so
+    // a pooled frame can never retire a stale ticket from a previous use.
+    frame->flip_ticket = flip_ticket;
 
     {
         std::scoped_lock lock{mutex};
@@ -623,9 +634,11 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         return {};
     };
 
-    // bbport: with a frame limit (uncapped presets) a queued flip is presented as soon as it
-    // arrives and its slot allows, between vblanks, instead of on the next vblank tick.
-    const bool immediate_flips = frame_limit != 0;
+    // PC frame-limited and uncapped presets can present ready frames between vblanks.
+    // With no FPS limit, waiting for a 480 Hz virtual tick quantizes arrivals into
+    // ~2.1 ms steps. Keep fixed-timestep (<=120 Hz) presets on their original ticks
+    // and retain the precise limiter above whenever a frame limit is requested.
+    const bool immediate_flips = frame_limit != 0 || EmulatorSettings.GetVblankFrequency() > 120;
 
     while (!token.stop_requested()) {
         timer.Start();

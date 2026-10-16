@@ -35,6 +35,17 @@ int bbgpu_input_reload_requested(void) {
     return r;
 }
 
+static int reflex_pre_samples = 0;
+static int reflex_on_samples = 0;
+void bbgpu_reflex_pre_input_sample(void) {
+    ++reflex_pre_samples;
+}
+void bbgpu_reflex_on_input_sampled(void) {
+    ++reflex_on_samples;
+}
+void bbgpu_reflex_on_simulation_end(void) {}
+uint64_t bbgpu_reflex_current_sim_frame_id(void) { return 1; }
+
 static void inject(const char *path, const char *tokens) {
     FILE *f=fopen(path,"w");
     assert(f);

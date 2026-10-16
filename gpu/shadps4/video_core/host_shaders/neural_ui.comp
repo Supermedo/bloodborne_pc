@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 450
+layout(local_size_x=8,local_size_y=8) in;
+layout(binding=0) uniform sampler2D processed_scene;
+layout(binding=1) uniform sampler2D original_scene;
+layout(binding=2) uniform sampler2D original_frame;
+layout(binding=3,rgba16f) uniform writeonly image2D composed;
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy),size=imageSize(composed);
+    if(any(greaterThanEqual(p,size))) return;
+    bool ui=false;
+    for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+        ivec2 q=clamp(p+ivec2(x,y),ivec2(0),size-1);
+        vec3 delta=abs(texelFetch(original_frame,q,0).rgb-texelFetch(original_scene,q,0).rgb);
+        ui=ui||any(greaterThan(delta,vec3(1.5/255.0)));
+    }
+    vec4 original=texelFetch(original_frame,p,0);
+    imageStore(composed,p,ui?original:vec4(texelFetch(processed_scene,p,0).rgb,original.a));
+}

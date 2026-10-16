@@ -73,9 +73,11 @@ struct Dlss::Impl {
     HMODULE module{};
     const BbDlssApi* api{};
     std::vector<std::string> instance_extensions, device_extensions;
+    std::vector<std::string> fg_instance_extensions, fg_device_extensions;
     std::optional<FeatureDesc> feature;
     std::string problem;
     bool eligible{true}, instance_ready{}, device_ready{}, initialized{}, available{};
+    bool fg_extensions_queried{};
 
     void Disable(std::string_view reason) {
         eligible = available = false;
@@ -114,7 +116,10 @@ Dlss::Dlss() : impl{std::make_unique<Impl>()} {
         impl->module ? reinterpret_cast<BbDlssGetApiFn>(GetProcAddress(impl->module, "BbDlssGetApi"))
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
-    if (!impl->api || impl->api->abi != BBPORT_DLSS_BRIDGE_ABI) {
+    if (!impl->api || (impl->api->abi != 1 && impl->api->abi != BBPORT_DLSS_BRIDGE_ABI)) {
+        // Rejected tables may be shorter than our FG interface. Cleanup must not
+        // inspect or call any of their entries after this compatibility check.
+        impl->api = nullptr;
         impl->Disable("bbport_dlss.dll is missing or from another version");
         return;
     }
@@ -148,6 +153,20 @@ void Dlss::AppendInstanceExtensions(std::vector<const char*>& enabled) {
         !CollectExtensions(required, count, extensions, impl->instance_extensions, enabled)) {
         return impl->Disable("required Vulkan instance extensions are missing");
     }
+
+    // Optional FG instance extensions if requested / available in ABI 2.
+    // If FG extensions query fails or extensions are missing, SR must remain functional.
+    if (impl->api->abi >= 2 && impl->api->FgExtensions) {
+        u32 fg_count{};
+        const VkExtensionProperties* fg_required{};
+        if (impl->api->FgExtensions(VK_NULL_HANDLE, VK_NULL_HANDLE, &fg_count, &fg_required) && fg_count) {
+            std::vector<std::string> fg_ext_storage;
+            if (CollectExtensions(fg_required, fg_count, extensions, fg_ext_storage, enabled)) {
+                impl->fg_instance_extensions = std::move(fg_ext_storage);
+            }
+        }
+    }
+
     impl->instance_ready = true;
 }
 
@@ -170,6 +189,20 @@ void Dlss::AppendDeviceExtensions(vk::Instance instance, vk::PhysicalDevice phys
         !CollectExtensions(required, count, extensions, impl->device_extensions, enabled)) {
         return impl->Disable("required Vulkan device extensions are missing");
     }
+
+    // Optional FG device extensions if requested / available in ABI 2.
+    // Failure here does NOT disable SR; it only means FG won't be usable.
+    if (impl->api->abi >= 2 && impl->api->FgExtensions) {
+        u32 fg_count{};
+        const VkExtensionProperties* fg_required{};
+        if (impl->api->FgExtensions(instance, physical, &fg_count, &fg_required) && fg_count) {
+            std::vector<std::string> fg_ext_storage;
+            if (CollectExtensions(fg_required, fg_count, extensions, fg_ext_storage, enabled)) {
+                impl->fg_device_extensions = std::move(fg_ext_storage);
+            }
+        }
+    }
+
     impl->device_ready = true;
 }
 
@@ -244,9 +277,41 @@ void Dlss::ReleaseFeature() {
     }
 }
 
+bool Dlss::FgAvailable() const {
+    if (!impl->available || !impl->api || impl->api->abi < 2 || !impl->api->FgAvailable)
+        return false;
+    return impl->api->FgAvailable() != 0;
+}
+
+u32 Dlss::FgMaxGenerated() const {
+    if (!FgAvailable() || !impl->api->FgMaxGenerated)
+        return 0;
+    return impl->api->FgMaxGenerated();
+}
+
+bool Dlss::CreateFgFeature(vk::CommandBuffer command, u32 width, u32 height, vk::Format format) {
+    if (!FgAvailable() || !impl->api->CreateFgFeature)
+        return false;
+    return impl->api->CreateFgFeature(command, width, height, static_cast<VkFormat>(format)) != 0;
+}
+
+bool Dlss::EvaluateFg(vk::CommandBuffer command, const BbDlssFgEvaluate& evaluate,
+                      u32 multi_frame_count, u32 multi_frame_index, u64 render_frame) {
+    if (!FgAvailable() || !impl->api->EvaluateFg)
+        return false;
+    return impl->api->EvaluateFg(command, &evaluate, multi_frame_count, multi_frame_index, render_frame) != 0;
+}
+
+void Dlss::ReleaseFgFeature() {
+    if (impl->api && impl->api->abi >= 2 && impl->api->ReleaseFgFeature) {
+        impl->api->ReleaseFgFeature();
+    }
+}
+
 void Dlss::Shutdown() {
     impl->available = false;
     impl->feature.reset();
+    ReleaseFgFeature();
     if (impl->api && impl->initialized) {
         impl->api->Shutdown();
         impl->initialized = false;
@@ -282,6 +347,19 @@ bool Dlss::Evaluate(vk::CommandBuffer, const Frame&) {
     return false;
 }
 void Dlss::ReleaseFeature() {}
+bool Dlss::FgAvailable() const {
+    return false;
+}
+u32 Dlss::FgMaxGenerated() const {
+    return 0;
+}
+bool Dlss::CreateFgFeature(vk::CommandBuffer, u32, u32, vk::Format) {
+    return false;
+}
+bool Dlss::EvaluateFg(vk::CommandBuffer, const BbDlssFgEvaluate&, u32, u32, u64) {
+    return false;
+}
+void Dlss::ReleaseFgFeature() {}
 
 #endif
 

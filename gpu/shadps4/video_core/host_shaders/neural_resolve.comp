@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: resolves the optional neural-rendering model output back into the game color space.
+//
+// The model consumes the encoded buffers produced by neural_prepare.comp, so every model fetch is
+// converted back through the same transfer curve before it is compared with the full-resolution
+// image. The result is written in the same color space as original_color.
+//
+// method 0 (direct) - the model output is the reconstructed image. The caller selects this when
+//   the model input is at least the game resolution, so no detail has to be reconstructed.
+// method 1 (residual) - the model ran on a smaller input: the difference between its output and
+//   its own input is upsampled with a 6-tap Lanczos3 kernel and added to the full-resolution
+//   image. This is the luma-preserving reconstruction described publicly by the RenoDX / OptiScaler
+//   / Magpie work; the implementation here is independent.
+// method 2 (ratio) - the model output replaces the low-resolution proxy while the original luma is
+//   kept and the model's hue/chroma is transferred in OkLab. OkLab and its LMS transforms are
+//   Bjoern Ottosson's published formulation (public, MIT-licensed reference implementation); the
+//   hue-transfer idea follows the same public RenoDX / OptiScaler lineage. transfer/colour
+//   strength, the luma ratio ceiling and the white point are configurable.
+//
+// The caller picks the method (auto: direct at input scale >= 1, residual below 1).
+//
+// White point (ratio only) is a linear-domain normalisation, not a post-hoc gain: prepare divides
+// the linear signal by it before encoding, and this stage divides the full-resolution original by
+// the same value, so the model, the low-resolution proxy and the original are compared inside one
+// normalised domain and the result is scaled back at the end. transfer_strength 0 reproduces
+// the original. At nonzero transfer, the low-resolution model can also transfer chroma when its
+// output equals its input. Direct and residual never read the white point.
+//
+// The push-constant block is shared with neural_prepare.comp and must match the host struct
+// field for field.
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D original_color;
+layout(binding = 1) uniform sampler2D model_input;
+layout(binding = 2) uniform sampler2D model_output;
+layout(binding = 3) uniform sampler2D original_ui;
+layout(binding = 4, rgba16f) uniform writeonly image2D resolved;
+
+layout(push_constant) uniform Params {
+    ivec2 full_size;         // valid game color size; the physical view may be larger
+    ivec2 work_size;         // model input size (also the model_* image size)
+    ivec2 guide_size;        // valid motion/depth size; unused here
+    int encoding;            // 0 encoded SDR, 1 linear SDR, 2 linear HDR
+    int method;              // 0 direct, 1 residual, 2 ratio
+    int protect_ui;          // 1 composites original_ui back over the result
+    float transfer_strength; // ratio: how much of the model's hue/chroma is transferred
+    float colour_strength;   // ratio: colour contribution of the upgraded image
+    float max_ratio;         // ratio: luma ratio ceiling; 0 selects the default of 2
+    float white_point;       // ratio: linear white point; 0 selects the default of 1
+} pc;
+
+const float kPi = 3.141592653589793;
+const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 srgb_to_linear(vec3 x) {
+    x = clamp(x, 0.0, 1.0);
+    return mix(pow((x + 0.055) / 1.055, vec3(2.4)), x / 12.92,
+               lessThanEqual(x, vec3(0.04045)));
+}
+
+vec3 linear_to_srgb(vec3 x) {
+    x = clamp(x, 0.0, 1.0);
+    return mix(1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, 12.92 * x,
+               lessThanEqual(x, vec3(0.0031308)));
+}
+
+// HDR compression is x/(1+x); the inverse is clamped so a value of exactly 1 stays finite.
+vec3 compress_hdr(vec3 x) {
+    return x / (1.0 + max(x, vec3(0.0)));
+}
+
+vec3 expand_hdr(vec3 e) {
+    return min(e / max(1.0 - e, vec3(1.0 / 65504.0)), vec3(65504.0));
+}
+
+// Model buffer (encoded) -> linear.
+vec3 model_to_linear(vec3 y) {
+    const vec3 e = srgb_to_linear(y);
+    return pc.encoding == 2 ? expand_hdr(e) : e;
+}
+
+// Game color space -> linear.
+vec3 input_to_linear(vec3 x) {
+    return pc.encoding == 0 ? srgb_to_linear(x) : x;
+}
+
+// Linear -> game color space, i.e. what the caller stores in the color target.
+vec3 linear_to_output(vec3 v) {
+    if (pc.encoding == 2) {
+        return min(max(v, vec3(0.0)), vec3(65504.0)); // linear HDR, kept finite
+    }
+    if (pc.encoding == 1) {
+        return clamp(v, 0.0, 1.0); // linear SDR
+    }
+    return linear_to_srgb(v); // display-encoded SDR
+}
+
+// Model buffer (encoded) -> game color space, before the final clamp. The residual path needs the
+// unclamped value so the difference is taken in one domain and only the sum is clamped.
+vec3 model_to_output_raw(vec3 y) {
+    return pc.encoding == 0 ? y : model_to_linear(y);
+}
+
+// Clamp into the game color space. HDR keeps a finite ceiling so a saturated value stays valid.
+vec3 clamp_output(vec3 v) {
+    return pc.encoding == 2 ? min(max(v, vec3(0.0)), vec3(65504.0)) : clamp(v, 0.0, 1.0);
+}
+
+// Model buffer (encoded) -> game color space.
+vec3 model_to_output(vec3 y) {
+    return clamp_output(model_to_output_raw(y));
+}
+
+float lanczos3(float x) {
+    x = abs(x);
+    if (x < 1e-5) {
+        return 1.0;
+    }
+    if (x >= 3.0) {
+        return 0.0;
+    }
+    const float px = kPi * x;
+    return (sin(px) / px) * (sin(px / 3.0) / (px / 3.0));
+}
+
+// True when the model ran at the game resolution, so no reconstruction is needed at all.
+bool model_is_1to1() {
+    return pc.work_size.x == pc.full_size.x && pc.work_size.y == pc.full_size.y;
+}
+
+vec3 model_texel(ivec2 p, sampler2D tex) {
+    return texelFetch(tex, clamp(p, ivec2(0), max(pc.work_size - 1, ivec2(0))), 0).rgb;
+}
+
+// 6-tap Lanczos3 reconstruction of the encoded model buffer at a full-resolution pixel. At 1:1
+// every non-centre tap is zero in the kernel itself, so that case fetches the single texel instead
+// of running the 36-tap loop twice.
+vec3 lanczos_model(ivec2 p, sampler2D tex) {
+    if (model_is_1to1()) {
+        return model_texel(p, tex);
+    }
+    const vec2 point = (vec2(p) + 0.5) * vec2(pc.work_size) / vec2(pc.full_size) - 0.5;
+    const ivec2 base = ivec2(floor(point));
+    const ivec2 limit = max(pc.work_size - 1, ivec2(0));
+
+    vec3 sum = vec3(0.0);
+    float weight_sum = 0.0;
+    for (int y = -2; y <= 3; ++y) {
+        for (int x = -2; x <= 3; ++x) {
+            const float w = lanczos3(point.x - float(base.x + x)) *
+                            lanczos3(point.y - float(base.y + y));
+            const ivec2 q = clamp(base + ivec2(x, y), ivec2(0), limit);
+            sum += texelFetch(tex, q, 0).rgb * w;
+            weight_sum += w;
+        }
+    }
+    return sum / (abs(weight_sum) > 1e-6 ? weight_sum : 1.0);
+}
+
+// OkLab (Bjoern Ottosson's published formulation). mat3(a,b,c, d,e,f, g,h,i) builds the *columns*
+// from its arguments, so a row-major literal list has to be wrapped in transpose() before it can be
+// used as matrix * vector. Without transpose() the transform is applied transposed.
+vec3 to_oklab(vec3 c) {
+    const mat3 rgb_to_lms = transpose(mat3(0.4122214708, 0.5363325363, 0.0514459929, //
+                                           0.2119034982, 0.6806995451, 0.1073969566, //
+                                           0.0883024619, 0.2817188376, 0.6299787005));
+    const mat3 lms_to_lab = transpose(mat3(0.2104542553, 0.7936177850, -0.0040720468, //
+                                           1.9779984951, -2.4285922050, 0.4505937099, //
+                                           0.0259040371, 0.7827717662, -0.8086757660));
+    const vec3 lms = rgb_to_lms * c;
+    return lms_to_lab * (sign(lms) * pow(abs(lms), vec3(1.0 / 3.0)));
+}
+
+vec3 from_oklab(vec3 lab) {
+    const mat3 lab_to_lms = transpose(mat3(1.0, 0.3963377774, 0.2158037573, //
+                                           1.0, -0.1055613458, -0.0638541728, //
+                                           1.0, -0.0894841775, -1.2914855480));
+    const mat3 lms_to_rgb = transpose(mat3(4.0767416621, -3.3077115913, 0.2309699292, //
+                                           -1.2684380046, 2.6097574011, -0.3413193965, //
+                                           -0.0041960863, -0.7034186147, 1.7076147010));
+    const vec3 lms = lab_to_lms * lab;
+    return lms_to_rgb * (lms * lms * lms);
+}
+
+// Keep the hue of "correct" and the chroma magnitude of "incorrect".
+vec3 hue_oklab(vec3 incorrect, vec3 correct) {
+    vec3 a = to_oklab(incorrect);
+    const vec3 b = to_oklab(correct);
+    const float chroma_a = length(a.yz);
+    const float chroma_b = length(b.yz);
+    a.yz = b.yz * (chroma_b == 0.0 ? 1.0 : chroma_a / chroma_b);
+    return max(from_oklab(a), vec3(0.0));
+}
+
+vec3 direct_resolve(ivec2 p) {
+    return model_to_output(lanczos_model(p, model_output));
+}
+
+vec3 residual_resolve(ivec2 p, vec3 original) {
+    // Every tap is decoded before it is weighted, so the accumulated value is exactly the Lanczos3
+    // interpolation of the decoded difference, sum(w * (decoded(output) - decoded(input))).
+    // Decoding after interpolation would instead give decoded(lanczos(output)) minus
+    // decoded(lanczos(input)), which is a different value for the non-linear transfer curves of
+    // encodings 1 and 2, and it is not the quantity the reconstruction is defined on.
+    vec3 difference;
+    if (model_is_1to1()) {
+        difference = model_to_output_raw(model_texel(p, model_output)) -
+                     model_to_output_raw(model_texel(p, model_input));
+    } else {
+        const vec2 point = (vec2(p) + 0.5) * vec2(pc.work_size) / vec2(pc.full_size) - 0.5;
+        const ivec2 base = ivec2(floor(point));
+        const ivec2 limit = max(pc.work_size - 1, ivec2(0));
+
+        difference = vec3(0.0);
+        float weight_sum = 0.0;
+        for (int y = -2; y <= 3; ++y) {
+            for (int x = -2; x <= 3; ++x) {
+                const float w = lanczos3(point.x - float(base.x + x)) *
+                                lanczos3(point.y - float(base.y + y));
+                const ivec2 q = clamp(base + ivec2(x, y), ivec2(0), limit);
+                difference += w * (model_to_output_raw(texelFetch(model_output, q, 0).rgb) -
+                                   model_to_output_raw(texelFetch(model_input, q, 0).rgb));
+                weight_sum += w;
+            }
+        }
+        difference /= abs(weight_sum) > 1e-6 ? weight_sum : 1.0;
+    }
+    return clamp_output(original + difference);
+}
+
+vec3 ratio_resolve(ivec2 p, vec3 original) {
+    const float white_point = pc.white_point > 0.0 ? pc.white_point : 1.0;
+    const float ratio_cap = pc.max_ratio > 0.0 ? pc.max_ratio : 2.0;
+    const float transfer = clamp(pc.transfer_strength, 0.0, 1.0);
+    const float colour = clamp(pc.colour_strength, 0.0, 1.0);
+
+    // The model buffers were already normalised by the white point when they were encoded, so only
+    // the full-resolution original has to be brought into the same domain.
+    // These two images are interpolated in the encoded domain and decoded afterwards, which is the
+    // order the reference resolve uses for the proxy and the model output. The residual path cannot
+    // do that, because there the interpolated quantity is a difference of decoded values.
+    const vec3 low = model_to_linear(lanczos_model(p, model_input));
+    const vec3 model = model_to_linear(lanczos_model(p, model_output));
+    const vec3 base = input_to_linear(original) / white_point;
+
+    const float base_luma = dot(base, kLuma);
+    const float low_luma = dot(low, kLuma);
+    const float model_luma = dot(model, kLuma);
+
+    vec3 upgraded = base;
+    if (model_luma > 1e-5) {
+        // Keep the original luma; where the model is brighter than the proxy, let it add the
+        // extra brightness instead of clipping it away.
+        const float ratio = base_luma < low_luma
+                                ? base_luma / max(low_luma, 1e-6)
+                                : (model_luma + max(0.0, base_luma - low_luma)) / model_luma;
+        upgraded = mix(base, hue_oklab(model * ratio, model), transfer);
+    }
+
+    const float floor_luma = 1.0 / 512.0;
+    const float luma_ratio =
+        clamp((dot(upgraded, kLuma) + floor_luma) / (base_luma + floor_luma), 0.0, ratio_cap);
+    const vec3 linear = mix(base * luma_ratio, upgraded, colour) * white_point;
+    return linear_to_output(max(linear, vec3(0.0)));
+}
+
+void main() {
+    const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.full_size))) {
+        return;
+    }
+
+    const vec4 original = texelFetch(original_color, p, 0);
+    vec3 value;
+    if (pc.work_size.x <= 0 || pc.work_size.y <= 0) {
+        value = original.rgb;
+    } else if (pc.method == 1) {
+        value = residual_resolve(p, original.rgb);
+    } else if (pc.method == 2) {
+        value = ratio_resolve(p, original.rgb);
+    } else {
+        value = direct_resolve(p);
+    }
+
+    // The color target's alpha is game data, so it is preserved even when UI pixels are restored.
+    vec4 result = vec4(value, original.a);
+
+    // When the caller renders without UI (original_color is the hudless frame) the UI pixels are
+    // taken back from the full original. Suspended at the pre-UI stage, where protect_ui is 0.
+    if (pc.protect_ui != 0) {
+        bool ui = false;
+        for (int y = -1; y <= 1 && !ui; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                const ivec2 q = clamp(p + ivec2(x, y), ivec2(0), pc.full_size - 1);
+                const vec3 delta = abs(texelFetch(original_ui, q, 0).rgb -
+                                       texelFetch(original_color, q, 0).rgb);
+                if (any(greaterThan(delta, vec3(1.5 / 255.0)))) {
+                    ui = true;
+                    break;
+                }
+            }
+        }
+        if (ui) {
+            result = vec4(texelFetch(original_ui, p, 0).rgb, original.a);
+        }
+    }
+
+    imageStore(resolved, p, result);
+}

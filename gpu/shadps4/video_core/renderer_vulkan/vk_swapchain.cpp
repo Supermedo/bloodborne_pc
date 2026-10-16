@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -10,6 +12,7 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 namespace Vulkan {
 
@@ -23,23 +26,36 @@ Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& windo
     FindPresentFormat();
     FindPresentMode();
 
-    Create(window.GetWidth(), window.GetHeight());
+    CreateInternal(window.GetWidth(), window.GetHeight());
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
 }
 
 Swapchain::~Swapchain() {
-    Destroy();
+    std::lock_guard<std::mutex> sleep_lock{Reflex::SleepMutex()};
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
+    DestroyInternal();
     instance.GetInstance().destroySurfaceKHR(surface);
 }
 
 void Swapchain::Create(u32 width_, u32 height_) {
+    std::lock_guard<std::mutex> sleep_lock{Reflex::SleepMutex()};
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
+    CreateInternal(width_, height_);
+}
+
+void Swapchain::CreateInternal(u32 width_, u32 height_) {
     width = width_;
     height = height_;
     needs_recreation = false;
 
-    Destroy();
+    DestroyInternal();
 
     SetSurfaceProperties();
+    if (std::getenv("BB_FG_TIMING")) {
+        std::printf("FG surface: window=%ux%u swapchain=%ux%u mode=%s images=%u\n",
+                    width, height, extent.width, extent.height,
+                    vk::to_string(present_mode).c_str(), image_count);
+    }
 
     const std::array queue_family_indices = {
         instance.GetGraphicsQueueFamilyIndex(),
@@ -51,7 +67,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
     const vk::SharingMode sharing_mode =
         exclusive ? vk::SharingMode::eExclusive : vk::SharingMode::eConcurrent;
     const auto format = needs_hdr ? SURFACE_FORMAT_HDR : surface_format;
-    const vk::SwapchainCreateInfoKHR swapchain_info = {
+    vk::SwapchainCreateInfoKHR swapchain_info = {
         .surface = surface,
         .minImageCount = image_count,
         .imageFormat = format.format,
@@ -70,19 +86,27 @@ void Swapchain::Create(u32 width_, u32 height_) {
         .oldSwapchain = nullptr,
     };
 
+    VkSwapchainLatencyCreateInfoNV latency_info{};
+    if (instance.IsReflexSupported()) {
+        Reflex::PrepareSwapchainCreateInfo(swapchain_info, latency_info);
+    }
+
     auto [swapchain_result, chain] = instance.GetDevice().createSwapchainKHR(swapchain_info);
     ASSERT_MSG(swapchain_result == vk::Result::eSuccess, "Failed to create swapchain: {}",
                vk::to_string(swapchain_result));
     swapchain = chain;
+    Reflex::OnSwapchainCreated(swapchain);
 
     SetupImages();
     RefreshSemaphores();
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
+    std::lock_guard<std::mutex> sleep_lock{Reflex::SleepMutex()};
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
     LOG_DEBUG(Render_Vulkan, "Recreate the swapchain: width={} height={} HDR={}", width_, height_,
               needs_hdr);
-    Create(width_, height_);
+    CreateInternal(width_, height_);
 }
 
 void Swapchain::SetHDR(bool hdr) {
@@ -103,6 +127,7 @@ void Swapchain::SetHDR(bool hdr) {
 }
 
 bool Swapchain::AcquireNextImage() {
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
     vk::Device device = instance.GetDevice();
     vk::Result result =
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
@@ -128,6 +153,7 @@ bool Swapchain::AcquireNextImage() {
 }
 
 bool Swapchain::Present() {
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
     const vk::PresentInfoKHR present_info = {
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &present_ready[image_index],
@@ -254,6 +280,12 @@ void Swapchain::SetSurfaceProperties() {
 }
 
 void Swapchain::Destroy() {
+    std::lock_guard<std::mutex> sleep_lock{Reflex::SleepMutex()};
+    std::lock_guard<std::mutex> wsi_lock{Reflex::WsiMutex()};
+    DestroyInternal();
+}
+
+void Swapchain::DestroyInternal() {
     vk::Device device = instance.GetDevice();
     const auto wait_result = device.waitIdle();
     if (wait_result != vk::Result::eSuccess) {
@@ -267,7 +299,9 @@ void Swapchain::Destroy() {
     images_view.clear();
 
     if (swapchain) {
+        Reflex::OnSwapchainDestroying(swapchain);
         device.destroySwapchainKHR(swapchain);
+        swapchain = nullptr;
     }
 
     for (const auto& sem : image_acquired) {

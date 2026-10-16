@@ -1,0 +1,26 @@
+diff --git a/src/ffx_vk_fsr3_3_1_5_bridge.cpp b/src/ffx_vk_fsr3_3_1_5_bridge.cpp
+index 2ac0e2e..9ffde5a 100644
+--- a/src/ffx_vk_fsr3_3_1_5_bridge.cpp
++++ b/src/ffx_vk_fsr3_3_1_5_bridge.cpp
+@@ -1274,8 +1274,19 @@ extern "C" FfxErrorCode ffxVkFsr3_3_1_5BridgeExecuteGpuJobs(
+         }
+         case FFX_GPU_JOB_CLEAR_FLOAT: {
+             BridgeResource* target = lookup_resource(bridge, job.clearJobDescriptor.target.internalIndex);
+-            if (!target || target->image == VK_NULL_HANDLE ||
+-                !ensure_image_layout(commandBuffer, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
++            if (!target || target->image == VK_NULL_HANDLE)
++                return static_cast<FfxErrorCode>(FFX_ERROR_INVALID_ARGUMENT);
++            // Initial and reset clears may target the same transfer layout.
++            // Layout equality does not order successive transfer writes.
++            if (target->imageLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
++                transition_image(commandBuffer, target,
++                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                 VK_ACCESS_TRANSFER_WRITE_BIT,
++                                 VK_ACCESS_TRANSFER_WRITE_BIT);
++            if (!ensure_image_layout(commandBuffer, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+                 return static_cast<FfxErrorCode>(FFX_ERROR_INVALID_ARGUMENT);
+             VkClearColorValue clear{};
+             clear.float32[0] = job.clearJobDescriptor.color[0];

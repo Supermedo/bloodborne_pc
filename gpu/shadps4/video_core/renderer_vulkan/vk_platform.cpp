@@ -23,6 +23,7 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/renderer_vulkan/vk_neural_rendering.h"
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -292,6 +293,8 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     if (Dlss* dlss = Dlss::Get()) {
         dlss->AppendInstanceExtensions(extensions);
     }
+
+    NeuralRendering::AppendInstanceExtensions(extensions);
 
     const vk::ApplicationInfo application_info = {
         .pApplicationName = "shadPS4",

@@ -7,6 +7,7 @@
 #include <vector>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 namespace Frontend {
 class WindowSDL;
@@ -104,6 +105,9 @@ private:
 
     /// Destroys current swapchain resources
     void Destroy();
+
+    void CreateInternal(u32 width, u32 height);
+    void DestroyInternal();
 
     /// Performs creation of image views and framebuffers from the swapchain images
     void SetupImages();

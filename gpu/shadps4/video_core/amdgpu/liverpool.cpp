@@ -27,6 +27,7 @@
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 namespace AmdGpu {
 
@@ -708,7 +709,7 @@ void ScanDcb(std::span<const u32> dcb, int depth) {
 } // namespace
 
 Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<const u32> ccb,
-                                           u64 seq,
+                                           u64 seq, u64 frame_id,
                                            std::shared_ptr<const BbCommandBufferCopy> command_copy) {
     // The coroutine parameter keeps the copied spans alive across every yield.
     (void)command_copy;
@@ -716,6 +717,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     // Top-level buffers enqueued for the draw preparation workers (nested IBs are not).
     Vulkan::DrawPreparation* draw_prep =
         seq != NoSeq && rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
+    // bbport: adopt the guest simulation identity captured at submit acceptance. This runs on
+    // the GPU command thread at the start of the top-level submission, before its first
+    // command buffer is allocated. Rasterizer::SetSubmissionFrameId drains the draw-recording
+    // thread only when the identity changes, then the scheduler flushes the previous source's
+    // still-open work under the old identity and keeps the new one for every allocation of the
+    // submission. It is deliberately outside the draw-preparation branch, but it still keys on
+    // `seq`, which SubmitGfx only assigns when the rasterizer (and therefore draw preparation)
+    // exists. That holds for the game path; a rasterizer-less run records no markers either.
+    // Nested indirect buffers inherit the enclosing top-level submission's identity.
+    if (seq != NoSeq && rasterizer) {
+        rasterizer->SetSubmissionFrameId(frame_id);
+    }
     if (draw_prep) {
         draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
     }
@@ -1270,7 +1283,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::IndirectBuffer: {
                 const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
                 auto task = ProcessGraphics(
-                    {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, {});
+                    {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, {}, NoSeq,
+                    frame_id);
                 // Tasks start suspended: the nested body (and its scan) runs on this resume.
                 g_dcb_depth = dcb_depth + 1;
                 RESUME_GFX(task);
@@ -1651,6 +1665,12 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
 
+    // bbport: capture the guest simulation identity at submit acceptance, on the guest thread.
+    // Reading it later (GPU thread / command recording) attributes the batch to whichever
+    // simulation cycle happens to be open then, which is exactly the late-global-ID mismatch
+    // that made the render markers disagree with the input/simulation markers.
+    const u64 frame_id = Vulkan::Reflex::CurrentSimFrameId();
+
     std::shared_ptr<const BbCommandBufferCopy> command_copy;
     if (EmulatorSettings.IsCopyGpuBuffers()) {
         command_copy = std::make_shared<BbCommandBufferCopy>(dcb, ccb);
@@ -1670,7 +1690,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
             seq = gfx_submit_seq++;
             draw_prep->Enqueue(seq, std::move(prep_submission));
         }
-        auto task = ProcessGraphics(dcb, ccb, seq, std::move(command_copy));
+        auto task = ProcessGraphics(dcb, ccb, seq, frame_id, std::move(command_copy));
         queue.submits.emplace(task.handle);
     }
 

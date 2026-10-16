@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2026 IFreemz, bbport contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// bbport: NVIDIA DLSS Super Resolution through the optional bbport_dlss.dll bridge (gpu/
-// dlss_bridge, MIT), loaded at run time from next to bb-probe.exe together with NVIDIA's
-// nvngx_dlss.dll. The port itself contains no NVIDIA code; without the DLLs, on other GPUs or
-// with BB_DLSS=0 nothing changes. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR
+// bbport: NVIDIA DLSS Super Resolution and Frame Generation through the optional
+// bbport_dlss.dll bridge (gpu/dlss_bridge, MIT), loaded at run time from next to bb-probe.exe
+// together with NVIDIA's nvngx_dlss.dll / nvngx_dlssg.dll. The port itself contains no NVIDIA code;
+// without the DLLs, on other GPUs or with BB_DLSS=0 nothing changes. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR
 // (vk_dlss_ngx).
 
 #pragma once
@@ -15,6 +15,7 @@
 
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
 
 namespace Vulkan {
 
@@ -66,6 +67,14 @@ public:
     bool CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc);
     bool Evaluate(vk::CommandBuffer command, const Frame& frame);
     void ReleaseFeature();
+
+    // Frame Generation (DLSS-G) methods
+    [[nodiscard]] bool FgAvailable() const;
+    [[nodiscard]] u32 FgMaxGenerated() const;
+    bool CreateFgFeature(vk::CommandBuffer command, u32 width, u32 height, vk::Format format);
+    bool EvaluateFg(vk::CommandBuffer command, const BbDlssFgEvaluate& evaluate,
+                    u32 multi_frame_count, u32 multi_frame_index, u64 render_frame);
+    void ReleaseFgFeature();
 
 private:
     Dlss();
