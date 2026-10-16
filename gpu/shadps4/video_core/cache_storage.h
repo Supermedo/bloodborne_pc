@@ -7,6 +7,7 @@
 #include "common/singleton.h"
 #include "common/types.h"
 
+#include <chrono>
 #include <functional>
 #include <thread>
 #include <vector>
@@ -28,6 +29,9 @@ public:
 
     void Open();
     void Close();
+    /// bbport: waits until the queued writes are on disk, for exits that skip `Close()`.
+    /// False when `timeout` passed first.
+    bool Flush(std::chrono::milliseconds timeout);
     [[nodiscard]] bool IsOpened() const {
         return opened;
     }

@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "common/hash.h"
+#include "common/thread.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
 #include "core/debug_state.h"
@@ -28,6 +29,8 @@
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "bbport_threads.h"
+#include "bbport_toggles.h"
 
 namespace Vulkan {
 
@@ -345,12 +348,20 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
     };
-    WarmUp();
+    if (!FastPreloadEnabled()) {
+        WarmUp();
+    }
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+    if (FastPreloadEnabled()) {
+        WarmUp();
+    }
+    if (AsyncPipelinesEnabled()) {
+        PipelineCompileThreads();
+    }
 }
 
 PipelineCache::~PipelineCache() = default;

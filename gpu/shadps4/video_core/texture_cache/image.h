@@ -188,6 +188,8 @@ public:
     };
     std::deque<BackingImage> backing_images;
     boost::container::static_vector<u64, 16> mip_hashes{};
+    /// bbport: mip_hashes match guest memory (BB_KEEP_MIP_HASHES). Cleared on a CPU write.
+    bool mip_hashes_current = false;
     u64 lru_id{};
     u64 hash{};
 

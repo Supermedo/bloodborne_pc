@@ -10,6 +10,7 @@
 #include "bbport_copy.h"
 #include "bbport_toggles.h"
 #include <cstdio>
+#include <cstring>
 #include <boost/preprocessor/stringize.hpp>
 
 #include "common/assert.h"
@@ -27,6 +28,8 @@
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderer_vulkan/vk_occlusion.h"
+#include "bbport_threads.h"
 
 namespace AmdGpu {
 
@@ -110,6 +113,7 @@ void Liverpool::ProcessCommands() {
 
 void Liverpool::Process(std::stop_token stoken) {
     Common::SetCurrentThreadName("shadPS4:GpuCommandProcessor");
+    BbThreads::RaiseRenderPriority();
 #ifndef _WIN32
     if (clockid_t clock; pthread_getcpuclockid(pthread_self(), &clock) == 0) {
         BbStats::gpu_thread_clock.store(static_cast<int>(clock));
@@ -184,17 +188,24 @@ void Liverpool::Process(std::stop_token stoken) {
         // heap free list after minutes of play).
         // The same holds when sceGnmSubmitDone finds the GPU idle and does not block at all:
         // decoded (num_submits 0) is not done until then (work_retired).
+        BbStats::submit_done_calls.fetch_add(1, std::memory_order_relaxed);
         if (rasterizer) {
-            rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonSubmissionEnd);
-            rasterizer->WaitDeferredSignals();
-        }
-        {
+            rasterizer->FinishSubmissionIdle([this] {
+                {
+                    std::scoped_lock lk{submit_mutex};
+                    if (num_submits == 0) {
+                        work_retired = true;
+                    }
+                }
+                Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
+            });
+        } else {
             std::scoped_lock lk{submit_mutex};
             if (num_submits == 0) {
                 work_retired = true;
             }
+            Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
         }
-        Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
     }
 }
 
@@ -237,6 +248,7 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
     case PM4ItOpcode::DispatchIndirect:
     case PM4ItOpcode::WriteData:     // run in order on the recording thread (RunInOrder)
     case PM4ItOpcode::DmaData:
+    case PM4ItOpcode::SetPredication:
         return true;
     default:
         return false;
@@ -287,6 +299,19 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
 void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* dma_data = reinterpret_cast<const PM4DmaData*>(data);
     ASSERT(dma_data->command.das == 0);
+    static const int dma_waits = [] {
+        const char* env = std::getenv("BB_DMA_WAITS");
+        if (!env || !env[0] || env[0] == '0') {
+            return 0;
+        }
+        return std::strcmp(env, "all") == 0 ? 2 : 1;
+    }();
+    const bool cpu_write = dma_data->src_sel == DmaDataSrc::Data &&
+                           (dma_data->dst_sel == DmaDataDst::Memory ||
+                            dma_data->dst_sel == DmaDataDst::MemoryUsingL2);
+    if (dma_waits == 2 || (dma_waits == 1 && cpu_write)) {
+        rasterizer.WaitDeferredSignals();
+    }
     if (dma_data->src_sel == DmaDataSrc::Data && dma_data->dst_sel == DmaDataDst::Gds) {
         rasterizer.FillBuffer(dma_data->dst_addr_lo, dma_data->NumBytes(),
                                dma_data->data, true);
@@ -334,6 +359,18 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                      (header->type3.count.Value() - 2) * sizeof(u32), BbWriteLog::WriteData);
     std::memcpy(write_data->Address<u64*>(), write_data->data,
                 (header->type3.count.Value() - 2) * sizeof(u32));
+}
+
+void RunOcclusionDump(Vulkan::Rasterizer& rasterizer, const u8* data) {
+    if (auto* occlusion = rasterizer.GetOcclusion()) {
+        occlusion->Dump(*reinterpret_cast<const Vulkan::Occlusion::DumpTask*>(data));
+    }
+}
+
+void RunSetPredication(Vulkan::Rasterizer& rasterizer, const u8* data) {
+    if (auto* occlusion = rasterizer.GetOcclusion()) {
+        occlusion->SetPredication(*reinterpret_cast<const Vulkan::Occlusion::PredicationTask*>(data));
+    }
 }
 
 void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
@@ -922,7 +959,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break; // registers: ApplyGraphicsRegisterPacket
             }
             case PM4ItOpcode::SetPredication: {
-                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION");
+                const auto* pred = reinterpret_cast<const u32*>(header);
+                Vulkan::Occlusion::PredicationTask task{};
+                task.block = (u64(pred[2] & 0xFFFF) << 32) | (pred[1] & ~0xFu);
+                task.op = (pred[2] >> 24) & 7;
+                task.draw_if_visible = ((pred[2] >> 16) & 1) == 0;
+                task.cont = (pred[2] >> 31) & 1;
+                if (rasterizer && rasterizer->GetOcclusion()) {
+                    rasterizer->RunInOrder(&RunSetPredication, &task, sizeof(task));
+                }
                 break;
             }
             case PM4ItOpcode::IndexType: {
@@ -1131,13 +1176,19 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     // registers: ApplyGraphicsRegisterPacket
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
                     if (event->event_type.Value() == EventType::PixelPipeStatDump) {
-                        static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
-                        static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
-                        u64* results = event->Address<u64*>();
-                        for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
-                            *results = pixel_counter | OcclusionCounterValidMask;
+                        if (rasterizer && rasterizer->GetOcclusion()) {
+                            const auto task = rasterizer->GetOcclusion()->MakeDump(
+                                event->Address<VAddr>(), num_counter_pairs);
+                            rasterizer->RunInOrder(&RunOcclusionDump, &task, sizeof(task));
+                        } else {
+                            static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
+                            static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
+                            u64* results = event->Address<u64*>();
+                            for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
+                                *results = pixel_counter | OcclusionCounterValidMask;
+                            }
+                            pixel_counter += OcclusionCounterStep;
                         }
-                        pixel_counter += OcclusionCounterStep;
                     }
                 }
                 break;

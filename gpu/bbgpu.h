@@ -24,6 +24,9 @@ void bbnet_set_image(unsigned char *image, uint64_t size);
 void bbnet_initialize(void);
 /* Creates window, Vulkan device, presenter and GPU command processor. */
 int bbgpu_init(const BbGpuConfig *config);
+/* Unless BB_CACHE_FLUSH_ON_EXIT=0: writes the queued shader cache blobs before an exit that skips
+ * destructors (window closed, guest exit, restart). Waits at most two seconds. */
+void bbgpu_flush_cache(void);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
 uintptr_t bbgpu_resolve(const char *scoped_nid);
 /* Called first by the loader's SIGSEGV handler: 1 when a GPU page-tracking fault was handled. */
