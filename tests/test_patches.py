@@ -1,5 +1,8 @@
 from paths import ROOT
+import os
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -10,7 +13,7 @@ from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
                      compile_external, eboot_bytes, eboot_matches_patches, patch_fingerprint,
-                     patch_sites)
+                     patch_sites, PATCH_GROUPS, image_groups, matching_groups)
 
 XML = ROOT / 'patches/Bloodborne.xml'
 SEGMENTS = [(0, 0x6000000)]
@@ -231,6 +234,78 @@ class FingerprintTests(unittest.TestCase):
     def test_stored_fingerprint_matches_the_prepared_game(self):
         # Fails after the FPS or resolution patches change: update PATCH_FINGERPRINTS.
         self.assertTrue(eboot_matches_patches(ROOT / 'out/eboot.elf'))
+
+
+def with_patches_applied(elf, names):
+    """`elf` with the named patches written over it, as a modified eboot.bin ships them."""
+    out = bytearray(elf)
+    phoff, = struct.unpack_from('<Q', elf, 0x20)
+    phentsize, phnum = struct.unpack_from('<HH', elf, 0x36)
+    loads = []
+    for i in range(phnum):
+        kind, _f, offset, vaddr, _p, filesz, _m, _a = struct.unpack_from('<IIQQQQQQ', elf, phoff + i * phentsize)
+        if kind == 1:
+            loads.append((vaddr, offset, filesz))
+    for at, data in compile_patches(XML, names, '01.09', SEGMENTS):
+        vaddr, offset, _size = next(l for l in loads if l[0] <= at < l[0] + l[2])
+        out[offset + at - vaddr:offset + at - vaddr + len(data)] = data
+    return bytes(out)
+
+
+@unittest.skipUnless((ROOT / 'out/eboot.elf').is_file(), 'needs a run of the game (out/eboot.elf)')
+class PatchGroupTests(unittest.TestCase):
+    """A modified eboot.bin keeps the groups of patches whose code it did not change."""
+
+    def setUp(self):
+        self.clean = (ROOT / 'out/eboot.elf').read_bytes()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.dir = Path(directory.name)
+
+    def groups(self, elf):
+        path = self.dir / 'eboot.elf'
+        path.write_bytes(elf)
+        return matching_groups(path)
+
+    def test_clean_game_has_every_group(self):
+        self.assertEqual(self.groups(self.clean), set(PATCH_GROUPS))
+
+    def test_a_60_fps_eboot_keeps_resolution_and_effects(self):
+        modified = with_patches_applied(self.clean, ['60 FPS++'])
+        self.assertEqual(self.groups(modified), {'resolution', 'effects'})
+        self.assertFalse(eboot_matches_patches(self.dir / 'eboot.elf'))
+
+    def test_changed_resolution_code_keeps_the_frame_rate(self):
+        modified = with_patches_applied(self.clean, [RESOLUTION_TEMPLATE])
+        self.assertEqual(self.groups(modified), {'fps', 'effects'})
+
+    def test_loaded_image_gives_the_same_groups(self):
+        # run.py checks eboot.bin's image before prepare.py writes eboot.elf.
+        modified = with_patches_applied(self.clean, ['60 FPS++'])
+        image = bytearray(0x6000000)
+        phoff, = struct.unpack_from('<Q', modified, 0x20)
+        phentsize, phnum = struct.unpack_from('<HH', modified, 0x36)
+        for i in range(phnum):
+            kind, _f, offset, vaddr, _p, filesz, _m, _a = struct.unpack_from('<IIQQQQQQ', modified, phoff + i * phentsize)
+            if kind == 1:
+                image[vaddr:vaddr + filesz] = modified[offset:offset + filesz]
+        self.assertEqual(image_groups(image), {'resolution', 'effects'})
+
+    def test_ultrawide_without_the_frame_rate(self):
+        # patches.py on a 60 fps eboot.elf with a 32:9 output: the resolution and ultrawide
+        # writes, no FPS ones.
+        (self.dir / 'eboot.elf').write_bytes(with_patches_applied(self.clean, ['60 FPS++']))
+        settings = self.dir / 'bbport.ini'
+        settings.write_text('output_res=5120x1440\nupscaler=fsr4\npreset=0\nquit_to_desktop=0\n')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/patches.py'), '--out', str(self.dir),
+                                 '--fps', '30', '--settings', str(settings), '--game-dir', str(self.dir),
+                                 '--render-res', '5120x1440', '--output-res', '5120x1440'],
+                                capture_output=True, text=True, env={**os.environ, 'BB_FORCE_PATCHES': ''})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('frame rate code differs', result.stdout)
+        self.assertIn('ultrawide 5120x1440', result.stdout)
+        blob = (self.dir / 'patches.bin').read_bytes()
+        self.assertGreater(struct.unpack_from('<Q', blob, 16)[0], 0)
 
 
 if __name__ == '__main__':

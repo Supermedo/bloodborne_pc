@@ -85,10 +85,9 @@ def hunters_dream(env, user_dir):
 LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
 
 
-def image_sha256(game):
-    """The SHA-256 of eboot.bin's loaded image (its loadable segments at their addresses): the
-    same whatever tool dumped it, unlike the SELF around it."""
-    import hashlib
+def eboot_image(game):
+    """eboot.bin's loaded image (its loadable segments at their addresses): the same whatever
+    tool dumped it, unlike the SELF around it."""
     sys.path.insert(0, str(PORT / 'scripts'))
     from prepare import parse_self, span
     elf, _header, ph, _segments, _missing = parse_self((Path(game) / 'eboot.bin').read_bytes())
@@ -96,7 +95,12 @@ def image_sha256(game):
     image = bytearray(max(p['vaddr'] + p['memsz'] for p in loads))
     for p in loads:
         image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
-    return hashlib.sha256(image).hexdigest()
+    return image
+
+
+def image_sha256(game):
+    import hashlib
+    return hashlib.sha256(eboot_image(game)).hexdigest()
 
 
 def fail(message):
@@ -203,7 +207,30 @@ def main():
                  'from a clean dump of the 1.09 update into the game folder, replacing this one. '
                  'BB_SKIP_GAME_CHECK=1 starts it anyway.')
     sys.path.insert(0, str(PORT / 'scripts'))
-    from patches import OUTPUT_SIZE, game_app_version, hud_canvas, output_size, read_settings
+    from patches import (OUTPUT_SIZE, PATCH_GROUPS, game_app_version, group_list, hud_canvas,
+                         image_groups, output_size, read_settings)
+    # Patches exist for game version 01.09 only (patches.py applies none to others): other
+    # versions keep the game's 30 FPS timing and change resolutions live. Of a 01.09 eboot.bin,
+    # only the groups of patches whose code is the 01.09 build's are applied (patches.py
+    # PATCH_GROUPS): checked here, before the HUD layout below, which needs the resolution group.
+    version = game_app_version(game)
+    if env.get('BB_FORCE_PATCHES'):
+        groups = set(PATCH_GROUPS)
+    elif version not in (None, '01.09'):
+        groups = set()
+        print(f'Game version {version}: community patches need 01.09; 30 FPS, no effect patches')
+    else:
+        try:
+            groups = image_groups(eboot_image(game))
+        except (OSError, ValueError, KeyError, IndexError):
+            groups = set()  # prepare.py reports unreadable executables itself
+        if not groups:
+            print('Game files: eboot.bin is not the 01.09 build the community patches were made for; '
+                  '30 FPS, no effect patches, no ultrawide or output resolution patch')
+        elif groups != set(PATCH_GROUPS):
+            print(f'Game files: eboot.bin is modified, not the clean 01.09 build: its '
+                  f'{group_list(set(PATCH_GROUPS) - groups)} code differs, so those options are off; '
+                  f'{group_list(groups)} work')
     # Quit to Desktop (bbport.ini quit_to_desktop, patches.py): the entries' names in the menu
     # texts of every language and six-row title and System menus, also a layer below the mods
     # (before the ultrawide one, which builds on its menu movies).
@@ -218,12 +245,12 @@ def main():
             print('Quit to Desktop: its menu texts could not be written; the game starts without it')
     # Ultrawide outputs: the menu movies with full-screen backdrops widened and the HUD's corner
     # groups toward the screen edges (bbport.ini hud_position, 0 centred .. 100 edges), a layer
-    # below the mods. Only for the
-    # 01.09 game, whose camera and HUD canvas the patches widen (patches.py hud_canvas).
+    # below the mods. Only with the resolution patches, which widen the camera and HUD canvas
+    # (patches.py hud_canvas): without them the widened menus showed stretched on a 16:9 game.
     hud_layer = out / 'hud_layout'
     shutil.rmtree(hud_layer, ignore_errors=True)
     canvas = hud_canvas(output_size(read_settings(Path(config))))
-    if canvas != OUTPUT_SIZE and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
+    if canvas != OUTPUT_SIZE and 'resolution' in groups:
         position = ini_value(config, 'hud_position') or '100'
         if not run_script('hud_layout.py', game, '--out', hud_layer, '--canvas-width', canvas[0],
                           '--position', max(0, min(100, int(position) if position.isdigit() else 100)) / 100,
@@ -260,25 +287,14 @@ def main():
             env.pop('BB_CPU_COMPAT', None)
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
 
-        # Patches exist for game version 01.09 only (patches.py applies none to others): other
-        # versions keep the game's 30 FPS timing and change resolutions live.
-        sys.path.insert(0, str(PORT / 'scripts'))
-        from patches import eboot_matches_patches, game_app_version
-        version = game_app_version(game)
-        forced = bool(env.get('BB_FORCE_PATCHES'))
-        patched = version in (None, '01.09') or forced
-        if not patched:
-            print(f'Game version {version}: community patches need 01.09; 30 FPS, no effect patches')
-        elif not forced and not eboot_matches_patches(out / 'eboot.elf'):
-            # param.sfo says 01.09, the code is another build's: the patches would break it.
-            patched = False
-            print('Game files: eboot.bin is not the 01.09 build the community patches were made for; '
-                  '30 FPS, no effect patches')
+        # The groups checked above: the frame rate needs the FPS patches, the startup resolution
+        # and ultrawide the resolution ones.
+        patched = 'resolution' in groups
         # Sizes chosen below for the previous launch are recomputed after an in-game restart.
         if env.get('BB_AUTO_RENDER_RES') == '1':
             for key in ('BB_RENDER_RES', 'BB_OUTPUT_RES', 'BB_AUTO_RENDER_RES'):
                 env.pop(key, None)
-        fps = env.get('BB_FPS', 'uncap') if patched else '30'
+        fps = env.get('BB_FPS', 'uncap') if 'fps' in groups else '30'
         scaled_render = scaled_output = None
         if not env.get('BB_RENDER_RES'):
             printed = run_script('patches.py', '--print-scaled', '--settings', config, capture=True).split()
