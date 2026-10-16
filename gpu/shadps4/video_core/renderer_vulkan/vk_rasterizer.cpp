@@ -22,6 +22,7 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/motion_history.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
@@ -515,6 +516,18 @@ bool Rasterizer::PendingWriteOverlaps(VAddr address, u64 size) {
     return false;
 }
 
+// The face bone is the last record of a stride-16 palette. robustBufferAccess2 returns zero past
+// stride * num_records, which sends that vertex to the world origin. Bind one extra record.
+static u64 BufferBytesForBind(Core::MemoryManager* memory, const Shader::Info& stage,
+                              const AmdGpu::Buffer& buffer) {
+    u64 bytes = buffer.GetSize();
+    if (stage.sw_stage == Shader::SwStage::Vertex && buffer.GetStride() == 16 &&
+        Motion::ClassifyBuffer(static_cast<u32>(bytes)) != Motion::BufferRole::Other) {
+        bytes += buffer.GetStride();
+    }
+    return memory->ClampRangeSize(buffer.base_address, bytes);
+}
+
 void Rasterizer::CollectRingBindings(const Shader::Info& stage, const PreparedDraw* prepared,
                            boost::container::static_vector<RingBinding, Shader::NUM_BUFFERS>& out) {
     const PreparedStage* prepared_stage = nullptr;
@@ -560,7 +573,7 @@ void Rasterizer::CollectRingBindings(const Shader::Info& stage, const PreparedDr
         if (address == 0 || vsharp.GetSize() == 0) {
             continue;
         }
-        const u64 size = memory->ClampRangeSize(address, vsharp.GetSize());
+        const u64 size = BufferBytesForBind(memory, stage, vsharp);
         if (desc.is_written) {
             NotePendingGpuWrite(address, size);
             continue;
@@ -2222,8 +2235,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else {
-                const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
-                if (size != vsharp.GetSize()) {
+                const u64 size = BufferBytesForBind(memory, stage, vsharp);
+                if (size < vsharp.GetSize()) {
                     LOG_ERROR(Render, "Clamped size from {} to {} for stage {:#x}",
                               vsharp.GetSize(), size, stage.pgm_hash);
                 }
