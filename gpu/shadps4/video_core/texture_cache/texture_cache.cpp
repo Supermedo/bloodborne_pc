@@ -1076,23 +1076,21 @@ void TextureCache::ReportMemory() {
 void TextureCache::GarbageCollectImages() {
     if (instance.CanReportMemoryUsage()) {
         total_used_memory = instance.GetDeviceMemoryUsage();
-        // bbport: on integrated GPUs (Steam Deck) the usage covers system-memory heaps holding
-        // much more than images (buffers backing guest memory), and the startup budget left
-        // ~1 GB after its 8 GB system reserve: usage stayed above the critical mark, so the
-        // collector evicted images used two or three frames ago on every submission and wrote
-        // GPU-written ones back. Compare with the driver's current budget instead.
-        // BB_GC_BUDGET_MB=N: this rule with a fixed budget on any GPU (tests on a desktop).
+        // bbport: on integrated GPUs (Steam Deck) and 4-8 GB discrete GPUs the usage covers
+        // guest memory buffers and swapchain in addition to images. The fixed constructor budget
+        // left too little headroom (e.g. 2.5 GB on an 8 GB GPU), causing usage to exceed the
+        // critical mark and thrash/evict textures every frame. Compare with the driver's current
+        // budget instead.
+        // BB_GC_BUDGET_MB=N: override with a fixed budget on any GPU (for testing).
         static const u64 forced_budget = [] {
             const char* env = std::getenv("BB_GC_BUDGET_MB");
             return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
         }();
-        if (instance.IsIntegrated() || forced_budget) {
-            const u64 budget = forced_budget ? forced_budget : instance.GetDeviceMemoryBudgetNow();
-            if (budget != 0) {
-                trigger_gc_memory = budget / 10 * 7;
-                pressure_gc_memory = budget / 100 * 85;
-                critical_gc_memory = budget / 100 * 95;
-            }
+        const u64 budget = forced_budget ? forced_budget : instance.GetDeviceMemoryBudgetNow();
+        if (budget != 0) {
+            trigger_gc_memory = budget / 10 * 7;
+            pressure_gc_memory = budget / 100 * 85;
+            critical_gc_memory = budget / 100 * 95;
         }
     }
     // bbport: gc_tick (one per guest submission, hundreds a second) at each of the last 64
