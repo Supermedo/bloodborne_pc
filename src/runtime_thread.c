@@ -248,6 +248,13 @@ static void set_host_name(const char *name) {
 #ifdef _WIN32
 #define exit_setjmp(t) bb_setjmp((t)->exit_jump)
 #define exit_longjmp(t) bb_longjmp((t)->exit_jump,1)
+/* PS4: a smaller priority number is higher. FMOD's mixer, stream and file
+ * threads sit at 256-265; everything else is the default 700. Boost only
+ * that band so a late mix does not empty the audio queue. */
+static void apply_host_priority(GuestThread *t) {
+    if (t->attr.prio>0 && t->attr.prio<=320)
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+}
 #else
 #define exit_setjmp(t) setjmp((t)->exit_jump)
 #define exit_longjmp(t) longjmp((t)->exit_jump,1)
@@ -256,6 +263,9 @@ static void *host_start(void *p) {
     GuestThread *t=p;
     attach(t);
     set_host_name(t->name);
+#ifdef _WIN32
+    apply_host_priority(t);
+#endif
     if (!exit_setjmp(t)) t->result=t->entry(t->argument);
     runtime_thread_keys_cleanup();
     pthread_mutex_lock(&lock); t->finished=1; ++exited; pthread_mutex_unlock(&lock);
@@ -334,7 +344,11 @@ static ABI int32_t thread_get_prio(GuestThread *t,int *prio) {
 }
 static ABI int32_t thread_set_prio(GuestThread *t,int prio) {
     if (!find_thread(t)) return ERR(3);
-    t->attr.prio=prio; return 0;
+    t->attr.prio=prio;
+#ifdef _WIN32
+    if (t==runtime_thread_current()) apply_host_priority(t);
+#endif
+    return 0;
 }
 static ABI int32_t thread_set_affinity(GuestThread *t,uint64_t mask) {
     if (!find_thread(t)) return ERR(3);
