@@ -26,6 +26,7 @@ void bbgpu_input_configure(int mouse_mode_available, int32_t toggle_scancode, in
 void bbgpu_mouse_camera_configure(int direct, float sensitivity) {
     (void)direct; (void)sensitivity;
 }
+void bbgpu_anti_lag_input(void) {}
 /* T6: controlled by the tests via stub_reload_requested, draining to 0 on read like the real
  * one (bbgpu_input_reload_requested's own doc comment: "1 once ... then clears back to 0"). */
 static int stub_reload_requested;

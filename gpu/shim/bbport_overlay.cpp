@@ -11,6 +11,7 @@
 
 #include <SDL3/SDL.h>
 #include "bbport_settings.h"
+#include "bbport_anti_lag.h"
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -373,6 +374,10 @@ void Menu() {
 
     ImGui::SeparatorText("Other");
     Checkbox("Show FPS counter", s.show_fps);
+    // AMD Anti-Lag: greyed out where the driver does not offer VK_AMD_anti_lag.
+    ImGui::BeginDisabled(!BbAntiLag::Supported());
+    Checkbox("AMD Anti-Lag (lower input latency)", s.anti_lag);
+    ImGui::EndDisabled();
 
     ImGui::Spacing();
     if (ImGui::Button("Close")) {

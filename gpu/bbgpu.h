@@ -64,6 +64,8 @@ int bbgpu_input_reload_requested(void);
 /* Direct mouse camera (mouse_camera = direct in input.ini): whether it is wanted and its
  * sensitivity multiplier. Safe from any thread; applied on the window thread's next PollEvents. */
 void bbgpu_mouse_camera_configure(int direct, float sensitivity);
+/* AMD Anti-Lag (gpu/shim/bbport_anti_lag.h): the game samples its input (pad reads). */
+void bbgpu_anti_lag_input(void);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus
