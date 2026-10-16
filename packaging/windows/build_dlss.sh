@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds bbport_dlss.dll (gpu/dlss_bridge, the only code that uses the NVIDIA DLSS SDK) with
-# MSVC and puts it with NVIDIA's nvngx_dlss.dll next to out/bb-probe.exe; package.sh ships both.
+# MSVC and puts it with NVIDIA's nvngx_dlss.dll and nvngx_dlssg.dll next to out/bb-probe.exe; package.sh ships both.
 # Needs Visual Studio 2022 (Build Tools) and a checkout of https://github.com/NVIDIA/DLSS:
 #   DLSS_SDK_ROOT=F:/sdk/DLSS bash packaging/windows/build_dlss.sh
 set -euo pipefail
@@ -14,5 +14,8 @@ cp -r /c/msys64/clang64/include/vulkan /c/msys64/clang64/include/vk_video out/vk
     -DDLSS_SDK_ROOT="$(cygpath -m "$sdk")" -DVULKAN_INCLUDE="$(cygpath -m "$PWD/out/vkinclude")"
 "$cmake" --build out/dlss-bridge --config Release
 cp out/dlss-bridge/Release/bbport_dlss.dll "$sdk/lib/Windows_x86_64/rel/nvngx_dlss.dll" out/
+if [[ -f "$sdk/lib/Windows_x86_64/rel/nvngx_dlssg.dll" ]]; then
+    cp "$sdk/lib/Windows_x86_64/rel/nvngx_dlssg.dll" out/
+fi
 cp "$sdk/LICENSE.txt" out/NVIDIA-DLSS-LICENSE.txt
-echo "DLSS bridge ready: out/bbport_dlss.dll, out/nvngx_dlss.dll"
+echo "DLSS bridge ready: out/bbport_dlss.dll, out/nvngx_dlss.dll (and nvngx_dlssg.dll if present)"

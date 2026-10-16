@@ -64,6 +64,15 @@ int bbgpu_input_reload_requested(void);
 /* Direct mouse camera (mouse_camera = direct in input.ini): whether it is wanted and its
  * sensitivity multiplier. Safe from any thread; applied on the window thread's next PollEvents. */
 void bbgpu_mouse_camera_configure(int direct, float sensitivity);
+/* NVIDIA Reflex: called before pad input sampling (driver frame pacing). */
+void bbgpu_reflex_pre_input_sample(void);
+/* NVIDIA Reflex: called immediately after pad input has been sampled. */
+void bbgpu_reflex_on_input_sampled(void);
+/* NVIDIA Reflex: called when a simulation cycle ends (e.g. at flip submission). */
+void bbgpu_reflex_on_simulation_end(void);
+/* Returns the current monotonic simulation frame ID (0 if not active/supported). */
+uint64_t bbgpu_reflex_current_sim_frame_id(void);
+
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus

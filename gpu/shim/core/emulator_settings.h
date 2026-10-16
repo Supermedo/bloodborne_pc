@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 #include "common/types.h"
+#include "bbport_settings.h"
 
 u32 BbDisplayRefreshHz(); // bbgpu.cpp: primary display refresh rate, 60 when unknown
 
@@ -51,7 +52,14 @@ public:
         }();
         return value;
     }
-    bool IsCopyGpuBuffers() { static const auto value = Flag("BB_COPY_GPU_BUFFERS", false); return value; }
+    bool IsCopyGpuBuffers() {
+        // FG can delay command processing while the guest recycles submission
+        // memory. Keep submitted PM4 (including indirect buffers) owned until
+        // its parser completes. The explicit override remains diagnostic-only.
+        static const auto value = Flag("BB_COPY_GPU_BUFFERS",
+            BbSettings::Get().startup_frame_generation >= 2);
+        return value;
+    }
     bool IsDirectMemoryAccessEnabled() { static const auto value = Flag("BB_DIRECT_MEMORY_ACCESS", false); return value; }
     bool IsDumpShaders() { static const auto value = Flag("BB_DUMP_SHADERS", false); return value; }
     bool IsFsrEnabled() { static const auto value = Flag("BB_FSR1", false); return value; }

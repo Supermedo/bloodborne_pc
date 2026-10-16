@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <thread>
+#include <mutex>
 
 #include "common/assert.h"
 #include "common/elf_info.h"
@@ -17,12 +18,20 @@
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 
 namespace Libraries::VideoOut {
 
 static std::unique_ptr<VideoOutDriver> driver;
+// Serialize frame capture through accepted-flip completion. The port's enqueue lock
+// alone does not prevent two guest threads from capturing the same simulation cycle.
+static std::mutex flip_cycle_mutex;
+
+std::mutex& FlipCycleMutex() {
+    return flip_cycle_mutex;
+}
 
 void PS4_SYSV_ABI sceVideoOutSetBufferAttribute(BufferAttribute* attribute, PixelFormat pixelFormat,
                                                 u32 tilingMode, u32 aspectRatio, u32 width,
@@ -181,11 +190,26 @@ s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode
     LOG_DEBUG(Lib_VideoOut, "bufferIndex = {}, flipMode = {}, flipArg = {}", bufferIndex, flipMode,
               flipArg);
 
-    if (!driver->SubmitFlip(port, bufferIndex, flipArg)) {
+    std::unique_lock cycle_lock{flip_cycle_mutex};
+    Vulkan::Reflex::PreInputSample(); // bootstrap a frame even without a pad poll
+    const u64 content_frame_id = Vulkan::Reflex::CurrentSimFrameId();
+    // bbport: allocate the accepted-flip ticket before the flip is enqueued so a presentation
+    // that completes before we register is matched exactly, not by a high-water mark.
+    const u64 flip_ticket = Vulkan::Reflex::AllocateFlipTicket();
+    if (!driver->SubmitFlip(port, bufferIndex, flipArg, false, content_frame_id, flip_ticket)) {
+        Vulkan::Reflex::OnFlipCancelled(flip_ticket);
         LOG_ERROR(Lib_VideoOut, "Flip queue is full");
         return ORBIS_VIDEO_OUT_ERROR_FLIP_QUEUE_FULL;
     }
 
+    // bbport: register the accepted source frame in the bounded backlog before the cycle closes.
+    Vulkan::Reflex::OnFlipAccepted(flip_ticket);
+    // Only mark simulation end once the flip request is actually accepted, closing the cycle
+    // this flip captured (not whichever cycle happens to be open on the flip thread).
+    Vulkan::Reflex::OnSimulationEnd(content_frame_id);
+    // Prepare the next application frame even when it never polls the pad. Pacing
+    // still precedes its actual input sampling; input markers remain pad-read only.
+    Vulkan::Reflex::PreInputSample();
     return ORBIS_OK;
 }
 
@@ -347,12 +371,17 @@ s32 PS4_SYSV_ABI sceVideoOutGetBufferLabelAddress(s32 handle, uintptr_t* label_a
     return 16;
 }
 
-s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, void** unk) {
+s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg,
+                           u64 content_frame_id) {
     auto* port = driver->GetPort(handle);
     if (!port) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
+    const u64 flip_ticket = Vulkan::Reflex::AllocateFlipTicket();
+    // bbport: register before the caller closes the cycle; if the flip later fails to submit, its
+    // exact ticket is cancelled instead of waiting for the backlog timeout.
+    Vulkan::Reflex::OnFlipAccepted(flip_ticket);
     Platform::IrqC::Instance()->RegisterOnce(
         Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
             ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
@@ -374,10 +403,15 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
                     }
                 }
             }
-            const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true);
+            const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true, content_frame_id, flip_ticket);
+            if (!result) {
+                Vulkan::Reflex::OnFlipCancelled(flip_ticket);
+            }
             ASSERT_MSG(result, "EOP flip submission failed");
         });
 
+    // The caller closes/prepares the cycle after submitting the patched graphics
+    // work. Advancing here would attribute that work to the following frame.
     return ORBIS_OK;
 }
 

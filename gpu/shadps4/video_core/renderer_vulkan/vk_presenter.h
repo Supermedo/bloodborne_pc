@@ -15,6 +15,8 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
+#include "video_core/renderer_vulkan/fg_timing.h"
 
 namespace Frontend {
 class WindowSDL;
@@ -25,6 +27,8 @@ struct Liverpool;
 }
 
 namespace Vulkan {
+
+struct FgFrameResources;
 
 struct Frame {
     u32 width;
@@ -37,6 +41,14 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
+    std::shared_ptr<FgFrameResources> generation;
+    u64 reflex_frame_id{};
+    u64 content_frame_id{}; ///< Guest flip identity for driver-independent latency diagnostics.
+    /// Monotonic accepted-flip ticket for the bounded backlog. Set by the driver for every
+    /// flip-prepared frame (including 0), so the presenter retires exactly the flip that owns
+    /// this frame; kept separate from content_frame_id, which the Reflex/latency path uses.
+    u64 flip_ticket{};
+    VAddr guest_address{};
 
 };
 
@@ -93,10 +105,14 @@ public:
 
     bool IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const;
 
+    /// bbport: `content_frame_id` is the identity captured when the guest's flip was accepted.
+    /// It becomes the frame's Reflex identity instead of the live/thread-local counter.
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                        VAddr cpu_address);
+                        VAddr cpu_address, u64 content_frame_id);
 
-    Frame* PrepareBlankFrame(bool present_thread);
+    /// The present thread has no accepted flip and keeps the live identity; the flip path passes
+    /// the accepted identity explicitly, including zero at startup.
+    Frame* PrepareBlankFrame(bool present_thread, u64 content_frame_id = 0);
 
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
     Frame* PrepareLastFrame();
@@ -107,6 +123,11 @@ private:
     void RecreateFrame(Frame* frame, u32 width, u32 height);
 
     void SetExpectedGameSize(s32 width, s32 height);
+    void PrepareGeneration(Frame* frame, vk::Image full_color, vk::ImageLayout layout,
+                           u32 width, u32 height, vk::Format sample_format, vk::Format source_format);
+    bool PresentOne(Frame* frame, vk::Image image, bool real, std::int64_t deadline = 0,
+                    bool grouped_present = false);
+    void CountPresentation(bool real);
 
 private:
     float expected_ratio{1920.0 / 1080.0f};
@@ -136,6 +157,20 @@ private:
     std::condition_variable free_cv;
     std::condition_variable_any frame_cv;
     std::vector<VAddr> vo_buffers_addr;
+    std::unique_ptr<FrameGeneration> generation;
+    std::mutex generation_mutex;
+    FgHistory generation_history;
+    FgSchedule generation_schedule{true,true};
+    vk::UniqueDescriptorSetLayout hud_desc;
+    vk::UniquePipelineLayout hud_layout;
+    vk::UniquePipeline hud_pipeline;
+    int generation_factor{}, generation_backend{};
+    u64 presentation_count{}, source_count{}, generated_count{}, skipped_count{};
+    std::int64_t last_ready_ns{};
+    u64 last_ready_serial{};
+    u64 last_reflex_report{};
+    std::int64_t last_reflex_query_ns{};
+    std::chrono::steady_clock::time_point counter_start{std::chrono::steady_clock::now()};
 };
 
 } // namespace Vulkan

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "bbport_settings.h"
 #include "bbport_toggles.h"
 
 #include "video_core/host_shaders/camera_motion_comp.h"
@@ -31,6 +32,83 @@ struct PushConstants {
     u32 mode;
 };
 
+using Mat4 = double[4][4];
+void mat_mul(const Mat4 a, const Mat4 b, Mat4 out) {
+    Mat4 t;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            double v = 0;
+            for (int k = 0; k < 4; ++k) v += a[i][k] * b[k][j];
+            t[i][j] = v;
+        }
+    }
+    std::memcpy(out, t, sizeof(t));
+}
+
+bool mat_inverse(const Mat4 m, Mat4 out) {
+    double a[4][8];
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 8; ++j) a[i][j] = j < 4 ? m[i][j] : (j - 4 == i ? 1.0 : 0.0);
+    }
+    for (int c = 0; c < 4; ++c) {
+        int p = c;
+        for (int r = c + 1; r < 4; ++r) {
+            if (std::fabs(a[r][c]) > std::fabs(a[p][c])) p = r;
+        }
+        if (std::fabs(a[p][c]) < 1e-12) return false;
+        if (p != c) {
+            for (int j = 0; j < 8; ++j) std::swap(a[p][j], a[c][j]);
+        }
+        const double d = a[c][c];
+        for (int j = 0; j < 8; ++j) a[c][j] /= d;
+        for (int r = 0; r < 4; ++r) {
+            if (r == c) continue;
+            const double k = a[r][c];
+            for (int j = 0; j < 8; ++j) a[r][j] -= k * a[c][j];
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) out[i][j] = a[i][j + 4];
+    }
+    return true;
+}
+
+void cam_vp(const float* f, Mat4 out) {
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) out[i][j] = f[200 + 4 * i + j];
+    }
+}
+
+void cam_pos(const float* f, double out[3]) {
+    out[0] = f[183];
+    out[1] = f[187];
+    out[2] = f[191];
+}
+
+bool reprojection(const float* cur, const float* prev, float out[16], bool* cut) {
+    *cut = false;
+    Mat4 m{};
+    for (int i = 0; i < 4; ++i) m[i][i] = 1.0;
+    Mat4 vp_cur, vp_prev, inv, move{};
+    cam_vp(cur, vp_cur);
+    cam_vp(prev, vp_prev);
+    double pc[3], pp[3];
+    cam_pos(cur, pc);
+    cam_pos(prev, pp);
+    const double d[3] = {pc[0] - pp[0], pc[1] - pp[1], pc[2] - pp[2]};
+    const double turn = vp_cur[3][0] * vp_prev[3][0] + vp_cur[3][1] * vp_prev[3][1] + vp_cur[3][2] * vp_prev[3][2];
+    if (std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) > 4.0 || turn < 0.9) *cut = true;
+    if (!mat_inverse(vp_cur, inv)) return false;
+    for (int i = 0; i < 4; ++i) move[i][i] = 1.0;
+    for (int i = 0; i < 3; ++i) move[i][3] = d[i];
+    mat_mul(vp_prev, move, m);
+    mat_mul(m, inv, m);
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) out[c * 4 + r] = static_cast<float>(m[r][c]);
+    }
+    return true;
+}
+
 /// a * b for 3x4 affine matrices (rows [R | t]).
 std::array<float, 12> Multiply(const std::array<float, 12>& a, const std::array<float, 12>& b) {
     std::array<float, 12> out{};
@@ -54,9 +132,11 @@ CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
     const char* env = std::getenv("BB_DEBUG_MOTION");
     debug_overlay = env && env[0] == '1';
     const char* upscaler = std::getenv("BB_UPSCALER");
-    // The upscaler can be switched on from the menu at any time: the camera is always tracked
-    // unless BB_UPSCALER=none.
-    for_upscaler = !(upscaler && std::strcmp(upscaler, "none") == 0);
+    const auto& s = BbSettings::Get();
+    const bool fg_requested = s.startup_frame_generation >= 2 || s.frame_generation.load() >= 2;
+    // The upscaler or frame generation can be switched on from the menu or startup:
+    // the camera is tracked unless BB_UPSCALER=none and no FG is active.
+    for_upscaler = !(upscaler && std::strcmp(upscaler, "none") == 0) || fg_requested;
     const auto device = instance.GetDevice();
     if (for_upscaler) {
         const std::array<vk::DescriptorSetLayoutBinding, 3> motion_bindings = {{
@@ -152,6 +232,78 @@ CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
 
 CameraMotion::~CameraMotion() = default;
 
+CameraMotion::FrameCamera CameraMotion::FrameGenerationCamera() const noexcept {
+    FrameCamera out{};
+    if (!current.valid) {
+        return out;
+    }
+    const float* f = current_constants.data();
+    auto& camera_out = out.camera;
+    out.valid = true;
+
+    Mat4 projection{}, inverse{};
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            projection[row][col] = f[52 + row * 4 + col];
+        }
+    }
+    if (!mat_inverse(projection, inverse)) {
+        out.valid = false;
+    }
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            camera_out.view_to_clip[row * 4 + col] = static_cast<float>(projection[col][row]);
+            camera_out.clip_to_view[row * 4 + col] = static_cast<float>(inverse[col][row]);
+        }
+    }
+
+    float reproject[16]{};
+    bool cut = false;
+    if (previous.valid && reprojection(f, previous_constants.data(), reproject, &cut)) {
+        if (cut) {
+            out.valid = false;
+        }
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                projection[row][col] = reproject[row * 4 + col];
+            }
+        }
+        std::memcpy(camera_out.clip_to_previous, reproject, sizeof(camera_out.clip_to_previous));
+        if (!mat_inverse(projection, inverse)) {
+            out.valid = false;
+        }
+        for (int row = 0; row < 4; ++row) {
+            for (int col = 0; col < 4; ++col) {
+                camera_out.previous_to_clip[row * 4 + col] = static_cast<float>(inverse[row][col]);
+            }
+        }
+    } else {
+        // Fallback: previous equals current
+        for (int i = 0; i < 4; ++i) {
+            camera_out.clip_to_previous[i * 5] = 1.0f;
+            camera_out.previous_to_clip[i * 5] = 1.0f;
+        }
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        camera_out.position[i] = f[183 + i * 4];
+        camera_out.right[i] = f[180 + i * 4];
+        camera_out.up[i] = f[181 + i * 4];
+        camera_out.forward[i] = f[182 + i * 4];
+    }
+    camera_out.jitter[0] = jitter[0];
+    camera_out.jitter[1] = jitter[1];
+    camera_out.near_plane = -f[63] / f[62];
+    const float far_plane = std::fabs(f[63] / (1.0f - f[62]));
+    camera_out.far_plane = std::isfinite(far_plane) && far_plane > camera_out.near_plane
+        ? far_plane : 3000.0f;
+    camera_out.vertical_fov = 2.0f * std::atan(1.0f / f[57]);
+    std::array<float,sizeof(BbDlssCamera)/sizeof(float)> scalars{};
+    std::memcpy(scalars.data(),&camera_out,sizeof(camera_out));
+    for (float scalar : scalars) if (!std::isfinite(scalar)) out.valid=false;
+    return out;
+}
+
 float CameraMotion::VerticalFov() const noexcept {
     return 2.0f * std::atan(1.0f / current.proj[1]);
 }
@@ -228,6 +380,8 @@ void CameraMotion::OnConstants(const float* data) {
         return; // the first one of a frame is the main camera
     }
     previous = current;
+    previous_constants = current_constants;
+    std::memcpy(current_constants.data(), data, 216 * sizeof(float));
     std::memcpy(current.view.data(), data + 8, 12 * sizeof(float));
     std::memcpy(current.inv_view.data(), data + 180, 12 * sizeof(float));
     // bbport: BB_CAMERA_LOG=<file>: one line per frame, "seconds x y z" of the main camera (the
@@ -258,6 +412,7 @@ void CameraMotion::OnGBufferPass(VideoCore::ImageId depth) {
 }
 
 void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
+    cached_fg_camera = FrameGenerationCamera();
     if (debug_overlay && frame && depth_id && current.valid && previous.valid) {
         Overlay(frame);
     }

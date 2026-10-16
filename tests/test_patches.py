@@ -7,7 +7,7 @@ from pathlib import Path
 
 from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
-                     render_size, resolution_writes, scaled_sizes, effect_patches,
+                     render_size, resolution_writes, scaled_sizes, output_size, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
                      compile_external, eboot_bytes, eboot_matches_patches, patch_fingerprint,
                      patch_sites)
@@ -86,6 +86,49 @@ class NativeUiTests(unittest.TestCase):
                          ((1916, 1078), (3840, 2160)))
         # TAA is native-only and uses the live host targets.
         self.assertIsNone(scaled_sizes({'output_res': '1280x720', 'upscaler': 'taa', 'preset': '3'}))
+
+
+    def test_arbitrary_aspect_and_native_movie_viewport(self):
+        for out in ((2560,1080), (5120,2160), (1280,800), (1080,1920), (5000,2000)):
+            settings={'output_res': f'{out[0]}x{out[1]}', 'upscaler':'dlss', 'preset':'1'}
+            scene, actual=scaled_sizes(settings)
+            self.assertEqual(actual, out)
+            writes=resolution_writes(XML,scene,'01.09',SEGMENTS,ui=out)
+            self.assertEqual(immediate(writes, UI_WIDTH)[1],out[0])
+            self.assertEqual(immediate(writes, UI_HEIGHT)[1],out[1])
+            # The stage-coordinate constants still describe 1920x1080.
+            self.assertEqual(immediate(writes,0x019E83AF-EBOOT_BASE)[1],1920)
+        self.assertEqual(scaled_sizes({'output_res':'1280x800','upscaler':'taa'}),
+                         ((1280,800),(1280,800)))
+
+    def test_native_scene_and_movie_targets_do_not_alias(self):
+        for out in ((3440,1440), (5120,1440), (1280,800), (1080,1920), (5000,2000)):
+            for upscaler in ('off','dlss','fsr3'):
+                with self.subTest(output=out,upscaler=upscaler):
+                    scene,actual=scaled_sizes({'output_res':f'{out[0]}x{out[1]}',
+                                               'upscaler':upscaler,'preset':'0'})
+                    self.assertEqual(actual,out)
+                    self.assertNotEqual(scene,out)
+                    self.assertLessEqual(out[0]-scene[0],4)
+                    self.assertLessEqual(out[1]-scene[1],2)
+                    self.assertEqual((scene[0]%2,scene[1]%2),(0,0))
+                    writes=resolution_writes(XML,scene,'01.09',SEGMENTS,ui=out)
+                    self.assertEqual(immediate(writes,UI_WIDTH)[1],out[0])
+                    self.assertEqual(immediate(writes,UI_HEIGHT)[1],out[1])
+
+    def test_native_ui_collision_guard_preserves_other_paths(self):
+        # 16:9 Native AA and TAA keep their exact-size contract; reduced-resolution
+        # presets keep the same scene dimensions as the validated generation runs.
+        self.assertEqual(scaled_sizes({'output_res':'3840x2160','upscaler':'dlss','preset':'0'}),
+                         ((3840,2160),(3840,2160)))
+        self.assertEqual(scaled_sizes({'output_res':'1280x800','upscaler':'taa'}),
+                         ((1280,800),(1280,800)))
+        self.assertEqual(scaled_sizes({'output_res':'3440x1440','upscaler':'dlss','preset':'3'}),
+                         ((1720,720),(3440,1440)))
+
+    def test_invalid_custom_resolutions_fall_back(self):
+        for text in ('0x0','999999x1080','1921x1080','1920x143','bad','-10x1080'):
+            self.assertEqual(output_size({'output_res':text}),OUTPUT_SIZE)
 
 
 class PhysicsStepTests(unittest.TestCase):

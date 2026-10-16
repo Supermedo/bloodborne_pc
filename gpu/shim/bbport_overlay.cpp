@@ -14,6 +14,7 @@
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 // DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license).
@@ -173,8 +174,21 @@ void Menu() {
         ImGui::End();
         return;
     }
-    ImGui::Text("%.0f FPS  (%.1f ms)", frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f,
-                frame_ms_avg);
+    {
+        const float active_fps = frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f;
+        const int fg_factor = s.startup_frame_generation;
+        if (fg_factor >= 2) {
+            const float src_fps = s.source_fps.load();
+            const float disp_fps = s.display_fps.load() > 0.0f ? s.display_fps.load() : active_fps;
+            if (src_fps > 0.0f) {
+                ImGui::Text("Presented FPS: %.0f  |  Source FPS: %.0f  (%.1f ms)", disp_fps, src_fps, frame_ms_avg);
+            } else {
+                ImGui::Text("Presented FPS: %.0f  (%.1f ms)", disp_fps, frame_ms_avg);
+            }
+        } else {
+            ImGui::Text("%.0f FPS  (%.1f ms)", active_fps, frame_ms_avg);
+        }
+    }
 
     ImGui::SeparatorText("Temporal upscaling");
     static const char* upscalers[] = {"Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)",
@@ -254,7 +268,9 @@ void Menu() {
     }
     ImGui::Text("Active scene resolution: %d x %d", s.active_render_width.load(),
                 s.active_render_height.load());
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         ImGui::Text("Startup preset: %s", BbSettings::PresetName(s.startup_preset));
         if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
             automatic && automatic[0] == '1') {
@@ -297,15 +313,14 @@ void Menu() {
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText("Output resolution");
-    static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160",
-                                    "2560 x 1080 (21:9)", "3440 x 1440 (21:9)",
-                                    "3840 x 1600 (21:9)", "5120 x 2160 (21:9)",
-                                    "3840 x 1080 (32:9)", "5120 x 1440 (32:9)"};
-    static_assert(sizeof(outputs) / sizeof(*outputs) == BbSettings::OutputCount);
+    auto output_label = [](int i) {
+        return std::to_string(BbSettings::OutputWidths[i]) + " x " +
+               std::to_string(BbSettings::OutputHeights[i]);
+    };
     int output = s.output_res;
-    if (ImGui::BeginCombo("Output resolution", outputs[output])) {
+    if (ImGui::BeginCombo("Output resolution", output_label(output).c_str())) {
         for (int i = 0; i < BbSettings::OutputCount; ++i) {
-            if (ImGui::Selectable(outputs[i], i == output)) {
+            if (ImGui::Selectable(output_label(i).c_str(), i == output)) {
                 Store(s.output_res, i, true);
             }
         }
@@ -318,7 +333,9 @@ void Menu() {
                                                          hud == 100 ? "Screen edges" : "%d%%"));
         Hint("Ultrawide (21:9, 32:9): moves the health, items and Blood Echoes from the centred 16:9 area toward the screen edges. Changes require a restart.");
     }
-    if (BbSettings::FixedRenderSession()) {
+    if (BbSettings::AspectNeedsRestart()) {
+        Hint("Changing aspect ratio requires a restart. HUD remains centered at 16:9.");
+    } else if (BbSettings::FixedRenderSession()) {
         Hint("Final image and HUD resolution. The preset controls scene resolution relative to the output. 4K Performance is approximately 1920x1080. Changes require a restart.");
     } else {
         Hint("Output and HUD resolution changes at the next frame boundary. The preset controls scene resolution relative to the output. Resizing resets upscaler history and may pause briefly.");
@@ -334,6 +351,78 @@ void Menu() {
         ImGui::EndCombo();
     }
     Hint("On: output and presets change without restarting, while game post-processing stays at 1080p. Off: the scene is patched to the preset resolution at startup. Auto enables the live path on capable discrete GPUs. Changes apply after restarting the game.");
+    ImGui::SeparatorText("Frame generation & Reflex");
+    static const char* fg_backends[] = {"DLSS Frame Generation", "FSR Frame Generation"};
+    int current_fg_backend = s.fg_backend;
+    if (ImGui::BeginCombo("Generation backend", fg_backends[current_fg_backend])) {
+        for (int i = 0; i < BbSettings::FgBackendCount; ++i) {
+            if (ImGui::Selectable(fg_backends[i], i == current_fg_backend)) {
+                Store(s.fg_backend, i, true);
+                if (i == BbSettings::FgFsr && s.frame_generation > 2) {
+                    Store(s.frame_generation, 2, true);
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+    Hint("Frame generation generates intermediate frames to increase display motion rate. Hardware support required.");
+
+    const bool is_dlss_backend = s.fg_backend == BbSettings::FgDlss;
+    static const char* dlss_fg_modes[] = {"Off", "2x", "3x", "4x"};
+    static constexpr int dlss_fg_values[] = {0, 2, 3, 4};
+    static const char* fsr_fg_modes[] = {"Off", "2x"};
+    static constexpr int fsr_fg_values[] = {0, 2};
+
+    int current_fg = s.frame_generation;
+    const char* current_fg_label = "Off";
+    if (is_dlss_backend) {
+        for (int i = 0; i < 4; ++i) {
+            if (dlss_fg_values[i] == current_fg) current_fg_label = dlss_fg_modes[i];
+        }
+    } else {
+        for (int i = 0; i < 2; ++i) {
+            if (fsr_fg_values[i] == current_fg) current_fg_label = fsr_fg_modes[i];
+        }
+    }
+
+    if (ImGui::BeginCombo("Frame generation", current_fg_label)) {
+        if (is_dlss_backend) {
+            for (int i = 0; i < 4; ++i) {
+                if (ImGui::Selectable(dlss_fg_modes[i], dlss_fg_values[i] == current_fg)) {
+                    Store(s.frame_generation, dlss_fg_values[i], true);
+                }
+            }
+        } else {
+            for (int i = 0; i < 2; ++i) {
+                if (ImGui::Selectable(fsr_fg_modes[i], fsr_fg_values[i] == current_fg)) {
+                    Store(s.frame_generation, fsr_fg_values[i], true);
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+    Hint("DLSS FG supports Off, 2x, 3x, 4x. FSR FG supports Off and 2x only. Changes apply after restarting the game.");
+
+    static const char* reflex_modes[] = {"Off", "On", "On + Boost"};
+    int current_reflex = s.reflex;
+    const bool reflex_avail = s.reflex_supported.load();
+    ImGui::BeginDisabled(!reflex_avail);
+    if (ImGui::BeginCombo("NVIDIA Reflex", reflex_modes[current_reflex])) {
+        for (int i = 0; i < BbSettings::ReflexModeCount; ++i) {
+            if (ImGui::Selectable(reflex_modes[i], i == current_reflex)) {
+                Store(s.reflex, i, true);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    if (!reflex_avail) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("- unsupported by runtime");
+    }
+    Hint("Reduces latency during frame generation and rendering. Changes apply after restarting the game.");
+    ImGui::Spacing();
+
     ImGui::SeparatorText("Game effects (restart required)");
     static const char* lods[] = {"Highest (-2)", "Original", "Lower (1)", "Lowest (2)"};
     static constexpr int lod_values[] = {-2, 0, 1, 2};
@@ -358,7 +447,8 @@ void Menu() {
     bool restart = s.object_motion != s.startup_object_motion ||
                    s.model_lod != s.startup_model_lod ||
                    s.live_resolution != s.startup_live_resolution ||
-                   BbSettings::ResolutionNeedsRestart();
+                   BbSettings::ResolutionNeedsRestart() ||
+                   BbSettings::FrameGenNeedsRestart();
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
         restart |= s.effects[e] != s.startup_effects[e];
     }
@@ -440,14 +530,27 @@ void FpsCounter() {
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
     const auto& s = BbSettings::Get();
-    ImGui::Text("%.0f FPS  %.1f ms  %s", frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f,
-                frame_ms_avg,
-                s.upscaler == BbSettings::UpscalerFsr3   ? "FSR 3.1"
-                : s.upscaler == BbSettings::UpscalerFsr4 ? "FSR 4"
-                : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
-                : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
-                : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
-                                                         : "");
+    {
+        const float active_fps = frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f;
+        const int fg_factor = s.startup_frame_generation;
+        const char* up_name = s.upscaler == BbSettings::UpscalerFsr3   ? "FSR 3.1"
+                            : s.upscaler == BbSettings::UpscalerFsr4 ? "FSR 4"
+                            : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
+                            : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
+                            : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
+                            : "";
+        if (fg_factor >= 2) {
+            const float src_fps = s.source_fps.load();
+            const float disp_fps = s.display_fps.load() > 0.0f ? s.display_fps.load() : active_fps;
+            if (src_fps > 0.0f) {
+                ImGui::Text("Presented: %.0f  Source: %.0f  %.1f ms  %s", disp_fps, src_fps, frame_ms_avg, up_name);
+            } else {
+                ImGui::Text("Presented: %.0f  %.1f ms  %s", disp_fps, frame_ms_avg, up_name);
+            }
+        } else {
+            ImGui::Text("%.0f FPS  %.1f ms  %s", active_fps, frame_ms_avg, up_name);
+        }
+    }
     ImGui::End();
 }
 
@@ -685,7 +788,14 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     {
         // Font atlas uploads submit to the graphics queue themselves.
         std::scoped_lock submit_lock{Vulkan::Scheduler::submit_mutex};
+        const auto frame_id = Vulkan::Reflex::RecordingFrameId();
+        if (Vulkan::Reflex::UsesMarkerAttribution()) {
+            Vulkan::Reflex::OnForeignSubmitBegin(frame_id);
+        }
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdbuf);
+        if (Vulkan::Reflex::UsesMarkerAttribution()) {
+            Vulkan::Reflex::OnForeignSubmitEnd(frame_id);
+        }
     }
     cmdbuf.endRendering();
 }

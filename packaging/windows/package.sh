@@ -53,15 +53,28 @@ ldd "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" |
     done
 cp -r scripts patches "$dest/"
 # Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
-mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
+mkdir -p "$dest/tools/windows" && cp tools/legacy-cpu-plan.json "$dest/tools/"
+if [[ -d tools/windows ]]; then
+    cp -r tools/windows/. "$dest/tools/windows/"
+fi
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
+if [[ -f docs/FG_REFLEX.md ]]; then
+    mkdir -p "$dest/docs" && cp docs/FG_REFLEX.md "$dest/docs/"
+    if [[ -f docs/GPU_VALIDATION.md ]]; then cp docs/GPU_VALIDATION.md "$dest/docs/"; fi
+fi
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
-# DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
-# (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
+# DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtimes (SR + Frame Generation dlssg),
+# next to bb-probe.exe (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
 if [[ -f out/bbport_dlss.dll && -f out/nvngx_dlss.dll ]]; then
     cp out/bbport_dlss.dll out/nvngx_dlss.dll "$dest/bin/"
+    if [[ -f out/nvngx_dlssg.dll ]]; then
+        cp out/nvngx_dlssg.dll "$dest/bin/"
+    fi
     mkdir -p "$dest/licenses" && cp out/NVIDIA-DLSS-LICENSE.txt "$dest/licenses/"
     cp gpu/dlss_bridge/LICENSE.txt "$dest/licenses/bbport_dlss-LICENSE.txt"
+    if [[ -f licenses/bbhost-aspect-GPL-3.0.txt ]]; then
+        cp licenses/bbhost-aspect-GPL-3.0.txt "$dest/licenses/bbhost-GPL-3.0.txt"
+    fi
 else
     echo "DLSS bridge not built (packaging/windows/build_dlss.sh): no DLSS in this package" >&2
 fi

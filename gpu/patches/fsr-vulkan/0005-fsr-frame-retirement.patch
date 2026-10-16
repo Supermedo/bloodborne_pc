@@ -1,0 +1,82 @@
+--- a/src/ffx_vk_fsr3_3_1_6_framegen.cpp
++++ b/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+@@ -413,8 +413,18 @@
+     return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
+ }
+ 
+ extern "C" FfxVkFsr3_3_1_6FrameGenerationResult
++ffxVkFsr3_3_1_6FrameGenerationContextGetTransientCounts(
++    FfxVkFsr3_3_1_6FrameGenerationContext* context, uint64_t* descriptors, uint64_t* constants)
++{
++    if (!context || !descriptors || !constants)
++        return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    ffxVkFsr3_3_1_5BridgeGetTransientCounts(context->bridge, descriptors, constants);
++    return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
++}
++
++extern "C" FfxVkFsr3_3_1_6FrameGenerationResult
+ ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(
+     FfxVkFsr3_3_1_6FrameGenerationContext* context,
+     FfxVkFsr3_3_1_6FrameGenerationMemoryUsage* outUsage)
+ {
+@@ -463,8 +473,10 @@
+                      context->displayWidth, context->displayHeight, false) ||
+         !valid_image(info->depth, VK_FORMAT_R32_SFLOAT, info->renderWidth, info->renderHeight, false) ||
+         !valid_motion_image(info->motionVectors, info->renderWidth, info->renderHeight))
+         return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    /* Tag transient descriptor/constant data before any frame work. */
++    ffxVkFsr3_3_1_5BridgeBeginFrame(context->bridge, info->frameId);
+     if (!context->initialized) {
+         const OwnedSharedImage shared[] = {
+             context->opticalFlowVector, context->opticalFlowScd, context->dilatedDepth,
+             context->dilatedMotionVectors, context->reconstructedPreviousDepth};
+@@ -690,8 +702,9 @@
+         } else {
+             ++retained;
+         }
+     }
++    ffxVkFsr3_3_1_5BridgeRetireFrame(context->bridge, completedFrameId);
+     return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
+ }
+ 
+ extern "C" void ffxVkFsr3_3_1_6FrameGenerationContextDestroy(
+--- a/src/ffx_vk_fsr3_3_1_5_bridge.cpp
++++ b/src/ffx_vk_fsr3_3_1_5_bridge.cpp
+@@ -875,8 +875,17 @@
+         std::lock_guard<std::mutex> lock(bridge->mutex);
+         bridge->constantBuffers.emplace_back(std::move(constantBuffer));
+     }
+     return FFX_OK;
++}
++
++extern "C" void ffxVkFsr3_3_1_5BridgeGetTransientCounts(
++    FfxVkFsr3_3_1_5Bridge* bridge, uint64_t* descriptors, uint64_t* constants)
++{
++    if (!bridge || !descriptors || !constants) return;
++    std::lock_guard<std::mutex> lock(bridge->mutex);
++    *descriptors = bridge->descriptorSets.size();
++    *constants = bridge->constantBuffers.size();
+ }
+ 
+ extern "C" void ffxVkFsr3_3_1_5BridgeBeginFrame(FfxVkFsr3_3_1_5Bridge* bridge,
+                                                    uint64_t frameId)
+--- a/include/ffx_vk_fsr3_3_1_5_bridge.h
++++ b/include/ffx_vk_fsr3_3_1_5_bridge.h
+@@ -324,8 +324,17 @@
+ ffxVkFsr3_3_1_6FrameGenerationContextCreate(
+     const FfxVkFsr3_3_1_6FrameGenerationCreateInfo* createInfo,
+     FfxVkFsr3_3_1_6FrameGenerationContext** outContext);
+ 
++/* Diagnostic object counts, including unretired frame work. */
++FfxVkFsr3_3_1_6FrameGenerationResult
++ffxVkFsr3_3_1_6FrameGenerationContextGetTransientCounts(
++    FfxVkFsr3_3_1_6FrameGenerationContext* context,
++    uint64_t* descriptors, uint64_t* constants);
++
++void ffxVkFsr3_3_1_5BridgeGetTransientCounts(
++    FfxVkFsr3_3_1_5Bridge* bridge, uint64_t* descriptors, uint64_t* constants);
++
+ FfxVkFsr3_3_1_6FrameGenerationResult
+ ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(
+     FfxVkFsr3_3_1_6FrameGenerationContext* context,
+     FfxVkFsr3_3_1_6FrameGenerationMemoryUsage* outUsage);

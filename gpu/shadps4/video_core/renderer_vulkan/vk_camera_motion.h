@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/texture_cache/image.h"
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
 
 namespace VideoCore {
 class TextureCache;
@@ -64,6 +65,15 @@ public:
     // Current projection, previous projection, and row Z of previous-view * inverse-view.
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
 
+    struct FrameCamera {
+        BbDlssCamera camera{};
+        bool valid = false;
+    };
+    [[nodiscard]] FrameCamera FrameGenerationCamera() const noexcept;
+    [[nodiscard]] FrameCamera CachedFrameGenerationCamera() const noexcept {
+        return cached_fg_camera;
+    }
+
     /// Records the motion vector pass: `depth_view` (depth aspect, General layout) into
     /// `motion_view` (RG16F storage, General), pixels, previous minus current.
     void RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_view, vk::ImageView motion_view,
@@ -101,6 +111,9 @@ private:
 
     ObjectMotion* object_motion = nullptr;
     Camera current, previous;
+    FrameCamera cached_fg_camera{};
+    std::array<float, 216> current_constants{};
+    std::array<float, 216> previous_constants{};
     bool frame_has_camera = false;
     std::array<float, 2> jitter{}, previous_jitter{};
     std::array<u32, 2> render_size{};

@@ -2,13 +2,52 @@
 #include "bbport_settings.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 namespace BbSettings {
+const char* FgBackendName(int backend) {
+    static constexpr const char* names[FgBackendCount] = {"dlss", "fsr"};
+    return names[std::clamp(backend, 0, FgBackendCount - 1)];
+}
+
+const char* ReflexModeName(int mode) {
+    static constexpr const char* names[ReflexModeCount] = {"off", "on", "boost"};
+    return names[std::clamp(mode, 0, ReflexModeCount - 1)];
+}
+
+const char* FrameGenName(int factor) {
+    switch (factor) {
+    case 2: return "2x";
+    case 3: return "3x";
+    case 4: return "4x";
+    default: return "off";
+    }
+}
+
+int ParseFrameGen(const std::string& value) {
+    if (value == "2x" || value == "2") return 2;
+    if (value == "3x" || value == "3") return 3;
+    if (value == "4x" || value == "4") return 4;
+    return 0; // default/off
+}
+
+int ParseFgBackend(const std::string& value) {
+    if (value == "fsr" || value == "1") return FgFsr;
+    return FgDlss; // default/0
+}
+
+int ParseReflex(const std::string& value) {
+    if (value == "off" || value == "0") return ReflexOff;
+    if (value == "boost" || value == "2") return ReflexBoost;
+    return ReflexOn; // default/1/"on"
+}
+
 
 namespace {
 
@@ -30,6 +69,20 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                 v.upscaler = u;
             }
         }
+    } else if (key == "frame_generation") {
+        int fg = ParseFrameGen(value);
+        if (v.fg_backend == FgFsr && fg > 2) {
+            fg = 2; // FSR FG supports Off / 2x only
+        }
+        v.frame_generation = fg;
+    } else if (key == "fg_backend") {
+        int b = ParseFgBackend(value);
+        v.fg_backend = b;
+        if (b == FgFsr && v.frame_generation > 2) {
+            v.frame_generation = 2; // clamp when switching to FSR
+        }
+    } else if (key == "reflex") {
+        v.reflex = ParseReflex(value);
     } else if (key == "preset") {
         v.preset = std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
@@ -63,10 +116,26 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "hud_position") {
         v.hud_position = std::clamp(i, 0, 100);
     } else if (key == "output_res") {
-        for (int r = 0; r < OutputCount; ++r) {
+        for (int r = 0; r < OutputCustom; ++r) {
             if (value == std::to_string(OutputWidths[r]) + "x" + std::to_string(OutputHeights[r])) {
                 v.output_res = r;
+                return;
             }
+        }
+        const auto separator = value.find('x');
+        if (separator == std::string::npos) return;
+        int w = 0, h = 0;
+        const char* begin = value.data();
+        const char* split = begin + separator;
+        const char* end = begin + value.size();
+        const auto width = std::from_chars(begin, split, w);
+        const auto height = std::from_chars(split + 1, end, h);
+        if (width.ec == std::errc{} && width.ptr == split &&
+            height.ec == std::errc{} && height.ptr == end &&
+            w >= 256 && w <= 7680 && h >= 144 && h <= 4320 && !(w & 1) && !(h & 1)) {
+            OutputWidths[OutputCustom] = w;
+            OutputHeights[OutputCustom] = h;
+            v.output_res = OutputCustom;
         }
     } else {
         for (int e = 0; e < EffectCount; ++e) {
@@ -86,6 +155,10 @@ Values& Get() {
 
 void Load() {
     auto& v = Get();
+    static bool initialized = false;
+    v.frame_generation = 0;
+    v.fg_backend = FgDlss;
+    v.reflex = ReflexOn;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -110,16 +183,32 @@ void Load() {
             if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
         }
     }
+    if (const char* env = std::getenv("BB_FG_BACKEND")) {
+        Set(v, "fg_backend", env);
+    }
+    if (const char* env = std::getenv("BB_FRAME_GENERATION")) {
+        Set(v, "frame_generation", env);
+    }
+    if (const char* env = std::getenv("BB_REFLEX")) {
+        Set(v, "reflex", env);
+    }
     const std::pair<const char*, const char*> env_keys[] = {
         {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
         {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"BB_OUTPUT_RES", "output_res"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
             Set(v, key, value);
         }
+    }
+    if (!initialized) {
+        v.startup_frame_generation = v.frame_generation;
+        v.startup_fg_backend = v.fg_backend;
+        v.startup_reflex = v.reflex;
+        initialized = true;
     }
     v.startup_preset = v.preset;
     v.startup_upscaler = v.upscaler;
@@ -160,6 +249,21 @@ void ConfigureDlssSupport(bool available, const char* problem) {
     }
 }
 
+void ConfigureReflexSupport(bool supported) {
+    auto& v = Get();
+    v.reflex_supported = supported;
+    if (!supported && v.reflex != ReflexOff) {
+        v.reflex = ReflexOff;
+    }
+}
+
+bool FrameGenNeedsRestart() {
+    const auto& v = Get();
+    return v.frame_generation != v.startup_frame_generation ||
+           v.fg_backend != v.startup_fg_backend ||
+           v.reflex != v.startup_reflex;
+}
+
 bool FixedRenderSession() {
     const char* size = std::getenv("BB_RENDER_RES");
     return size && size[0];
@@ -171,16 +275,27 @@ int RenderPreset() {
         v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
 }
 
+bool AspectNeedsRestart() {
+    const auto& v = Get();
+    const int a = v.output_res, b = v.startup_output_res;
+    return int64_t(OutputWidths[a]) * OutputHeights[b] !=
+           int64_t(OutputWidths[b]) * OutputHeights[a];
+}
+
 bool ResolutionNeedsRestart() {
     const auto& v = Get();
-    // TAA needs the live path (native guest targets): run.sh selects it on restart. Ultrawide
-    // outputs patch the camera and HUD at startup.
-    if (Ultrawide(v.output_res) != Ultrawide(v.startup_output_res)) return true;
-    if (Ultrawide(v.output_res) && v.hud_position != v.startup_hud_position) return true;
-    return FixedRenderSession() &&
+    // Wide outputs patch the camera and the HUD layer (patches.py, hud_layout.py) at startup, and
+    // two wide outputs can share an aspect ratio, so compare the outputs themselves.
+    if ((Ultrawide(v.output_res) || Ultrawide(v.startup_output_res)) &&
+        (v.output_res != v.startup_output_res || v.hud_position != v.startup_hud_position)) {
+        return true;
+    }
+    // TAA needs the live path (native guest targets): run.sh selects it on restart.
+    // An aspect change needs the camera and UI viewport patches rebuilt on restart.
+    return AspectNeedsRestart() || (FixedRenderSession() &&
         (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
-         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
+         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa)));
 }
 
 void Save() {
@@ -192,10 +307,13 @@ void Save() {
     }
     std::fprintf(file,
                  "# bbport settings (in-game menu: Insert / L3+R3)\n"
-                 "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
+                 "upscaler=%s\nframe_generation=%s\nfg_backend=%s\nreflex=%s\n"
+                 "preset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
                  "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
-                 UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
+                 UpscalerName(v.upscaler), FrameGenName(v.frame_generation.load()),
+                 FgBackendName(v.fg_backend.load()), ReflexModeName(v.reflex.load()),
+                 v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
