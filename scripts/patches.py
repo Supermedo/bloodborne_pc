@@ -63,7 +63,6 @@ EFFECTS={
     'cheat_infinite_lucidity':(None,'Infinite Lucidity (shadPS4)'),
     'cheat_infinite_health':(None,'Infinite Health (shadPS4)'),
     'cheat_infinite_stamina':(None,'Infinite Stamina (shadPS4)'),
-    'cheat_one_hit_kill':(None,'1 Hit Kill (shadPS4)'),
     'cheat_infinite_items':(None,'Infinite Items (shadPS4)'),
 }
 # model_lod: -2 highest, 0 the game's, 1 lower, 2 lowest.
