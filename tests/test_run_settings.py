@@ -95,6 +95,18 @@ class RestartResolutionTests(unittest.TestCase):
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=auto\n', caps=0)[0]['BB_RENDER_RES'],
                          '854x480')
 
+    def test_auto_live_resolution_keeps_the_startup_patch_above_1080p_with_depth_of_field(self):
+        # The live path blurs the depth of field of scenes larger than the guest's 1920x1080.
+        above = 'output_res=2560x1440\nlive_resolution=auto\n'
+        self.assertEqual(self.run_restarts(ini_extra=above, caps=1)[0]['BB_RENDER_RES'], '1706x960')
+        self.assertEqual(self.run_restarts(ini_extra=above + 'effect_dof=1\n', caps=1)[0]['BB_RENDER_RES'],
+                         '1706x960')
+        self.assertIsNone(self.run_restarts(ini_extra=above + 'effect_dof=0\n', caps=1)[0]['BB_RENDER_RES'])
+        # An explicit choice and outputs below 1080p are unchanged.
+        self.assertIsNone(self.run_restarts(ini_extra='output_res=2560x1440\nlive_resolution=1\n',
+                                            caps=1)[0]['BB_RENDER_RES'])
+        self.assertIsNone(self.run_restarts(ini_extra='live_resolution=auto\n', caps=1)[0]['BB_RENDER_RES'])
+
     def test_live_resolution_without_sed_or_grep(self):
         # A missing sed ended run.sh (exit 127) before the game in the AppImage on NixOS.
         self.assertEqual(self.run_restarts(ini_extra='live_resolution=0\n', caps=1,
