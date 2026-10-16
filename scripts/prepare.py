@@ -135,6 +135,10 @@ def prepare(game, out):
     source = (game / 'eboot.bin').read_bytes()
     elf, header, ph, segments, missing = parse_self(source)
     loads = [p for p in ph if p['type'] in (1, 0x61000010)]
+    for p in loads:
+        al = p.get('align', 0)
+        if al > 0:
+            p['memsz'] = (p['memsz'] + al - 1) & ~(al - 1)
     def mapped(addr, size=8):
         return any(p['vaddr'] <= addr and addr + size <= p['vaddr'] + p['memsz'] for p in loads)
     size = max(p['vaddr'] + p['memsz'] for p in loads)
