@@ -320,6 +320,29 @@ static int apply_deadzone(int value, int inner, int outer) {
     return value<0 ? -(int)scaled : (int)scaled;
 }
 
+/* MIX-004 / DZN-001: combine the destination trigger's bindings before deadzone.
+ * A key/button contributes a full press; a later idle axis must not overwrite it.
+ * Config limits use 1..127, scaled to the trigger's 0..255 range. Keep the default
+ * (1,127) exactly as before so existing trigger sensitivity is unchanged. */
+static uint8_t trigger_output_value(const HostState *host, const InputConfig *cfg,
+                                    InputOutput out, DeadzoneTarget target) {
+    int value=0;
+    for (int i=0;i<cfg->table.binding_count[out];++i) {
+        const InputBinding *b=&cfg->table.bindings[out][i];
+        if (b->kind==IN_AXIS) {
+            if (host->gamepad) value+=trigger(SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value));
+        } else if (binding_held(host,b)) value+=255;
+    }
+    if (value>255) value=255;
+    const AxisDeadzone *dz=&cfg->deadzone[target];
+    if (dz->inner==1 && dz->outer==127) return (uint8_t)value;
+    const int inner=dz->inner*255/127, outer=dz->outer*255/127;
+    /* Outer first also makes equal limits a step, including full travel at 127,127. */
+    if (value>=outer) return 255;
+    if (value<=inner) return 0;
+    return (uint8_t)((value-inner)*255/(outer-inner));
+}
+
 /* MOU-009: converts raw mouse motion straight into shadPS4's linear response (magnitude*speed +
  * speed_offset*128, over a 33 ms window -- shadPS4's fixed poll interval, kept as the unit
  * mouse_movement_params' defaults are tuned for), with no filtering of the raw delta itself, and
@@ -480,19 +503,10 @@ static void sample_host(PadData *d) {
         InputOutput out=plain_buttons[i];
         if (button_output_held(&host,cfg,out)) d->buttons|=button_bit(out);
     }
-    /* OUT-003/OUT-004: l2/r2 carry both a button bit and an analog value. A gatilho físico
-     * passes its own reading; a plain button/key bound to l2/r2 snaps the analog to 255,
-     * matching the pre-existing keyboard behavior (KBD-006). */
-    for (int i=0;i<cfg->table.binding_count[OUT_L2];++i) {
-        const InputBinding *b=&cfg->table.bindings[OUT_L2][i];
-        if (b->kind==IN_AXIS) { if (host.gamepad) d->l2=trigger(SDL_GetGamepadAxis(host.gamepad,(SDL_GamepadAxis)b->value)); }
-        else if (binding_held(&host,b)) d->l2=255;
-    }
-    for (int i=0;i<cfg->table.binding_count[OUT_R2];++i) {
-        const InputBinding *b=&cfg->table.bindings[OUT_R2][i];
-        if (b->kind==IN_AXIS) { if (host.gamepad) d->r2=trigger(SDL_GetGamepadAxis(host.gamepad,(SDL_GamepadAxis)b->value)); }
-        else if (binding_held(&host,b)) d->r2=255;
-    }
+    /* OUT-003/OUT-004: derive both the analog value and button bit from the combined,
+     * deadzone-adjusted trigger output. Digital bindings still give a full 255 press. */
+    d->l2=trigger_output_value(&host,cfg,OUT_L2,DEADZONE_L2);
+    d->r2=trigger_output_value(&host,cfg,OUT_R2,DEADZONE_R2);
     if (d->l2>INPUT_TRIGGER_BUTTON_THRESHOLD) d->buttons|=BTN_L2;
     if (d->r2>INPUT_TRIGGER_BUTTON_THRESHOLD) d->buttons|=BTN_R2;
 
