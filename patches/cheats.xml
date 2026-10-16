@@ -24,6 +24,10 @@
         <Line Type="bytes" Address="0x54db889" Value="BEFFE0F50589B3840000008BB384000000E91B6782FC"/>
         <Line Type="bytes" Address="0x1d01fb4" Value="E9D0987D0390"/>
     </Metadata>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="1 Hit Kill" Author="Shiningami" isEnabled="false">
+        <Line Type="bytes" Address="0x54db852" Value="39F00F4EF0534889FB4881EBF0000000483B1D9787B2FA74065BE9111C93FC5BE90D1C93FC"/>
+        <Line Type="bytes" Address="0x1e0d47b" Value="E9D2E36C03"/>
+    </Metadata>
     <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite Items" Author="bloo" isEnabled="false">
         <Line Type="bytes" Address="0x54db877" Value="4189C441BC1400000044896308E9D4DC3FFC"/>
         <Line Type="bytes" Address="0x18d9556" Value="E91C23C0039090"/>

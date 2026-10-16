@@ -512,9 +512,6 @@ def main():
         return
     names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
-    cheats_ini=a.settings.parent/'cheats.ini'
-    if cheats_ini.is_file():
-        names+=[n for n in effect_patches(read_settings(cheats_ini)) if n not in names]
     validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
