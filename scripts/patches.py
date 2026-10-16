@@ -243,12 +243,35 @@ def eboot_bytes(elf,start,end):
 # The patches write bytes into the code of one build of the game. A game whose param.sfo says 01.09
 # but whose eboot.bin holds other code (a base-game eboot beside an update's param.sfo, a modified
 # eboot) got them written over other instructions and crashed at start (write fault at guest
-# offset 0x20348b8). The fingerprint covers the game's original bytes everywhere the FPS and
-# resolution patches write, so another region's build with the same code passes. Recompute it
-# with --print-fingerprint (after a run of CUSA03173 v01.09) when those patches change.
+# offset 0x20348b8). A fingerprint covers the game's original bytes everywhere a group of patches
+# writes, so another region's build with the same code passes. Each group is checked on its own:
+# an eboot.bin with only its frame-rate code changed (a 60 fps patch applied to the file, as some
+# dumps ship it) still gets the resolution, ultrawide and effect patches, whose code is untouched.
+# The groups' code does not overlap: Enemy Control rewrites code the FPS patches write too, so it
+# is checked with them. Recompute the fingerprints with --print-fingerprint (after a run of
+# CUSA03173 v01.09) when those patches change.
 BUILTIN_XML=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'
+HEAP_PATCH='Increased Graphics Heap Sizes'
+SHARES_FPS_CODE={'Enemy Control'}
+PATCH_GROUPS={
+    'fps':sorted({n for names in FPS_PRESETS.values() for n in names}|SHARES_FPS_CODE),
+    'resolution':sorted({RESOLUTION_TEMPLATE,ULTRAWIDE_TEMPLATE,HEAP_PATCH}),
+    'effects':sorted(({n for pair in EFFECTS.values() for n in pair if n}|set(MODEL_LOD.values()))-SHARES_FPS_CODE),
+}
+GROUP_OF={name:group for group,names in PATCH_GROUPS.items() for name in names}
+GROUP_TEXT={'fps':'frame rate','resolution':'resolution (ultrawide)','effects':'effect options'}
+
+
+def group_list(groups):
+    """'frame rate, resolution (ultrawide) and effect options' for the groups given."""
+    names=[GROUP_TEXT[g] for g in PATCH_GROUPS if g in groups]
+    return names[0] if len(names)==1 else ', '.join(names[:-1])+' and '+names[-1]
 FINGERPRINT_PATCHES=sorted({n for names in FPS_PRESETS.values() for n in names}|{RESOLUTION_TEMPLATE})
-PATCH_FINGERPRINTS={'01.09':'34e41d1df9e3805762bfd59054e69fe60c330b9b6df7906fa7f66a43c939fbf0'}
+PATCH_FINGERPRINTS={'01.09':{
+    'fps':'6a0f9b8e586dfb9e8cbfe15a852b72d07404589a4728497ebee5568f01bb1197',
+    'resolution':'47357d5f72288b628769eb3f7b7a77b6cc60b29acfd215c9e259a6940c9d77f4',
+    'effects':'49fbe0e9fddc3d02edc4b121f4f0b5a9a79705cb802460b7cf2d4d406771d70b',
+}}
 
 
 def patch_sites(xml,app_version,names=FINGERPRINT_PATCHES):
@@ -266,17 +289,42 @@ def patch_sites(xml,app_version,names=FINGERPRINT_PATCHES):
     return merged
 
 
-def patch_fingerprint(elf,xml=BUILTIN_XML,app_version='01.09'):
+def fingerprint(read,xml=BUILTIN_XML,app_version='01.09',names=FINGERPRINT_PATCHES):
+    """SHA-256 over the named patches' sites as `read(start, end)` gives the eboot's bytes there."""
     digest=hashlib.sha256()
-    for start,end in patch_sites(xml,app_version):
-        digest.update(struct.pack('<QQ',start,end)+eboot_bytes(elf,start,end))
+    for start,end in patch_sites(xml,app_version,names):
+        digest.update(struct.pack('<QQ',start,end)+read(start,end))
     return digest.hexdigest()
 
 
-def eboot_matches_patches(elf_path,app_version='01.09'):
-    """False when eboot.elf (prepare.py) differs from the build the patches were made for."""
+def patch_fingerprint(elf,xml=BUILTIN_XML,app_version='01.09',names=FINGERPRINT_PATCHES):
+    return fingerprint(lambda start,end: eboot_bytes(elf,start,end),xml,app_version,names)
+
+
+def matching_groups_of(read,app_version='01.09'):
+    """The PATCH_GROUPS whose original bytes the eboot has (all of them for a game version
+    without fingerprints): only those may be patched."""
     expected=PATCH_FINGERPRINTS.get(app_version)
-    return not expected or patch_fingerprint(Path(elf_path).read_bytes(),BUILTIN_XML,app_version)==expected
+    if not expected: return set(PATCH_GROUPS)
+    return {group for group,value in expected.items()
+            if fingerprint(read,BUILTIN_XML,app_version,PATCH_GROUPS[group])==value}
+
+
+def matching_groups(elf_path,app_version='01.09'):
+    """matching_groups_of for eboot.elf (prepare.py)."""
+    elf=Path(elf_path).read_bytes()
+    return matching_groups_of(lambda start,end: eboot_bytes(elf,start,end),app_version)
+
+
+def image_groups(image,app_version='01.09'):
+    """matching_groups_of for eboot.bin's loaded image (its segments at their addresses), as
+    run.py reads it before prepare.py has run."""
+    return matching_groups_of(lambda start,end: bytes(image[start:end]).ljust(end-start,b'\0'),app_version)
+
+
+def eboot_matches_patches(elf_path,app_version='01.09'):
+    """False when eboot.elf (prepare.py) differs anywhere from the build the patches were made for."""
+    return matching_groups(elf_path,app_version)==set(PATCH_GROUPS)
 
 
 def encode(line):
@@ -386,10 +434,12 @@ def main():
     p.add_argument('--print-scaled',action='store_true',
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
     p.add_argument('--print-fingerprint',action='store_true',
-                   help='print the patch fingerprint of <out>/eboot.elf (PATCH_FINGERPRINTS)')
+                   help='print the patch groups\' fingerprints of <out>/eboot.elf (PATCH_FINGERPRINTS)')
     a=p.parse_args()
     if a.print_fingerprint:
-        print(patch_fingerprint((a.out/'eboot.elf').read_bytes(),BUILTIN_XML,a.app_version))
+        elf=(a.out/'eboot.elf').read_bytes()
+        for group,names in PATCH_GROUPS.items():
+            print(group,patch_fingerprint(elf,BUILTIN_XML,a.app_version,names))
         return
     if a.print_scaled:
         sizes=scaled_sizes(read_settings(a.settings))
@@ -413,19 +463,26 @@ def main():
         print(f'Patches: game version {version}, patches are for {a.app_version}: none applied '
               '(30 FPS, no effect or resolution patches)')
         return
-    if not force and not eboot_matches_patches(a.out/'eboot.elf',a.app_version):
+    groups=set(PATCH_GROUPS) if force else matching_groups(a.out/'eboot.elf',a.app_version)
+    if not groups:
         (a.out/'patches.bin').write_bytes(struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,0))
         print(f'Patches: eboot.bin is not the {a.app_version} build the patches were made for: none '
               'applied (30 FPS, no effect or resolution patches; BB_FORCE_PATCHES=1 applies them)')
         return
-    fps_names=FPS_PRESETS[a.fps]
-    names=fps_names+[n.strip() for n in a.extra.split(';') if n.strip()]
-    names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
+    whole=groups==set(PATCH_GROUPS)
+    if not whole:
+        print(f'Patches: eboot.bin is not the clean {a.app_version} build: its '
+              f'{group_list(set(PATCH_GROUPS)-groups)} code differs; only the {group_list(groups)} patches apply')
+    fps_names=FPS_PRESETS[a.fps] if 'fps' in groups else []
+    names=list(fps_names)
+    if whole:  # other patches' code is not fingerprinted
+        names+=[n.strip() for n in a.extra.split(';') if n.strip()]
+    names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names and GROUP_OF.get(n) in groups]
     validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
-    fps_count=len(compile_patches(a.xml,fps_names,a.app_version,segments))  # the first writes
-    size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
+    fps_count=len(compile_patches(a.xml,fps_names,a.app_version,segments)) if fps_names else 0  # the first writes
+    size=render_size(read_settings(a.settings),a.render_res) if a.render_res and 'resolution' in groups else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
     # it into the output-size image with a viewport scaled by output / 1920
     # (UiComposition::NativeViewport), so it is rasterized at the output resolution. Ultrawide
@@ -438,9 +495,8 @@ def main():
             writes+=ultrawide_writes(a.xml,output,a.app_version,segments)
             names.append(f'ultrawide {output[0]}x{output[1]} (HUD {ui[0]}x{ui[1]})')
         if size[0]*size[1]>OUTPUT_SIZE[0]*OUTPUT_SIZE[1]:
-            heap='Increased Graphics Heap Sizes'
-            writes+=compile_patches(a.xml,[heap],a.app_version,segments)
-            names.append(heap)
+            writes+=compile_patches(a.xml,[HEAP_PATCH],a.app_version,segments)
+            names.append(HEAP_PATCH)
         print(f'Patches: scene {size[0]}x{size[1]}; UI {ui[0]}x{ui[1]}')
     if read_settings(a.settings).get('quit_to_desktop','1')!='0' and os.environ.get('BB_QUIT_TO_DESKTOP')!='0':
         # Quit to Desktop in the title and System menus (quit_menu.py; its texts are a mod layer).
@@ -453,7 +509,7 @@ def main():
             names.append('Quit to Desktop')
         except ValueError as error:
             print(f'Patches: {error}; Quit to Desktop skipped')
-    if a.patches_dir:
+    if a.patches_dir and whole:
         # After the built-in ones: an external patch of the same bytes wins.
         selected=external_selection(external_patches(a.patches_dir,a.app_version,a.xml),a.patches_config)
         fps_ranges=[(offset,offset+len(data)) for offset,data in writes[:fps_count]]
