@@ -140,21 +140,33 @@ static int translate(const char *guest,char *out,size_t size) {
     else if ((size_t)snprintf(out,size,"%s%s",m->host,buffer+best)>=size) result=ENAMETOOLONG;
     pthread_mutex_unlock(&lock);
     if (!result && strstr(out,"/dvdroot_ps4/")) {
+        /* Text language: the PS4 language code the game reads (system_param id 1)
+         * decides which msg/menu folder it asks for. When a code makes the game
+         * use a fallback folder (Portuguese/English) instead of the translated one
+         * the dump holds, point that request at the translated folder when the file
+         * is there. A request that already names the translated folder is left
+         * untouched, so this only adds folders the game would otherwise miss.
+         * 17 = Portuguese (Brazil), 11 = Chinese (Simplified), 10 = Chinese (Traditional). */
         const char *language=getenv("BB_LANGUAGE");
-        if (language && !strcmp(language,"17")) {
-            /* Some game paths use the Portuguese or English fallback directory. */
-            const char *folders[]={"/msg/porpt/","/menu/porpt/","/msg/engus/","/menu/engus/"};
-            for (size_t i=0;i<sizeof(folders)/sizeof(folders[0]);++i) {
-                char *segment=strstr(out,folders[i]);
+        const struct { const char *code, *folder; const char *fallbacks[5]; } text[]={
+            {"17","porbr",{"/msg/porpt/","/menu/porpt/","/msg/engus/","/menu/engus/",NULL}},
+            {"11","zhocn",{"/msg/engus/","/menu/engus/","/msg/enggb/","/menu/enggb/",NULL}},
+            {"10","zhotw",{"/msg/engus/","/menu/engus/","/msg/enggb/","/menu/enggb/",NULL}},
+        };
+        for (size_t t=0;t<sizeof(text)/sizeof(text[0]) && language;++t) {
+            if (strcmp(language,text[t].code)) continue;
+            for (size_t i=0;text[t].fallbacks[i];++i) {
+                char *segment=strstr(out,text[t].fallbacks[i]);
                 if (!segment) continue;
-                char *folder=segment+strlen(folders[i])-6;
+                char *folder=segment+strlen(text[t].fallbacks[i])-6;
                 char original[5];
                 memcpy(original,folder,5);
-                memcpy(folder,"porbr",5);
+                memcpy(folder,text[t].folder,5);
                 HostStat file;
                 if (host_stat(out,&file)) memcpy(folder,original,5);
                 break;
             }
+            break;
         }
         /* Voice tracks are independent of the game's text language. */
         const char *voice=getenv("BB_VOICE_LANGUAGE");

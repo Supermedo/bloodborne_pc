@@ -37,9 +37,13 @@ int main(void) {
     path(p,sizeof(p),root,"dvdroot_ps4/msg/porbr"); folder(p);
     path(p,sizeof(p),root,"dvdroot_ps4/msg/engus"); folder(p);
     path(p,sizeof(p),root,"dvdroot_ps4/msg/porpt"); folder(p);
+    path(p,sizeof(p),root,"dvdroot_ps4/msg/zhocn"); folder(p);
+    path(p,sizeof(p),root,"dvdroot_ps4/msg/zhotw"); folder(p);
     path(p,sizeof(p),root,"dvdroot_ps4/sound"); folder(p);
     path(p,sizeof(p),root,"dvdroot_ps4/msg/porbr/menu.msgbnd.dcx"); file(p);
     path(p,sizeof(p),root,"dvdroot_ps4/msg/engus/item.msgbnd.dcx"); file(p);
+    path(p,sizeof(p),root,"dvdroot_ps4/msg/zhocn/menu.msgbnd.dcx"); file(p);
+    path(p,sizeof(p),root,"dvdroot_ps4/msg/zhotw/menu.msgbnd.dcx"); file(p);
     path(p,sizeof(p),root,"dvdroot_ps4/sound/sprj_c1020_eng.fsb"); file(p);
     path(p,sizeof(p),root,"dvdroot_ps4/sound/sprj_c1020_ptb.fsb"); file(p);
     runtime_file_mount("/app0",root);
@@ -52,6 +56,19 @@ int main(void) {
     assert(!strcmp(resolved,expected));
     assert(!translate("/app0/dvdroot_ps4/msg/engus/item.msgbnd.dcx",resolved,sizeof(resolved)));
     path(expected,sizeof(expected),root,"dvdroot_ps4/msg/engus/item.msgbnd.dcx");
+    assert(!strcmp(resolved,expected));
+    /* Chinese: the EU build ships zhocn/zhotw but its language codes fall back
+     * to the English folders, so those requests resolve to the translated ones. */
+    variable("BB_LANGUAGE","11");
+    assert(!translate("/app0/dvdroot_ps4/msg/engus/menu.msgbnd.dcx",resolved,sizeof(resolved)));
+    path(expected,sizeof(expected),root,"dvdroot_ps4/msg/zhocn/menu.msgbnd.dcx");
+    assert(!strcmp(resolved,expected));
+    assert(!translate("/app0/dvdroot_ps4/msg/engus/item.msgbnd.dcx",resolved,sizeof(resolved)));
+    path(expected,sizeof(expected),root,"dvdroot_ps4/msg/engus/item.msgbnd.dcx");
+    assert(!strcmp(resolved,expected));
+    variable("BB_LANGUAGE","10");
+    assert(!translate("/app0/dvdroot_ps4/msg/engus/menu.msgbnd.dcx",resolved,sizeof(resolved)));
+    path(expected,sizeof(expected),root,"dvdroot_ps4/msg/zhotw/menu.msgbnd.dcx");
     assert(!strcmp(resolved,expected));
     variable("BB_LANGUAGE","1");
     assert(!translate("/app0/dvdroot_ps4/msg/engus/menu.msgbnd.dcx",resolved,sizeof(resolved)));
@@ -74,13 +91,16 @@ int main(void) {
     assert(!strcmp(resolved,expected));
     const char *created[]={"dvdroot_ps4/msg/porbr/menu.msgbnd.dcx",
                           "dvdroot_ps4/msg/engus/item.msgbnd.dcx",
+                          "dvdroot_ps4/msg/zhocn/menu.msgbnd.dcx",
+                          "dvdroot_ps4/msg/zhotw/menu.msgbnd.dcx",
                           "dvdroot_ps4/sound/sprj_c1020_eng.fsb",
                           "dvdroot_ps4/sound/sprj_c1020_ptb.fsb"};
     for (size_t i=0;i<sizeof(created)/sizeof(created[0]);++i) {
         path(p,sizeof(p),root,created[i]); assert(!remove(p));
     }
     const char *directories[]={"dvdroot_ps4/msg/porbr","dvdroot_ps4/msg/engus",
-                               "dvdroot_ps4/msg/porpt","dvdroot_ps4/msg",
+                               "dvdroot_ps4/msg/porpt","dvdroot_ps4/msg/zhocn",
+                               "dvdroot_ps4/msg/zhotw","dvdroot_ps4/msg",
                                "dvdroot_ps4/sound","dvdroot_ps4"};
     for (size_t i=0;i<sizeof(directories)/sizeof(directories[0]);++i) {
         path(p,sizeof(p),root,directories[i]); assert(!rmdir(p));
