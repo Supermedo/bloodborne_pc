@@ -23,9 +23,12 @@ public:
 
     void Shutdown();
 
-    /// Any thread (input.ini load/reload): whether direct mode is wanted and its sensitivity
-    /// multiplier (1.0 = 900 mouse counts per radian). Applied by the window thread.
-    void Configure(bool direct, float sensitivity);
+    /// Any thread (input.ini load/reload): whether direct mode is wanted, its sensitivity
+    /// multiplier (1.0 = 900 mouse counts per radian) and the per-axis multipliers of the motion
+    /// (-1 inverts; the vertical one carries mouse_sensitivity_y). Applied by the window thread.
+    /// `sync` also turns the drawn position with the angles (TurnDrawnPosition).
+    void Configure(bool direct, float sensitivity, float scale_x = 1.0f, float scale_y = 1.0f,
+                   bool sync = true);
     [[nodiscard]] bool IsConfigured() const noexcept {
         return m_configured.load(std::memory_order_relaxed);
     }
@@ -41,8 +44,12 @@ public:
         return m_lockedOn.load(std::memory_order_relaxed);
     }
 
-    /// Mouse sampler thread: applies relative motion to the camera.
+    /// Mouse sampler thread: gathers relative motion for the next camera update.
     void OnMouseMotion(float xrel, float yrel);
+    /// The game's thread, from the camera hook: turns `camera` by the gathered motion.
+    void Apply(uintptr_t camera);
+    /// Turns `camera` by mouse counts (the game's thread).
+    void Turn(uintptr_t camera, float xrel, float yrel);
 
 private:
     BloodborneCam() = default;
@@ -52,11 +59,16 @@ private:
     BloodborneCam& operator=(const BloodborneCam&) = delete;
 
     bool InitializeAddresses();
+    void TurnDrawnPosition(uintptr_t camera, float turnPitch, float turnYaw);
 
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_configured{false};
     std::atomic<float> m_scale{1.0f};
+    std::atomic<float> m_scale_x{1.0f}, m_scale_y{1.0f};
+    std::atomic<bool> m_sync{true};
     std::atomic<bool> m_lockedOn{false};
+    std::atomic<float> m_pendingX{0.0f}, m_pendingY{0.0f}; ///< mouse counts since the last update
+    std::atomic<int64_t> m_lastApplyMs{0};
     bool m_addressesResolved = false;
     bool m_addressSearchFailed = false;
 

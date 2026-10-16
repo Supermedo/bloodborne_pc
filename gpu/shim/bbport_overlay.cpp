@@ -349,6 +349,10 @@ void Menu() {
         }
         ImGui::EndCombo();
     }
+    int fov = s.fov;
+    Store(s.fov, fov, ImGui::SliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
+                                       fov == BbSettings::FovDefault ? "%d (game)" : "%d"));
+    Hint("Vertical field of view in degrees; the game's camera has 43. Every camera is scaled by the same amount (scripts/fov.py).");
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
         Checkbox(BbSettings::Effects[e].label, s.effects[e]);
     }
@@ -356,7 +360,7 @@ void Menu() {
     Hint("Free camera: hold Cross and press L3 (keyboard: Space + Z). Debug menu: left touchpad / Tab. Requires DbgFont14h.ccm and DbgFont14h.tpf in dvdroot_ps4/font from the debug-font mod. Right touchpad: Backspace.");
 
     bool restart = s.object_motion != s.startup_object_motion ||
-                   s.model_lod != s.startup_model_lod ||
+                   s.model_lod != s.startup_model_lod || s.fov != s.startup_fov ||
                    s.live_resolution != s.startup_live_resolution ||
                    BbSettings::ResolutionNeedsRestart();
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
@@ -373,6 +377,17 @@ void Menu() {
 
     ImGui::SeparatorText("Other");
     Checkbox("Show FPS counter", s.show_fps);
+    Checkbox("Mute when the game is in the background", s.mute_unfocused);
+    static const char* prompt_modes[] = {"Follow the device in use", "PlayStation", "Keyboard and mouse", "Xbox",
+                                         "Nintendo Switch"};
+    int prompts = s.button_prompts;
+    if (ImGui::BeginCombo("Button prompts", prompt_modes[prompts])) {
+        for (int i = 0; i < BbSettings::PromptsCount; ++i) {
+            if (ImGui::Selectable(prompt_modes[i], i == prompts)) Store(s.button_prompts, i, true);
+        }
+        ImGui::EndCombo();
+    }
+    Hint("The game's button icons: keyboard and mouse keys from input.ini while you play with them, the controller's (PlayStation, Xbox or Switch) while you use it.");
 
     ImGui::Spacing();
     if (ImGui::Button("Close")) {

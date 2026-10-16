@@ -230,10 +230,21 @@ def main():
                           '--source', text_layer, optional=True):
             shutil.rmtree(hud_layer, ignore_errors=True)
             print('HUD layout: its menu files could not be written; the HUD stays in the centre')
+    # Field of view (bbport.ini fov, degrees; 43 is the game's): the camera table with every
+    # camera's field of view scaled, a layer below the mods. fov.py keeps it between starts
+    # while the setting and the game file are the same.
+    fov_layer = out / 'fov'
+    fov = ini_value(config, 'fov')
+    if fov and fov.isdigit() and int(fov) != 43:
+        if not run_script('fov.py', game, '--out', fov_layer, '--fov', fov, optional=True):
+            shutil.rmtree(fov_layer, ignore_errors=True)
+            print('Field of view: its camera table could not be written; the game keeps its own')
+    else:
+        shutil.rmtree(fov_layer, ignore_errors=True)
     mod_args = [game, '--out', out, '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                 '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
                 '--enabled', env.get('BB_MODS_ENABLED', '1')]
-    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', hud_layer,
+    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', hud_layer, '--layer', fov_layer,
                       capture=True, optional=True)
     if view is None:
         # The game view could not be made with the port's own layers (Quit to Desktop's texts,

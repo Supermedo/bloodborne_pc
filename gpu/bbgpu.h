@@ -36,6 +36,13 @@ int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
+/* 1 while the game should be silent: bbport.ini mute_unfocused is on and the window does not
+ * have focus. Safe from any thread (the audio ports read it for every buffer). */
+int bbgpu_audio_muted(void);
+/* Button prompts (gpu/shim/bbport_prompts.cpp): what each of the game's key-guide icons shows
+ * on keyboard and mouse, one string per icon in bbport_prompt_icons.h's order ("e",
+ * "lshift+leftbutton", "w a s d", "mouse", "" for nothing). Draws them; safe from any thread. */
+void bbgpu_prompts_configure(const char *const *inputs, int count);
 
 /* Mouse input accumulated by the window thread since the last call; the call resets the
  * motion (dx/dy) but not held buttons. All zero (and captured=0) while capture is inactive
@@ -61,9 +68,12 @@ void bbgpu_input_configure(int mouse_mode_available, int32_t toggle_scancode, in
  * thread polls this once per sample() (CFG-008) to know when to re-read input.ini. 0 if no
  * window exists yet. */
 int bbgpu_input_reload_requested(void);
-/* Direct mouse camera (mouse_camera = direct in input.ini): whether it is wanted and its
- * sensitivity multiplier. Safe from any thread; applied on the window thread's next PollEvents. */
-void bbgpu_mouse_camera_configure(int direct, float sensitivity);
+/* Direct mouse camera (mouse_camera = direct in input.ini): whether it is wanted, its
+ * sensitivity multiplier, and the motion's per-axis multipliers (input_mouse_scale_x/_y: -1 to
+ * invert, the vertical sensitivity) and whether the drawn position turns too (mouse_camera_sync).
+ * Safe from any thread; applied on the window thread's next
+ * PollEvents. */
+void bbgpu_mouse_camera_configure(int direct, float sensitivity, float scale_x, float scale_y, int sync);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus

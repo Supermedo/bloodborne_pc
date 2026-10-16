@@ -319,6 +319,14 @@ target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
 add_dependencies(camera-motion-test host_shaders)
 
+# bbport: keyboard and mouse button prompt icons: ninja -C out/gpu prompt-icons-test, then run it
+# (with a folder argument it writes each icon drawn and encoded, for viewing).
+add_executable(prompt-icons-test EXCLUDE_FROM_ALL ../tests/test_prompt_icons.cpp shim/bbport_prompt_icons.cpp)
+target_include_directories(prompt-icons-test PRIVATE shim third_party/imgui)
+target_compile_definitions(prompt-icons-test PRIVATE
+    BB_TEST_FONT="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+target_compile_options(prompt-icons-test PRIVATE -UNDEBUG)
+
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
     shim/bbport_settings.cpp)

@@ -4,6 +4,7 @@
 #include <xxhash.h>
 
 #include "bbport_process_memory.h"
+#include "bbport_prompts.h"
 #include "bbport_toggles.h"
 #include "common/assert.h"
 #include "common/debug.h"
@@ -782,6 +783,11 @@ void TextureCache::RefreshImage(Image& image) {
 
     RENDERER_TRACE;
     TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
+
+    // bbport: the game's key-guide icons are found for button prompts that follow the input
+    // device (bbport_prompts.cpp, which swaps them from the window thread).
+    BbPrompts::OnUpload(image.info.guest_address, image.info.mips_layout[0].size, image.info.size.width,
+                        image.info.size.height, image.info.resources.levels, image.info.num_bits);
 
     if (True(image.flags & ImageFlagBits::MaybeCpuDirty) &&
         False(image.flags & ImageFlagBits::CpuDirty)) {

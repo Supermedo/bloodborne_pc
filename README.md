@@ -34,6 +34,9 @@ https://nativeretro.com/
   physics, the Japanese/Asian button layout with Circle to confirm and Cross to dodge).
 - **Game effects** on and off: chromatic aberration, depth of field, motion blur, SSAO, the
   game's own AA, dynamic light shadows, screen-space reflections, model detail.
+- **Field of view** from 30 to 90 degrees (the game has 43), for every camera of the game.
+- **Mute in the background:** optionally silent while the game window is not in focus; the
+  mouse is released then too.
 - **Mods and third-party patches**, loaded without changing your game files.
 - **DLC** from your own dump (The Old Hunters on base-game dumps), with a DLC folder setting.
 - **Add to Steam** puts the game in your Steam library in one click.
@@ -41,8 +44,9 @@ https://nativeretro.com/
   desktop shortcut).
 - **Controller and keyboard**, an in-game settings menu (Insert or L3+R3), name entry on
   screen, a desktop shortcut, and a button to clear the shader cache.
-- **Keyboard and mouse:** remap keys and buttons on the Controls page, mouse look, and an
-  optional direct 1:1 mouse camera ([docs/INPUT.md](docs/INPUT.md)).
+- **Keyboard and mouse:** remap keys and buttons on the Controls page (up to three per action), key combinations such as
+  Shift + left click, a Dark Souls III layout, mouse look, and a direct 1:1 mouse camera
+  ([docs/INPUT.md](docs/INPUT.md)).
 - **Text and voice language** chosen separately, Brazilian Portuguese text included.
 - **Achievements page** in the launcher with the trophies you have earned, updated live.
 

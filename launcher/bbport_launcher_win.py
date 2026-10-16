@@ -126,9 +126,11 @@ def run_command():
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
-from bbport_input_config import (KEYBOARD_OUTPUTS, BUTTON_OUTPUTS, STICK_OUTPUTS, OUTPUT_LABELS, keysym_to_name,
+from bbport_input_config import (STICK_OUTPUTS, OUTPUT_LABELS, ACTION_GROUPS, SLOTS, keysym_to_name,
                                   button_num_to_name, input_ini_path, load_input_ini, reserved_keys,
-                                  save_input_ini, save_mouse_settings, wheel_to_name)  # noqa: E402
+                                  save_input_ini, save_mouse_settings, wheel_to_name, MAX_COMBO,
+                                  MODIFIER_NAMES, apply_layout, slot_conflicts, binding_parts,
+                                  display_name)  # noqa: E402
 
 LANG = 'en'
 
@@ -192,10 +194,11 @@ TWEAKS = [
     ('quit_to_desktop', ('Quit to Desktop in the title menu and in the System menu',
                          'Пункт «Выйти на рабочий стол» в главном меню и в меню «Система»'), True),
 ]
-INI_FLAGS = {'sharpen', 'object_motion', 'show_fps', *(k for k, _t, _o in EFFECTS + EXTRAS + CHEATS + TWEAKS)}
+INI_FLAGS = {'sharpen', 'object_motion', 'show_fps', 'mute_unfocused', *(k for k, _t, _o in EFFECTS + EXTRAS + CHEATS + TWEAKS)}
 INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': '0.50',
                 'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080', 'model_lod': '0',
-                'live_resolution': 'auto', 'hud_position': '100',
+                'live_resolution': 'auto', 'hud_position': '100', 'fov': '43', 'mute_unfocused': '0',
+                'button_prompts': 'auto',
                 **{key: '1' if on else '0' for key, _t, on in EFFECTS + EXTRAS + CHEATS + TWEAKS}}
 APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'), 'user_dir': '', 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
@@ -223,6 +226,20 @@ OUTPUTS = [('1280x720', ('1280 × 720 (Steam Deck)',)), ('1920x1080', ('1920 × 
            ('2560x1080', ('2560 × 1080 (21:9)',)), ('3440x1440', ('3440 × 1440 (21:9)',)),
            ('3840x1600', ('3840 × 1600 (21:9)',)), ('5120x2160', ('5120 × 2160 (21:9)',)),
            ('3840x1080', ('3840 × 1080 (32:9)',)), ('5120x1440', ('5120 × 1440 (32:9)',))]
+# Vertical field of view in degrees (scripts/fov.py; the game's camera has 43).
+FOVS = [('43', ('Game (43°)', 'Как в игре (43°)')), *((str(d), (f'{d}°',)) for d in (50, 55, 60, 65, 70, 75, 80, 90))]
+
+
+def fov_options(current):
+    """FOVS, with a value set in the game's menu (any degree from 30 to 90) kept as a choice."""
+    if current in (v for v, _t in FOVS) or not str(current).isdigit() or not 30 <= int(current) <= 90:
+        return FOVS
+    return sorted([*FOVS, (current, (f'{current}°',))], key=lambda o: int(o[0]))
+# The game's button icons (gpu/shim/bbport_prompts.cpp): with the device in use, or always one kind.
+PROMPT_MODES = [('auto', ('Follow the device in use', 'По используемому устройству')),
+                ('playstation', ('PlayStation', 'PlayStation')),
+                ('keyboard', ('Keyboard and mouse', 'Клавиатура и мышь')),
+                ('xbox', ('Xbox', 'Xbox')), ('switch', ('Nintendo Switch', 'Nintendo Switch'))]
 HUD_POSITIONS = [('100', ('Screen edges', 'У краёв экрана')), ('75', ('75%',)), ('50', ('Halfway', 'Посередине')),
                  ('25', ('25%',)), ('0', ('Centred (16:9)', 'По центру (16:9)'))]
 LIVE = [('auto', ('Auto (by graphics card)', 'Авто (по видеокарте)')), ('0', ('Off (faster)', 'Выключена (быстрее)')),
@@ -539,7 +556,7 @@ class Launcher:
         self.remap_ini_path = input_ini_path(ini_path())
         self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
             self.mouse_settings = load_input_ini(self.remap_ini_path)
-        # {output: first-binding key name, or None once cleared}, edited by the remap page and
+        # {output: [binding or None per slot]}, edited by the remap page and
         # applied on top of self.remap_bindings in collect(); separate from it so re-opening the
         # Controls page after a cancelled edit shows what is actually on disk, not a half-edit.
         self.remap_edits = {}
@@ -647,6 +664,11 @@ class Launcher:
         s.configure('TSpinbox', foreground=TEXT, arrowcolor=GOLD, insertcolor=TEXT, padding=4)
         s.configure('TButton', background=CARD, foreground=TEXT, padding=(12, 6), borderwidth=1)
         s.map('TButton', background=[('active', LINE), ('disabled', PANEL)], foreground=[('disabled', MUTED)])
+        # The Controls page's binding slots; they stay as they are while another slot listens.
+        s.configure('Slot.TButton', background=CARD, foreground=TEXT, padding=(6, 5), font=('Segoe UI', 9))
+        s.map('Slot.TButton', background=[('active', LINE), ('disabled', CARD)], foreground=[('disabled', TEXT)])
+        s.configure('Listen.TButton', background=LINE, foreground=GOLD, padding=(6, 5), font=('Segoe UI', 9))
+        s.map('Listen.TButton', background=[('disabled', LINE)], foreground=[('disabled', GOLD)])
         s.configure('Play.TButton', background=BLOOD, foreground='#f4ece0', font=('Georgia', 15, 'bold'),
                     padding=(36, 10), borderwidth=0)
         s.map('Play.TButton', background=[('active', BLOOD_HI), ('disabled', '#3a2420')],
@@ -981,7 +1003,12 @@ class Launcher:
         self.section(f, _('Detail', 'Детализация'))
         self.row(f, _('Model detail (LOD)', 'Детализация моделей'), self.choice(f, 'model_lod', 'ini', LODS),
                  _('A game patch (game version 1.09).', 'Патч игры (версия 1.09).'))
+        self.row(f, _('Field of view', 'Поле зрения'), self.choice(f, 'fov', 'ini', fov_options(self.ini.get('fov'))),
+                 _('Vertical, in degrees. Every camera of the game is widened by the same amount.',
+                   'По вертикали, в градусах. Все камеры игры расширяются одинаково.'))
         self.check(f, 'show_fps', 'ini', _('Show the FPS counter', 'Показывать FPS'))
+        self.check(f, 'mute_unfocused', 'ini', _('Mute when the game is in the background',
+                                                 'Без звука, когда игра в фоне'))
 
     def build_display(self):
         ttk = self.ttk
@@ -1436,61 +1463,92 @@ class Launcher:
             self.toasts.pop(0)
             self.show_toast()
         self.root.after(5500, done)
-    def current_binding(self, output):
-        """The key name currently bound to `output`'s first slot: a pending edit (even "cleared
-        to None"), else whatever input.ini already had, else None."""
+    def current_slots(self, output):
+        """`output`'s bindings, one per slot (None for an empty one): pending edits, else what
+        input.ini has. A file with more than SLOTS keeps the extra ones at the end."""
         if output in self.remap_edits:
             return self.remap_edits[output]
-        values = self.remap_bindings.get(output) or []
-        return values[0] if values else None
+        values = list(self.remap_bindings.get(output) or [])
+        return values + [None] * (SLOTS - len(values))
 
     def build_controls(self):
         ttk, tk = self.ttk, self.tk
         f = self.scrolled_page('controls', _('Controls', 'Управление'),
-                               _('Keyboard and mouse-button bindings. The controller keeps '
-                                 'working side by side; edit its lines in input.ini directly — '
-                                 'see docs/INPUT.md.',
-                                 'Раскладка клавиатуры и кнопок мыши. Геймпад продолжает '
-                                 'работать одновременно; его строки можно настроить только в '
-                                 'input.ini — см. docs/INPUT.md.'))
-        self.remap_rows = {}
+                               _('Keyboard and mouse bindings, up to three per action. The '
+                                 'controller keeps working side by side; edit its lines in '
+                                 'input.ini directly — see docs/INPUT.md.',
+                                 'Раскладка клавиатуры и мыши, до трёх привязок на действие. '
+                                 'Геймпад продолжает работать одновременно; его строки можно '
+                                 'настроить только в input.ini — см. docs/INPUT.md.'))
+        self.remap_rows = {}  # output -> ([slot buttons], conflict label)
+        self.remap_listening = False
+        self.mouse_vars = {}  # mouse_settings key -> its widget's variable (apply_layout_preset)
 
-        def add_row(parent, output):
-            r = self.next_row(parent)
-            label, _ru = OUTPUT_LABELS[output]
-            ttk.Label(parent, text=_(label, _ru)).grid(row=r, column=0, sticky='w', padx=(0, 18), pady=4)
-            key_label = ttk.Label(parent, width=14, style='Muted.TLabel')
-            key_label.grid(row=r, column=1, sticky='w', pady=4)
-            set_btn = ttk.Button(parent, text=_('Set…', 'Назначить…'),
-                                 command=lambda o=output: self.start_remap_capture(o, key_label, set_btn))
-            set_btn.grid(row=r, column=2, sticky='w', padx=(10, 4), pady=4)
-            ttk.Button(parent, text=_('Clear', 'Сбросить'),
-                      command=lambda o=output: self.clear_remap(o, key_label)).grid(
-                row=r, column=3, sticky='w', pady=4)
-            self.remap_rows[output] = key_label
-            self.refresh_remap_row(output)
-
-        self.section(f, _('Buttons', 'Кнопки'), top=4)
-        for output in BUTTON_OUTPUTS:
-            add_row(f, output)
-        self.section(f, _('Sticks', 'Стики'))
-        for output in STICK_OUTPUTS:
-            add_row(f, output)
-        self.note(f, _('Click "Set…" on a button row to bind a mouse button instead of a key — '
-                       'left, middle, right, or the side buttons (back/forward), if the mouse '
-                       'has them. Stick directions stay keyboard-only.',
-                       'Нажмите «Назначить…» в строке кнопки, чтобы привязать кнопку мыши '
-                       'вместо клавиши — левую, среднюю, правую или боковые (вперёд/назад), '
-                       'если они есть. Направления стиков можно привязать только к клавише.'))
+        self.row(f, _('Button prompts', 'Подсказки кнопок'), self.choice(f, 'button_prompts', 'ini', PROMPT_MODES),
+                 _("The game's button icons: your keyboard and mouse keys while you play with them, "
+                   "the controller's (PlayStation, Xbox or Switch) while you use it.",
+                   'Значки кнопок в игре: ваши клавиши и мышь, пока вы играете ими, и кнопки '
+                   'геймпада (PlayStation, Xbox или Switch), пока вы используете его.'))
+        preset = ttk.Frame(f)
+        ttk.Button(preset, text=_('Use the Dark Souls III layout', 'Раскладка Dark Souls III'),
+                   command=self.apply_layout_preset).pack(side='left')
+        self.row(f, _('Layout', 'Раскладка'), preset,
+                 _('WASD, Space to dodge, left click / Shift + left click to attack, right click / '
+                   'Shift + right click (or Ctrl) for the off hand, E interact, R item, F vial, Q lock '
+                   'on, Tab or Esc menu, and the 1:1 mouse camera. Replaces the keyboard and mouse '
+                   'bindings; the controller keeps its own.',
+                   'WASD, пробел — уклонение, левый клик / Shift + левый клик — атака, правый клик / '
+                   'Shift + правый клик (или Ctrl) — левая рука, E — действие, R — предмет, F — флакон, '
+                   'Q — захват цели, Tab или Esc — меню и камера мыши 1:1. Заменяет привязки клавиатуры и '
+                   'мыши; у геймпада остаются свои.'))
+        self.note(f, _('Click a slot, then press a key, click a mouse button or turn the wheel; '
+                       'Esc cancels. Right-click a slot to clear it. Movement and camera '
+                       'directions take keys only.',
+                       'Щёлкните ячейку и нажмите клавишу, кнопку мыши или прокрутите колесо; '
+                       'Esc отменяет. Правый клик по ячейке очищает её. Направления движения и '
+                       'камеры принимают только клавиши.'), top=10)
+        # One grid for every group, so the slot columns line up down the page.
+        table = ttk.Frame(f)
+        table.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
+        for c in range(1, SLOTS + 1):
+            table.columnconfigure(c, uniform='slot', minsize=self.px(150))
+        for (group, group_ru), actions in ACTION_GROUPS:
+            ttk.Label(table, text=_(group, group_ru), style='Section.TLabel').grid(
+                row=table.grid_size()[1], column=0, columnspan=SLOTS + 2, sticky='w', pady=(14, 4))
+            for output, (label, label_ru) in actions:
+                r = table.grid_size()[1]
+                ttk.Label(table, text=_(label, label_ru)).grid(row=r, column=0, sticky='w', padx=(0, 18), pady=2)
+                buttons = []
+                for slot in range(SLOTS):
+                    btn = ttk.Button(table, style='Slot.TButton',
+                                     command=lambda o=output, i=slot: self.start_remap_capture(o, i))
+                    btn.grid(row=r, column=slot + 1, sticky='ew', padx=2, pady=2)
+                    btn.bind('<Button-3>', lambda _e, o=output, i=slot: self.clear_remap(o, i))
+                    buttons.append(btn)
+                warn = ttk.Label(table, style='Muted.TLabel')
+                warn.grid(row=r, column=SLOTS + 1, sticky='w', padx=(8, 0))
+                self.remap_rows[output] = (buttons, warn)
+        self.refresh_remap_row(None)
+        self.note(f, _('Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse '
+                       'button (up to three inputs, such as Shift + left click). A held '
+                       'combination wins over the bindings on its parts, so left click and Shift + '
+                       'left click can be two actions. ⚠ marks an input another action uses too. A '
+                       'key that is both an action of its own and part of a combination is pressed '
+                       'on the way into it: with Shift on Circle, Shift + left click starts a '
+                       'sprint that ends as a dodge.',
+                       'Сочетания: удерживайте Shift, Ctrl или Alt, нажимая клавишу или кнопку мыши '
+                       '(до трёх вводов, например Shift + левый клик). Удерживаемое сочетание '
+                       'важнее привязок его частей, поэтому левый клик и Shift + левый клик могут '
+                       'быть разными действиями. ⚠ отмечает ввод, который использует и другое '
+                       'действие. Клавиша, которая сама является действием и частью сочетания, '
+                       'нажимается по пути к нему: если Shift — это Круг, Shift + левый клик '
+                       'начинает бег, который заканчивается уклонением.'))
         self.note(f, _('Reserved: Insert/Escape (the port\'s menu), F9 (route recording), and '
                        'whichever key toggles mouse look or reloads input.ini (F7/F8 by '
-                       'default). A key or button already used elsewhere is simply bound to '
-                       'both actions (hold it to trigger both) — this page does not warn about '
-                       'that.',
+                       'default).',
                        'Зарезервированы: Insert/Escape (меню порта), F9 (запись маршрута), а '
                        'также клавиши переключения мыши и перезагрузки input.ini (по умолчанию '
-                       'F7/F8). Если клавиша или кнопка уже где-то занята, она просто '
-                       'срабатывает на обе привязки — страница об этом не предупреждает.'))
+                       'F7/F8).'))
 
         self.section(f, _('Mouse look', 'Обзор мышью'))
         ms = self.mouse_settings
@@ -1500,7 +1558,7 @@ class Launcher:
 
         # Built manually (not via self.check) because mouse_settings is its own dict, not
         # self.ini/self.app -- self.var()'s ini/app bookkeeping does not apply to it.
-        enabled_var = tk.BooleanVar(value=ms['enabled'])
+        enabled_var = self.mouse_vars['enabled'] = tk.BooleanVar(value=ms['enabled'])
         enabled_var.trace_add('write', lambda *_a: (ms.__setitem__('enabled', enabled_var.get()), mark_mouse_edited()))
         ttk.Checkbutton(f, text=_('Enable mouse look', 'Включить обзор мышью'), variable=enabled_var).grid(
             row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 0))
@@ -1508,7 +1566,7 @@ class Launcher:
                        'without restarting.', 'F7 также переключает это прямо в игре мгновенно; '
                        'F8 применяет эти настройки без перезапуска.'), top=2)
 
-        stick_var = tk.StringVar(value=ms['stick'])
+        stick_var = self.mouse_vars['stick'] = tk.StringVar(value=ms['stick'])
         stick_var.trace_add('write', lambda *_a: (ms.__setitem__('stick', stick_var.get()), mark_mouse_edited()))
         stick_box = ttk.Frame(f)
         ttk.Radiobutton(stick_box, text=_('Camera (right stick)', 'Камера (правый стик)'),
@@ -1519,7 +1577,7 @@ class Launcher:
 
         def slider_row(key, title, hint, lo, hi, fmt='{:.2f}'):
             holder = ttk.Frame(f)
-            var = tk.DoubleVar(value=ms[key])
+            var = self.mouse_vars[key] = tk.DoubleVar(value=ms[key])
             ttk.Scale(holder, from_=lo, to=hi, variable=var, length=280).pack(side='left')
             value_label = ttk.Label(holder, width=6)
             value_label.pack(side='left', padx=10)
@@ -1533,74 +1591,167 @@ class Launcher:
         # (src/runtime_pad.c), which deadzone_offset no longer affects, so the slider for it was
         # removed here rather than leave a control with no real effect. The value is still read/
         # written in input.ini by bbport_input_config.py for files that already set it.
-        slider_row('speed', _('Sensitivity', 'Чувствительность'),
-                   _('How fast the camera turns for a given mouse movement.',
-                     'Насколько быстро поворачивается камера при движении мыши.'), 0.1, 5.0)
-        slider_row('speed_offset', _('Minimum turn speed', 'Минимальная скорость поворота'),
+        camera_var = self.mouse_vars['camera'] = tk.StringVar(value=ms['camera'])
+        camera_var.trace_add('write', lambda *_a: (ms.__setitem__('camera', camera_var.get()), mark_mouse_edited()))
+        camera_box = ttk.Frame(f)
+        ttk.Radiobutton(camera_box, text=_('Direct (1:1, like a PC game)', 'Прямая (1:1, как в ПК-играх)'),
+                       variable=camera_var, value='direct').pack(side='left')
+        ttk.Radiobutton(camera_box, text=_('Stick emulation', 'Эмуляция стика'),
+                       variable=camera_var, value='stick').pack(side='left', padx=(16, 0))
+        self.row(f, _('Camera', 'Камера'), camera_box,
+                 _('Direct turns the game\'s camera by exact angles: no stick acceleration or '
+                   'turn-speed cap. It falls back to the stick while locked on.',
+                   'Прямая поворачивает камеру игры на точные углы: без ускорения стика и '
+                   'предела скорости поворота. При захвате цели работает как стик.'))
+        slider_row('camera_sensitivity', _('Sensitivity (direct)', 'Чувствительность (прямая)'),
+                   _('How far the direct camera turns per mouse movement (1.00 = 900 counts per '
+                     'radian).', 'Насколько поворачивается прямая камера при движении мыши (1.00 = '
+                     '900 отсчётов на радиан).'), 0.1, 5.0)
+        slider_row('speed', _('Sensitivity (stick)', 'Чувствительность (стик)'),
+                   _('How fast the camera turns for a given mouse movement in stick emulation.',
+                     'Насколько быстро поворачивается камера при движении мыши в эмуляции стика.'), 0.1, 5.0)
+        slider_row('speed_offset', _('Minimum turn speed (stick)', 'Минимальная скорость поворота (стик)'),
                    _('A constant added on top of sensitivity; raises the floor for slow '
                      'movements without affecting fast ones as much.',
                      'Добавляется поверх чувствительности; поднимает минимальную скорость для '
                      'медленных движений, почти не влияя на быстрые.'), 0.0, 1.0)
+        slider_row('sensitivity_y', _('Vertical sensitivity', 'Вертикальная чувствительность'),
+                   _('Up and down as a multiple of left and right (1.00 = the same).',
+                     'Вверх и вниз относительно влево и вправо (1.00 = одинаково).'), 0.1, 3.0)
 
-        self.note(f, _('Mouse buttons and the scroll wheel are bound in the Buttons section above: '
-                       'press Set… and click or turn the wheel. They work while the mouse is captured '
+        def invert_check(key, text):
+            var = self.mouse_vars[key] = tk.BooleanVar(value=ms[key])
+            var.trace_add('write', lambda *_a: (ms.__setitem__(key, var.get()), mark_mouse_edited()))
+            ttk.Checkbutton(f, text=text, variable=var).grid(
+                row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 0))
+
+        invert_check('invert_x', _('Invert horizontal', 'Инвертировать по горизонтали'))
+        invert_check('invert_y', _('Invert vertical', 'Инвертировать по вертикали'))
+        self.note(f, _('Vertical sensitivity and inverting apply to both camera modes.',
+                       'Вертикальная чувствительность и инверсия действуют в обоих режимах камеры.'), top=2)
+
+        self.note(f, _('Mouse buttons and the scroll wheel are bound in the slots above: click a '
+                       'slot, then click or turn the wheel. They work while the mouse is captured '
                        '(mouse look on).',
-                       'Кнопки мыши и колесо назначаются в разделе «Кнопки» выше: нажмите «Назначить…» '
-                       'и щёлкните или прокрутите колесо. Они работают, пока мышь захвачена '
+                       'Кнопки мыши и колесо назначаются в ячейках выше: щёлкните ячейку, затем '
+                       'щёлкните или прокрутите колесо. Они работают, пока мышь захвачена '
                        '(обзор мышью включён).'), top=10)
         self.note(f, _('Changes apply the next time the game starts, or press F8 in-game to '
                        'reload input.ini without restarting.',
                        'Изменения применяются при следующем запуске игры, либо нажмите F8 в '
                        'игре, чтобы перечитать input.ini без перезапуска.'), top=6)
 
+    def apply_layout_preset(self):
+        """Writes the Dark Souls III layout into input.ini now (bbport_input_config.apply_layout)
+        and shows it: pending edits on this page are replaced by it."""
+        if not self.messagebox.askyesno(
+                _('Dark Souls III layout', 'Раскладка Dark Souls III'),
+                _('Replace your keyboard and mouse bindings with the Dark Souls III layout? '
+                  'Controller bindings stay as they are.',
+                  'Заменить привязки клавиатуры и мыши раскладкой Dark Souls III? Привязки '
+                  'геймпада не изменятся.')):
+            return
+        lines = apply_layout(self.remap_lines)
+        try:
+            Path(self.remap_ini_path).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        except OSError as error:
+            self.messagebox.showerror(_('Layout', 'Раскладка'), str(error))
+            return
+        self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
+            mouse = load_input_ini(self.remap_ini_path)
+        self.remap_edits = {}
+        self.mouse_settings.update(mouse)  # the widgets hold this dict: update it in place
+        for key, var in self.mouse_vars.items():
+            var.set(mouse[key])
+        self.mouse_edited = False
+        self.refresh_remap_row(None)
+
     def refresh_remap_row(self, output):
-        key = self.current_binding(output)
-        self.remap_rows[output].configure(text=key if key else _('(none)', '(нет)'))
+        """Every row, since a change to one binding can add or clear another's conflict mark."""
+        conflicts = slot_conflicts({o: self.current_slots(o) for o in self.remap_rows})
+        russian = LANG == 'ru'
+        for o, (buttons, warn) in self.remap_rows.items():
+            values = self.current_slots(o)
+            marked = conflicts.get(o, {})
+            for i, btn in enumerate(buttons):
+                key = values[i] if i < len(values) else None
+                text = ' + '.join(display_name(p, russian) for p in binding_parts(key)) if key else '—'
+                btn.configure(text=text + ('  ⚠' if i in marked else ''), style='Slot.TButton')
+            others = sorted({b for slot in marked.values() for b in slot})
+            warn.configure(text='⚠ ' + _('also {}', 'также {}').format(
+                ', '.join(_(*OUTPUT_LABELS[c]) for c in others)) if others else '')
 
-    def clear_remap(self, output, key_label):
-        self.remap_edits[output] = None
-        self.refresh_remap_row(output)
+    def set_slot(self, output, slot, value):
+        values = list(self.current_slots(output))
+        values[slot] = value
+        self.remap_edits[output] = values
 
-    def start_remap_capture(self, output, key_label, set_btn):
-        """Grabs the next keypress or mouse click and binds it to `output`'s first slot. Esc
+    def clear_remap(self, output, slot):
+        if not self.remap_listening:
+            self.set_slot(output, slot, None)
+            self.refresh_remap_row(output)
+
+    def start_remap_capture(self, output, slot):
+        """Grabs the next keypress or mouse click and binds it to `output`'s slot. Esc
         cancels; a key/button already reserved (HOT-001/HOT-002), or a mouse click on a
         STICK_OUTPUTS row (an axis has no use for a press), is rejected in place, leaving the
         previous binding untouched. bind_all (not root.bind) plus grab_set makes sure the event
         reaches this handler even if some other widget currently has focus, and that no other
-        widget (e.g. the player-name Entry on another page) reacts to the same keypress.
+        widget (e.g. the player-name Entry on another page) reacts to the same keypress. Every
+        slot is disabled meanwhile, so a click on another slot binds the click instead of
+        starting over there.
 
         The <ButtonPress> bind is installed via after_idle rather than immediately: this call
-        itself runs from the "Set…" button's own click handler, so the left-button-release that
+        itself runs from the slot's own click handler, so the left-button-release that
         follows (Tk doesn't fire <ButtonPress> again for that click, but belt-and-suspenders
         against any platform quirk) would otherwise risk being seen as "the user chose
         leftbutton" the instant capture starts."""
+        if self.remap_listening:
+            return
+        self.remap_listening = True
         is_stick = output in STICK_OUTPUTS
-        original_text = set_btn['text']
-        key_label.configure(text=_('Press a key, a mouse button or turn the wheel…',
-                                   'Нажмите клавишу, кнопку мыши или прокрутите колесо…')
-                            if not is_stick else _('Press a key…', 'Нажмите клавишу…'))
-        set_btn.configure(state='disabled')
+        key_label = self.remap_rows[output][0][slot]
+        for buttons, _warn in self.remap_rows.values():
+            for btn in buttons:
+                btn.state(['disabled'])
+        key_label.configure(text=_('Press…', 'Нажмите…'), style='Listen.TButton')
         self.root.grab_set()
+        # Shift, Ctrl and Alt held so far, in press order: the next input makes a combination
+        # with them, and releasing one with nothing else pressed binds the modifiers alone.
+        modifiers = []
+
+        # Tk on Windows sends Alt, Alt + key and F10 to the menu bar (tk::WinMenuKey, which
+        # waits in the system menu's loop), not to <KeyPress>: they are taken over meanwhile.
+        menu_keys = {seq: self.root.bind_all(seq) for seq in (
+            '<Key-Alt_L>', '<Key-Alt_R>', '<Alt-Key>', '<Key-F10>',
+            '<KeyRelease-Alt_L>', '<KeyRelease-Alt_R>', '<Alt-KeyRelease>', '<KeyRelease-F10>')}
 
         def finish():
             self.root.unbind_all('<KeyPress>')
+            self.root.unbind_all('<KeyRelease>')
+            for seq, script in menu_keys.items():
+                self.root.bind_all(seq, script)
             self.root.unbind_all('<ButtonPress>')
             self.root.unbind_all('<Shift-MouseWheel>')
             self.root.bind_all('<MouseWheel>', self.wheel)  # the pages scroll again
             self.root.grab_release()
-            set_btn.configure(state='normal', text=original_text)
+            for buttons, _warn in self.remap_rows.values():
+                for btn in buttons:
+                    btn.state(['!disabled'])
+            self.remap_listening = False
             self.refresh_remap_row(output)
 
         def apply(name):
-            reserved = reserved_keys(self.remap_toggle_key, self.remap_reload_key)
-            if name in reserved:
+            parts = (modifiers + [name])[-MAX_COMBO:] if name not in modifiers else list(modifiers)
+            reserved = [p for p in parts if p in reserved_keys(self.remap_toggle_key, self.remap_reload_key)]
+            if reserved:
                 self.messagebox.showwarning(
                     _('Reserved', 'Зарезервировано'),
                     _('{} is reserved (menu, recording, or a hotkey) and cannot be bound to a '
                       'game action.', '{} зарезервирована (меню, запись или горячая клавиша) и '
-                      'не может быть назначена игровому действию.').format(name))
+                      'не может быть назначена игровому действию.').format(reserved[0]))
             else:
-                self.remap_edits[output] = name
+                self.set_slot(output, slot, ', '.join(parts))
             finish()
 
         def on_key(event):
@@ -1614,7 +1765,16 @@ class Launcher:
                     _('That key has no bbport name; pick another one.',
                       'У этой клавиши нет имени в bbport; выберите другую.'))
                 return
+            if name in MODIFIER_NAMES:
+                if name not in modifiers and len(modifiers) < MAX_COMBO - 1:
+                    modifiers.append(name)
+                    key_label.configure(text=' + '.join(display_name(m, LANG == 'ru') for m in modifiers) + ' + …')
+                return  # wait: another input makes a combination, a release binds it alone
             apply(name)
+
+        def on_key_release(event):
+            if modifiers and keysym_to_name(event.keysym) in modifiers:
+                apply(modifiers[-1])
 
         def on_click(event):
             name = button_num_to_name(event.num)
@@ -1635,6 +1795,9 @@ class Launcher:
             return 'break'
 
         self.root.bind_all('<KeyPress>', on_key)
+        self.root.bind_all('<KeyRelease>', on_key_release)
+        for seq in menu_keys:
+            self.root.bind_all(seq, on_key_release if 'Release' in seq else on_key)
         if not is_stick:
             self.root.after_idle(lambda: self.root.bind_all('<ButtonPress>', on_click))
             # While waiting, the wheel binds instead of scrolling the page.
@@ -1892,13 +2055,13 @@ class Launcher:
         save_ini({key: self.ini[key] for key in INI_DEFAULTS}, self.ini_lines)
         self.ini, self.ini_lines = load_ini()
         if self.remap_edits:
-            first_bindings = {key: (self.remap_edits[key] if key in self.remap_edits else
-                                    (vals[0] if vals else None))
-                              for key, vals in self.remap_bindings.items()}
-            save_input_ini(self.remap_ini_path, first_bindings, self.remap_lines)
+            save_input_ini(self.remap_ini_path, {key: [v for v in values if v]
+                                                 for key, values in self.remap_edits.items()}, self.remap_lines)
             self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
                 self.mouse_settings = load_input_ini(self.remap_ini_path)
             self.remap_edits = {}
+            if getattr(self, 'remap_rows', None):
+                self.refresh_remap_row(None)  # emptied slots close up, as the file has them
         if self.mouse_edited:
             save_mouse_settings(self.remap_ini_path, self.mouse_settings, self.remap_lines)
             self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \

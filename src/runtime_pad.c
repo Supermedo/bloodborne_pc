@@ -122,6 +122,10 @@ typedef struct {
     uint32_t mouse_wheel;   /* bbgpu_mouse_take's wheel: bit 0 up, 1 down, 2 left, 3 right */
     int back_combo;         /* Back drives the touchpad halves (touchpad_combo) */
     int back_down;          /* ... and is held now */
+    /* Combos (lshift + leftbutton) with every input held now: a binding whose inputs are all
+     * part of a larger held combo does not fire (binding_consumed). */
+    const InputBinding *held_combos[OUT_COUNT*INPUT_MAX_BINDINGS_PER_OUTPUT];
+    int held_combo_count;
 } HostState;
 
 /* A gamepad button as the bindings see it. With the touchpad combo, Back and (while Back is
@@ -172,7 +176,7 @@ static void touchpad_combo(const HostState *host, PadData *d) {
  * `is_button_output` tells which of the two readings the caller wants (an axis binding on a
  * button-like output, or vice versa, each have their own threshold rule, applied by the
  * caller -- see OUT-004/OUT-005). */
-static int binding_held(const HostState *host, const InputBinding *b) {
+static int input_held(const HostState *host, const InputBinding *b) {
     switch (b->kind) {
     case IN_KEY: return host->keys && host->keys[b->value];
     case IN_CBUTTON: return cbutton_held(host,b->value);
@@ -201,13 +205,60 @@ static int binding_held(const HostState *host, const InputBinding *b) {
     case IN_NONE: default: return 0;
     }
 }
+
+/* Combos (shadPS4's "output = a, b, c"): every input held, with priority for the larger one.
+ * Holding lshift + leftbutton fires "r2 = lshift, leftbutton" and not "r1 = leftbutton" or a
+ * binding on lshift alone, as in shadPS4. Only digital inputs take part (the parser rejects an
+ * analog one in a combo), so an analog binding is never consumed. */
+static int digital_input(InputKind kind) {
+    return kind==IN_KEY || kind==IN_MOUSE_BUTTON || kind==IN_MOUSE_WHEEL || kind==IN_CBUTTON;
+}
+static int combo_part_held(const HostState *host, InputKind kind, int32_t value) {
+    const InputBinding part={kind,value,0,0,{{0}}};
+    return input_held(host,&part);
+}
+static int all_inputs_held(const HostState *host, const InputBinding *b) {
+    if (!input_held(host,b)) return 0;
+    for (int i=0;i<b->extra_count;++i)
+        if (!combo_part_held(host,b->extra[i].kind,b->extra[i].value)) return 0;
+    return 1;
+}
+static int combo_has_input(const InputBinding *combo, InputKind kind, int32_t value) {
+    if (combo->kind==kind && combo->value==value) return 1;
+    for (int i=0;i<combo->extra_count;++i)
+        if (combo->extra[i].kind==kind && combo->extra[i].value==value) return 1;
+    return 0;
+}
+/* True if a held combo with more inputs than `b` contains all of `b`'s inputs. */
+static int binding_consumed(const HostState *host, const InputBinding *b) {
+    if (!digital_input(b->kind)) return 0;
+    for (int c=0;c<host->held_combo_count;++c) {
+        const InputBinding *combo=host->held_combos[c];
+        if (combo==b || combo->extra_count<=b->extra_count) continue;
+        int inside=combo_has_input(combo,b->kind,b->value);
+        for (int i=0;inside && i<b->extra_count;++i) inside=combo_has_input(combo,b->extra[i].kind,b->extra[i].value);
+        if (inside) return 1;
+    }
+    return 0;
+}
+static void find_held_combos(HostState *host, const InputConfig *cfg) {
+    host->held_combo_count=0;
+    for (int o=0;o<OUT_COUNT;++o)
+        for (int i=0;i<cfg->table.binding_count[o];++i) {
+            const InputBinding *b=&cfg->table.bindings[o][i];
+            if (b->extra_count && all_inputs_held(host,b)) host->held_combos[host->held_combo_count++]=b;
+        }
+}
+static int binding_held(const HostState *host, const InputBinding *b) {
+    return all_inputs_held(host,b) && !binding_consumed(host,b);
+}
 /* Signed axis-unit contribution (-127..127) of one binding toward the stick it is bound to;
  * 0 for anything that is not an axis-like input. A plain key/button bound to a half-axis
  * output contributes a full deflection (KBD-006), matching the previous fixed-layout behavior. */
 static int binding_axis_value(const HostState *host, const InputBinding *b, int half_sign) {
+    /* Keys and buttons (and combos of them): a full deflection while held. */
+    if (digital_input(b->kind)) return binding_held(host,b) ? 127*half_sign : 0;
     switch (b->kind) {
-    case IN_KEY: return (host->keys && host->keys[b->value]) ? 127*half_sign : 0;
-    case IN_CBUTTON: return cbutton_held(host,b->value) ? 127*half_sign : 0;
     case IN_AXIS_HALF: {
         if (!host->gamepad) return 0;
         int16_t raw=SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value);
@@ -216,8 +267,6 @@ static int binding_axis_value(const HostState *host, const InputBinding *b, int 
     }
     case IN_AXIS: /* a full physical axis bound to another full axis output (axis_left_x=axis_right_x) */
         return host->gamepad ? (SDL_GetGamepadAxis(host->gamepad,(SDL_GamepadAxis)b->value)>>8) : 0;
-    case IN_MOUSE_BUTTON: return (host->mouse_buttons & SDL_BUTTON_MASK(b->value)) ? 127*half_sign : 0;
-    case IN_MOUSE_WHEEL: return (host->mouse_wheel & (1u<<b->value)) ? 127*half_sign : 0;
     default: return 0; /* IN_NONE */
     }
 }
@@ -404,6 +453,45 @@ static void mouse_to_axis(float dx, float dy, double dt_ms, const MouseParams *m
 static InputConfig default_config;
 static InputConfig *loaded_config; /* NULL until pad_open's first load; falls back to defaults */
 static int config_initialized;
+
+/* Button prompts (gpu/shim/bbport_prompts.cpp): the actions each of the game's key-guide icons
+ * stands for, in bbport_prompt_icons.h's order. Each icon is named after its role and shows a
+ * button (KG_OK shows Circle): the keyboard icon is that button's key. */
+#define PROMPT_ICONS 20
+static const InputOutput prompt_outputs[PROMPT_ICONS][4]={
+    {OUT_CROSS}, {OUT_L1}, {OUT_L2}, {OUT_L3},
+    {OUT_AXIS_LEFT_Y_MINUS,OUT_AXIS_LEFT_X_MINUS,OUT_AXIS_LEFT_Y_PLUS,OUT_AXIS_LEFT_X_PLUS}, /* LS: WASD */
+    {OUT_PAD_DOWN}, {OUT_PAD_LEFT,OUT_PAD_RIGHT}, {OUT_PAD_UP}, {OUT_PAD_UP,OUT_PAD_DOWN},
+    {OUT_PAD_UP,OUT_PAD_DOWN,OUT_PAD_LEFT,OUT_PAD_RIGHT},
+    {OUT_CIRCLE}, {OUT_R1}, {OUT_R2}, {OUT_R3},
+    {OUT_AXIS_RIGHT_Y_MINUS,OUT_AXIS_RIGHT_X_MINUS,OUT_AXIS_RIGHT_Y_PLUS,OUT_AXIS_RIGHT_X_PLUS}, /* RS */
+    {OUT_SQUARE}, {OUT_TRIANGLE}, {OUT_OPTIONS}, {OUT_TOUCHPAD_LEFT}, {OUT_TOUCHPAD_RIGHT},
+};
+static const int prompt_output_count[PROMPT_ICONS]={1,1,1,1,4,1,2,1,2,4,1,1,1,1,4,1,1,1,1,1};
+/* What the icons show on keyboard and mouse: each action's first keyboard or mouse binding, and
+ * "mouse" for a stick the mouse drives. */
+static void configure_prompts(const InputConfig *cfg) {
+    static char text[PROMPT_ICONS][128];
+    const char *list[PROMPT_ICONS];
+    for (int icon=0;icon<PROMPT_ICONS;++icon) {
+        size_t used=0;
+        text[icon][0]=0;
+        const int stick=icon==4 ? 1 : icon==14 ? 2 : 0;
+        if (stick && cfg->mouse.stick==stick) snprintf(text[icon],sizeof(text[icon]),"mouse");
+        else for (int k=0;k<prompt_output_count[icon];++k) {
+            const InputOutput out=prompt_outputs[icon][k];
+            for (int i=0;i<cfg->table.binding_count[out];++i) {
+                char one[64];
+                if (!input_binding_keyboard_text(&cfg->table.bindings[out][i],one,sizeof(one))) continue;
+                int n=snprintf(text[icon]+used,sizeof(text[icon])-used,"%s%s",used ? " " : "",one);
+                if (n>0 && (size_t)n<sizeof(text[icon])-used) used+=(size_t)n;
+                break;
+            }
+        }
+        list[icon]=text[icon];
+    }
+    bbgpu_prompts_configure(list,PROMPT_ICONS);
+}
 static void ensure_config_loaded(void) {
     if (config_initialized) return;
     config_initialized=1;
@@ -421,8 +509,10 @@ static void ensure_config_loaded(void) {
     bbgpu_input_configure(loaded_config ? loaded_config->mouse.stick!=0 : 0,
                           loaded_config ? loaded_config->toggle_scancode : default_config.toggle_scancode,
                           loaded_config ? loaded_config->reload_scancode : default_config.reload_scancode);
-    bbgpu_mouse_camera_configure(loaded_config ? loaded_config->mouse.camera_direct : 0,
-                                 loaded_config ? loaded_config->mouse.camera_sensitivity : 1.0f);
+    const MouseParams *mouse=loaded_config ? &loaded_config->mouse : &default_config.mouse;
+    configure_prompts(loaded_config ? loaded_config : &default_config);
+    bbgpu_mouse_camera_configure(loaded_config ? mouse->camera_direct : 0,mouse->camera_sensitivity,
+                                 input_mouse_scale_x(mouse),input_mouse_scale_y(mouse),mouse->camera_sync);
 }
 /* CFG-008: called once per sample() (under `lock`), reloads if the window thread set the F8
  * flag. The read of the new file (input_config_load, I/O) happens before the critical section
@@ -441,7 +531,10 @@ static void reload_config_if_requested(void) {
         if (fresh->warnings) printf("Input config: %s reloaded, %u line(s) ignored (see above)\n",path,fresh->warnings);
         else printf("Input config: %s reloaded\n",path);
         bbgpu_input_configure(loaded_config->mouse.stick!=0,loaded_config->toggle_scancode,loaded_config->reload_scancode);
-        bbgpu_mouse_camera_configure(loaded_config->mouse.camera_direct,loaded_config->mouse.camera_sensitivity);
+        const MouseParams *mouse=&loaded_config->mouse;
+        configure_prompts(loaded_config);
+        bbgpu_mouse_camera_configure(mouse->camera_direct,mouse->camera_sensitivity,
+                                     input_mouse_scale_x(mouse),input_mouse_scale_y(mouse),mouse->camera_sync);
     } else {
         free(fresh);
     }
@@ -464,10 +557,12 @@ static void sample_host(PadData *d) {
     if (bbgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
     const InputConfig *cfg=active_config();
     BbMouseInput mouse; bbgpu_mouse_take(&mouse); /* MOU-008: drains dx/dy; buttons/wheel persist */
-    HostState host={SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL, g,
-        mouse.captured ? mouse.buttons : 0, mouse.captured ? mouse.wheel : 0, 0, 0};
+    static HostState host; /* ~1 KB with the held-combo list: kept off the game thread's stack */
+    host=(HostState){SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(NULL) : NULL, g,
+        mouse.captured ? mouse.buttons : 0, mouse.captured ? mouse.wheel : 0, 0, 0, {0}, 0};
     host.back_combo=back_combo_wanted(g,cfg);
     host.back_down=host.back_combo && SDL_GetGamepadButton(g,SDL_GAMEPAD_BUTTON_BACK);
+    find_held_combos(&host,cfg);
 
     /* MIX-001/002: keyboard, controller (and, from T5, mouse) are read together, buttons ORed.
      * OUT_L2/OUT_R2 are skipped here (button_bit returns 0 for them anyway) and handled below,
@@ -534,7 +629,8 @@ static void sample_host(PadData *d) {
         if (dt_ms>100.0) dt_ms=100.0;
         last_mouse_sample_us=now;
         int mx=0, my=0;
-        mouse_to_axis(mouse.dx,mouse.dy,dt_ms,&cfg->mouse,&mx,&my);
+        mouse_to_axis(mouse.dx*input_mouse_scale_x(&cfg->mouse),mouse.dy*input_mouse_scale_y(&cfg->mouse),
+                      dt_ms,&cfg->mouse,&mx,&my);
         int *tx=cfg->mouse.stick==1 ? &lx : &rx, *ty=cfg->mouse.stick==1 ? &ly : &ry;
         *tx+=mx; *ty+=my;
         *tx=*tx<-127?-127:*tx>127?127:*tx; *ty=*ty<-127?-127:*ty>127?127:*ty;
@@ -698,6 +794,21 @@ static void replay_sample(PadData *d) {
 /* After the menu or the text dialog closes, buttons still held (the Cross that accepted a
  * name) stay hidden until released: the game would take them as a new press. */
 static int hold_after_capture;
+/* Touches as the DualShock 4 reports them: every finger that goes down gets a new id (1..127, kept
+ * while it stays down) and the time since the first one went down. With id 0 and no hold time
+ * the game ignores touchpad presses: no gesture menu from the touchpad, Back or a key. */
+static void touch_ids(PadData *d) {
+    static uint8_t next_id=1, ids[2]; static int down[2]; static uint64_t since;
+    for (int i=0;i<2;++i) {
+        const int now=i<d->touch_count;
+        if (now && !down[i]) { ids[i]=next_id; next_id=next_id==127 ? 1 : next_id+1; }
+        down[i]=now;
+        if (now) d->touches[i].id=ids[i];
+    }
+    if (!d->touch_count) since=0;
+    else if (!since) since=d->timestamp;
+    d->touch_held_time=d->touch_count ? (uint32_t)(d->timestamp-since) : 0;
+}
 static void sample(PadData *d) {
     reload_config_if_requested();
     sample_host(d);
@@ -712,6 +823,7 @@ static void sample(PadData *d) {
     if (injected.buttons & BTN_R2) d->r2=255;
     uint8_t *axes[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
+    touch_ids(d);
     if (hold_after_capture) {
         if (d->buttons) d->buttons=0;
         else hold_after_capture=0;
