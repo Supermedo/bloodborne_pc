@@ -322,8 +322,11 @@ def game_info(folder):
         return None
     try:
         from prepare import sfo
+        from patches import game_app_version
         values = sfo((folder / 'sce_sys/param.sfo').read_bytes())
-        return values.get('TITLE', 'Bloodborne').replace('™', '').strip(), values.get('APP_VER', '?')
+        # game_app_version: Game of the Year dumps say APP_VER 01.00 over the 1.09 code.
+        version = game_app_version(folder) or values.get('APP_VER', '?')
+        return values.get('TITLE', 'Bloodborne').replace('™', '').strip(), version
     except (OSError, ValueError, ImportError):
         return 'Bloodborne', '?'
 
