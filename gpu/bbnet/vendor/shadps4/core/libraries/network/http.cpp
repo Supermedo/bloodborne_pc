@@ -1524,7 +1524,10 @@ int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char*
     auto req = std::make_shared<HttpRequest>();
     req->conn_id = connId;
     req->method = method;
-    req->url = url;
+    // bbport: Bloodborne passes an empty request URL after creating a connection with
+    // the full URL. Keep that connection's path and query; using an empty URL
+    // here makes SendRequest request '/' instead (ss.info then returns 404).
+    req->url = url[0] ? url : conn_it->second.url;
     req->content_length = contentLength;
     req->settings = conn_it->second.settings;
     req->epoll_id = conn_it->second.epoll_id;
