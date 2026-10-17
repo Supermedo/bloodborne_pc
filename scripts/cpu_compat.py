@@ -261,7 +261,9 @@ def patch_libc(module):
     if not enabled():
         return []
     if module['sha256'] != LIBC_SHA256:
-        raise ValueError('Legacy CPU profile expects the inspected libc dump; its SHA256 changed.')
+        raise ValueError('Legacy CPU profile expects the inspected libc dump; its SHA256 changed '
+                         '(the profile is made for the SELF files of the dump: a plain-ELF or '
+                         'otherwise different libc.prx cannot use it).')
     matches = [symbol for symbol in module['symbols'] if symbol['section'] and symbol['type'] == 2
                and symbol['name'].split('#')[0] == nid('strlen')]
     if len(matches) != 1:
@@ -383,7 +385,9 @@ def patch_image(image, segments, main, modules, relocations, *, plan=None, activ
         if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
             raise ValueError(f'Legacy CPU {name}: source SHA256 is invalid.')
         if plan['modules'][name] != digest:
-            raise ValueError(f'Legacy CPU {name}: source SHA256 does not match the plan.')
+            raise ValueError(f'Legacy CPU {name}: source SHA256 does not match the plan (the plan is '
+                             'made for the SELF files of the 1.09 dump: a plain-ELF or otherwise '
+                             'different file cannot use it).')
     report['source_hashes'] = {name: values[2] for name, values in locations.items()}
     report['plan_sha256'] = hashlib.sha256(raw_plan).hexdigest()
 

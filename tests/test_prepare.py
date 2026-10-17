@@ -19,6 +19,20 @@ def fixture():
 
 
 class SelfTests(unittest.TestCase):
+    def test_plain_elf_is_read_without_the_self_wrapper(self):
+        wrapped = fixture()
+        self_elf, self_header, self_ph, _, _ = parse_self(wrapped)
+        plain = bytearray(0x1010)
+        plain[:64] = wrapped[64:128]
+        plain[64:120] = wrapped[128:184]
+        plain[0x1000:] = bytes(range(16))
+        elf, header, ph, segments, missing = parse_self(plain)
+        self.assertEqual((header, ph), (self_header, self_ph))
+        self.assertEqual(elf[0x1000:0x1010], self_elf[0x1000:0x1010])
+        self.assertEqual((segments, missing), ([], []))
+        with self.assertRaisesRegex(ValueError, 'neither'):
+            parse_self(b'\0' * 64)
+
     def test_libc_ret_contract_is_verified_from_symbol_and_code(self):
         def libc(instruction):
             data=bytearray(0x320)
