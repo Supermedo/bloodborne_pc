@@ -19,6 +19,11 @@
 #include <mutex>
 #include <queue>
 
+#include <algorithm>
+#include <atomic>
+#include <cstdlib>
+#include <vector>
+
 namespace {
 
 std::mutex submit_mutex{};
@@ -29,6 +34,74 @@ std::mutex m_request{};
 
 mz_zip_archive zip_ar{};
 bool ar_is_read_only{true};
+
+// bbport: cache statistics (BB_CACHE_STATS=1). Counted on the loading threads, so atomics.
+struct CacheStats {
+    std::atomic<u64> hits{0};
+    std::atomic<u64> misses{0};
+    std::atomic<u64> read_bytes{0};
+    std::atomic<u64> written_bytes{0};
+};
+CacheStats cache_stats{};
+
+bool CacheStatsEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("BB_CACHE_STATS");
+        return value != nullptr && value[0] == '1';
+    }();
+    return enabled;
+}
+
+// bbport: BB_CACHE_MAX_MB caps the on-disk cache (default 2048, 0 disables); the oldest blobs by
+// modification time are removed first, so a long playthrough cannot fill the disk unnoticed.
+u64 CacheMaxBytes() {
+    static const u64 limit = [] {
+        const char* value = std::getenv("BB_CACHE_MAX_MB");
+        const long mb = value != nullptr && *value != '\0' ? std::strtol(value, nullptr, 10) : 2048;
+        return mb > 0 ? static_cast<u64>(mb) * 1024ULL * 1024ULL : 0ULL;
+    }();
+    return limit;
+}
+
+void PruneCache(const std::filesystem::path& dir) {
+    const u64 limit = CacheMaxBytes();
+    if (limit == 0) {
+        return;
+    }
+    std::error_code error;
+    std::vector<std::pair<std::filesystem::file_time_type, std::pair<u64, std::filesystem::path>>> files;
+    u64 total = 0;
+    for (const auto& entry : std::filesystem::directory_iterator{dir, error}) {
+        if (!entry.is_regular_file(error)) {
+            continue;
+        }
+        const auto size = static_cast<u64>(entry.file_size(error));
+        if (error) {
+            continue;
+        }
+        total += size;
+        files.emplace_back(entry.last_write_time(error), std::pair<u64, std::filesystem::path>{size, entry.path()});
+    }
+    if (total <= limit) {
+        return;
+    }
+    std::sort(files.begin(), files.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    // Leave some headroom so the sweep does not run on every start.
+    const u64 target = limit - limit / 10;
+    u64 removed = 0;
+    for (const auto& [time, info] : files) {
+        if (total <= target) {
+            break;
+        }
+        if (std::filesystem::remove(info.second, error)) {
+            total -= std::min(total, info.first);
+            ++removed;
+        }
+    }
+    LOG_WARNING(Render, "Shader cache pruned: {} file(s) removed, {} MiB left (cap {} MiB)", removed,
+                total >> 20, limit >> 20);
+}
 
 } // namespace
 
@@ -95,11 +168,17 @@ void DataBase::Open() {
     const auto& game_info = Common::ElfInfo::Instance();
 
     using namespace Common::FS;
+    // bbport: BB_CACHE_DIR points every install (installer edition, portable edition, a second
+    // build) at one cache root instead of three separate copies under each user directory and
+    // %APPDATA%; the blobs are per game serial and share nothing else.
+    std::filesystem::path cache_root = GetUserPath(PathType::CacheDir);
+    if (const char* override_dir = std::getenv("BB_CACHE_DIR"); override_dir != nullptr && *override_dir != '\0') {
+        cache_root = std::filesystem::u8path(override_dir);
+    }
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         mz_zip_zero_struct(&zip_ar);
 
-        cache_path = GetUserPath(PathType::CacheDir) /
-                     std::filesystem::path{game_info.GameSerial()}.replace_extension(".zip");
+        cache_path = cache_root / std::filesystem::path{game_info.GameSerial()}.replace_extension(".zip");
 
         if (!mz_zip_reader_init_file(&zip_ar, cache_path.string().c_str(),
                                      MZ_ZIP_FLAG_READ_ALLOW_WRITING) ||
@@ -110,10 +189,11 @@ void DataBase::Open() {
             mz_zip_writer_init_file(&zip_ar, cache_path.string().c_str(), 0);
         }
     } else {
-        cache_path = GetUserPath(PathType::CacheDir) / game_info.GameSerial();
+        cache_path = cache_root / game_info.GameSerial();
         if (!std::filesystem::exists(cache_path)) {
             std::filesystem::create_directories(cache_path);
         }
+        PruneCache(cache_path);
     }
 
     io_worker = std::jthread{ProcessIO};
@@ -134,6 +214,17 @@ void DataBase::Close() {
     }
 
     opened = false;
+    if (CacheStatsEnabled()) {
+        const u64 hits = cache_stats.hits.load(std::memory_order_relaxed);
+        const u64 misses = cache_stats.misses.load(std::memory_order_relaxed);
+        const u64 total = hits + misses;
+        LOG_INFO(Render,
+                 "Shader cache: {} hit(s) / {} miss(es) ({:.1f}% reuse), {} MiB read, {} MiB written, "
+                 "dir {}",
+                 hits, misses, total ? 100.0 * static_cast<double>(hits) / static_cast<double>(total) : 0.0,
+                 cache_stats.read_bytes.load(std::memory_order_relaxed) >> 20,
+                 cache_stats.written_bytes.load(std::memory_order_relaxed) >> 20, cache_path.string());
+    }
     LOG_INFO(Render, "Cache dumped");
 }
 
@@ -165,6 +256,9 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector
                 }
                 std::error_code error;
                 std::filesystem::rename(temp, path, error);
+                if (!error) {
+                    cache_stats.written_bytes += v.size() * sizeof(T);
+                }
             }
         }};
         std::scoped_lock lock{m_request};
@@ -185,6 +279,7 @@ void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
         int index{-1};
         index = mz_zip_reader_locate_file(&zip_ar, path.string().c_str(), nullptr, 0);
         if (index < 0) {
+            cache_stats.misses.fetch_add(1, std::memory_order_relaxed);
             LOG_WARNING(Render, "File {} is not found in the archive", path.string().c_str());
             return;
         }
@@ -192,10 +287,23 @@ void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
         mz_zip_reader_file_stat(&zip_ar, index, &stat);
         v.resize(stat.m_uncomp_size / sizeof(T));
         mz_zip_reader_extract_to_mem(&zip_ar, index, v.data(), stat.m_uncomp_size, 0);
+        cache_stats.hits.fetch_add(1, std::memory_order_relaxed);
+        cache_stats.read_bytes.fetch_add(stat.m_uncomp_size, std::memory_order_relaxed);
     } else {
+        // bbport: a miss is "this blob is not on disk yet" (first run in an area, or a new shader).
+        if (!std::filesystem::exists(path)) {
+            cache_stats.misses.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
         const auto file = IOFile{path, FileAccessMode::Read};
+        if (!file.IsOpen()) {
+            cache_stats.misses.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
         v.resize(file.GetSize() / sizeof(T));
         file.Read(v);
+        cache_stats.hits.fetch_add(1, std::memory_order_relaxed);
+        cache_stats.read_bytes.fetch_add(file.GetSize(), std::memory_order_relaxed);
     }
 }
 
