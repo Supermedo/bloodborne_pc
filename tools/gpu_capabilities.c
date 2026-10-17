@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <SDL3/SDL.h>
 #include <vulkan/vulkan.h>
 
 static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
@@ -64,7 +65,31 @@ static int live_resolution_suits(VkPhysicalDevice device) {
     return suits;
 }
 
+/* --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's order, as
+ * the game numbers them (the launcher's Monitor choice, BB_DISPLAY). */
+static int list_displays(void) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "displays: %s\n", SDL_GetError());
+        return 1;
+    }
+    const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    int count = 0;
+    SDL_DisplayID *ids = SDL_GetDisplays(&count);
+    for (int i = 0; ids && i < count; ++i) {
+        const char *name = SDL_GetDisplayName(ids[i]);
+        const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(ids[i]);
+        printf("%s\t%dx%d\t%d\n", name && *name ? name : "?", mode ? mode->w : 0,
+               mode ? mode->h : 0, ids[i] == primary);
+    }
+    SDL_free(ids);
+    SDL_Quit();
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--displays")) {
+        return list_displays();
+    }
     const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
