@@ -1264,6 +1264,10 @@
             <Line Type="bytes" Address="0x023b9190" Value="b805000000c3"/>
             <Line Type="bytes" Address="0x023B8730" Value="31C0C3909090909090909090909090"/>
             <Line Type="bytes" Address="0x01C2C890" Value="31C0C3909090909090909090909090"/>
+            <Line Type="bytes" Address="0x023e450d" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x023b86b3" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x01d5e537" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x0227d9e1" Value="b80200000090"/>
         </PatchList>
     </Metadata>
     <Metadata Title="Bloodborne" Name="Circle Confirm (Japanese/Asian button layout)" Note="The game's check for the regions where Circle confirms (Japan, Asia) always answers yes: Circle confirms and interacts, Cross cancels and dodges, and the on-screen button icons follow. Applied after Unlock Game Region, which clears the same check." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
