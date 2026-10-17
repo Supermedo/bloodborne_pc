@@ -9,7 +9,7 @@
 
 namespace Vulkan {
 
-constexpr u64 WAIT_TIMEOUT = std::numeric_limits<u64>::max();
+constexpr u64 kWaitTimeout = std::numeric_limits<u64>::max();
 
 Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
     const vk::StructureChain semaphore_chain = {
@@ -62,7 +62,7 @@ void Semaphore::Wait(u64 tick) {
         .pValues = &tick,
     };
 
-    while (instance.GetDevice().waitSemaphores(&wait_info, WAIT_TIMEOUT) != vk::Result::eSuccess) {
+    while (instance.GetDevice().waitSemaphores(&wait_info, kWaitTimeout) != vk::Result::eSuccess) {
     }
     Refresh();
 }

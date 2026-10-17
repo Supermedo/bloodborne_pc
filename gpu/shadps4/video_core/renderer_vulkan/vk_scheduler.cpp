@@ -432,6 +432,12 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     std::array<vk::PipelineStageFlags, std::tuple_size_v<decltype(info.wait_semas)>>
         wait_stage_masks;
     wait_stage_masks.fill(vk::PipelineStageFlagBits::eAllCommands);
+    if (pending_external_wait) {
+        ASSERT(info.num_wait_semas < info.wait_semas.size());
+        wait_stage_masks[info.num_wait_semas] = vk::PipelineStageFlagBits::eAllCommands;
+        info.AddWait(pending_external_wait, pending_external_value);
+        pending_external_wait = nullptr;
+    }
 
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
         .waitSemaphoreValueCount = info.num_wait_semas,

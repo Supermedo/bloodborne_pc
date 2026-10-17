@@ -1,0 +1,935 @@
+{
+  "scene": "User-confirmed stationary sewer scene",
+  "gpu": "AMD Radeon RX 9070",
+  "cpu": "Intel Core i7-11700B",
+  "base_commit": "a0f53a1de2d1deb66835c692e2540ea6d67cb6dc",
+  "driver": "AMD 26.9.2 LLPC",
+  "render": [
+    2560,
+    1440
+  ],
+  "output": [
+    3840,
+    2160
+  ],
+  "preset": "Quality",
+  "hdr": false,
+  "sharpness": 0.5,
+  "fps_limit": 0,
+  "present_mode": "Immediate",
+  "fullscreen": true,
+  "cheats": false,
+  "mods": false,
+  "gpu_profiler": false,
+  "debugger_attached": false,
+  "method": "One process and stationary camera; DX12 old/new/new/old, then FSR3 old/new/new/old. Each 10s settling + 25s measured. Mean FPS from five-second reports.",
+  "change": "Bounded cache of four object-motion image allocations; retain legacy per-size-change clear and validity behavior. Shader math and quality settings are preserved.",
+  "phases": [
+    {
+      "phase": "dx12-old-A",
+      "provider": "dx12",
+      "cache": 0,
+      "startUTC": "2026-10-16T12:13:54.7881277Z",
+      "startLine": 405,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:14:19.8080974Z",
+      "endLine": 473,
+      "samples": [
+        {
+          "fps": 59.0,
+          "worst_ms": 22.9,
+          "compiles": 0,
+          "draws": 1434,
+          "renderer_tick_wait_pct": 65.3
+        },
+        {
+          "fps": 58.8,
+          "worst_ms": 19.9,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 65.4
+        },
+        {
+          "fps": 58.6,
+          "worst_ms": 19.9,
+          "compiles": 0,
+          "draws": 1491,
+          "renderer_tick_wait_pct": 65.0
+        },
+        {
+          "fps": 58.7,
+          "worst_ms": 19.6,
+          "compiles": 0,
+          "draws": 1456,
+          "renderer_tick_wait_pct": 65.2
+        },
+        {
+          "fps": 58.8,
+          "worst_ms": 20.0,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 65.3
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 4737,
+          "reuse": 0,
+          "resize_waits": 4736,
+          "frame": 4200
+        },
+        {
+          "allocations": 5337,
+          "reuse": 0,
+          "resize_waits": 5336,
+          "frame": 4500
+        },
+        {
+          "allocations": 5937,
+          "reuse": 0,
+          "resize_waits": 5936,
+          "frame": 4800
+        },
+        {
+          "allocations": 6537,
+          "reuse": 0,
+          "resize_waits": 6536,
+          "frame": 5100
+        },
+        {
+          "allocations": 7137,
+          "reuse": 0,
+          "resize_waits": 7136,
+          "frame": 5400
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 58.78,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 2.0,
+        "reuse": 0.0,
+        "resize_waits": 2.0
+      }
+    },
+    {
+      "phase": "dx12-new-A",
+      "provider": "dx12",
+      "cache": 1,
+      "startUTC": "2026-10-16T12:14:29.8593308Z",
+      "startLine": 512,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:14:54.8913148Z",
+      "endLine": 605,
+      "samples": [
+        {
+          "fps": 109.1,
+          "worst_ms": 11.8,
+          "compiles": 0,
+          "draws": 1471,
+          "renderer_tick_wait_pct": 32.4
+        },
+        {
+          "fps": 109.0,
+          "worst_ms": 11.8,
+          "compiles": 0,
+          "draws": 1455,
+          "renderer_tick_wait_pct": 33.1
+        },
+        {
+          "fps": 108.9,
+          "worst_ms": 11.7,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 33.2
+        },
+        {
+          "fps": 108.6,
+          "worst_ms": 11.9,
+          "compiles": 0,
+          "draws": 1456,
+          "renderer_tick_wait_pct": 33.1
+        },
+        {
+          "fps": 109.0,
+          "worst_ms": 12.0,
+          "compiles": 0,
+          "draws": 1457,
+          "renderer_tick_wait_pct": 33.2
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 7730,
+          "reuse": 2407,
+          "resize_waits": 7728,
+          "frame": 6900
+        },
+        {
+          "allocations": 7730,
+          "reuse": 3007,
+          "resize_waits": 7728,
+          "frame": 7200
+        },
+        {
+          "allocations": 7730,
+          "reuse": 3607,
+          "resize_waits": 7728,
+          "frame": 7500
+        },
+        {
+          "allocations": 7730,
+          "reuse": 4207,
+          "resize_waits": 7728,
+          "frame": 7800
+        },
+        {
+          "allocations": 7730,
+          "reuse": 4807,
+          "resize_waits": 7728,
+          "frame": 8100
+        },
+        {
+          "allocations": 7730,
+          "reuse": 5407,
+          "resize_waits": 7728,
+          "frame": 8400
+        },
+        {
+          "allocations": 7730,
+          "reuse": 6007,
+          "resize_waits": 7728,
+          "frame": 8700
+        },
+        {
+          "allocations": 7730,
+          "reuse": 6607,
+          "resize_waits": 7728,
+          "frame": 9000
+        },
+        {
+          "allocations": 7730,
+          "reuse": 7207,
+          "resize_waits": 7728,
+          "frame": 9300
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 108.92,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 0.0,
+        "reuse": 2.0,
+        "resize_waits": 0.0
+      }
+    },
+    {
+      "phase": "dx12-new-B",
+      "provider": "dx12",
+      "cache": 1,
+      "startUTC": "2026-10-16T12:15:04.9254119Z",
+      "startLine": 644,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:15:29.9524065Z",
+      "endLine": 738,
+      "samples": [
+        {
+          "fps": 108.7,
+          "worst_ms": 11.7,
+          "compiles": 0,
+          "draws": 1432,
+          "renderer_tick_wait_pct": 32.7
+        },
+        {
+          "fps": 108.9,
+          "worst_ms": 11.8,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 31.0
+        },
+        {
+          "fps": 109.0,
+          "worst_ms": 12.0,
+          "compiles": 0,
+          "draws": 1463,
+          "renderer_tick_wait_pct": 32.8
+        },
+        {
+          "fps": 108.7,
+          "worst_ms": 11.8,
+          "compiles": 0,
+          "draws": 1485,
+          "renderer_tick_wait_pct": 32.6
+        },
+        {
+          "fps": 108.5,
+          "worst_ms": 11.9,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 32.1
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 7730,
+          "reuse": 10207,
+          "resize_waits": 7728,
+          "frame": 10800
+        },
+        {
+          "allocations": 7730,
+          "reuse": 10807,
+          "resize_waits": 7728,
+          "frame": 11100
+        },
+        {
+          "allocations": 7730,
+          "reuse": 11407,
+          "resize_waits": 7728,
+          "frame": 11400
+        },
+        {
+          "allocations": 7730,
+          "reuse": 12007,
+          "resize_waits": 7728,
+          "frame": 11700
+        },
+        {
+          "allocations": 7730,
+          "reuse": 12607,
+          "resize_waits": 7728,
+          "frame": 12000
+        },
+        {
+          "allocations": 7730,
+          "reuse": 13207,
+          "resize_waits": 7728,
+          "frame": 12300
+        },
+        {
+          "allocations": 7730,
+          "reuse": 13807,
+          "resize_waits": 7728,
+          "frame": 12600
+        },
+        {
+          "allocations": 7730,
+          "reuse": 14407,
+          "resize_waits": 7728,
+          "frame": 12900
+        },
+        {
+          "allocations": 7730,
+          "reuse": 15007,
+          "resize_waits": 7728,
+          "frame": 13200
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 108.76,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 0.0,
+        "reuse": 2.0,
+        "resize_waits": 0.0
+      }
+    },
+    {
+      "phase": "dx12-old-B",
+      "provider": "dx12",
+      "cache": 0,
+      "startUTC": "2026-10-16T12:15:39.9919041Z",
+      "startLine": 765,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:16:05.0065771Z",
+      "endLine": 832,
+      "samples": [
+        {
+          "fps": 59.0,
+          "worst_ms": 20.0,
+          "compiles": 0,
+          "draws": 1443,
+          "renderer_tick_wait_pct": 65.4
+        },
+        {
+          "fps": 58.5,
+          "worst_ms": 20.1,
+          "compiles": 0,
+          "draws": 1483,
+          "renderer_tick_wait_pct": 65.1
+        },
+        {
+          "fps": 58.8,
+          "worst_ms": 20.0,
+          "compiles": 0,
+          "draws": 1455,
+          "renderer_tick_wait_pct": 65.5
+        },
+        {
+          "fps": 58.8,
+          "worst_ms": 19.5,
+          "compiles": 0,
+          "draws": 1456,
+          "renderer_tick_wait_pct": 65.5
+        },
+        {
+          "fps": 58.7,
+          "worst_ms": 19.7,
+          "compiles": 0,
+          "draws": 1455,
+          "renderer_tick_wait_pct": 65.4
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 9306,
+          "reuse": 15231,
+          "resize_waits": 9304,
+          "frame": 14100
+        },
+        {
+          "allocations": 9906,
+          "reuse": 15231,
+          "resize_waits": 9904,
+          "frame": 14400
+        },
+        {
+          "allocations": 10506,
+          "reuse": 15231,
+          "resize_waits": 10504,
+          "frame": 14700
+        },
+        {
+          "allocations": 11106,
+          "reuse": 15231,
+          "resize_waits": 11104,
+          "frame": 15000
+        },
+        {
+          "allocations": 11706,
+          "reuse": 15231,
+          "resize_waits": 11704,
+          "frame": 15300
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 58.76,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 2.0,
+        "reuse": 0.0,
+        "resize_waits": 2.0
+      }
+    },
+    {
+      "phase": "fsr3-old-A",
+      "provider": "fsr3",
+      "cache": 0,
+      "startUTC": "2026-10-16T12:16:15.0296009Z",
+      "startLine": 860,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:16:40.0574953Z",
+      "endLine": 933,
+      "samples": [
+        {
+          "fps": 67.5,
+          "worst_ms": 17.9,
+          "compiles": 0,
+          "draws": 1426,
+          "renderer_tick_wait_pct": 62.4
+        },
+        {
+          "fps": 67.4,
+          "worst_ms": 17.5,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 62.5
+        },
+        {
+          "fps": 67.5,
+          "worst_ms": 17.7,
+          "compiles": 0,
+          "draws": 1456,
+          "renderer_tick_wait_pct": 62.6
+        },
+        {
+          "fps": 67.2,
+          "worst_ms": 17.9,
+          "compiles": 0,
+          "draws": 1464,
+          "renderer_tick_wait_pct": 62.2
+        },
+        {
+          "fps": 67.0,
+          "worst_ms": 17.7,
+          "compiles": 0,
+          "draws": 1481,
+          "renderer_tick_wait_pct": 62.2
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 13506,
+          "reuse": 15231,
+          "resize_waits": 13504,
+          "frame": 16200
+        },
+        {
+          "allocations": 14106,
+          "reuse": 15231,
+          "resize_waits": 14104,
+          "frame": 16500
+        },
+        {
+          "allocations": 14706,
+          "reuse": 15231,
+          "resize_waits": 14704,
+          "frame": 16800
+        },
+        {
+          "allocations": 15306,
+          "reuse": 15231,
+          "resize_waits": 15304,
+          "frame": 17100
+        },
+        {
+          "allocations": 15906,
+          "reuse": 15231,
+          "resize_waits": 15904,
+          "frame": 17400
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 67.32000000000001,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 2.0,
+        "reuse": 0.0,
+        "resize_waits": 2.0
+      }
+    },
+    {
+      "phase": "fsr3-new-A",
+      "provider": "fsr3",
+      "cache": 1,
+      "startUTC": "2026-10-16T12:16:50.0896943Z",
+      "startLine": 976,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:17:15.1099617Z",
+      "endLine": 1083,
+      "samples": [
+        {
+          "fps": 133.9,
+          "worst_ms": 10.2,
+          "compiles": 0,
+          "draws": 1427,
+          "renderer_tick_wait_pct": 18.3
+        },
+        {
+          "fps": 132.8,
+          "worst_ms": 10.6,
+          "compiles": 0,
+          "draws": 1470,
+          "renderer_tick_wait_pct": 15.7
+        },
+        {
+          "fps": 133.8,
+          "worst_ms": 9.9,
+          "compiles": 0,
+          "draws": 1477,
+          "renderer_tick_wait_pct": 17.6
+        },
+        {
+          "fps": 133.8,
+          "worst_ms": 9.9,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 17.7
+        },
+        {
+          "fps": 133.1,
+          "worst_ms": 10.7,
+          "compiles": 0,
+          "draws": 1453,
+          "renderer_tick_wait_pct": 16.1
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 16435,
+          "reuse": 18302,
+          "resize_waits": 16432,
+          "frame": 19200
+        },
+        {
+          "allocations": 16435,
+          "reuse": 18902,
+          "resize_waits": 16432,
+          "frame": 19500
+        },
+        {
+          "allocations": 16435,
+          "reuse": 19502,
+          "resize_waits": 16432,
+          "frame": 19800
+        },
+        {
+          "allocations": 16435,
+          "reuse": 20102,
+          "resize_waits": 16432,
+          "frame": 20100
+        },
+        {
+          "allocations": 16435,
+          "reuse": 20702,
+          "resize_waits": 16432,
+          "frame": 20400
+        },
+        {
+          "allocations": 16435,
+          "reuse": 21302,
+          "resize_waits": 16432,
+          "frame": 20700
+        },
+        {
+          "allocations": 16435,
+          "reuse": 21902,
+          "resize_waits": 16432,
+          "frame": 21000
+        },
+        {
+          "allocations": 16435,
+          "reuse": 22502,
+          "resize_waits": 16432,
+          "frame": 21300
+        },
+        {
+          "allocations": 16435,
+          "reuse": 23102,
+          "resize_waits": 16432,
+          "frame": 21600
+        },
+        {
+          "allocations": 16435,
+          "reuse": 23702,
+          "resize_waits": 16432,
+          "frame": 21900
+        },
+        {
+          "allocations": 16435,
+          "reuse": 24302,
+          "resize_waits": 16432,
+          "frame": 22200
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 133.48000000000002,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 0.0,
+        "reuse": 2.0,
+        "resize_waits": 0.0
+      }
+    },
+    {
+      "phase": "fsr3-new-B",
+      "provider": "fsr3",
+      "cache": 1,
+      "startUTC": "2026-10-16T12:17:25.1384388Z",
+      "startLine": 1124,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:17:50.1724095Z",
+      "endLine": 1232,
+      "samples": [
+        {
+          "fps": 133.7,
+          "worst_ms": 10.2,
+          "compiles": 0,
+          "draws": 1443,
+          "renderer_tick_wait_pct": 18.8
+        },
+        {
+          "fps": 133.7,
+          "worst_ms": 10.3,
+          "compiles": 0,
+          "draws": 1454,
+          "renderer_tick_wait_pct": 18.8
+        },
+        {
+          "fps": 132.1,
+          "worst_ms": 11.0,
+          "compiles": 0,
+          "draws": 1456,
+          "renderer_tick_wait_pct": 15.0
+        },
+        {
+          "fps": 133.9,
+          "worst_ms": 10.1,
+          "compiles": 0,
+          "draws": 1455,
+          "renderer_tick_wait_pct": 14.9
+        },
+        {
+          "fps": 131.4,
+          "worst_ms": 11.6,
+          "compiles": 0,
+          "draws": 1481,
+          "renderer_tick_wait_pct": 11.4
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 16435,
+          "reuse": 27302,
+          "resize_waits": 16432,
+          "frame": 23700
+        },
+        {
+          "allocations": 16435,
+          "reuse": 27902,
+          "resize_waits": 16432,
+          "frame": 24000
+        },
+        {
+          "allocations": 16435,
+          "reuse": 28502,
+          "resize_waits": 16432,
+          "frame": 24300
+        },
+        {
+          "allocations": 16435,
+          "reuse": 29102,
+          "resize_waits": 16432,
+          "frame": 24600
+        },
+        {
+          "allocations": 16435,
+          "reuse": 29702,
+          "resize_waits": 16432,
+          "frame": 24900
+        },
+        {
+          "allocations": 16435,
+          "reuse": 30302,
+          "resize_waits": 16432,
+          "frame": 25200
+        },
+        {
+          "allocations": 16435,
+          "reuse": 30902,
+          "resize_waits": 16432,
+          "frame": 25500
+        },
+        {
+          "allocations": 16435,
+          "reuse": 31502,
+          "resize_waits": 16432,
+          "frame": 25800
+        },
+        {
+          "allocations": 16435,
+          "reuse": 32102,
+          "resize_waits": 16432,
+          "frame": 26100
+        },
+        {
+          "allocations": 16435,
+          "reuse": 32702,
+          "resize_waits": 16432,
+          "frame": 26400
+        },
+        {
+          "allocations": 16435,
+          "reuse": 33302,
+          "resize_waits": 16432,
+          "frame": 26700
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 132.96,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 0.0,
+        "reuse": 2.0,
+        "resize_waits": 0.0
+      }
+    },
+    {
+      "phase": "fsr3-old-B",
+      "provider": "fsr3",
+      "cache": 0,
+      "startUTC": "2026-10-16T12:18:00.2004906Z",
+      "startLine": 1261,
+      "warmup": 10,
+      "measure": 25,
+      "endUTC": "2026-10-16T12:18:25.2134707Z",
+      "endLine": 1335,
+      "samples": [
+        {
+          "fps": 67.7,
+          "worst_ms": 17.5,
+          "compiles": 0,
+          "draws": 1422,
+          "renderer_tick_wait_pct": 62.6
+        },
+        {
+          "fps": 67.4,
+          "worst_ms": 17.9,
+          "compiles": 0,
+          "draws": 1455,
+          "renderer_tick_wait_pct": 62.4
+        },
+        {
+          "fps": 66.9,
+          "worst_ms": 17.5,
+          "compiles": 0,
+          "draws": 1491,
+          "renderer_tick_wait_pct": 62.1
+        },
+        {
+          "fps": 67.3,
+          "worst_ms": 17.6,
+          "compiles": 0,
+          "draws": 1457,
+          "renderer_tick_wait_pct": 62.6
+        },
+        {
+          "fps": 67.0,
+          "worst_ms": 18.9,
+          "compiles": 0,
+          "draws": 1453,
+          "renderer_tick_wait_pct": 62.5
+        }
+      ],
+      "counters": [
+        {
+          "allocations": 18219,
+          "reuse": 33918,
+          "resize_waits": 18216,
+          "frame": 27900
+        },
+        {
+          "allocations": 18819,
+          "reuse": 33918,
+          "resize_waits": 18816,
+          "frame": 28200
+        },
+        {
+          "allocations": 19419,
+          "reuse": 33918,
+          "resize_waits": 19416,
+          "frame": 28500
+        },
+        {
+          "allocations": 20019,
+          "reuse": 33918,
+          "resize_waits": 20016,
+          "frame": 28800
+        },
+        {
+          "allocations": 20619,
+          "reuse": 33918,
+          "resize_waits": 20616,
+          "frame": 29100
+        }
+      ],
+      "mode_confirmed": true,
+      "mean_fps": 67.26,
+      "compiles": 0,
+      "per_frame": {
+        "allocations": 2.0,
+        "reuse": 0.0,
+        "resize_waits": 2.0
+      }
+    }
+  ],
+  "groups": {
+    "dx12-old": {
+      "mean_fps": 58.769999999999996,
+      "phase_means": [
+        58.78,
+        58.76
+      ],
+      "report_count": 10,
+      "compiles": 0,
+      "fps_report_range": [
+        58.5,
+        59.0
+      ],
+      "draws_range": [
+        1434,
+        1491
+      ],
+      "tick_wait_pct": 65.31
+    },
+    "dx12-new": {
+      "mean_fps": 108.84,
+      "phase_means": [
+        108.92,
+        108.76
+      ],
+      "report_count": 10,
+      "compiles": 0,
+      "fps_report_range": [
+        108.5,
+        109.1
+      ],
+      "draws_range": [
+        1432,
+        1485
+      ],
+      "tick_wait_pct": 32.620000000000005
+    },
+    "fsr3-old": {
+      "mean_fps": 67.29,
+      "phase_means": [
+        67.32000000000001,
+        67.26
+      ],
+      "report_count": 10,
+      "compiles": 0,
+      "fps_report_range": [
+        66.9,
+        67.7
+      ],
+      "draws_range": [
+        1422,
+        1491
+      ],
+      "tick_wait_pct": 62.410000000000004
+    },
+    "fsr3-new": {
+      "mean_fps": 133.22,
+      "phase_means": [
+        133.48000000000002,
+        132.96
+      ],
+      "report_count": 10,
+      "compiles": 0,
+      "fps_report_range": [
+        131.4,
+        133.9
+      ],
+      "draws_range": [
+        1427,
+        1481
+      ],
+      "tick_wait_pct": 16.43
+    }
+  },
+  "runtime_errors": [],
+  "log_file": "measured-game.log",
+  "log_sha256": "9907f5a6683d9167294105d2dc13d615b3affef2cbb1abd541c0ba5476c86908",
+  "gains_percent": {
+    "dx12": 85.19652884124555,
+    "fsr3": 97.97889731015007
+  },
+  "scope": "Experimental 1.8.2 in-game build; the final source integration is validated separately. Mean FPS from five-second reports."
+}

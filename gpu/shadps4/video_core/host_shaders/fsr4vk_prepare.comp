@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 450
+layout(local_size_x=8,local_size_y=8) in;
+layout(binding=0) uniform sampler2D color_input;
+layout(binding=1) uniform sampler2D depth_input;
+layout(binding=2,rgba16f) uniform writeonly image2D color_output;
+layout(binding=3,r32f) uniform writeonly image2D depth_output;
+layout(push_constant) uniform Params { uvec2 size; uint encode_srgb; uint pad; } p;
+void main() {
+    ivec2 xy=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(uvec2(xy),p.size))) return;
+    vec4 c=texelFetch(color_input,xy,0);
+    if(p.encode_srgb!=0) c.rgb=mix(12.92*c.rgb,1.055*pow(max(c.rgb,vec3(0)),vec3(1.0/2.4))-0.055,greaterThan(c.rgb,vec3(0.0031308)));
+    imageStore(color_output,xy,c);
+    // Bloodborne uses forward depth. fsr4vk's captured model requires reverse depth.
+    imageStore(depth_output,xy,vec4(1.0-texelFetch(depth_input,xy,0).r));
+}

@@ -1,0 +1,485 @@
+{
+  "scene": "Hunter's Dream, stationary character and camera",
+  "gpu": "AMD Radeon RX 9070",
+  "driver": "AMD 26.9.2 LLPC",
+  "output": [
+    3840,
+    2160
+  ],
+  "render": [
+    2560,
+    1440
+  ],
+  "preset": "Quality",
+  "sharpness": 0.5,
+  "hdr": false,
+  "fullscreen": true,
+  "present_mode": "Immediate",
+  "fps_limit": 0,
+  "source_commit": "739e60dea2a7c8695ab14fb27932f8be6a02fb2e",
+  "method": "Original post shader / coalesced output shader / FSR 4 / DX12 / DX12 / FSR 4 / coalesced output shader / original post shader. One process; 15 seconds settling and 40 seconds measured per phase; means of five-second FPS reports.",
+  "log_sha256": "66c9ad63b03169b6ed144be1301dccb9d0f5c5b249f92dc544fca2786501eb10",
+  "date": "2026-10-16",
+  "scope": "Experimental test build before the 1.8.2 merge; one process, static Hunters Dream view; not a production-binary in-game rebenchmark.",
+  "phases": [
+    {
+      "phase": "original-A",
+      "backend": "original",
+      "startUTC": "2026-10-16T00:16:15.8608654Z",
+      "endUTC": "2026-10-16T00:16:55.8827508Z",
+      "mean_fps": 69.4875,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 69.4,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 69.7,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 69.7,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 69.6,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 69.2,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 69.4,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 69.5,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 69.4,
+          "compiles": 0,
+          "draws": 1128
+        }
+      ]
+    },
+    {
+      "phase": "post-A",
+      "backend": "post",
+      "startUTC": "2026-10-16T00:17:10.9332144Z",
+      "endUTC": "2026-10-16T00:17:50.9613630Z",
+      "mean_fps": 81.45,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 81.5,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 81.5,
+          "compiles": 0,
+          "draws": 1127
+        },
+        {
+          "fps": 81.4,
+          "compiles": 0,
+          "draws": 1133
+        },
+        {
+          "fps": 81.6,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 81.6,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 81.5,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 81.2,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 81.3,
+          "compiles": 0,
+          "draws": 1129
+        }
+      ]
+    },
+    {
+      "phase": "fsr4-A",
+      "backend": "fsr4",
+      "startUTC": "2026-10-16T00:18:05.9853476Z",
+      "endUTC": "2026-10-16T00:18:45.9988443Z",
+      "mean_fps": 85.9875,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 86.3,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 85.7,
+          "compiles": 0,
+          "draws": 1132
+        },
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 86.2,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 86.1,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 86.0,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 85.9,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 85.9,
+          "compiles": 0,
+          "draws": 1128
+        }
+      ]
+    },
+    {
+      "phase": "dx12-A",
+      "backend": "dx12",
+      "startUTC": "2026-10-16T00:19:01.0213183Z",
+      "endUTC": "2026-10-16T00:19:41.0506549Z",
+      "mean_fps": 93.9,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 93.6,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 94.2,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 94.2,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 94.0,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 93.8,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 93.6,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 93.8,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 94.0,
+          "compiles": 0,
+          "draws": 1128
+        }
+      ]
+    },
+    {
+      "phase": "dx12-B",
+      "backend": "dx12",
+      "startUTC": "2026-10-16T00:19:56.0873173Z",
+      "endUTC": "2026-10-16T00:20:36.1107165Z",
+      "mean_fps": 94.1,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 94.4,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 94.0,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 94.1,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 94.0,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 94.2,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 94.2,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 94.0,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 93.9,
+          "compiles": 0,
+          "draws": 1126
+        }
+      ]
+    },
+    {
+      "phase": "fsr4-B",
+      "backend": "fsr4",
+      "startUTC": "2026-10-16T00:20:51.1363847Z",
+      "endUTC": "2026-10-16T00:21:31.1513781Z",
+      "mean_fps": 85.725,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 85.6,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 85.8,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 85.5,
+          "compiles": 0,
+          "draws": 1132
+        },
+        {
+          "fps": 85.7,
+          "compiles": 0,
+          "draws": 1132
+        }
+      ]
+    },
+    {
+      "phase": "post-B",
+      "backend": "post",
+      "startUTC": "2026-10-16T00:21:46.1806572Z",
+      "endUTC": "2026-10-16T00:22:26.2114551Z",
+      "mean_fps": 80.7375,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 81.0,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 80.7,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 80.3,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 80.6,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 80.8,
+          "compiles": 0,
+          "draws": 1126
+        },
+        {
+          "fps": 80.8,
+          "compiles": 0,
+          "draws": 1127
+        },
+        {
+          "fps": 80.8,
+          "compiles": 0,
+          "draws": 1130
+        },
+        {
+          "fps": 80.9,
+          "compiles": 0,
+          "draws": 1128
+        }
+      ]
+    },
+    {
+      "phase": "original-B",
+      "backend": "original",
+      "startUTC": "2026-10-16T00:22:41.2371143Z",
+      "endUTC": "2026-10-16T00:23:21.2647583Z",
+      "mean_fps": 69.1,
+      "compiles": 0,
+      "samples": [
+        {
+          "fps": 69.0,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 69.0,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 69.0,
+          "compiles": 0,
+          "draws": 1131
+        },
+        {
+          "fps": 69.2,
+          "compiles": 0,
+          "draws": 1128
+        },
+        {
+          "fps": 68.9,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 69.2,
+          "compiles": 0,
+          "draws": 1129
+        },
+        {
+          "fps": 69.3,
+          "compiles": 0,
+          "draws": 1127
+        },
+        {
+          "fps": 69.2,
+          "compiles": 0,
+          "draws": 1129
+        }
+      ]
+    }
+  ],
+  "providers": {
+    "original": {
+      "mean_fps": 69.29375,
+      "phase_means": [
+        69.4875,
+        69.1
+      ],
+      "report_count": 16,
+      "compiles": 0,
+      "draws_range": [
+        1126,
+        1131
+      ],
+      "phase_difference_percent": 0.5592134932804227
+    },
+    "post": {
+      "mean_fps": 81.09375,
+      "phase_means": [
+        81.45,
+        80.7375
+      ],
+      "report_count": 16,
+      "compiles": 0,
+      "draws_range": [
+        1126,
+        1133
+      ],
+      "phase_difference_percent": 0.8786127167630128
+    },
+    "fsr4": {
+      "mean_fps": 85.85625,
+      "phase_means": [
+        85.9875,
+        85.725
+      ],
+      "report_count": 16,
+      "compiles": 0,
+      "draws_range": [
+        1126,
+        1132
+      ],
+      "phase_difference_percent": 0.30574361214239254
+    },
+    "dx12": {
+      "mean_fps": 94.0,
+      "phase_means": [
+        93.9,
+        94.1
+      ],
+      "report_count": 16,
+      "compiles": 0,
+      "draws_range": [
+        1126,
+        1131
+      ],
+      "phase_difference_percent": 0.2127659574467964
+    }
+  },
+  "improvement_percent": 17.02895282763597
+}

@@ -121,6 +121,8 @@ add_host_shader(post_process.frag post_process_frag)
 add_host_shader(camera_motion.comp camera_motion_comp)
 add_host_shader(upscale_merge.comp upscale_merge_comp)
 add_host_shader(upscale_reactive.comp upscale_reactive_comp)
+add_host_shader(fsr4vk_prepare.comp fsr4vk_prepare_comp)
+add_host_shader(test_fsr411_consume.comp test_fsr411_consume_comp)
 add_host_shader(taa.comp taa_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
@@ -244,10 +246,14 @@ target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic
 if (WIN32)
     # Guest code is entered with the System V ABI; NOMINMAX/WIN32_LEAN_AND_MEAN keep
     # <windows.h> out of the way of std::min/max and the Vulkan/SDL headers.
-    target_compile_definitions(bbgpu PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(bbgpu PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN VK_USE_PLATFORM_WIN32_KHR)
+    target_sources(bbgpu PRIVATE fsr411_dx12/native_fsr411.cpp)
+    # AMD's runtime loader checks MSBuild's _WINDOWS macro, not MinGW's _WIN32.
+    set_source_files_properties(fsr411_dx12/native_fsr411.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
+    target_include_directories(bbgpu PRIVATE fsr411_dx12 fsr411_dx12/sdk/api/include fsr411_dx12/sdk/upscalers/include)
     target_compile_options(bbgpu PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/shim/bb_win_compat.h)
     target_include_directories(bbgpu PRIVATE third_party/xbyak)
-    target_link_libraries(bbgpu PUBLIC Vulkan::Vulkan ws2_32 bcrypt ntdll synchronization winmm)
+    target_link_libraries(bbgpu PUBLIC Vulkan::Vulkan ws2_32 bcrypt ntdll synchronization winmm d3d12 dxgi dxguid)
 else()
     target_link_libraries(bbgpu PUBLIC PkgConfig::X11)
 endif()
@@ -275,6 +281,15 @@ if (WIN32)
     endif()
     target_include_directories(bb-probe PRIVATE .. ../src)
     target_link_libraries(bb-probe PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+    add_executable(fsr411-compare EXCLUDE_FROM_ALL ../tests/test_fsr411_compare.cpp ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(fsr411-compare PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(fsr411-compare PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+    target_include_directories(fsr411-compare PRIVATE ${SHADER_INCLUDE})
+    add_dependencies(fsr411-compare host_shaders)
+    add_executable(object-motion-cache-test EXCLUDE_FROM_ALL ../tests/test_object_motion_cache.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(object-motion-cache-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(object-motion-cache-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     # The PS4 range (64 GiB - 1 TiB) must stay free: no high-entropy ASLR for heaps and stacks.
     # The guest main thread runs on the process stack: 16 MiB, committed (no stack probes).
     target_link_options(bb-probe PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
@@ -291,9 +306,21 @@ add_executable(command-buffer-test EXCLUDE_FROM_ALL ../tests/test_command_buffer
 target_compile_options(command-buffer-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(command-buffer-test PRIVATE ..)
 
+add_executable(fsr4vk-post-test EXCLUDE_FROM_ALL ../tests/test_fsr4vk_post.cpp
+    shadps4/video_core/renderer_vulkan/fsr4vk_post.cpp)
+target_include_directories(fsr4vk-post-test PRIVATE shadps4)
+target_compile_options(fsr4vk-post-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_link_libraries(fsr4vk-post-test PRIVATE PkgConfig::XXHASH)
+
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
+if (NOT WIN32)
+    add_executable(object-motion-cache-test EXCLUDE_FROM_ALL ../tests/test_object_motion_cache.cpp
+        ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(object-motion-cache-test PRIVATE .. shim shadps4 third_party/gcn/include)
+    target_link_libraries(object-motion-cache-test PRIVATE bbgpu)
+endif()
 add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
 target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
 target_link_libraries(motion-shader-test PRIVATE bbgpu)
@@ -305,7 +332,9 @@ add_executable(scene-resolution-test EXCLUDE_FROM_ALL ../tests/test_scene_resolu
 target_include_directories(scene-resolution-test PRIVATE shim shadps4 third_party/gcn/include)
 # The test's Vulkan-Hpp inline methods have a different set of platform extensions
 # from vk_platform.cpp. Keep them local and use an explicit dispatcher in the test.
-target_compile_options(scene-resolution-test PRIVATE -UNDEBUG -fPIC)
+# Match bbgpu's Vulkan-Hpp dispatcher layout; the test re-enables its own
+# assertions after including the renderer headers.
+target_compile_options(scene-resolution-test PRIVATE -fPIC)
 set_source_files_properties(../tests/test_scene_resolution.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(scene-resolution-test PRIVATE bbgpu)

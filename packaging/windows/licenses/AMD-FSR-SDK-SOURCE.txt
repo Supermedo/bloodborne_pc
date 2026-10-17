@@ -1,0 +1,18 @@
+AMD FSR SDK v2.3.0: original AMD FSR 4.1.1.2740 DX12 upscaler runtime
+
+Release:
+https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/v2.3.0
+Downloaded archive:
+https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/v2.3.0/FidelityFX-Samples-v2.3.0-prebuilt.zip
+Archive SHA-256:
+f90890b9323bb2f4f2404ac4cdc9395e8495ecdac6f7aa0bcdf1ad1848422273
+Archive member:
+Samples/Upscalers/FidelityFX_FSR/dx12/x64/Release/amd_fidelityfx_upscaler_dx12.dll
+DLL SHA-256:
+d0dcccc74a43c44ba435b7a369b456e0970d8a4464e4bd683119b374f2c9fb46
+
+The DLL is unmodified and dynamically loaded beside bb-probe.exe.
+Its binary redistribution terms are reproduced in AMD-FSR-SDK-LICENSE.md,
+with third-party notices in AMD-FSR-SDK-NOTICES.md. The API headers in the
+source tree carry AMD's MIT notice; the runtime is not covered by that notice.
+No AMD runtime binary or game data is committed to this repository.

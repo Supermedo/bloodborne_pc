@@ -683,6 +683,13 @@ public:
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish();
 
+    // Applied to the next submission, before it can consume external GPU output.
+    void WaitExternal(vk::Semaphore semaphore, u64 value) {
+        ASSERT(!pending_external_wait);
+        pending_external_wait = semaphore;
+        pending_external_value = value;
+    }
+
     /// bbport: waits for the work submitted so far but leaves the command buffer being
     /// recorded open, so a CommandBuffer() the caller holds stays valid (Finish() submits it:
     /// recording into a submitted buffer crashes AMD's driver).
@@ -899,6 +906,8 @@ private:
     DynamicState dynamic_state;
     SubmitFunc on_submit{};
     vk::CommandBuffer current_cmdbuf;
+    vk::Semaphore pending_external_wait{};
+    u64 pending_external_value{};
     std::condition_variable_any event_cv;
     struct PendingOp {
         Common::UniqueFunction<void> callback;

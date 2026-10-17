@@ -1213,6 +1213,8 @@ WINDOWS_LANGUAGES = {0x19: 'ru', 0x01: 'ar', 0x0a: 'es', 0x16: 'pt', 0x0c: 'fr',
                      0x15: 'pl', 0x1f: 'tr', 0x04: 'zh', 0x11: 'ja', 0x12: 'ko'}
 
 from bbport_lang_more import MORE, MORE_KEYS  # noqa: E402 (texts added later, Russian included)
+from bbport_lang_fsr411 import TRANSLATIONS as FSR411_TRANSLATIONS  # noqa: E402
+from bbport_lang_motion_cache import TRANSLATIONS as MOTION_CACHE_TRANSLATIONS  # noqa: E402
 
 EXTRA_TRANSLATIONS = {
     'pt': {
@@ -1238,4 +1240,6 @@ def table(language):
         _tables[language] = {**(dict(zip(KEYS, texts)) if texts else {}),
                              **(dict(zip(MORE_KEYS, more)) if more else {}),
                              **EXTRA_TRANSLATIONS.get(language, {})}
+        _tables[language].update(FSR411_TRANSLATIONS.get(language, {}))
+        _tables[language].update(MOTION_CACHE_TRANSLATIONS.get(language, {}))
     return _tables[language]

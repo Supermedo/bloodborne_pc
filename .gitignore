@@ -29,3 +29,6 @@ patches.json
 # IDE/session-local
 .claude/
 .vscode/
+
+# Optional fsr4vk provider downloaded by the Windows launcher
+/fsr4vk/

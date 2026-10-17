@@ -90,6 +90,16 @@ private:
     u32 image_width = 0, image_height = 0;
     bool written = false; ///< this frame's vectors are in the image
     vk::ImageLayout image_layout = vk::ImageLayout::eUndefined;
+    // Keep alternate render-target sizes resident; at most four images including the active one.
+    struct CachedImage {
+        VideoCore::UniqueImage image;
+        vk::UniqueImageView view;
+        u32 width{}, height{};
+        vk::ImageLayout layout = vk::ImageLayout::eUndefined;
+    };
+    std::array<CachedImage, 3> cached_images;
+    u32 eviction_cursor{};
+    bool cache_enabled = false; ///< opt-in, read once from BB_OBJECT_MOTION_CACHE
 };
 
 } // namespace Vulkan

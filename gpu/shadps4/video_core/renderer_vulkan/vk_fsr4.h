@@ -29,6 +29,8 @@ public:
         vk::Image image;
         vk::ImageView view;
         u32 width, height;
+        vk::Format format{vk::Format::eUndefined};
+        vk::ImageAspectFlags aspect{vk::ImageAspectFlagBits::eColor};
     };
     struct Frame {
         vk::CommandBuffer cmdbuf;
@@ -39,11 +41,15 @@ public:
         float frame_ms, near_plane, far_plane, vertical_fov;
         float sharpness;
         bool sharpen, reset, auto_exposure;
+        bool hdr{true};
     };
 
-    /// Records FSR 4 into `frame.cmdbuf`; the output stays in General. False when FSR 4
+    /// Records FSR 4 into `frame.cmdbuf`; output stays in General and may be replaced.
+    /// Consume the returned image/view, then ReleaseOutput before recording another frame.
+    /// False when FSR 4
     /// cannot run (Problem() says why; missing assets or device features are permanent).
-    bool Record(const Frame& frame);
+    bool Record(Frame& frame);
+    void ReleaseOutput(vk::CommandBuffer command);
 
     /// Why the last Record failed, or null.
     [[nodiscard]] const char* Problem() const noexcept;

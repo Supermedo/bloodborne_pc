@@ -16,6 +16,8 @@
 #include "video_core/renderer_vulkan/fsr411/fsr411.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_fsr411_native.h"
+#include "video_core/renderer_vulkan/vk_fsr4vk.h"
 
 namespace Vulkan {
 
@@ -71,6 +73,11 @@ struct Fsr4Upscaler::Impl {
     std::unique_ptr<Fsr411::Upscaler> fsr411;
     std::deque<u64> fsr411_ticks; ///< scheduler ticks of its recent frames (constant ring)
     std::string fsr411_described;
+#ifdef _WIN32
+    std::unique_ptr<Fsr411Native> native411;
+    std::unique_ptr<Fsr4Vk> fsr4vk;
+    bool native411_described{};
+#endif
 
     Impl(const Instance& instance_, Scheduler& scheduler_)
         : instance{instance_}, scheduler{scheduler_} {}
@@ -231,7 +238,44 @@ struct Fsr4Upscaler::Impl {
         return ffxFsr4VkSetExternalImageState(&backend, &state);
     }
 
-    bool Record411(const Frame& f) {
+    bool Record411(Frame& f) {
+#ifdef _WIN32
+        const char* requested = std::getenv("BB_FSR411_BACKEND");
+        const bool use_native = requested && std::string_view{requested} == "dx12";
+        if (use_native) {
+            // Both Windows providers use the existing host RCAS pass.
+            f.sharpen = false;
+            if (!instance.IsFsr411AsyncSupported()) {
+                Fail("AMD DX12 FSR 4.1.1 needs its DLL and shared GPU-fence support; select Vulkan (fsr4vk) in the launcher", true);
+                return false;
+            }
+            if (!native411) native411 = std::make_unique<Fsr411Native>(instance, scheduler);
+            if (!native411->Record(f, true)) {
+                Fail(native411->Error(), true);
+                return false;
+            }
+            if (!native411_described) {
+                std::printf("Upscaler: FSR 4.1.1 through optimized AMD DX12 GPU fences, output %ux%u\n", f.output.width, f.output.height);
+                native411_described = true;
+            }
+            problem.clear();
+            return true;
+        }
+        if (instance.IsFsr4VkSupported()) {
+            f.sharpen = false;
+            if (!fsr4vk) fsr4vk = std::make_unique<Fsr4Vk>(instance, scheduler);
+            if (!fsr4vk->Record(f)) {
+                Fail(fsr4vk->Problem() ? fsr4vk->Problem() : "fsr4vk failed", fsr4vk->Fatal());
+                return false;
+            }
+            if (const auto description = fsr4vk->Describe(); description != fsr411_described) {
+                fsr411_described = description;
+                std::printf("Upscaler: FSR 4.1.1 through fsr4vk, %s\n", description.c_str());
+            }
+            problem.clear();
+            return true;
+        }
+#endif
         if (!instance.IsFsr411Supported()) {
             Fail("FSR 4.1.1 needs INT8 dot products and VK_VALVE_shader_mixed_float_dot_product", true);
             return false;
@@ -275,7 +319,7 @@ struct Fsr4Upscaler::Impl {
         return true;
     }
 
-    bool Record(const Frame& f) {
+    bool Record(Frame& f) {
         if (BbSettings::Get().upscaler == BbSettings::UpscalerFsr411) {
             return Record411(f);
         }
@@ -383,8 +427,15 @@ Fsr4Upscaler::Fsr4Upscaler(const Instance& instance, Scheduler& scheduler)
 
 Fsr4Upscaler::~Fsr4Upscaler() = default;
 
-bool Fsr4Upscaler::Record(const Frame& frame) {
+bool Fsr4Upscaler::Record(Frame& frame) {
     return impl->Record(frame);
+}
+
+void Fsr4Upscaler::ReleaseOutput(vk::CommandBuffer command) {
+#ifdef _WIN32
+    if (impl->native411)
+        impl->native411->ReleaseOutput(command);
+#endif
 }
 
 const char* Fsr4Upscaler::Problem() const noexcept {
