@@ -1,15 +1,16 @@
-// SPDX-FileCopyrightText: Copyright 2026 IFreemz (shadps4_dlss bridge), bbport contributors
-// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: Copyright 2026 IFreemz (shadps4_dlss bridge), bbport contributors, bbhost contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-or-later
 //
 // bbport_dlss.dll: the only part of the project that uses the NVIDIA DLSS (NGX) SDK. Built with
 // MSVC (the SDK's libraries are MSVC only); the port loads it at run time.
-// Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR (dlss_bridge).
+// Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR (dlss_bridge) and bbhost ngx_bridge.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <limits>
 #include <string>
 #include <vector>
@@ -26,6 +27,81 @@ namespace {
 constexpr char ProjectId[] = "42359704-c9f3-4806-9fb5-d469000fdb8a";
 constexpr char EngineVersion[] = "bbport-windows";
 
+struct NgxTransferSync {
+    PFN_vkGetInstanceProcAddr gipa = nullptr;
+    PFN_vkGetDeviceProcAddr gdpa = nullptr;
+    PFN_vkCmdPipelineBarrier barrier = nullptr;
+    PFN_vkCmdFillBuffer fill = nullptr;
+    VkDevice device = VK_NULL_HANDLE;
+    bool enabled = true;
+} g_transfer_sync;
+
+thread_local VkCommandBuffer g_transfer_cmd = VK_NULL_HANDLE;
+
+struct TransferScope {
+    VkCommandBuffer previous = g_transfer_cmd;
+    explicit TransferScope(VkCommandBuffer cmd) {
+        g_transfer_cmd = g_transfer_sync.enabled ? cmd : VK_NULL_HANDLE;
+    }
+    ~TransferScope() { g_transfer_cmd = previous; }
+};
+
+void VKAPI_CALL transfer_barrier(VkCommandBuffer cmd, VkPipelineStageFlags src,
+                                 VkPipelineStageFlags dst, VkDependencyFlags flags,
+                                 uint32_t memory_count, const VkMemoryBarrier* memory,
+                                 uint32_t buffer_count, const VkBufferMemoryBarrier* buffers,
+                                 uint32_t image_count, const VkImageMemoryBarrier* images) {
+    if (cmd == g_transfer_cmd && image_count) {
+        std::vector<VkImageMemoryBarrier> complete(images, images + image_count);
+        for (auto& image : complete) {
+            image.srcAccessMask |= VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+            image.dstAccessMask |= VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+        }
+        g_transfer_sync.barrier(cmd, src | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                dst | VK_PIPELINE_STAGE_TRANSFER_BIT, flags, memory_count, memory,
+                                buffer_count, buffers, image_count, complete.data());
+    } else {
+        g_transfer_sync.barrier(cmd, src, dst, flags, memory_count, memory,
+                                buffer_count, buffers, image_count, images);
+    }
+}
+
+void VKAPI_CALL transfer_fill(VkCommandBuffer cmd, VkBuffer buffer,
+                              VkDeviceSize offset, VkDeviceSize size, uint32_t data) {
+    if (cmd == g_transfer_cmd) {
+        VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        b.srcAccessMask = b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.buffer = buffer;
+        b.offset = offset;
+        b.size = size;
+        g_transfer_sync.barrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &b, 0, nullptr);
+    }
+    g_transfer_sync.fill(cmd, buffer, offset, size, data);
+}
+
+PFN_vkVoidFunction wrap_transfer_proc(const char* name, PFN_vkVoidFunction original) {
+    if (!original || !name || !g_transfer_sync.enabled) return original;
+    if (!std::strcmp(name, "vkCmdPipelineBarrier"))
+        return reinterpret_cast<PFN_vkVoidFunction>(transfer_barrier);
+    if (!std::strcmp(name, "vkCmdFillBuffer"))
+        return reinterpret_cast<PFN_vkVoidFunction>(transfer_fill);
+    return original;
+}
+
+PFN_vkVoidFunction VKAPI_CALL transfer_gdpa(VkDevice device, const char* name) {
+    auto original = g_transfer_sync.gdpa(device, name);
+    return device == g_transfer_sync.device ? wrap_transfer_proc(name, original) : original;
+}
+
+PFN_vkVoidFunction VKAPI_CALL transfer_gipa(VkInstance instance, const char* name) {
+    auto original = g_transfer_sync.gipa(instance, name);
+    if (original && name && !std::strcmp(name, "vkGetDeviceProcAddr"))
+        return reinterpret_cast<PFN_vkVoidFunction>(transfer_gdpa);
+    return wrap_transfer_proc(name, original);
+}
+
 struct State {
     BbDlssLogFn log{};
     std::wstring dll_directory;
@@ -33,22 +109,16 @@ struct State {
     const wchar_t* dll_path{};
     NVSDK_NGX_FeatureCommonInfo common{};
     NVSDK_NGX_FeatureDiscoveryInfo discovery{};
-    NVSDK_NGX_FeatureDiscoveryInfo discovery_fg{}; // Frame Generation
     NVSDK_NGX_Parameter* capabilities{};
     NVSDK_NGX_Parameter* parameters{};
     NVSDK_NGX_Handle* feature{};
     BbDlssFeature feature_desc{};
-    // Frame Generation: its own parameter map (NVIDIA's advice with two features).
-    NVSDK_NGX_Parameter* fg_parameters{};
-    NVSDK_NGX_Handle* fg_feature{};
-    BbDlssgFeature fg_desc{};
-    bool fg_device_supported{};
-    int32_t fg_max_count{};
-    // Extensions of both features, without duplicates.
-    std::vector<VkExtensionProperties> instance_extensions, device_extensions;
     VkDevice device{};
     bool configured{};
     bool initialized{};
+    bool fg_available{};
+    NVSDK_NGX_Parameter* fg_parameters{};
+    NVSDK_NGX_Handle* fg_feature{};
 } state;
 
 template <typename... Args>
@@ -86,42 +156,18 @@ int32_t Configure(const wchar_t* dll_directory, const wchar_t* data_directory, B
                                                 EngineVersion};
     state.discovery.ApplicationDataPath = state.data_directory.c_str();
     state.discovery.FeatureInfo = &state.common;
-    state.discovery_fg = state.discovery;
-    state.discovery_fg.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
     state.configured = true;
     return 1;
 }
 
-void Merge(std::vector<VkExtensionProperties>& into, const VkExtensionProperties* add,
-           uint32_t count) {
-    for (uint32_t i = 0; i < count; ++i) {
-        const auto same = std::find_if(into.begin(), into.end(), [&](const auto& have) {
-            return std::strcmp(have.extensionName, add[i].extensionName) == 0;
-        });
-        if (same == into.end()) {
-            into.push_back(add[i]);
-        } else {
-            same->specVersion = std::max(same->specVersion, add[i].specVersion);
-        }
-    }
-}
-
 int32_t InstanceExtensions(uint32_t* count, const VkExtensionProperties** extensions) {
     VkExtensionProperties* required{};
-    uint32_t required_count{};
     if (!state.configured ||
         !Check("Instance extension query",
-               NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
-                   &state.discovery, &required_count, &required)))
+               NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(&state.discovery, count,
+                                                                       &required)))
         return 0;
-    state.instance_extensions.clear();
-    Merge(state.instance_extensions, required, required_count);
-    // Frame Generation's own needs; without them only DLSS is offered.
-    if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
-            &state.discovery_fg, &required_count, &required)))
-        Merge(state.instance_extensions, required, required_count);
-    *count = uint32_t(state.instance_extensions.size());
-    *extensions = state.instance_extensions.data();
+    *extensions = required;
     return 1;
 }
 
@@ -140,29 +186,11 @@ int32_t DeviceExtensions(VkInstance instance, VkPhysicalDevice physical, uint32_
         return 0;
     }
     VkExtensionProperties* required{};
-    uint32_t required_count{};
     if (!Check("Device extension query",
                NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
-                   instance, physical, &state.discovery, &required_count, &required)))
+                   instance, physical, &state.discovery, count, &required)))
         return 0;
-    state.device_extensions.clear();
-    Merge(state.device_extensions, required, required_count);
-    NVSDK_NGX_FeatureRequirement fg_support{};
-    state.fg_device_supported =
-        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureRequirements(instance, physical,
-                                                                  &state.discovery_fg,
-                                                                  &fg_support)) &&
-        fg_support.FeatureSupported == NVSDK_NGX_FeatureSupportResult_Supported &&
-        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
-            instance, physical, &state.discovery_fg, &required_count, &required));
-    if (state.fg_device_supported) {
-        Merge(state.device_extensions, required, required_count);
-    } else {
-        Log(0, "Frame Generation is not supported on this GPU or driver (code 0x%x)",
-            static_cast<unsigned>(fg_support.FeatureSupported));
-    }
-    *count = uint32_t(state.device_extensions.size());
-    *extensions = state.device_extensions.data();
+    *extensions = required;
     return 1;
 }
 
@@ -171,11 +199,21 @@ int32_t Initialize(VkInstance instance, VkPhysicalDevice physical, VkDevice devi
                    PFN_vkGetDeviceProcAddr get_device_proc) {
     if (!state.configured || state.initialized)
         return 0;
+
+    g_transfer_sync.gipa = get_instance_proc;
+    g_transfer_sync.gdpa = get_device_proc;
+    g_transfer_sync.device = device;
+    g_transfer_sync.barrier = reinterpret_cast<PFN_vkCmdPipelineBarrier>(get_device_proc(device, "vkCmdPipelineBarrier"));
+    g_transfer_sync.fill = reinterpret_cast<PFN_vkCmdFillBuffer>(get_device_proc(device, "vkCmdFillBuffer"));
+    const char* sync_override = std::getenv("BBPORT_NGX_TRANSFER_SYNC");
+    g_transfer_sync.enabled = g_transfer_sync.barrier && g_transfer_sync.fill &&
+        !(sync_override && !std::strcmp(sync_override, "0"));
+
     if (!Check("NGX initialization",
                NVSDK_NGX_VULKAN_Init_with_ProjectID(
                    ProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, EngineVersion,
-                   state.data_directory.c_str(), instance, physical, device, get_instance_proc,
-                   get_device_proc, &state.common)))
+                   state.data_directory.c_str(), instance, physical, device,
+                   transfer_gipa, transfer_gdpa, &state.common)))
         return 0;
     state.initialized = true;
     state.device = device;
@@ -194,22 +232,12 @@ int32_t Initialize(VkInstance instance, VkPhysicalDevice physical, VkDevice devi
         Log(1, "DLSS Super Resolution is not available on this system");
         return 0;
     }
-    int fg_available{}, fg_needs_driver{};
-    unsigned fg_max{};
-    NVSDK_NGX_Parameter_GetI(state.capabilities, NVSDK_NGX_Parameter_FrameGeneration_Available,
-                             &fg_available);
-    NVSDK_NGX_Parameter_GetI(state.capabilities,
-                             NVSDK_NGX_Parameter_FrameGeneration_NeedsUpdatedDriver,
-                             &fg_needs_driver);
-    if (NVSDK_NGX_FAILED(NVSDK_NGX_Parameter_GetUI(
-            state.capabilities, NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax, &fg_max)))
-        fg_max = 1;
-    if (state.fg_device_supported && fg_available) {
-        state.fg_max_count = static_cast<int32_t>(std::clamp(fg_max, 1u, 3u));
-        Log(0, "Frame Generation available (up to %dx)", state.fg_max_count + 1);
-    } else if (fg_needs_driver) {
-        Log(1, "Frame Generation needs a newer NVIDIA driver");
-    }
+
+    int fg_avail = 0;
+    NVSDK_NGX_Parameter_GetI(state.capabilities, NVSDK_NGX_Parameter_FrameGeneration_Available, &fg_avail);
+    state.fg_available = (fg_avail != 0);
+    Log(0, "DLSS ready (Frame Generation %s)", state.fg_available ? "available" : "unavailable");
+
     return 1;
 }
 
@@ -266,7 +294,13 @@ int32_t CreateFeature(VkCommandBuffer command, const BbDlssFeature* desc) {
 }
 
 NVSDK_NGX_Resource_VK Wrap(const BbDlssImage& image, bool writable) {
-    return NVSDK_NGX_Create_ImageView_Resource_VK(image.view, image.image, image.range,
+    VkImageSubresourceRange range = image.range;
+    if (!range.aspectMask) {
+        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+    if (!range.levelCount) range.levelCount = 1;
+    if (!range.layerCount) range.layerCount = 1;
+    return NVSDK_NGX_Create_ImageView_Resource_VK(image.view, image.image, range,
                                                   image.format, image.width, image.height,
                                                   writable);
 }
@@ -298,11 +332,38 @@ int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
                : 0;
 }
 
-int32_t FrameGenMaxCount() {
-    return state.initialized ? state.fg_max_count : 0;
+// -----------------------------------------------------------------------------
+// Frame Generation (ABI 2)
+// -----------------------------------------------------------------------------
+
+int32_t FgAvailable() {
+    return (state.initialized && state.fg_available) ? 1 : 0;
 }
 
-void FrameGenRelease() {
+uint32_t FgMaxGenerated() {
+    if (!state.initialized || !state.fg_available || !state.capabilities)
+        return 0;
+    unsigned int maximum = 1;
+    NVSDK_NGX_Parameter_GetUI(state.capabilities, NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax, &maximum);
+    return std::max(1u, maximum);
+}
+
+int32_t FgExtensions(VkInstance instance, VkPhysicalDevice physical, uint32_t* count,
+                     const VkExtensionProperties** extensions) {
+    if (!state.configured)
+        return 0;
+    NVSDK_NGX_FeatureDiscoveryInfo discovery = state.discovery;
+    discovery.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
+    VkExtensionProperties* required = nullptr;
+    const auto r = physical
+        ? NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(instance, physical, &discovery, count, &required)
+        : NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(&discovery, count, &required);
+    if (NVSDK_NGX_FAILED(r)) return 0;
+    *extensions = required;
+    return 1;
+}
+
+void ReleaseFgFeature() {
     if (state.fg_feature) {
         NVSDK_NGX_VULKAN_ReleaseFeature(state.fg_feature);
         state.fg_feature = nullptr;
@@ -313,131 +374,95 @@ void FrameGenRelease() {
     }
 }
 
-int32_t FrameGenCreate(VkCommandBuffer command, const BbDlssgFeature* desc) {
-    if (!state.initialized || state.fg_max_count < 1 || !desc)
+int32_t CreateFgFeature(VkCommandBuffer command, uint32_t width, uint32_t height, VkFormat format) {
+    if (!state.initialized || !state.fg_available)
         return 0;
-    FrameGenRelease();
-    if (!Check("Frame Generation parameter allocation",
-               NVSDK_NGX_VULKAN_AllocateParameters(&state.fg_parameters)))
+    ReleaseFgFeature();
+    if (!Check("FG parameter allocation", NVSDK_NGX_VULKAN_AllocateParameters(&state.fg_parameters)))
         return 0;
-    // Depth and motion vectors are smaller than the backbuffer (the game's own size).
-    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_Width, desc->width);
-    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_Height, desc->height);
-    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_InternalWidth,
-                              desc->render_width);
-    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_InternalHeight,
-                              desc->render_height);
-    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_DynamicResolution, 0);
-    NVSDK_NGX_DLSSG_Create_Params settings{};
-    settings.Width = desc->width;
-    settings.Height = desc->height;
-    settings.NativeBackbufferFormat = static_cast<unsigned>(desc->format);
-    settings.RenderWidth = desc->render_width;
-    settings.RenderHeight = desc->render_height;
-    const auto result = NGX_VK_CREATE_DLSSG(command, 1, 1, &state.fg_feature,
-                                            state.fg_parameters, &settings);
-    if (!Check("Frame Generation feature creation", result) || !state.fg_feature) {
+    NVSDK_NGX_DLSSG_Create_Params params{};
+    params.Width = width;
+    params.Height = height;
+    params.NativeBackbufferFormat = format;
+    const auto r = NGX_VK_CREATE_DLSSG(command, 1, 1, &state.fg_feature, state.fg_parameters, &params);
+    if (!Check("FG feature creation", r) || !state.fg_feature) {
         state.fg_feature = nullptr;
         return 0;
     }
-    state.fg_desc = *desc;
-    Log(0, "Frame Generation %ux%u (depth and motion %ux%u)", desc->width, desc->height,
-        desc->render_width, desc->render_height);
+    Log(0, "DLSS FG feature created: %ux%u", width, height);
     return 1;
 }
 
-// Row-major, row vectors (D3D style: clip = view * m), depth 0 at the near plane.
-void Perspective(float (&m)[4][4], float fov, float aspect, float near_z, float far_z) {
-    std::memset(m, 0, sizeof(m));
-    const float y = 1.0f / std::tan(fov * 0.5f);
-    m[0][0] = y / aspect;
-    m[1][1] = y;
-    m[2][2] = far_z / (far_z - near_z);
-    m[2][3] = 1.0f;
-    m[3][2] = -near_z * far_z / (far_z - near_z);
-}
-
-void Inverse(float (&out)[4][4], const float (&m)[4][4]) {
-    // Of the perspective matrix above.
-    std::memset(out, 0, sizeof(out));
-    out[0][0] = 1.0f / m[0][0];
-    out[1][1] = 1.0f / m[1][1];
-    out[2][3] = 1.0f / m[3][2];
-    out[3][2] = 1.0f;
-    out[3][3] = -m[2][2] / m[3][2];
-}
-
-void Identity(float (&m)[4][4]) {
-    std::memset(m, 0, sizeof(m));
-    for (int i = 0; i < 4; ++i)
-        m[i][i] = 1.0f;
-}
-
-int32_t FrameGenEvaluate(VkCommandBuffer command, const BbDlssgEvaluate* evaluate) {
+int32_t EvaluateFg(VkCommandBuffer command, const BbDlssFgEvaluate* evaluate,
+                   uint32_t multi_frame_count, uint32_t multi_frame_index, uint64_t render_frame) {
     if (!state.fg_feature || !state.fg_parameters || !evaluate)
         return 0;
-    auto backbuffer = Wrap(evaluate->backbuffer, false);
+    if (!multi_frame_count || multi_frame_count > FgMaxGenerated() ||
+        !multi_frame_index || multi_frame_index > multi_frame_count)
+        return 0;
+
+    auto color = Wrap(evaluate->color, false);
     auto depth = Wrap(evaluate->depth, false);
     auto motion = Wrap(evaluate->motion, false);
     auto output = Wrap(evaluate->output, true);
-    NVSDK_NGX_VK_DLSSG_Eval_Params resources{};
-    resources.pBackbuffer = &backbuffer;
-    resources.pDepth = &depth;
-    resources.pMVecs = &motion;
-    resources.pOutputInterpFrame = &output;
-    NVSDK_NGX_Resource_VK hudless{};
-    if (evaluate->hudless.image != VK_NULL_HANDLE) {
-        hudless = Wrap(evaluate->hudless, false);
-        resources.pHudless = &hudless;
+    auto real = evaluate->real.image ? Wrap(evaluate->real, true) : NVSDK_NGX_Resource_VK{};
+    auto hudless = evaluate->hudless.image ? Wrap(evaluate->hudless, false) : NVSDK_NGX_Resource_VK{};
+    auto ui = evaluate->ui.image ? Wrap(evaluate->ui, false) : NVSDK_NGX_Resource_VK{};
+
+    NVSDK_NGX_Resource_VK disable{};
+    if (evaluate->disable_interpolation) {
+        disable = NVSDK_NGX_Create_Buffer_Resource_VK(evaluate->disable_interpolation, 4, true);
     }
-    NVSDK_NGX_DLSSG_Opt_Eval_Params options{};
-    options.multiFrameCount = evaluate->multi_frame_count;
-    options.multiFrameIndex = evaluate->multi_frame_index;
-    const float aspect = float(state.fg_desc.render_width) / float(state.fg_desc.render_height);
-    Identity(options.clipToLensClip);
-    if (evaluate->has_matrices) {
-        // The game's cameras: DLSS separates the camera's motion from the objects' with them
-        // (the vectors hold both). A still camera here contradicted the vectors on every
-        // camera turn and smeared the generated frames.
-        std::memcpy(options.cameraViewToClip, evaluate->view_to_clip,
-                    sizeof(options.cameraViewToClip));
-        std::memcpy(options.clipToPrevClip, evaluate->clip_to_prev_clip,
-                    sizeof(options.clipToPrevClip));
-        std::memcpy(options.prevClipToClip, evaluate->prev_clip_to_clip,
-                    sizeof(options.prevClipToClip));
-    } else {
-        // Unknown camera: a plausible projection that stood still.
-        Perspective(options.cameraViewToClip, evaluate->camera_fov, aspect,
-                    evaluate->camera_near, evaluate->camera_far);
-        Identity(options.clipToPrevClip);
-        Identity(options.prevClipToClip);
+
+    NVSDK_NGX_VK_DLSSG_Eval_Params images{};
+    images.pBackbuffer = &color;
+    images.pDepth = &depth;
+    images.pMVecs = &motion;
+    images.pOutputInterpFrame = &output;
+    images.pOutputRealFrame = evaluate->real.image ? &real : nullptr;
+    images.pOutputDisableInterpolation = evaluate->disable_interpolation ? &disable : nullptr;
+    images.pHudless = evaluate->hudless.image ? &hudless : nullptr;
+    images.pUI = evaluate->ui.image ? &ui : nullptr;
+
+    NVSDK_NGX_DLSSG_Opt_Eval_Params p{};
+    std::memcpy(p.cameraViewToClip, evaluate->camera.view_to_clip, 64);
+    std::memcpy(p.clipToCameraView, evaluate->camera.clip_to_view, 64);
+    std::memcpy(p.clipToPrevClip, evaluate->camera.clip_to_previous, 64);
+    std::memcpy(p.prevClipToClip, evaluate->camera.previous_to_clip, 64);
+    for (int i = 0; i < 4; ++i) p.clipToLensClip[i][i] = 1.0f;
+    std::memcpy(p.cameraPos, evaluate->camera.position, 12);
+    std::memcpy(p.cameraUp, evaluate->camera.up, 12);
+    std::memcpy(p.cameraRight, evaluate->camera.right, 12);
+    std::memcpy(p.cameraFwd, evaluate->camera.forward, 12);
+    p.jitterOffset[0] = evaluate->camera.jitter[0];
+    p.jitterOffset[1] = evaluate->camera.jitter[1];
+    p.mvecScale[0] = p.mvecScale[1] = 1.0f;
+    p.cameraNear = evaluate->camera.near_plane;
+    p.cameraFar = evaluate->camera.far_plane;
+    p.cameraFOV = evaluate->camera.vertical_fov;
+    const float projection_aspect = evaluate->camera.view_to_clip[5] / evaluate->camera.view_to_clip[0];
+    p.cameraAspectRatio = std::isfinite(projection_aspect) && projection_aspect > 0.0f
+        ? projection_aspect : float(evaluate->color.width) / std::max(1u,evaluate->color.height);
+    p.cameraMotionIncluded = true;
+    p.reset = evaluate->reset != 0;
+    p.depthInverted = false;
+    p.colorBuffersHDR = false;
+    p.motionVectorsInvalidValue = std::numeric_limits<float>::max();
+    p.multiFrameCount = multi_frame_count;
+    p.multiFrameIndex = multi_frame_index;
+
+    if (render_frame) {
+        NVSDK_NGX_Parameter_SetULL(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_BackbufferFrameID, render_frame);
     }
-    Inverse(options.clipToCameraView, options.cameraViewToClip);
-    options.jitterOffset[0] = evaluate->jitter_x;
-    options.jitterOffset[1] = evaluate->jitter_y;
-    options.mvecScale[0] = options.mvecScale[1] = 1.0f;
-    options.cameraUp[1] = 1.0f;
-    options.cameraRight[0] = 1.0f;
-    options.cameraFwd[2] = 1.0f;
-    options.cameraNear = evaluate->camera_near;
-    options.cameraFar = evaluate->camera_far;
-    options.cameraFOV = evaluate->camera_fov;
-    options.cameraAspectRatio = aspect;
-    options.depthInverted = evaluate->depth_inverted != 0;
-    options.cameraMotionIncluded = true;
-    // No vector is invalid (0, the zero-initialised value, would mark every still pixel).
-    options.motionVectorsInvalidValue = std::numeric_limits<float>::max();
-    options.reset = evaluate->reset != 0 && evaluate->multi_frame_index == 1;
-    return Check("Frame Generation evaluation",
-                 NGX_VK_EVALUATE_DLSSG(command, state.fg_feature, state.fg_parameters,
-                                       &resources, &options))
-               ? 1
-               : 0;
+
+    TransferScope transfer_scope(command);
+    return Check("FG evaluation", NGX_VK_EVALUATE_DLSSG(command, state.fg_feature, state.fg_parameters, &images, &p)) ? 1 : 0;
 }
 
 void Shutdown() {
-    FrameGenRelease();
+    ReleaseFgFeature();
     ReleaseFeature();
+    state.fg_available = false;
     if (state.capabilities) {
         NVSDK_NGX_VULKAN_DestroyParameters(state.capabilities);
         state.capabilities = nullptr;
@@ -447,12 +472,27 @@ void Shutdown() {
         state.initialized = false;
         state.device = VK_NULL_HANDLE;
     }
+    g_transfer_sync = {};
+    g_transfer_cmd = VK_NULL_HANDLE;
 }
 
-const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,        InstanceExtensions, DeviceExtensions,
-                    Initialize,             CreateFeature,    Evaluate,           ReleaseFeature,
-                    Shutdown,               FrameGenMaxCount, FrameGenCreate,     FrameGenEvaluate,
-                    FrameGenRelease};
+const BbDlssApi api{
+    BBPORT_DLSS_BRIDGE_ABI,
+    Configure,
+    InstanceExtensions,
+    DeviceExtensions,
+    Initialize,
+    CreateFeature,
+    Evaluate,
+    ReleaseFeature,
+    Shutdown,
+    FgAvailable,
+    FgMaxGenerated,
+    FgExtensions,
+    CreateFgFeature,
+    EvaluateFg,
+    ReleaseFgFeature,
+};
 
 } // namespace
 

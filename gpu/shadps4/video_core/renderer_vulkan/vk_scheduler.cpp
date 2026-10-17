@@ -20,6 +20,7 @@
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 #include "bbport_threads.h"
 
 namespace Vulkan {
@@ -376,7 +377,40 @@ void Scheduler::PopPendingOperations() {
     }
 }
 
+void Scheduler::SetSubmissionFrameId(u64 frame_id) {
+    // The guest can submit the next source frame's graphics work before the previous source's
+    // flip has been processed (no FIFO ordering is guaranteed across the submit and flip
+    // paths), so the buffer open here can still hold the previous source's unflushed commands.
+    // Submit them under the identity they were recorded with before adopting the new one;
+    // otherwise that work would be attributed to this frame. The caller
+    // (Rasterizer::SetSubmissionFrameId) has already drained the draw-recording thread, so
+    // submitting here cannot race a draw into a submitted buffer.
+    //
+    // Only flush when something was actually recorded into the current buffer. When the natural
+    // PrepareFrame boundary already flushed it, or a submission recorded nothing, an extra
+    // empty submission would overwrite the driver's latency window with tiny work and add
+    // markers for no reason. When the identity is unchanged (several submissions inside one
+    // source frame) there is nothing to split and the buffer keeps accumulating.
+    if (has_recorded_work && recording_id.RecordingId() != frame_id) {
+        Flush();
+    }
+    // Apply immediately: the very next allocation records under the accepted identity, not
+    // the stale one, and every later allocation in this submission reuses it because
+    // AllocateWorkerCommandBuffers no longer clears the captured value.
+    recording_id.BeginSubmission(frame_id);
+    Reflex::SetRecordingFrameId(recording_id.RecordingId());
+}
+
 void Scheduler::AllocateWorkerCommandBuffers() {
+    // bbport: while a top-level graphics submission owns the recording identity, every
+    // command buffer allocated for it keeps that captured identity. Only a scheduler that
+    // never captured one (presenter blits, compute, initialization) reads the live counter.
+    // The value is deliberately NOT cleared here: clearing it after the first allocation made
+    // later flushes inside the same submission fall back to the late-global counter.
+    recording_id.Allocate(Reflex::CurrentSimFrameId());
+    Reflex::SetRecordingFrameId(recording_id.RecordingId());
+    has_recorded_work = false;
+
     const vk::CommandBufferBeginInfo begin_info = {
         .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
     };
@@ -393,6 +427,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
         static const auto scope_loc =
             GPU_SCOPE_LOCATION("Guest Frame", MarkersPalette::GpuMarkerColor);
         new (profiler_scope) tracy::VkCtxScope{profiler_ctx, &scope_loc, current_cmdbuf, true};
+        has_recorded_work = true;
     }
 #endif
 }
@@ -433,6 +468,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         wait_stage_masks;
     wait_stage_masks.fill(vk::PipelineStageFlagBits::eAllCommands);
 
+
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
         .waitSemaphoreValueCount = info.num_wait_semas,
         .pWaitSemaphoreValues = info.wait_ticks.data(),
@@ -440,7 +476,9 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         .pSignalSemaphoreValues = info.signal_ticks.data(),
     };
 
-    const vk::SubmitInfo submit_info = {
+    VkLatencySubmissionPresentIdNV attribution{};
+    u64 submit_reflex_id = recording_id.RecordingId();
+    vk::SubmitInfo submit_info = {
         .pNext = &timeline_si,
         .waitSemaphoreCount = info.num_wait_semas,
         .pWaitSemaphores = info.wait_semas.data(),
@@ -451,8 +489,32 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         .pSignalSemaphores = info.signal_semas.data(),
     };
 
+    const auto queue = use_present_queue ? instance.GetPresentQueue() : instance.GetGraphicsQueue();
+    const bool trace_reflex = submit_reflex_id && instance.IsReflexSupported() &&
+        !(Reflex::UsesMarkerAttribution() && queue != instance.GetGraphicsQueue());
+    if (trace_reflex) {
+        // Presentation blits share the graphics queue. Their regular frame ID
+        // would replace game-render attribution with a tiny copy submission.
+        const auto attributed = Reflex::PrepareSubmit(queue,
+            is_out_of_band ? 0 : submit_reflex_id, submit_info, attribution);
+        if (!is_out_of_band) submit_reflex_id = attributed;
+        if (is_out_of_band) {
+            Reflex::OnForeignSubmitBegin(submit_reflex_id);
+        } else {
+            Reflex::OnRenderSubmitBegin(submit_reflex_id);
+        }
+    }
+
     ImGui::Core::TextureManager::Submit();
-    auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+    auto submit_result = queue.submit(submit_info, info.fence);
+
+    if (trace_reflex && submit_reflex_id) {
+        if (is_out_of_band) {
+            Reflex::OnForeignSubmitEnd(submit_reflex_id);
+        } else {
+            Reflex::OnRenderSubmitEnd(submit_reflex_id);
+        }
+    }
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
 
     work_semaphore.Refresh();

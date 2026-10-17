@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 #define TRACY_VK_USE_SYMBOL_TABLE
 #include <tracy/TracyVulkan.hpp>
@@ -148,6 +149,19 @@ public:
     /// Returns true if VK_KHR_maintenance8 is supported
     bool IsMaintenance8Supported() const {
         return maintenance_8;
+    }
+
+    /// Returns true if VK_EXT_dynamic_rendering_unused_attachments is supported and enabled.
+    /// Allows a pipeline VkPipelineRenderingCreateInfo::pColorAttachmentFormats entry to be a
+    /// real format while the matching VkRenderingInfo::pColorAttachments imageView is
+    /// VK_NULL_HANDLE (and the reverse), which is what the guest does for unused MRT slots.
+    bool IsDynamicRenderingUnusedAttachmentsSupported() const {
+        return dynamic_rendering_unused_attachments &&
+               dynamic_rendering_unused_attachments_features.dynamicRenderingUnusedAttachments;
+    }
+
+    bool IsReflexSupported() const {
+        return reflex_supported;
     }
 
     /// Returns true if VK_EXT_attachment_feedback_loop_layout is supported
@@ -304,6 +318,11 @@ public:
     /// bbport: FSR 4.1.1 (INT8 model passes and VK_VALVE_shader_mixed_float_dot_product).
     bool IsFsr411Supported() const {
         return IsFsr4Int8Supported() && mixed_float_dot_product;
+    }
+
+    /// bbport: Frame Generation FSR provider requirements (VK_KHR_compute_shader_derivatives + linear group).
+    bool IsFsrGenerationSupported() const {
+        return compute_shader_derivatives && compute_shader_derivatives_features.computeDerivativeGroupLinear;
     }
 
     /// VK_KHR_shader_clock is supported.
@@ -548,6 +567,8 @@ private:
     vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT list_restart_features;
     vk::PhysicalDeviceShaderClockFeaturesKHR shader_clock_features;
     vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR compute_shader_derivatives_features;
+    vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT
+        dynamic_rendering_unused_attachments_features;
     vk::DriverIdKHR driver_id;
     vk::UniqueDebugUtilsMessengerEXT debug_callback{};
     std::string vendor_name;
@@ -582,12 +603,14 @@ private:
     bool maintenance_6{};
     bool maintenance_8{};
     bool attachment_feedback_loop{};
+    bool dynamic_rendering_unused_attachments{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool supports_memory_budget{};
+    bool reflex_supported{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
     std::vector<size_t> valid_heaps;

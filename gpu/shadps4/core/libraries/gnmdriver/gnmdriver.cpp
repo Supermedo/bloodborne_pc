@@ -23,6 +23,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 
 extern Frontend::WindowSDL* g_window;
 std::unique_ptr<Vulkan::Presenter> presenter;
@@ -1333,7 +1334,7 @@ s32 PS4_SYSV_ABI sceGnmRegisterResource(void* res_handle, void* owner_handle, co
 }
 
 static inline s32 PatchFlipRequest(u32* cmdbuf, u32 size, u32 vo_handle, u32 buf_idx, u32 flip_mode,
-                                   s64 flip_arg, void* unk) {
+                                   s64 flip_arg, u64 content_frame_id) {
     // check for `prepareFlip` packet
     cmdbuf += size - 64;
     ASSERT_MSG(cmdbuf[0] == 0xc03e1000, "Can't find `prepareFlip` packet");
@@ -1346,7 +1347,7 @@ static inline s32 PatchFlipRequest(u32* cmdbuf, u32 size, u32 vo_handle, u32 buf
     ASSERT_MSG(buf_idx != 0xffff'ffffu, "Invalid VO buffer index");
 
     const s32 flip_result = VideoOut::sceVideoOutSubmitEopFlip(vo_handle, buf_idx, flip_mode,
-                                                               flip_arg, nullptr /*unk*/);
+                                                               flip_arg, content_frame_id);
     if (flip_result != 0) {
         if (flip_result == 0x80290012) {
             LOG_ERROR(Lib_GnmDriver, "Flip queue is full");
@@ -1433,15 +1434,19 @@ s32 PS4_SYSV_ABI sceGnmRequestFlipAndSubmitDoneForWorkload(u64 workload, u32* gp
         return ORBIS_GNM_ERROR_SUBMISSION_NOT_ENOUGH_RESOURCES;
     }
 
+    std::unique_lock flip_cycle_lock{VideoOut::FlipCycleMutex()};
     std::scoped_lock lk{m_submit_lock};
     WaitGpuIdle();
+
+    Vulkan::Reflex::PreInputSample();
+    const u64 content_frame_id = Vulkan::Reflex::CurrentSimFrameId();
 
     // Write a PrepareFlip, then patch the flip request
     auto* nop = reinterpret_cast<PM4CmdNop*>(gpu_addr);
     nop->header = PM4Type3Header{PM4ItOpcode::Nop, 0x3e};
     nop->data_block[0] = PM4CmdNop::PayloadType::PrepareFlip;
     const s32 patch_result =
-        PatchFlipRequest(gpu_addr, 0x40, vo_handle, buf_idx, flip_mode, flip_arg, nullptr /*unk*/);
+        PatchFlipRequest(gpu_addr, 0x40, vo_handle, buf_idx, flip_mode, flip_arg, content_frame_id);
     if (patch_result != ORBIS_OK) {
         return patch_result;
     }
@@ -1469,6 +1474,8 @@ s32 PS4_SYSV_ABI sceGnmRequestFlipAndSubmitDoneForWorkload(u64 workload, u32* gp
         });
     }
     liverpool->SubmitGfx(dcb_span, {});
+    Vulkan::Reflex::OnSimulationEnd(content_frame_id);
+    Vulkan::Reflex::PreInputSample();
 
     if (!liverpool->IsGpuIdle()) {
         submission_lock = true;
@@ -2411,17 +2418,28 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
     auto* cmdbuf = dcb_gpu_addrs[count - 1];
     const auto size_dw = dcb_sizes_in_bytes[count - 1] / 4;
 
+    std::unique_lock flip_cycle_lock{VideoOut::FlipCycleMutex()};
     std::scoped_lock lk{m_submit_lock};
     WaitGpuIdle();
 
+    Vulkan::Reflex::PreInputSample(); // bootstrap a frame even without a pad poll
+    const u64 content_frame_id = Vulkan::Reflex::CurrentSimFrameId();
     const s32 patch_result =
-        PatchFlipRequest(cmdbuf, size_dw, vo_handle, buf_idx, flip_mode, flip_arg, nullptr /*unk*/);
+        PatchFlipRequest(cmdbuf, size_dw, vo_handle, buf_idx, flip_mode, flip_arg, content_frame_id);
     if (patch_result != ORBIS_OK) {
         return patch_result;
     }
 
-    return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
-                         const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    const s32 submit_result = PerformSubmit(
+        count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
+        const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
+    if (submit_result == ORBIS_OK) {
+        // Both IRQ registration and graphics enqueue must precede the next cycle's
+        // gate/sleep. Keep all command-buffer pairs under the captured source ID.
+        Vulkan::Reflex::OnSimulationEnd(content_frame_id);
+        Vulkan::Reflex::PreInputSample();
+    }
+    return submit_result;
 }
 
 s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
@@ -2454,8 +2472,12 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffersForWorkload(u32 workload, u32 count,
         }
     }
 
+    // A separate draw submission must not capture a closed cycle while a direct
+    // flip is preparing the following frame on another guest thread.
+    std::unique_lock flip_cycle_lock{VideoOut::FlipCycleMutex()};
     std::scoped_lock lk{m_submit_lock};
     WaitGpuIdle();
+    Vulkan::Reflex::PreInputSample();
 
     return PerformSubmit(count, const_cast<const u32**>(dcb_gpu_addrs), dcb_sizes_in_bytes,
                          const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);

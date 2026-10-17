@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: builds the optional neural-rendering model input from the game color target.
+//
+// The game color target is a padded guest image: only full_size pixels are valid and the physical
+// view can be larger, so every fetch is expressed in valid source pixel space first and then
+// used directly as texel coordinates within the top-left valid rectangle. Motion and depth
+// behave the same way against guide_size; the padding is never stretched into that rectangle.
+//
+// Color is reduced with a coverage-weighted box filter (the exact area each model pixel covers),
+// which is what the resolve stage inverts, and is written in the encoding the resolve stage
+// decodes: 0 = already display-encoded SDR, 1 = linear SDR, 2 = linear HDR compressed through
+// x/(1+x) before the sRGB transfer curve.
+//
+// The ratio method additionally normalises the linear signal by the white point, so the model sees
+// a consistent reference white instead of a full-scale image; the resolve stage inverts exactly
+// that scale. Direct and residual never apply it, so their output does not depend on the white
+// point. Prepare and resolve must be dispatched with the same method and white_point for a frame.
+//
+// The push-constant block is shared with neural_resolve.comp and must match the host struct
+// field for field.
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D source_color;
+layout(binding = 1) uniform sampler2D source_motion;
+layout(binding = 2) uniform sampler2D source_depth;
+layout(binding = 3, rgba16f) uniform writeonly image2D model_color;
+layout(binding = 4, rg16f) uniform writeonly image2D model_motion;
+layout(binding = 5, r32f) uniform writeonly image2D model_depth;
+
+layout(push_constant) uniform Params {
+    ivec2 full_size;         // valid game color size; the physical view may be larger
+    ivec2 work_size;         // model input size (also the model_* image size)
+    ivec2 guide_size;        // valid motion/depth size; 0 disables the guides
+    int encoding;            // 0 encoded SDR, 1 linear SDR, 2 linear HDR
+    int method;              // 0 direct, 1 residual, 2 ratio; ratio also normalises by white_point
+    int protect_ui;          // resolve only: 1 composites original_ui back over the result
+    float transfer_strength; // ratio only: how much of the model's hue/chroma is transferred
+    float colour_strength;   // ratio only: colour contribution of the upgraded image
+    float max_ratio;         // ratio only: luma ratio ceiling
+    float white_point;       // ratio only: linear white point; 0 selects the default of 1
+} pc;
+
+const float kEps = 1e-6;
+
+vec3 compress_hdr(vec3 x) {
+    return x / (1.0 + max(x, vec3(0.0)));
+}
+
+vec3 srgb_to_linear(vec3 x) {
+    x = clamp(x, 0.0, 1.0);
+    return mix(pow((x + 0.055) / 1.055, vec3(2.4)), x / 12.92,
+               lessThanEqual(x, vec3(0.04045)));
+}
+
+vec3 linear_to_srgb(vec3 x) {
+    x = clamp(x, 0.0, 1.0);
+    return mix(1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, 12.92 * x,
+               lessThanEqual(x, vec3(0.0031308)));
+}
+
+// Game color space -> linear. Encoding 0 carries display-encoded SDR, 1 and 2 are already linear.
+vec3 input_to_linear(vec3 x) {
+    return pc.encoding == 0 ? srgb_to_linear(x) : max(x, vec3(0.0));
+}
+
+// Linear -> model buffer encoding. Both SDR encodings end up display-encoded in the buffer; HDR is
+// compressed first so the whole range survives the transfer curve.
+vec3 linear_to_encoded(vec3 v) {
+    if (pc.encoding == 2) {
+        return linear_to_srgb(compress_hdr(v));
+    }
+    return linear_to_srgb(v);
+}
+
+// Game color space -> model buffer encoding. The white point is a ratio-only normalisation applied
+// in linear space, so the model's reference white stays fixed while the image scale changes.
+vec3 encode_input(vec3 x) {
+    const bool normalise = pc.method == 2 && pc.white_point > 0.0 && pc.white_point != 1.0;
+    if (pc.encoding == 0 && !normalise) {
+        return clamp(x, 0.0, 1.0); // already display-encoded, nothing to convert
+    }
+    vec3 linear = input_to_linear(x);
+    if (normalise) {
+        linear /= pc.white_point;
+    }
+    return linear_to_encoded(linear);
+}
+
+// Valid source pixel -> physical texel, honouring padding on either axis.
+vec2 source_texel(vec2 valid_pixel, vec2 physical) {
+    return clamp(valid_pixel, vec2(0.5), min(physical, vec2(pc.full_size)) - 0.5);
+}
+
+vec2 guide_texel(vec2 valid_pixel, vec2 physical) {
+    return clamp(valid_pixel, vec2(0.5), min(physical, vec2(pc.guide_size)) - 0.5);
+}
+
+// Coverage-weighted box average of the valid source region covered by one model pixel.
+vec3 box_color(ivec2 p) {
+    const vec2 physical = vec2(textureSize(source_color, 0));
+    const vec2 scale = vec2(pc.full_size) / vec2(max(pc.work_size, ivec2(1)));
+    const vec2 start = vec2(p) * scale;
+    const vec2 end = vec2(p + 1) * scale;
+
+    ivec2 first = clamp(ivec2(floor(start)), ivec2(0), max(pc.full_size - 1, ivec2(0)));
+    ivec2 last = clamp(ivec2(ceil(end)), first + 1, max(pc.full_size, ivec2(1)));
+
+    vec3 sum = vec3(0.0);
+    float weight_sum = 0.0;
+    for (int y = first.y; y < last.y; ++y) {
+        const float wy = max(0.0, min(end.y, float(y + 1)) - max(start.y, float(y)));
+        for (int x = first.x; x < last.x; ++x) {
+            const float wx = max(0.0, min(end.x, float(x + 1)) - max(start.x, float(x)));
+            const float w = wx * wy;
+            if (w <= 0.0) {
+                continue;
+            }
+            const ivec2 t = clamp(ivec2(source_texel(vec2(x, y) + 0.5, physical)), ivec2(0),
+                                  ivec2(physical) - 1);
+            sum += texelFetch(source_color, t, 0).rgb * w;
+            weight_sum += w;
+        }
+    }
+    return sum / max(weight_sum, kEps);
+}
+
+// Coverage-weighted box average of the guide motion, rescaled from guide pixels to model pixels.
+vec2 box_motion(ivec2 p) {
+    if (pc.guide_size.x <= 0 || pc.guide_size.y <= 0) {
+        return vec2(0.0);
+    }
+    const vec2 physical = vec2(textureSize(source_motion, 0));
+    const vec2 scale = vec2(pc.guide_size) / vec2(max(pc.work_size, ivec2(1)));
+    const vec2 start = vec2(p) * scale;
+    const vec2 end = vec2(p + 1) * scale;
+
+    ivec2 first = clamp(ivec2(floor(start)), ivec2(0), max(pc.guide_size - 1, ivec2(0)));
+    ivec2 last = clamp(ivec2(ceil(end)), first + 1, max(pc.guide_size, ivec2(1)));
+
+    vec2 sum = vec2(0.0);
+    float weight_sum = 0.0;
+    for (int y = first.y; y < last.y; ++y) {
+        const float wy = max(0.0, min(end.y, float(y + 1)) - max(start.y, float(y)));
+        for (int x = first.x; x < last.x; ++x) {
+            const float wx = max(0.0, min(end.x, float(x + 1)) - max(start.x, float(x)));
+            const float w = wx * wy;
+            if (w <= 0.0) {
+                continue;
+            }
+            const ivec2 t = clamp(ivec2(guide_texel(vec2(x, y) + 0.5, physical)), ivec2(0),
+                                  ivec2(physical) - 1);
+            sum += texelFetch(source_motion, t, 0).rg * w;
+            weight_sum += w;
+        }
+    }
+    return sum / max(weight_sum, kEps) * vec2(pc.work_size) / vec2(pc.guide_size);
+}
+
+// Depth is taken nearest rather than averaged so a model pixel never mixes two surfaces.
+float point_depth(ivec2 p) {
+    if (pc.guide_size.x <= 0 || pc.guide_size.y <= 0) {
+        return 0.0;
+    }
+    const vec2 physical = vec2(textureSize(source_depth, 0));
+    const vec2 valid = (vec2(p) + 0.5) * vec2(pc.guide_size) / vec2(max(pc.work_size, ivec2(1)));
+    const ivec2 t =
+        clamp(ivec2(floor(guide_texel(valid, physical))), ivec2(0), ivec2(physical) - 1);
+    return texelFetch(source_depth, t, 0).r;
+}
+
+void main() {
+    const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.work_size))) {
+        return;
+    }
+
+    imageStore(model_color, p, vec4(clamp(encode_input(box_color(p)), 0.0, 1.0), 1.0));
+    imageStore(model_motion, p, vec4(box_motion(p), 0.0, 0.0));
+    imageStore(model_depth, p, vec4(point_depth(p), 0.0, 0.0, 0.0));
+}

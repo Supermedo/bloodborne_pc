@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+layout(local_size_x=8,local_size_y=8) in;
+layout(binding=0) uniform texture2D current_frame;
+layout(binding=1) uniform texture2D hudless_frame;
+layout(binding=2,rgba8) uniform image2D generated;
+layout(binding=3) uniform texture2D ui_frame;
+void main() {
+    ivec2 p=ivec2(gl_GlobalInvocationID.xy),size=imageSize(generated);
+    if(any(greaterThanEqual(p,size))) return;
+    // Preserve the current, un-interpolated HUD, including antialiased edges.
+    // A one-pixel neighbourhood prevents leaving interpolated edge remnants.
+    bool ui=false;
+    for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
+        ivec2 q=clamp(p+ivec2(x,y),ivec2(0),size-1);
+        vec3 d=abs(texelFetch(ui_frame,q,0).rgb-texelFetch(hudless_frame,q,0).rgb);
+        ui=ui||any(greaterThan(d,vec3(1.5/255.0)));
+    }
+    vec3 display=texelFetch(current_frame,p,0).rgb;
+    if(ui) imageStore(generated,p,vec4(display,1));
+    else {
+        // Preserve the final display pass's local color correction while
+        // retaining the interpolated scene from the reconstruction surface.
+        vec3 residual=display-texelFetch(ui_frame,p,0).rgb;
+        imageStore(generated,p,vec4(clamp(imageLoad(generated,p).rgb+residual,0,1),1));
+    }
+}

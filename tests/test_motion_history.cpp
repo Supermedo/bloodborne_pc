@@ -20,19 +20,60 @@ int main() {
     assert(IndexedRange(std::span(restart), 0, true).count == 0);
     assert(IndexedRange(std::span<const uint16_t>{}, 0, false).count == 0);
 
-    Draw draw{.shader = 1, .geometry = 2, .indices = 3, .topology = 4,
-              .index_count = 5, .instances = 2, .first_instance = 100,
-              .vertices = range};
+    // Single animated mesh (instances == 1): motion history preserved
+    Draw single_draw{.shader = 1, .geometry = 2, .indices = 3, .topology = 4,
+                     .index_count = 5, .instances = 1, .first_instance = 0,
+                     .vertices = range};
+    History single_hist(32);
+    single_hist.NextFrame();
+    const auto s_first = single_hist.Prepare(single_draw);
+    assert(s_first.store && !s_first.load && s_first.first_vertex == 100);
+    assert(single_hist.Used() == 8);
+    single_hist.NextFrame();
+    const auto s_next = single_hist.Prepare(single_draw);
+    assert(s_next.load == s_first.store && s_next.store != s_first.store);
+    assert(single_hist.stats.loaded == 1);
+    single_hist.NextFrame();
+    single_hist.NextFrame();
+    assert(!single_hist.Prepare(single_draw).load);
+
+    // Multi-instance batches (instances > 1): rejected by default until stable instance IDs.
+    // Culling reorders batches across frames; per-instance history would associate unrelated objects.
+    Draw multi_draw{.shader = 1, .geometry = 2, .indices = 3, .topology = 4,
+                    .index_count = 5, .instances = 2, .first_instance = 100,
+                    .vertices = range};
+    History multi_hist(32);
+    multi_hist.NextFrame();
+    const auto m_first = multi_hist.Prepare(multi_draw);
+    assert(!m_first.store && !m_first.load);
+    assert(multi_hist.stats.dropped_instanced == 1);
+    assert(multi_hist.Used() == 0);
+
+    // Multi-instance reordering / count changes test:
+    // With 3 instances then 2 instances or different first_instance, ensure no history is loaded
+    multi_hist.NextFrame();
+    auto multi_reorder = multi_draw;
+    multi_reorder.instances = 3;
+    const auto m_reordered = multi_hist.Prepare(multi_reorder);
+    assert(!m_reordered.store && !m_reordered.load);
+    assert(multi_hist.stats.dropped_instanced == 2);
+
+    // Preserved under unsafe override if explicitly enabled, or tested via draw with single mesh:
+    Draw draw = single_draw;
     History history(32);
     history.NextFrame();
+    draw.vertices.count = 8;
     const auto first = history.Prepare(draw);
     const auto duplicate = history.Prepare(draw);
     assert(first.store && !first.load && first.first_vertex == 100);
-    assert(first.first_instance == 100 && first.instances == 2);
-    assert(duplicate.store == first.store + 16); // shared geometry, different draw
-    assert(history.Used() == 32); // firstInstance must NOT multiply the allocation
+    assert(duplicate.store == first.store + 8); // shared geometry, different draw
+    assert(history.Used() == 16);
+    draw.vertices.count = 16;
+    assert(history.Prepare(draw).store);
+    assert(history.Used() == 32);
     assert(!history.Prepare(draw).store && history.stats.exhausted == 1);
     history.NextFrame();
+    draw.vertices.count = 8;
     const auto next = history.Prepare(draw);
     assert(next.load == first.store && next.store != first.store);
     assert(history.Prepare(draw).load == duplicate.store);
@@ -54,19 +95,34 @@ int main() {
     changed.vertices.first++;
     assert(!history.Prepare(changed).load);
 
+    // Single-mesh capacity exhaustion and invalid bounds checking:
+    // With instances == 1, draw with vertices exceeding capacity (33 > 32) triggers exhausted
     History overflow(32);
-    draw.vertices.first = 0;
-    draw.vertices.count = INT32_MAX;
-    draw.instances = UINT32_MAX;
+    draw.instances = 1;
     draw.first_instance = 0;
+    draw.vertices.first = 0;
+    draw.vertices.count = 33;
     assert(!overflow.Prepare(draw).store);
     assert(overflow.stats.exhausted == 1);
-    draw.first_instance = 10;
-    assert(!overflow.Prepare(draw).store && overflow.stats.invalid == 1);
-    draw.first_instance = 0;
+
+    // Invalid bounds on single-mesh draws:
+    // 1) vertex first + count overflow (> INT32_MAX)
     draw.vertices.first = INT32_MAX;
     draw.vertices.count = 2;
+    assert(!overflow.Prepare(draw).store && overflow.stats.invalid == 1);
+
+    // 2) first_instance + instances overflow (> UINT32_MAX)
+    draw.vertices.first = 0;
+    draw.vertices.count = 10;
+    draw.first_instance = UINT32_MAX;
+    draw.instances = 2;
     assert(!overflow.Prepare(draw).store && overflow.stats.invalid == 2);
+
+    // 3) zero vertices count is invalid
+    draw.first_instance = 0;
+    draw.instances = 1;
+    draw.vertices.count = 0;
+    assert(!overflow.Prepare(draw).store && overflow.stats.invalid == 3);
 
     // Small skeletons: history only while the bone palette changes (weapon spinning).
     History gated(1024);

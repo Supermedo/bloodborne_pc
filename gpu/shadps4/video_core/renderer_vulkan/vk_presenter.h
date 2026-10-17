@@ -3,23 +3,20 @@
 
 #pragma once
 
-#include <array>
-#include <atomic>
-#include <chrono>
 #include <deque>
-#include <memory>
 
 #include <condition_variable>
 
 #include "core/libraries/videoout/buffer.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
-#include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
+#include "video_core/renderer_vulkan/fg_timing.h"
 
 namespace Frontend {
 class WindowSDL;
@@ -30,6 +27,8 @@ struct Liverpool;
 }
 
 namespace Vulkan {
+
+struct FgFrameResources;
 
 struct Frame {
     u32 width;
@@ -42,16 +41,15 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
+    std::shared_ptr<FgFrameResources> generation;
+    u64 reflex_frame_id{};
+    u64 content_frame_id{}; ///< Guest flip identity for driver-independent latency diagnostics.
+    /// Monotonic accepted-flip ticket for the bounded backlog. Set by the driver for every
+    /// flip-prepared frame (including 0), so the presenter retires exactly the flip that owns
+    /// this frame; kept separate from content_frame_id, which the Reflex/latency path uses.
+    u64 flip_ticket{};
+    VAddr guest_address{};
 
-    /// bbport: frame generation: frames between the previous game frame and this one,
-    /// presented before it (FrameGenerator), the first `generated_count` of them.
-    struct Generated {
-        VmaAllocation allocation{};
-        vk::Image image{};
-        vk::ImageView view{};
-    };
-    std::array<Generated, FrameGenerator::MaxGenerated> generated{};
-    u32 generated_count{};
 };
 
 enum SchedulerType {
@@ -107,10 +105,14 @@ public:
 
     bool IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const;
 
+    /// bbport: `content_frame_id` is the identity captured when the guest's flip was accepted.
+    /// It becomes the frame's Reflex identity instead of the live/thread-local counter.
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
-                        VAddr cpu_address);
+                        VAddr cpu_address, u64 content_frame_id);
 
-    Frame* PrepareBlankFrame(bool present_thread);
+    /// The present thread has no accepted flip and keeps the live identity; the flip path passes
+    /// the accepted identity explicitly, including zero at startup.
+    Frame* PrepareBlankFrame(bool present_thread, u64 content_frame_id = 0);
 
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
     Frame* PrepareLastFrame();
@@ -119,21 +121,13 @@ private:
     Frame* GetRenderFrame();
 
     void RecreateFrame(Frame* frame, u32 width, u32 height);
-    /// bbport: the first `count` images frame generation writes for `frame` (its size), made
-    /// when missing; the others are freed. Returns how many there are.
-    u32 EnsureGenerated(Frame* frame, u32 count);
-    void DestroyGenerated(Frame* frame, u32 from = 0);
-    /// bbport: frame generation is off (or the output HDR): its memory is freed.
-    void ReleaseFrameGen(Frame* frame);
-    /// bbport: present thread, after a game frame: how many generated frames the display can
-    /// show per game frame (frame_gen_limit). `present_ms`: the time Present took.
-    void UpdateFrameGenLimit(bool wanted, double present_ms);
-    /// bbport: blits `image` (General layout) into a swapchain image with the overlay and
-    /// presents it. `last`: the game frame itself, which also signals the frame's fence.
-    /// False when the swapchain could not give an image.
-    bool PresentImage(Frame* frame, vk::Image image, bool last);
 
     void SetExpectedGameSize(s32 width, s32 height);
+    void PrepareGeneration(Frame* frame, vk::Image full_color, vk::ImageLayout layout,
+                           u32 width, u32 height, vk::Format sample_format, vk::Format source_format);
+    bool PresentOne(Frame* frame, vk::Image image, bool real, std::int64_t deadline = 0,
+                    bool grouped_present = false);
+    void CountPresentation(bool real);
 
 private:
     float expected_ratio{1920.0 / 1080.0f};
@@ -163,26 +157,20 @@ private:
     std::condition_variable free_cv;
     std::condition_variable_any frame_cv;
     std::vector<VAddr> vo_buffers_addr;
-    /// bbport: frame generation, and the interval of the game's frames its frames are paced
-    /// in (present thread).
-    std::unique_ptr<FrameGenerator> frame_generator;
-    /// The game's picture before its UI, through the same passes as the frame.
-    Frame hudless_frame{};
-    std::chrono::steady_clock::time_point last_game_present{};
-    std::atomic<double> game_frame_ms{16.7}; ///< written by the present thread
-    /// Generated frames per game frame the display can show (UpdateFrameGenLimit).
-    std::atomic<u32> frame_gen_limit{0};
-    // Present thread: the share of the frame interval spent presenting, the pause after
-    // presenting fell behind, and whether the swapchain was made for frame generation.
-    double present_busy{};
-    int frame_gen_hold_seconds{5};
-    std::chrono::steady_clock::time_point frame_gen_hold_until{};
-    bool swapchain_frame_gen{};
-    // Present thread: the game frames of the current second, and the seconds with room for
-    // one more generated frame.
-    std::chrono::steady_clock::time_point limit_window{};
-    u32 limit_frames{};
-    u32 limit_up_seconds{};
+    std::unique_ptr<FrameGeneration> generation;
+    std::mutex generation_mutex;
+    FgHistory generation_history;
+    FgSchedule generation_schedule{true,true};
+    vk::UniqueDescriptorSetLayout hud_desc;
+    vk::UniquePipelineLayout hud_layout;
+    vk::UniquePipeline hud_pipeline;
+    int generation_factor{}, generation_backend{};
+    u64 presentation_count{}, source_count{}, generated_count{}, skipped_count{};
+    std::int64_t last_ready_ns{};
+    u64 last_ready_serial{};
+    u64 last_reflex_report{};
+    std::int64_t last_reflex_query_ns{};
+    std::chrono::steady_clock::time_point counter_start{std::chrono::steady_clock::now()};
 };
 
 } // namespace Vulkan

@@ -176,6 +176,13 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     env.setdefault('BB_CONFIG', str(data / 'bbport.ini'))
     config = env['BB_CONFIG']
+    for ini_k, env_k in (('frame_generation', 'BB_FRAME_GENERATION'),
+                         ('fg_backend', 'BB_FG_BACKEND'),
+                         ('reflex', 'BB_REFLEX')):
+        if not env.get(env_k):
+            val = ini_value(config, ini_k)
+            if val:
+                env[env_k] = val
     if not env.get('BB_FSR411_DIR') and not (PORT / 'fsr4_411').is_dir() and (data / 'fsr4_411').is_dir():
         env['BB_FSR411_DIR'] = str(data / 'fsr4_411')
 
@@ -224,7 +231,7 @@ def main():
     shutil.rmtree(hud_layer, ignore_errors=True)
     canvas = hud_canvas(output_size(read_settings(Path(config))))
     if canvas != OUTPUT_SIZE and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
-        position = ini_value(config, 'hud_position') or '100'
+        position = (ini_value(config, 'hud_position') or '0').strip()
         if not run_script('hud_layout.py', game, '--out', hud_layer, '--canvas-width', canvas[0],
                           '--position', max(0, min(100, int(position) if position.isdigit() else 100)) / 100,
                           '--source', text_layer, optional=True):
@@ -246,6 +253,9 @@ def main():
     mod_view = game if game.resolve() != original_game else None
     try:
         run_script('prepare.py', game, '--out', out)
+        sys.path.insert(0, str(PORT / 'scripts'))
+        from aspect_ratio import segment_fingerprint
+        env['BB_ASPECT_EBOOT_SEGMENTS'] = segment_fingerprint((out / 'eboot.elf').read_bytes())
         run_script('link_libc.py', game, '--out', out)
         run_script('link_modules.py', game, '--out', out)
         # Legacy CPU profile (scripts/cpu_compat.py): the image no longer needs BMI1, LZCNT or
@@ -293,14 +303,16 @@ def main():
                                         text=True, creationflags=no_console())
                 live = result.stdout.strip() if result.returncode == 0 else '0'
             live = '1' if live == '1' or not patched else '0'
-            # Ultrawide: the camera and HUD need the startup patch (patches.py hud_canvas).
-            from patches import OUTPUT_SIZE, hud_canvas
-            canvas = hud_canvas(tuple(int(v) for v in scaled_output.split('x')))
-            if patched and canvas != OUTPUT_SIZE:
+        if scaled_output or env.get('BB_OUTPUT_RES'):
+            movie_output = scaled_output or env['BB_OUTPUT_RES']
+            ow, oh = map(int, movie_output.split('x'))
+            if patched and ow * 9 != oh * 16:
                 live = '0'
-                env['BB_UI_RES'] = f'{canvas[0]}x{canvas[1]}'
-                print(f'Output {scaled_output}: ultrawide, HUD {env["BB_UI_RES"]}')
-        if live == '1' or not scaled_output:
+                env['BB_UI_RES'] = movie_output
+                print('Aspect correction: centered 16:9 stage; aspect changes require restart')
+            else:
+                env.pop('BB_UI_RES', None)
+        else:
             env.pop('BB_UI_RES', None)
         if live == '1':
             print(f'Output {scaled_output}: live resolution changes (live_resolution=0: startup patch)')

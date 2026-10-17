@@ -106,7 +106,7 @@ bash launcher/bb-launcher.sh         # launcher/install-desktop.sh adds it to th
 (`launcher/bbport_launcher_win.py`), and `bash packaging/windows/package.sh` makes a
 self-contained folder with `Bloodborne.exe` (players need no Python). Details and the
 differences from Linux (TLS, guest memory, exceptions):
-[packaging/windows/README.md](packaging/windows/README.md). Tested on an NVIDIA RTX 5080
+[packaging/windows/README.md](packaging/windows/README.md). Tested on an NVIDIA test GPU
 (FSR 3.1 and FSR 4, game versions 1.00 and 1.09).
 
 By default the game folder is expected next to the repository (`../CUSA03173`). Saves and the

@@ -4,15 +4,25 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
-#include <unistd.h>
+#include <filesystem>
+#include <chrono>
 #include "bbport_settings.h"
+
+#ifdef _WIN32
+static int setenv(const char* key, const char* value, int) { return _putenv_s(key, value); }
+static int unsetenv(const char* key) { return _putenv_s(key, ""); }
+#endif
 
 int main() {
     using namespace BbSettings;
-    char path[] = "/tmp/bbport-upscaler-test-XXXXXX";
-    const int fd = mkstemp(path);
-    assert(fd >= 0);
-    close(fd);
+    const auto file = std::filesystem::temp_directory_path() /
+        ("bbport-upscaler-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) + ".ini");
+    const auto path_string = file.string();
+    const char* path = path_string.c_str();
+    FILE* created = std::fopen(path, "w");
+    assert(created);
+    std::fclose(created);
     setenv("BB_CONFIG", path, 1);
     unsetenv("BB_UPSCALER");
     unsetenv("BB_UPSCALE_PRESET");

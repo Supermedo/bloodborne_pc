@@ -701,6 +701,7 @@ static int hold_after_capture;
 static void sample(PadData *d) {
     reload_config_if_requested();
     sample_host(d);
+    bbgpu_reflex_on_input_sampled();
     if (bbgpu_overlay_captures_input()) { hold_after_capture=1; return; }
     record_sample(d);
     read_inject();
@@ -739,6 +740,7 @@ static ABI int32_t pad_close(int32_t handle) {
 static ABI int32_t pad_read_state(int32_t handle, PadData *data) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     if (!data) return ERR_INVALID_ARG;
+    bbgpu_reflex_pre_input_sample();
     pthread_mutex_lock(&lock);
     sample(data); ++reads;
     pthread_mutex_unlock(&lock);
