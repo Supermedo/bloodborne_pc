@@ -20,6 +20,15 @@ MINGW*|MSYS*)
             git -C gpu/third_party/fsr-vulkan apply "$PWD/$patch"
         fi
     done
+    # clang 23 / current MinGW headers (MSYS2, 2026-10): the FSR 3.1 sources relied on <new>,
+    # <cmath>, _countof and swprintf_s arriving through other headers, and the loader's -Werror
+    # meets a new warning. Read by CMake when out/gpu is configured for the first time.
+    export CXXFLAGS="${CXXFLAGS:-} -include new -include cmath -include cstdlib -include cwchar -include stdlib.h -include wchar.h"
+    export CFLAGS="${CFLAGS:-} -Wno-unknown-warning-option -Wno-error=unused-but-set-global"
+    # Source paths in the binaries (assert and log messages) relative to the checkout, not the
+    # build machine's folders.
+    prefix_map="-ffile-prefix-map=$(cygpath -m "$PWD")/="
+    export CFLAGS="$CFLAGS $prefix_map" CXXFLAGS="$CXXFLAGS $prefix_map"
     cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO=off \
         -DBB_LTO="${BB_LTO:-OFF}" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ >/dev/null
     echo "GPU library and loader: LTO ${BB_LTO:-OFF}"
