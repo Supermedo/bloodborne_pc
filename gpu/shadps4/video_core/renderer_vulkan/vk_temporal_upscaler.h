@@ -22,6 +22,8 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_fsr4.h"
+#include "video_core/renderer_vulkan/vk_fg_images.h"
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
 #include "video_core/texture_cache/image.h"
 
 struct FfxVkPortableUpscaleContext;
@@ -37,7 +39,6 @@ class Scheduler;
 class Runtime;
 class CameraMotion;
 class SceneTargets;
-class FrameGenerator;
 
 class TemporalUpscaler {
 public:
@@ -48,12 +49,6 @@ public:
 
     [[nodiscard]] bool Enabled() const noexcept {
         return enabled;
-    }
-
-    /// bbport: frame generation (the Presenter's): its depth and motion vectors are taken at
-    /// the upscaler's trigger, the picture before the UI at the frame's first UI draw.
-    void SetFrameGenerator(FrameGenerator* generator) noexcept {
-        frame_generator = generator;
     }
 
     /// A draw into a full-size RGBA16F target with the scene depth: the scene color.
@@ -129,6 +124,19 @@ public:
     };
     bool DisplayOverride(VAddr address, Display& display);
 
+    struct GenerationGuides {
+        vk::Image color{}, depth{}, motion{}, ui{};
+        vk::ImageView color_view{}, depth_view{}, motion_view{}, ui_view{};
+        u32 output_width{}, output_height{}, render_width{}, render_height{};
+        BbDlssCamera camera{};
+        u64 serial{};
+        float frame_ms{16.6667f};
+        bool valid{}, reset{};
+    };
+    // The display pass seals the preceding scene's metadata. Read on the GPU
+    // command thread and copy into a leased presentation frame before reuse.
+    GenerationGuides FrameGenerationGuides(VAddr address);
+
 private:
     /// bbport: views of guest images the upscaler reads, kept across frames: FSR 4 registers
     /// images by view in a registry of eight (a new view per frame filled it at Native AA).
@@ -146,14 +154,10 @@ private:
     u64 view_uses = 0;
 
     void Run();
-    /// The scene depth and the motion vectors for frame generation (also with the upscaler off).
-    void CaptureFrameGen();
-    /// The UI target before the first UI draw (frame generation's picture without UI):
-    /// `color` (a texture cache image) at 1080p, the port's output-size UI image otherwise.
-    void CaptureHudless(VideoCore::ImageId color);
-    void CaptureHudlessUi();
     void RunScaled();
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
+    void CaptureGenerationGuides(vk::CommandBuffer cmd, vk::ImageView depth,
+                                  u32 w, u32 h, float frame_ms, bool existing_motion);
     void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);
     /// Render size below the scaled-preset output size (the resolution patch is on).
@@ -206,9 +210,6 @@ private:
 
     bool enabled = false;
     bool failed = false;
-    FrameGenerator* frame_generator = nullptr;
-    bool frame_gen_captured = false; ///< this frame's depth and motion are taken
-    bool hudless_pending = false;    ///< the UI started; its picture is taken at its next draw
     u64 trigger_hash = 0x9a9cf8a9;
     VideoCore::ImageId scene_color{};
     bool done_this_frame = false;
@@ -258,6 +259,8 @@ private:
         vk::Format format{};
         u32 width = 0, height = 0;
         bool valid = false;
+        FgImage fg_color, fg_depth, fg_motion, fg_ui;
+        GenerationGuides guides{};
     };
     std::mutex display_mutex;
     std::unordered_map<VAddr, DisplayImage> displays;
@@ -298,6 +301,12 @@ private:
     vk::UniqueImageView extra_sharpen_view;
     u32 extra_sharpen_width = 0, extra_sharpen_height = 0;
     vk::UniqueImageView ui_storage_view;
+    FgImage fg_color, fg_depth, fg_motion, fg_ui;
+    GenerationGuides fg_pending{}, fg_completed{};
+    u64 fg_render_serial{1};
+    vk::UniqueDescriptorSetLayout fg_depth_desc;
+    vk::UniquePipelineLayout fg_depth_layout;
+    vk::UniquePipeline fg_depth_pipeline;
 };
 
 } // namespace Vulkan

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include <core/libraries/system/userservice.h>
 #include "core/libraries/kernel/equeue.h"
 #include "core/libraries/videoout/buffer.h"
@@ -139,7 +141,11 @@ s32 PS4_SYSV_ABI sceVideoOutColorSettingsSetGamma(SceVideoOutColorSettings* sett
 s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettings* settings);
 
 // Internal system functions
-s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, void** unk);
+s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, u64 content_frame_id);
+
+// Serializes an accepted flip's captured frame through graphics submission and
+// next-cycle preparation. Never taken by the IRQ, GPU or presenter workers.
+std::mutex& FlipCycleMutex();
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 

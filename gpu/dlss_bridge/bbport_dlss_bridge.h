@@ -1,5 +1,5 @@
-// SPDX-FileCopyrightText: Copyright 2026 IFreemz (shadps4_dlss bridge), bbport contributors
-// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: Copyright 2026 IFreemz (shadps4_dlss bridge), bbport contributors, bbhost contributors
+// SPDX-License-Identifier: MIT AND GPL-3.0-or-later
 //
 // C interface between bbport and bbport_dlss.dll. The port contains no NVIDIA code: it loads the
 // bridge at run time when it is present (next to bb-probe.exe, with nvngx_dlss.dll) and keeps
@@ -14,7 +14,6 @@
 extern "C" {
 #endif
 
-// 2: DLSS Frame Generation (the FrameGen* members; an ABI 1 bridge has DLSS only).
 #define BBPORT_DLSS_BRIDGE_ABI 2
 
 typedef void (*BbDlssLogFn)(int warning, const char* message);
@@ -51,46 +50,41 @@ typedef struct BbDlssEvaluate {
     float sharpness; // 0..1; 0 leaves the output unsharpened
 } BbDlssEvaluate;
 
-// DLSS Frame Generation (nvngx_dlssg.dll): frames between two finished frames.
-typedef struct BbDlssgFeature {
-    uint32_t width;         // backbuffer: input and output colour
-    uint32_t height;
-    VkFormat format;
-    uint32_t render_width;  // depth and motion vectors
-    uint32_t render_height;
-} BbDlssgFeature;
+// Camera metadata for DLSS-G / Frame Generation. Row-major matrices.
+typedef struct BbDlssCamera {
+    float view_to_clip[16];
+    float clip_to_view[16];
+    float clip_to_previous[16];
+    float previous_to_clip[16];
+    float position[3];
+    float up[3];
+    float right[3];
+    float forward[3];
+    float jitter[2];
+    float near_plane;
+    float far_plane;
+    float vertical_fov;
+} BbDlssCamera;
 
-typedef struct BbDlssgEvaluate {
-    BbDlssImage backbuffer; // sampled, general layout: the finished frame (UI included)
-    BbDlssImage depth;      // sampled, hardware depth values (a depth or R32F image)
-    BbDlssImage motion;     // sampled, render-resolution pixels, current to previous
-    BbDlssImage output;     // storage, general layout: the generated frame
-    BbDlssImage hudless;    // sampled: the backbuffer before the UI; image null when none
-    float jitter_x;         // render pixels
-    float jitter_y;
-    float camera_near;
-    float camera_far;
-    float camera_fov;       // vertical, radians
-    int32_t depth_inverted;
+typedef struct BbDlssFgEvaluate {
+    BbDlssImage color;   // sampled, output resolution, HUD-free
+    BbDlssImage depth;   // sampled, render resolution hardware depth (R32_SFLOAT)
+    BbDlssImage motion;  // sampled, render resolution pixels (RG16_SFLOAT), current to previous
+    BbDlssImage output;  // storage, general layout, output resolution
+    BbDlssImage real;    // optional output for real frame copy (can be null/VK_NULL_HANDLE)
+    BbDlssImage hudless; // optional HUD-free reference
+    BbDlssImage ui;      // optional UI overlay
+    BbDlssCamera camera;
+    VkBuffer disable_interpolation; // optional 4-byte host-visible/coherent buffer flag
     int32_t reset;
-    uint32_t multi_frame_count; // frames generated for this pair (1: 2x .. 3: 4x)
-    uint32_t multi_frame_index; // 1 .. multi_frame_count, in order
-    // Row-major, row vectors (v * m), D3D clip space (y up, depth 0 at the near plane): the
-    // projection, current clip to previous clip and back. has_matrices 0: a camera that stood
-    // still and a projection from camera_fov is assumed.
-    int32_t has_matrices;
-    float view_to_clip[4][4];
-    float clip_to_prev_clip[4][4];
-    float prev_clip_to_clip[4][4];
-} BbDlssgEvaluate;
+} BbDlssFgEvaluate;
 
 typedef struct BbDlssApi {
     uint32_t abi;
     // UTF-16 paths: the directory with nvngx_dlss.dll, and a writable data directory.
     int32_t (*Configure)(const wchar_t* dll_directory, const wchar_t* data_directory,
                          BbDlssLogFn log);
-    // Vulkan extensions NGX needs (DLSS and, when the GPU has it, Frame Generation). The arrays
-    // stay valid until Shutdown.
+    // Vulkan extensions NGX needs. The arrays stay valid until Shutdown.
     int32_t (*InstanceExtensions)(uint32_t* count, const VkExtensionProperties** extensions);
     int32_t (*DeviceExtensions)(VkInstance instance, VkPhysicalDevice physical, uint32_t* count,
                                 const VkExtensionProperties** extensions);
@@ -102,14 +96,16 @@ typedef struct BbDlssApi {
     // The caller must have waited for the GPU work that used the feature.
     void (*ReleaseFeature)(void);
     void (*Shutdown)(void);
-    // ABI 2. Frames Frame Generation can make per pair of rendered frames after Initialize:
-    // 0 unavailable, 1 (2x), 3 (up to 4x, GeForce RTX 50).
-    int32_t (*FrameGenMaxCount)(void);
-    int32_t (*FrameGenCreate)(VkCommandBuffer command, const BbDlssgFeature* feature);
-    // Call multi_frame_count times per rendered frame, multi_frame_index 1, 2, ...
-    int32_t (*FrameGenEvaluate)(VkCommandBuffer command, const BbDlssgEvaluate* evaluate);
-    // The caller must have waited for the GPU work that used the feature.
-    void (*FrameGenRelease)(void);
+
+    // ABI 2: Frame Generation extensions and evaluation
+    int32_t (*FgAvailable)(void);
+    uint32_t (*FgMaxGenerated)(void);
+    int32_t (*FgExtensions)(VkInstance instance, VkPhysicalDevice physical, uint32_t* count,
+                            const VkExtensionProperties** extensions);
+    int32_t (*CreateFgFeature)(VkCommandBuffer command, uint32_t width, uint32_t height, VkFormat format);
+    int32_t (*EvaluateFg)(VkCommandBuffer command, const BbDlssFgEvaluate* evaluate,
+                          uint32_t multi_frame_count, uint32_t multi_frame_index, uint64_t render_frame);
+    void (*ReleaseFgFeature)(void);
 } BbDlssApi;
 
 typedef const BbDlssApi* (*BbDlssGetApiFn)(void);

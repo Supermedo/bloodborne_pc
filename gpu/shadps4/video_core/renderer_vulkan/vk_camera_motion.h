@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/texture_cache/image.h"
+#include "../../../dlss_bridge/bbport_dlss_bridge.h"
 
 namespace VideoCore {
 class TextureCache;
@@ -61,15 +62,17 @@ public:
     /// Vertical field of view and near/far planes of the current camera.
     [[nodiscard]] float VerticalFov() const noexcept;
     [[nodiscard]] float Near() const noexcept;
-    /// The far plane of the current camera, or `fallback` for an infinite or unknown one.
-    [[nodiscard]] float FarPlane(float fallback) const noexcept;
-    /// Frame generation (DLSS): row-vector matrices of D3D clip space (y up, depth 0 near):
-    /// the projection, current clip to previous clip, and back. False before two cameras.
-    bool ClipTransforms(std::array<float, 16>& view_to_clip,
-                        std::array<float, 16>& clip_to_prev_clip,
-                        std::array<float, 16>& prev_clip_to_clip) const noexcept;
     // Current projection, previous projection, and row Z of previous-view * inverse-view.
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
+
+    struct FrameCamera {
+        BbDlssCamera camera{};
+        bool valid = false;
+    };
+    [[nodiscard]] FrameCamera FrameGenerationCamera() const noexcept;
+    [[nodiscard]] FrameCamera CachedFrameGenerationCamera() const noexcept {
+        return cached_fg_camera;
+    }
 
     /// Records the motion vector pass: `depth_view` (depth aspect, General layout) into
     /// `motion_view` (RG16F storage, General), pixels, previous minus current.
@@ -108,6 +111,9 @@ private:
 
     ObjectMotion* object_motion = nullptr;
     Camera current, previous;
+    FrameCamera cached_fg_camera{};
+    std::array<float, 216> current_constants{};
+    std::array<float, 216> previous_constants{};
     bool frame_has_camera = false;
     std::array<float, 2> jitter{}, previous_jitter{};
     std::array<u32, 2> render_size{};

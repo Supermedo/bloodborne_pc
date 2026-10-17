@@ -12,8 +12,10 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/renderer_vulkan/vk_reflex.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "bbport_settings.h"
 
 #include <vk_mem_alloc.h>
 
@@ -200,6 +202,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
 }
 
 Instance::~Instance() {
+    Reflex::Shutdown();
     ImGui::Core::Shutdown(GetDevice());
     vmaDestroyAllocator(allocator);
 }
@@ -234,7 +237,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
-        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
+        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -301,6 +305,23 @@ bool Instance::CreateDevice() {
         }
     }
     depth_range_unrestricted = add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
+    // bbport: the guest binds unused MRT slots as VK_NULL_HANDLE while the pipeline still
+    // declares the real format. Enabling this feature makes that legal instead of VUID
+    // -vkCmdDraw-dynamicRenderingUnusedAttachments-08912, without trimming attachments.
+    dynamic_rendering_unused_attachments =
+        add_extension(VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME);
+    if (dynamic_rendering_unused_attachments) {
+        dynamic_rendering_unused_attachments_features =
+            feature_chain.get<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
+        if (!dynamic_rendering_unused_attachments_features.dynamicRenderingUnusedAttachments) {
+            // The extension is present but the feature is not; do not request the extension.
+            enabled_extensions.pop_back();
+            dynamic_rendering_unused_attachments = false;
+        } else {
+            LOG_INFO(Render_Vulkan, "- dynamicRenderingUnusedAttachments: {}",
+                     dynamic_rendering_unused_attachments_features.dynamicRenderingUnusedAttachments);
+        }
+    }
     dynamic_state_3 = add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
     if (dynamic_state_3) {
         dynamic_state_3_features =
@@ -412,10 +433,24 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    static constexpr std::array queue_priorities = {1.0f};
+    // An independent queue lets time-sensitive presentation copies bypass
+    // the following source frame's draw work. Both queues belong to the same
+    // family, so leased images keep their existing ownership rules.
+    const char* fsr_present_queue = std::getenv("BB_FSR_PRESENT_QUEUE");
+    const char* dlss_present_queue = std::getenv("BB_DLSS_PRESENT_QUEUE");
+    const auto& startup = BbSettings::Get();
+    const bool fsr_generation = startup.startup_frame_generation >= 2 &&
+        startup.startup_fg_backend == BbSettings::FgFsr;
+    const bool dlss_generation = startup.startup_frame_generation >= 2 &&
+        startup.startup_fg_backend == BbSettings::FgDlss;
+    const bool separate_present =
+        ((fsr_generation && (!fsr_present_queue || fsr_present_queue[0] != '0')) ||
+         (dlss_generation && (!dlss_present_queue || dlss_present_queue[0] != '0'))) &&
+        family_properties[queue_family_index].queueCount >= 2;
+    static constexpr std::array queue_priorities = {1.0f, 1.0f};
     const vk::DeviceQueueCreateInfo queue_info = {
         .queueFamilyIndex = queue_family_index,
-        .queueCount = static_cast<u32>(queue_priorities.size()),
+        .queueCount = separate_present ? 2u : 1u,
         .pQueuePriorities = queue_priorities.data(),
     };
 
@@ -428,6 +463,20 @@ bool Instance::CreateDevice() {
     if (Dlss* dlss = Dlss::Get()) {
         dlss->AppendDeviceExtensions(*instance, physical_device, dlss_extensions);
         for (const char* name : dlss_extensions) {
+            if (std::none_of(enabled_extensions.begin(), enabled_extensions.end(),
+                             [&](const char* e) { return std::string_view{e} == name; }) &&
+                enabled_extensions.size() < enabled_extensions.capacity()) {
+                enabled_extensions.push_back(name);
+            }
+        }
+    }
+    // bbport: NVIDIA Reflex (VK_NV_low_latency2 rev3 + VK_KHR_present_id)
+    std::vector<const char*> reflex_extensions;
+    vk::PhysicalDevicePresentIdFeaturesKHR reflex_present_id{};
+    reflex_supported = Reflex::ConfigureDevice(physical_device, reflex_extensions,
+                                               vk12_features, reflex_present_id);
+    if (reflex_supported) {
+        for (const char* name : reflex_extensions) {
             if (std::none_of(enabled_extensions.begin(), enabled_extensions.end(),
                              [&](const char* e) { return std::string_view{e} == name; }) &&
                 enabled_extensions.size() < enabled_extensions.capacity()) {
@@ -591,6 +640,13 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE{
             .shaderMixedFloatDotProductFloat16AccFloat32 = true,
         },
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT{
+            .dynamicRenderingUnusedAttachments =
+                dynamic_rendering_unused_attachments_features.dynamicRenderingUnusedAttachments,
+        },
+        vk::PhysicalDevicePresentIdFeaturesKHR{
+            .presentId = reflex_supported,
+        },
     };
 
     if (!custom_border_color) {
@@ -651,6 +707,12 @@ bool Instance::CreateDevice() {
     if (!mixed_float_dot_product) {
         device_chain.unlink<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
     }
+    if (!dynamic_rendering_unused_attachments) {
+        device_chain.unlink<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
+    }
+    if (!reflex_supported) {
+        device_chain.unlink<vk::PhysicalDevicePresentIdFeaturesKHR>();
+    }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
     if (device_result != vk::Result::eSuccess && enabled_extensions.size() > renderer_extension_count) {
@@ -680,9 +742,15 @@ bool Instance::CreateDevice() {
     if (Dlss* dlss = Dlss::Get()) {
         dlss->Initialize(*instance, physical_device, *device);
     }
+    Reflex::Initialize(*instance, physical_device, *device, reflex_supported);
 
     graphics_queue = device->getQueue(queue_family_index, 0);
-    present_queue = device->getQueue(queue_family_index, 0);
+    present_queue = device->getQueue(queue_family_index, separate_present ? 1 : 0);
+    if (reflex_supported) Reflex::OnGraphicsQueueCreated(graphics_queue, separate_present);
+    std::printf("Presentation queue: %s\n",separate_present ? "independent" : "shared");
+    if (reflex_supported && present_queue && present_queue != graphics_queue) {
+        Reflex::OnPresentQueueCreated(present_queue);
+    }
 
     if (calibrated_timestamps) {
         const auto [time_domains_result, time_domains] =

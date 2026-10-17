@@ -229,6 +229,7 @@ public:
     };
     struct Stats {
         uint64_t draws{}, stored{}, loaded{}, unmatched{}, exhausted{}, invalid{}, still{};
+        uint64_t dropped_instanced{};
     } stats;
 
     // A small skeleton (weapon, prop; most are static world pieces) only needs history
@@ -263,14 +264,18 @@ public:
 
     Allocation Prepare(const Draw& draw) {
         ++stats.draws;
-        Key key{draw, 0};
-        key.occurrence = occurrences[key]++;
         const uint64_t count = uint64_t(draw.vertices.count) * draw.instances;
         if (!count || uint64_t(draw.vertices.first) + draw.vertices.count - 1 > INT32_MAX ||
             uint64_t(draw.first_instance) + draw.instances > UINT32_MAX) {
             ++stats.invalid;
             return {};
         }
+        if (draw.instances > 1 && !UnsafeInstancesEnabled()) {
+            ++stats.dropped_instanced;
+            return {};
+        }
+        Key key{draw, 0};
+        key.occurrence = occurrences[key]++;
         const auto* prev = previous.find(key);
         Allocation result{0, 0, draw.vertices.count, draw.instances,
                           draw.vertices.first, draw.first_instance};
@@ -289,6 +294,15 @@ public:
             ++stats.exhausted;
         }
         return result;
+    }
+
+    static bool UnsafeInstancesEnabled() {
+        static const bool enabled = [] {
+            const char* e = std::getenv("BB_OBJECT_MOTION_UNSAFE_INSTANCES");
+            if (!e) e = std::getenv("BBHOST_OBJECT_MOTION_UNSAFE_INSTANCES");
+            return e && e[0] == '1';
+        }();
+        return enabled;
     }
 
     uint32_t Used() const { return used; }
