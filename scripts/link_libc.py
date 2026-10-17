@@ -5,10 +5,24 @@ identity, versions and NID, not by dump-local suffix or NID alone.
 """
 import collections
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import struct
-from prepare import parse_self, span, unpack
+import sys
+
+# The Windows launcher runs script roles in one process. A previous role or
+# the frozen launcher can leave a different ``prepare`` module in sys.modules;
+# load the parser shipped beside this script so the linker sees the same ELF
+# support as prepare.py.
+_prepare_spec = importlib.util.spec_from_file_location(
+    'prepare', Path(__file__).with_name('prepare.py'))
+if _prepare_spec is None or _prepare_spec.loader is None:
+    raise ImportError('could not load prepare.py beside link_libc.py')
+_prepare = importlib.util.module_from_spec(_prepare_spec)
+sys.modules['prepare'] = _prepare
+_prepare_spec.loader.exec_module(_prepare)
+parse_self, span, unpack = _prepare.parse_self, _prepare.span, _prepare.unpack
 from cpu_compat import atomic_output, patch_libc
 
 
