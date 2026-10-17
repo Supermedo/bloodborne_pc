@@ -71,6 +71,11 @@ public:
         return *device;
     }
 
+    /// bbport: stops the port after the driver lost the device (a GPU fault or a reset), with
+    /// what VK_EXT_device_fault tells about it. A wait that retried instead spun forever while
+    /// the game showed its last frame (frozen screen, sound still playing).
+    [[noreturn]] void DeviceLost(const char* where) const;
+
     /// Returns the VMA allocator handle
     VmaAllocator GetAllocator() const {
         return allocator;
@@ -587,6 +592,7 @@ private:
     bool shader_clock{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
+    bool device_fault{};            // bbport: VK_EXT_device_fault (DeviceLost)
     bool supports_memory_budget{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
