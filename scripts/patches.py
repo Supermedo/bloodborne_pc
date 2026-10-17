@@ -112,6 +112,7 @@ UI_HEIGHT=0x0235855D-EBOOT_BASE
 
 
 def read_settings(path):
+    path = Path(path)
     # Path.read_text() defaults to the process locale; bbport.ini may contain
     # UTF-8 outside that encoding. Match the Windows launcher (encoding='utf-8').
     settings={}
