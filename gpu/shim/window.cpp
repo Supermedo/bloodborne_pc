@@ -1,4 +1,5 @@
 // bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <array>
@@ -46,6 +47,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     if (driver && !std::strcmp(driver, "windows")) {
         window_info.type = WindowSystemType::Windows;
         window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+        on_hdr_display = SDL_GetBooleanProperty(wp, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
     } else
 #endif
     if (driver && !std::strcmp(driver, "x11")) {
@@ -64,6 +66,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    if (on_hdr_display) {
+        std::printf("Display: HDR on in Windows\n");
+    }
     BbMouse::Start();
 }
 
@@ -199,6 +204,12 @@ bool WindowSDL::PollEvents() {
             height = h;
             break;
         }
+#ifdef _WIN32
+        // HDR switched in Windows (Win+Alt+B) or the window moved to another display.
+        case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+            on_hdr_display = event.window.data1 != 0;
+            break;
+#endif
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;

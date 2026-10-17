@@ -12,6 +12,7 @@ layout (push_constant) uniform settings {
     float gamma;
     bool hdr;
     bool srgb_input;
+    bool sdr_on_hdr;
 } pp;
 
 const float cutoff = 0.0031308, a = 1.055, b = 0.055, d = 12.92;
@@ -33,12 +34,22 @@ vec3 degamma(vec3 rgb) {
     );
 }
 
+// bbport: Windows decodes an SDR swapchain on an HDR display with the piecewise sRGB curve, while
+// an SDR display (and the TV the game was graded on) applies gamma 2.2. Near black the sRGB curve
+// is several times brighter, which lifts the blacks. Re-encode so that decode gives gamma 2.2.
+vec3 gamma22_for_srgb_decode(vec3 encoded) {
+    vec3 rgb = pow(max(encoded, 0.0), vec3(2.2));
+    return mix(a * pow(rgb, vec3(1.0 / 2.4)) - b, d * rgb, lessThan(rgb, vec3(cutoff)));
+}
+
 void main() {
     vec4 color_linear = texture(texSampler, uv);
     if (pp.hdr) {
         color = color_linear;
     } else {
         if (pp.srgb_input) color_linear.rgb = degamma(color_linear.rgb);
-        color = vec4(gamma(color_linear.rgb), color_linear.a);
+        vec3 encoded = gamma(color_linear.rgb);
+        if (pp.sdr_on_hdr) encoded = gamma22_for_srgb_decode(encoded);
+        color = vec4(encoded, color_linear.a);
     }
 }

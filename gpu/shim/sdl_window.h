@@ -41,6 +41,9 @@ public:
     SDL_Window* GetSDLWindow() const { return window; }
     WindowSystemInfo GetWindowInfo() const { return window_info; }
     bool IsOpen() const { return is_open.load(std::memory_order_relaxed); }
+    /// Windows only: the window is on a display that Windows runs in HDR, where the desktop
+    /// decodes an SDR swapchain with the sRGB curve instead of the display's gamma 2.2.
+    bool IsOnHdrDisplay() const { return on_hdr_display.load(std::memory_order_relaxed); }
     /// Processes pending window events. Returns false once the user closed the window.
     bool PollEvents();
     /// Keyboard text entry for the system IME dialog; typed text shows in the title bar.
@@ -63,6 +66,7 @@ public:
 private:
     std::atomic<s32> width, height;
     std::atomic<bool> is_open{true};
+    std::atomic<bool> on_hdr_display{false};
     std::mutex text_mutex;
     bool text_requested{}, text_active{};
     int text_state{};
