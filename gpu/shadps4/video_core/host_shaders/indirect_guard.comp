@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: the group counts of an indirect dispatch, checked on the GPU before it runs
+// (vk_indirect_guard.cpp). Counts no game dispatches on purpose (billions of groups: garbage in
+// the arguments) would keep the GPU busy past the kernel's timeout and lose the device; such a
+// dispatch runs no groups instead, and is counted.
+#version 450
+
+layout(local_size_x = 1) in;
+
+layout(std430, binding = 0) readonly buffer Args { uint args[]; };
+layout(std430, binding = 1) writeonly buffer Checked { uint checked[]; };
+layout(std430, binding = 2) buffer Skipped { uint skipped; uvec3 last; };
+
+layout(push_constant) uniform Push {
+    uvec3 max_count; // the device's limit per dimension
+    uint first;      // the arguments' first dword in binding 0
+    uint max_total;  // groups in all
+    uint slot;       // where in binding 1 (dwords)
+} push;
+
+void main() {
+    const uvec3 groups = uvec3(args[push.first], args[push.first + 1], args[push.first + 2]);
+    uint high, low, high2, total;
+    umulExtended(groups.x, groups.y, high, low);
+    umulExtended(low, groups.z, high2, total);
+    const bool plausible = all(lessThanEqual(groups, push.max_count)) && high == 0 &&
+                           high2 == 0 && total <= push.max_total;
+    const uvec3 run = plausible ? groups : uvec3(0);
+    checked[push.slot] = run.x;
+    checked[push.slot + 1] = run.y;
+    checked[push.slot + 2] = run.z;
+    if (!plausible) {
+        atomicAdd(skipped, 1);
+        last = groups;
+    }
+}
