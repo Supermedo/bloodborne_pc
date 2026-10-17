@@ -31,7 +31,19 @@ index a78e1eb..db1a8e8 100644
      if (it == state.entries.end()) {
          it = state.entries.find("*");
      }
-@@ -1745,6 +1760,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
+@@ -1509,7 +1524,10 @@ int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char* url,
+     auto req = std::make_shared<HttpRequest>();
+     req->conn_id = connId;
+     req->method = method;
+-    req->url = url;
++    // bbport: Bloodborne passes an empty request URL after creating a connection with
++    // the full URL. Keep that connection's path and query; using an empty URL
++    // here makes SendRequest request '/' instead (ss.info then returns 404).
++    req->url = url[0] ? url : conn_it->second.url;
+     req->content_length = contentLength;
+     req->settings = conn_it->second.settings;
+     req->epoll_id = conn_it->second.epoll_id;
+@@ -1745,6 +1763,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
                                                          ? tmpl_user_agent
                                                          : BuildLibhttpUserAgent(""));
          }
