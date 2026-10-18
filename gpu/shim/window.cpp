@@ -212,6 +212,13 @@ bool WindowSDL::PollEvents() {
     // button sets menu_open there, not through an SDL event here).
     UpdateMouseCapture();
     UpdateMouseCamera();
+    // Hide the cursor during controller gameplay, but keep it visible in menus.
+    const bool show_cursor = !mouse_captured_last &&
+                             (!SDL_HasGamepad() || !window_focused || BbOverlay::CapturesInput());
+    if (SDL_CursorVisible() != show_cursor) {
+        if (show_cursor) SDL_ShowCursor();
+        else SDL_HideCursor();
+    }
     return is_open;
 }
 
