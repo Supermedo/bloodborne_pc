@@ -174,6 +174,19 @@ void Swapchain::FindPresentFormat() {
         return;
     }
 
+    // bbport: on a display Windows runs in HDR the picture is re-encoded for the desktop's sRGB
+    // decode (post_process.frag), which leaves the game's 12 darkest 8-bit levels on 4 codes of
+    // an 8-bit swapchain. A 10-bit one keeps them apart.
+    if (window.IsOnHdrDisplay() && EmulatorSettings.IsHdrGammaEnabled()) {
+        const auto it = std::ranges::find(
+            formats, vk::SurfaceFormatKHR{vk::Format::eA2B10G10R10UnormPack32,
+                                          vk::ColorSpaceKHR::eSrgbNonlinear});
+        if (it != formats.end()) {
+            surface_format = *it;
+            return;
+        }
+    }
+
     // Try to find a suitable format.
     for (const vk::SurfaceFormatKHR& sformat : formats) {
         vk::Format format = sformat.format;
