@@ -5,6 +5,7 @@ image places eboot vaddr 0 at image offset 0. Only literal writes are supported
 (bytes, bytes16/32/64, float32/64, utf8, utf16); pattern ("mask") patches are rejected.
 """
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -63,12 +64,34 @@ MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LO
 
 
 def game_app_version(game):
-    """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read."""
+    """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read.
+    Game of the Year discs (CUSA03173) ship the 1.09 code with APP_VER 01.00: a game whose
+    eboot.bin has the 1.09 patch fingerprint is 01.09 whatever its param.sfo says."""
     try:
         from prepare import sfo
-        return sfo((Path(game) / 'sce_sys/param.sfo').read_bytes()).get('APP_VER')
+        version=sfo((Path(game) / 'sce_sys/param.sfo').read_bytes()).get('APP_VER')
     except (OSError, ValueError, ImportError):
         return None
+    if version!='01.09':
+        eboot=Path(game).resolve()/'eboot.bin'
+        try:
+            stat=eboot.stat()
+        except OSError:
+            return version
+        # Keyed on size and time too: the launcher stays open while eboot.bin is replaced.
+        if eboot_is_109(str(eboot),stat.st_size,stat.st_mtime_ns):
+            return '01.09'
+    return version
+
+
+@functools.lru_cache(maxsize=None)
+def eboot_is_109(path,_size=None,_mtime=None):
+    try:
+        from prepare import parse_self
+        elf=bytes(parse_self(Path(path).read_bytes())[0])
+        return patch_fingerprint(elf,BUILTIN_XML,'01.09')==PATCH_FINGERPRINTS['01.09']
+    except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error, ET.ParseError, ImportError):
+        return False
 
 
 def validate_patch_requirements(names, game):
