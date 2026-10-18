@@ -71,18 +71,52 @@ def game_app_version(game):
         return None
 
 
+DEBUG_MENU = 'Restore Debug Menu (READ NOTES)'
+DEBUG_MENU_FONTS = ('DbgFont14h.ccm', 'DbgFont14h.tpf')
+# Under dvdroot_ps4: the folder the port's notes name, and the one bbport 0.5 found the patched
+# game reading them from (BB_FILE_TRACE there). Either holds them.
+DEBUG_MENU_FONT_DIRS = ('font', 'adhoc/font')
+
+
+def find_ignoring_case(root, relative):
+    """`root`/`relative` with each component matched ignoring case (a mod may ship Adhoc/Font or
+    dbgfont14h.*); None when absent."""
+    path = Path(root)
+    for part in relative.split('/'):
+        exact = path / part
+        if exact.exists():
+            path = exact
+            continue
+        try:
+            path = next(p for p in path.iterdir() if p.name.lower() == part.lower())
+        except (OSError, StopIteration):
+            return None
+    return path
+
+
+def debug_menu_problem(game):
+    """Why the debug menu patch cannot work with this game folder (with its mods), or None."""
+    dvdroot = Path(game) / 'dvdroot_ps4'
+    for folder in DEBUG_MENU_FONT_DIRS:
+        found = [find_ignoring_case(dvdroot, f'{folder}/{name}') for name in DEBUG_MENU_FONTS]
+        if all(f and f.is_file() and f.stat().st_size > 0 for f in found):
+            return None
+    places = ' or '.join(f'dvdroot_ps4/{folder}' for folder in DEBUG_MENU_FONT_DIRS)
+    return (f'it needs non-empty {" and ".join(DEBUG_MENU_FONTS)} in {places} of the game folder '
+            'or of a mod (https://www.nexusmods.com/bloodborne/mods/253)')
+
+
 def validate_patch_requirements(names, game):
+    """The patches to apply: raises for conflicts; leaves the debug menu out (with a message)
+    when its font files are missing, rather than refusing to start the game."""
     if 'Restore Debug Camera' in names and 'Enemy Control' in names:
         raise ValueError('Restore Debug Camera conflicts with Enemy Control; enable only one')
-    if 'Restore Debug Menu (READ NOTES)' in names:
-        font = game / 'dvdroot_ps4/font'
-        missing = [name for name in ('DbgFont14h.ccm', 'DbgFont14h.tpf')
-                   if not (font / name).is_file() or (font / name).stat().st_size == 0]
-        if missing:
-            raise ValueError('Debug menu needs non-empty font files in '
-                             f'{font}: {", ".join(missing)}. Install the fonts from '
-                             'https://www.nexusmods.com/bloodborne/mods/253 first; '
-                             'or disable debug_menu in bbport.ini')
+    if DEBUG_MENU in names:
+        if problem := debug_menu_problem(game):
+            print(f'Patches: debug menu left out: {problem}; or turn debug_menu off in bbport.ini',
+                  file=sys.stderr)
+            return [n for n in names if n != DEBUG_MENU]
+    return names
 
 
 def effect_patches(settings):
@@ -421,7 +455,7 @@ def main():
     fps_names=FPS_PRESETS[a.fps]
     names=fps_names+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
-    validate_patch_requirements(names,a.game_dir)
+    names=validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
     fps_count=len(compile_patches(a.xml,fps_names,a.app_version,segments))  # the first writes

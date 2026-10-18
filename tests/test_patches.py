@@ -114,21 +114,32 @@ class DebugPatchTests(unittest.TestCase):
                     if offset+i in camera_bytes:
                         self.assertEqual(camera_bytes[offset+i], byte, patch)
 
-    def test_debug_menu_checks_both_fonts_but_camera_does_not_need_them(self):
+    def test_debug_menu_needs_both_fonts_but_camera_does_not(self):
         names = effect_patches({'debug_menu': '1'})
+        menu = 'Restore Debug Menu (READ NOTES)'
         with tempfile.TemporaryDirectory() as directory:
             game = Path(directory)
-            validate_patch_requirements(['Restore Debug Camera'], game)
-            with self.assertRaisesRegex(ValueError, 'DbgFont14h.ccm.*DbgFont14h.tpf'):
-                validate_patch_requirements(names, game)
+            self.assertEqual(validate_patch_requirements(['Restore Debug Camera'], game),
+                             ['Restore Debug Camera'])
+            # Without the fonts the patch is left out; the game still starts.
+            self.assertNotIn(menu, validate_patch_requirements(names, game))
             font = game / 'dvdroot_ps4/font'
             font.mkdir(parents=True)
             (font / 'DbgFont14h.ccm').write_bytes(b'test')
-            (font / 'DbgFont14h.tpf').touch()
-            with self.assertRaisesRegex(ValueError, 'DbgFont14h.tpf'):
-                validate_patch_requirements(names, game)
+            (font / 'DbgFont14h.tpf').touch()  # an empty file is not enough
+            self.assertNotIn(menu, validate_patch_requirements(names, game))
             (font / 'DbgFont14h.tpf').write_bytes(b'test')
-            validate_patch_requirements(names, game)
+            self.assertIn(menu, validate_patch_requirements(names, game))
+
+    def test_debug_menu_fonts_in_adhoc_font_with_a_mods_own_case(self):
+        names = effect_patches({'debug_menu': '1'})
+        with tempfile.TemporaryDirectory() as directory:
+            game = Path(directory)
+            font = game / 'dvdroot_ps4/Adhoc/Font'
+            font.mkdir(parents=True)
+            (font / 'dbgfont14h.ccm').write_bytes(b'test')
+            (font / 'dbgfont14h.tpf').write_bytes(b'test')
+            self.assertIn('Restore Debug Menu (READ NOTES)', validate_patch_requirements(names, game))
 
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
