@@ -250,7 +250,7 @@ public:
     }
     /// bbport: whether `image_id` is still the registered image `uid` (slot ids are reused).
     [[nodiscard]] bool IsRegisteredImage(ImageId image_id, u64 uid) const {
-        if (!image_id || !slot_images.is_allocated(image_id)) {
+        if (!image_id || !slot_images.IsAllocated(image_id)) {
             return false;
         }
         const Image& image = slot_images[image_id];
