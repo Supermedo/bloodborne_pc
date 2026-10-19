@@ -125,7 +125,13 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
         return false;
     }
 
-    fetch_shader_data = spec.fetch_shader_data;
+    // bbport 0.6-pre1 / bloodborne-mac v0.7.0: stages are loaded Fragment → Vertex →
+    // Geometry. Only keep fetch data from a stage that has it, or a geometry stage
+    // overwrites the vertex fetch shader with empty and cached GS pipelines bind no
+    // vertex buffers.
+    if (spec.fetch_shader_data) {
+        fetch_shader_data = spec.fetch_shader_data;
+    }
     return true;
 }
 

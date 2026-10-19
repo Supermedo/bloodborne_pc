@@ -297,7 +297,8 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     // main camera (shadow passes bind the same layout with the light's camera).
     gbuffer_draw = camera_motion->Enabled() && std::popcount(key.mrt_mask) >= 5 && db_desc.first;
     if (gbuffer_draw) {
-        camera_motion->OnGBufferPass(db_desc.first);
+        camera_motion->OnGBufferPass(db_desc.first, regs.viewports[0].xscale,
+                                     regs.viewports[0].yscale);
     }
     if (upscaler->Enabled() && cb_descs[0].first) {
         upscaler->OnColorTarget(cb_descs[0].first);

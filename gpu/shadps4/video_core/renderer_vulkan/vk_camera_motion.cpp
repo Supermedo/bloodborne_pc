@@ -153,7 +153,7 @@ CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
 CameraMotion::~CameraMotion() = default;
 
 float CameraMotion::VerticalFov() const noexcept {
-    return 2.0f * std::atan(1.0f / current.proj[1]);
+    return 2.0f * std::atan(1.0f / std::abs(current.proj[1]));
 }
 
 float CameraMotion::Near() const noexcept {
@@ -243,8 +243,10 @@ void CameraMotion::OnConstants(const float* data) {
                      current.inv_view[7], current.inv_view[11]);
         std::fflush(camera_log);
     }
-    current.proj = {data[52], data[57], data[62], data[63]};
-    current.valid = current.proj[0] != 0.0f && current.proj[1] != 0.0f;
+    // The constant buffer projection is Y-up. The G-buffer viewport scale carries the window
+    // direction; the motion shader divides by these signed scales.
+    current.proj = {data[52] * viewport_x_sign, data[57] * viewport_y_sign, data[62], data[63]};
+    current.valid = current.proj[0] != 0.f && current.proj[1] != 0.f;
     const std::array<u32, 2> size{u32(data[4]), u32(data[5])};
     if (size != render_size) {
         std::printf("Camera motion: scene render size %ux%u\n", size[0], size[1]);
@@ -253,8 +255,10 @@ void CameraMotion::OnConstants(const float* data) {
     frame_has_camera = true;
 }
 
-void CameraMotion::OnGBufferPass(VideoCore::ImageId depth) {
+void CameraMotion::OnGBufferPass(VideoCore::ImageId depth, float xscale, float yscale) {
     depth_id = depth;
+    viewport_x_sign = xscale < 0.f ? -1.f : 1.f;
+    viewport_y_sign = yscale < 0.f ? -1.f : 1.f;
 }
 
 void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
