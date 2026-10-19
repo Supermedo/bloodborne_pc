@@ -2,10 +2,16 @@
  * buffer period on a steady clock, like PS4 hardware: FMOD's output thread
  * reads 256-frame slots out of its mixer's 512-frame ring, and returning in
  * bursts (whenever the device pulls a quantum) lets it overtake the mixer and
- * play stale halves - a click every 10.7 ms. The lowest SDL queue level of
- * each window is steered to two buffers (silence prefill on underrun, ±3%
- * cadence corrections), which also absorbs device clock drift. Without an audio device (headless runs, BB_AUDIO=none)
- * ports only follow the clock. */
+ * play stale halves - a click every 10.7 ms. The SDL queue itself is kept
+ * about four device periods deep (at least 80 ms). Two game buffers (~10 ms)
+ * sit under one Windows shared-mode chunk, so the device underruns and the
+ * hole is a crackle, loudest on high-pitched sounds; a busy 6-core CPU
+ * delivers the mix late and makes it constant. The lowest level of each
+ * window is steered there (one silence buffer on a real underrun, ±3%
+ * cadence), which also absorbs device clock drift. A queue that runs long
+ * drops one buffer; it is never flushed (flushing is a long dropout).
+ * Without an audio device (headless runs, BB_AUDIO=none) ports only follow
+ * the clock. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
@@ -15,6 +21,12 @@
 #include <pthread.h>
 #include <time.h>
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #define PORTS 25
 #define ERR_NOT_OPENED ((int32_t)0x80260001)
@@ -42,6 +54,7 @@ typedef struct {
     int stats;
     uint64_t stat_start_ns, stat_last_ns, stat_max_gap_ns; /* BB_AUDIO_STATS */
     unsigned stat_starved, stat_buffers; int stat_min_queued;
+    int primed, drop_warned;
 } Port;
 typedef struct { uint16_t output; uint8_t channel, reserved; int16_t volume; uint16_t reroute; uint64_t flag, reserved64[2]; } PortState;
 _Static_assert(sizeof(PortState)==32,"AudioOut port state layout");
@@ -51,6 +64,7 @@ static Port ports[PORTS];
 static int initialized, sdl_ready=-1;
 static size_t buffers_out, ports_opened;
 static int device_channels; /* >0 playback channels, <0 query failed */
+static int device_period_frames; /* device chunk, in 48 kHz frames */
 static float master_gain=1.f;
 
 /* SDL's 7.1->stereo matrix multiplies the front pair by ~0.21 so a full 8ch
@@ -89,11 +103,47 @@ static void audio_levels(void) {
     const char *env=getenv("BB_AUDIO_GAIN");
     if (env && env[0]) { char *end=NULL; float g=strtof(env,&end); if (end!=env && g>0.f && g<=8.f) master_gain=g; }
     SDL_AudioSpec spec;
-    if (SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,NULL) && spec.channels>=1 && spec.channels<=8)
+    int frames=0;
+    if (SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,&frames) && spec.channels>=1 && spec.channels<=8) {
         device_channels=spec.channels;
-    else device_channels=-1;
-    printf("Runtime: audio device %d ch, gain %.2f\n", device_channels>0 ? device_channels : 0, master_gain);
+        if (frames>0 && frames<=16384 && spec.freq>0)
+            device_period_frames=(int)((int64_t)frames*48000/spec.freq);
+    } else device_channels=-1;
+    printf("Runtime: audio device %d ch, period %d frames (%.1f ms), gain %.2f\n",
+           device_channels>0 ? device_channels : 0, device_period_frames,
+           device_period_frames*1000.0/48000.0, master_gain);
 }
+/* Bytes of queued PCM to stay ahead of the device. Four chunks, and at least
+ * 80 ms. Two chunks still drain here: WASAPI reports a 1024-frame / 21 ms
+ * period, and one late mix on a 6-thread CPU empties that lead. */
+static int queue_low_bytes(const Port *p) {
+    int bpf=p->out_channels*p->sample_bytes;
+    if (bpf<1) bpf=1;
+    int frames=device_period_frames>0 ? device_period_frames*4 : 0;
+    if (frames<3840) frames=3840;
+    if (frames<p->frames*4) frames=p->frames*4;
+    if (frames>9600) frames=9600;
+    return frames*bpf;
+}
+static void put_silence(SDL_AudioStream *stream, int bytes) {
+    static const unsigned char silence[4096];
+    while (bytes>0) {
+        int n=bytes>(int)sizeof silence ? (int)sizeof silence : bytes;
+        if (!SDL_PutAudioStreamData(stream,silence,n)) break;
+        bytes-=n;
+    }
+}
+#ifdef _WIN32
+/* The mix runs on this thread before it calls in. On a loaded 6-core CPU
+ * a normal priority wakeup is late, the queue empties, and the underrun is
+ * the crackle. The thread sleeps for most of each period. */
+static void raise_audio_thread(void) {
+    static __thread int done;
+    if (done) return;
+    done=1;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+}
+#endif
 
 static uint64_t now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
 static void sleep_until(uint64_t deadline) {
@@ -203,6 +253,9 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
     Port *p=port_of(handle,&error);
     pthread_mutex_unlock(&table_lock);
     if (!p) return error;
+#ifdef _WIN32
+    raise_audio_thread();
+#endif
     pthread_mutex_lock(&p->lock);
     size_t samples=(size_t)p->frames*(size_t)p->channels;
     size_t out_bytes=(size_t)p->frames*(size_t)p->out_channels*(size_t)p->sample_bytes;
@@ -261,13 +314,34 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
             p->next_deadline_ns+=period;
         }
         if (p->stream) {
-            /* The device drains the queue in quanta (21 ms on PipeWire), so the level
-               is a sawtooth: its minimum over ~32 buffers is what gets controlled. */
-            int low=2*(int)out_bytes, queued=SDL_GetAudioStreamQueued(p->stream);
-            if (queued<(int)out_bytes) {
-                static const unsigned char silence[2048*8*4];
-                SDL_PutAudioStreamData(p->stream,silence,low-queued<(int)out_bytes ? low-queued : (int)out_bytes);
-                queued=low;
+            /* The device drains the queue in quanta, so the level is a sawtooth:
+               its minimum over ~32 buffers is what gets controlled. Silence is
+               only for a real hole. Pretending a short prefill filled `low`
+               made the controller slow down while the device was already empty. */
+            int bpf=p->out_channels*p->sample_bytes;
+            int low=queue_low_bytes(p);
+            int extra=device_period_frames>p->frames ? device_period_frames : p->frames;
+            int high=low+extra*bpf*2;
+            int queued=SDL_GetAudioStreamQueued(p->stream);
+            if (queued<0) queued=0;
+            if (!p->primed) {
+                /* Silence only before the first real buffer. Filling the whole
+                   cushion again after a hole mutes for the length of the lead. */
+                int fill=low-queued;
+                if (bpf>1) fill-=fill%bpf;
+                if (fill>0) put_silence(p->stream,fill);
+                p->primed=1;
+                queued=SDL_GetAudioStreamQueued(p->stream);
+                if (queued<0) queued=0;
+            } else if (queued<(int)out_bytes) {
+                int quantum=device_period_frames>0 ? device_period_frames*bpf : (int)out_bytes;
+                int fill=quantum-queued;
+                if (fill<(int)out_bytes) fill=(int)out_bytes;
+                if (fill>low-queued) fill=low-queued;
+                if (bpf>1) fill-=fill%bpf;
+                if (fill>0) put_silence(p->stream,fill);
+                queued=SDL_GetAudioStreamQueued(p->stream);
+                if (queued<0) queued=0;
             }
             if (!p->window_count || queued<p->window_min) p->window_min=queued;
             if (++p->window_count==32) {
@@ -275,7 +349,15 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
                 p->window_count=0;
             }
             p->next_deadline_ns+=(uint64_t)p->adjust_ns;
-            SDL_PutAudioStreamData(p->stream,converted,(int)out_bytes);
+            if (queued>high) {
+                if (!p->drop_warned) {
+                    fprintf(stderr,"Runtime: audio queue backed up (%d bytes, limit %d), dropping one buffer\n",queued,high);
+                    p->drop_warned=1;
+                }
+            } else {
+                if (queued<low) p->drop_warned=0;
+                SDL_PutAudioStreamData(p->stream,converted,(int)out_bytes);
+            }
         }
         ++buffers_out;
     }
