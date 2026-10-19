@@ -33,13 +33,13 @@ int main() {
     ci.type = AmdGpu::ImageType::Color2D;
     ci.pixel_format = vk::Format::eR8G8B8A8Unorm;
     ci.num_bits = 32;
-    const auto color_id = images.insert(instance, runtime, views, ci);
+    const auto color_id = images.Insert(instance, runtime, views, ci);
     auto di = ci;
     di.pixel_format = vk::Format::eD32SfloatS8Uint;
     di.props.is_depth = di.props.has_stencil = true;
-    const auto depth_id = images.insert(instance, runtime, views, di);
+    const auto depth_id = images.Insert(instance, runtime, views, di);
     SceneTargets targets(instance, scheduler, runtime, [&](VideoCore::ImageId id, u64 uid) {
-        if (!images.is_allocated(id)) return static_cast<VideoCore::Image*>(nullptr);
+        if (!images.IsAllocated(id)) return static_cast<VideoCore::Image*>(nullptr);
         return !uid || images[id].image_uid == uid ? &images[id] : nullptr;
     });
     const bool color_eligible = targets.Eligible(images[color_id]);
@@ -154,7 +154,7 @@ int main() {
     auto hi = ci;
     hi.size = {960, 540, 1};
     hi.resources = {4, 1};
-    const auto half_id = images.insert(instance, runtime, views, hi);
+    const auto half_id = images.Insert(instance, runtime, views, hi);
     const auto scene = SceneResolution::ForPreset(4); // 640x360 (x3 of 1080p)
     targets.SetSize(scene);
     auto& half = images[half_id];

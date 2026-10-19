@@ -7,3 +7,7 @@ patches here to its working tree when they are not applied yet:
   statistics of each pass) in the FSR 4 v07 provider.
 - `0002-...`: `#include <mutex>` in the FFX Vulkan backend; libc++ (the Windows MSYS2 CLANG64
   build) does not include it transitively.
+- `0003-...`: FSR 3.1 frame generation tells the bridge which frame its jobs belong to and
+  retires that frame with the imported views. Without it every constant buffer and descriptor
+  set the bridge made (one allocation each, per generated frame) was kept until the context
+  was destroyed: video memory grew by about 60 MiB a second until the device was lost.

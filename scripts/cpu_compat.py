@@ -287,6 +287,42 @@ def _uint(value, label):
     return value
 
 
+def _short_span_check(site, start, end, module_base, module_symbols, relocations):
+    """A short span (plan version 4, tools/build_cpu_compat.py): a short count or MOVBE
+    instruction with neighbors moved into its trampoline (no jump fits its own bytes). The
+    offline audit found no entry into the moved instructions; the linked image's resolved
+    relocations and the module's symbols are checked here again."""
+    span = site.get('span')
+    if not isinstance(span, dict) or set(span) != {'pieces', 'function', 'entry_audit'}:
+        raise ValueError('Legacy CPU short span metadata is incomplete or has unknown fields.')
+    pieces = span['pieces']
+    if (not isinstance(pieces, list) or not 2 <= len(pieces) <= 4
+            or any(not isinstance(p, list) or len(p) != 4 or p[0] not in ('translate', 'move')
+                   or type(p[1]) is not int or type(p[2]) is not int for p in pieces)
+            or not any(p[0] == 'translate' for p in pieces)
+            or sum(p[2] for p in pieces) != end - start
+            or pieces[0][1] != site['address']):
+        raise ValueError('Legacy CPU short span pieces do not describe its bytes.')
+    audit = span['entry_audit']
+    if (not isinstance(audit, dict) or audit.get('method') != 'short_span_entries_v1'
+            or audit.get('global_indirect_proof') is not False
+            or audit.get('known_entries') != [] or audit.get('unresolved_candidates') != []):
+        raise ValueError('Legacy CPU short span entry audit is missing or found entries.')
+    if site.get('rip_fixups', []) != []:
+        raise ValueError('Legacy CPU short spans cannot contain RIP fixups.')
+
+    def entry(target):
+        if type(target) is int and start < target < end:
+            raise ValueError('Legacy CPU short span has a known interior entry.')
+
+    for relocation in relocations:
+        if relocation[1] == 0 and type(relocation[2]) is int and type(relocation[3]) is int:
+            entry(relocation[2] + relocation[3])
+    for symbol in module_symbols:
+        if symbol.get('section') and type(symbol.get('value')) is int:
+            entry(module_base + symbol['value'])
+
+
 def _hex_bytes(value, label, minimum, maximum):
     if not isinstance(value, str) or len(value) % 2 or not re.fullmatch('[0-9a-fA-F]+', value):
         raise ValueError(f'Legacy CPU {label} must contain hexadecimal bytes.')
@@ -335,8 +371,8 @@ def patch_image(image, segments, main, modules, relocations, *, plan=None, activ
             raw_plan = json.dumps(plan, sort_keys=True, separators=(',', ':')).encode('utf-8')
     except (OSError, UnicodeError, TypeError, json.JSONDecodeError) as error:
         raise ValueError(f'Legacy CPU plan could not be loaded: {error}') from error
-    if not isinstance(plan, dict) or type(plan.get('version')) is not int or plan['version'] not in (1, 2, 3):
-        raise ValueError('Legacy CPU plan version must be 1, 2 or 3.')
+    if not isinstance(plan, dict) or type(plan.get('version')) is not int or plan['version'] not in (1, 2, 3, 4):
+        raise ValueError('Legacy CPU plan version must be 1, 2, 3 or 4.')
     report['plan_version'] = plan['version']
     if not isinstance(plan.get('modules'), dict) or not isinstance(plan.get('sites'), list):
         raise ValueError('Legacy CPU plan requires modules and sites.')
@@ -409,17 +445,21 @@ def patch_image(image, segments, main, modules, relocations, *, plan=None, activ
         name = site['module']
         address = _uint(site.get('address'), f'{name} site address')
         label = f'{name}+{address:#x}'
-        original = _hex_bytes(site.get('bytes'), label + ' original bytes', 5, 15)
+        kind = site.get('kind', 'instruction')
+        # A short span holds up to four instructions.
+        original = _hex_bytes(site.get('bytes'), label + ' original bytes', 5,
+                              40 if kind == 'short_span' else 15)
         body = bytearray(_hex_bytes(site.get('body'), label + ' body', 1, 4096))
         instruction = site.get('instruction')
         if not isinstance(instruction, str) or instruction.split(' ', 1)[0] not in SUPPORTED:
             raise ValueError(f'Legacy CPU {label}: unsupported instruction description.')
-        kind = site.get('kind', 'instruction')
-        if kind not in ('instruction', 'count_span'):
+        if kind not in ('instruction', 'count_span', 'short_span'):
             raise ValueError(f'Legacy CPU {label}: unsupported site kind.')
-        is_span = kind == 'count_span'
-        if is_span and plan['version'] != 3:
+        is_span = kind in ('count_span', 'short_span')
+        if kind == 'count_span' and plan['version'] not in (3, 4):
             raise ValueError(f'Legacy CPU {label}: count spans require plan version 3.')
+        if kind == 'short_span' and plan['version'] != 4:
+            raise ValueError(f'Legacy CPU {label}: short spans require plan version 4.')
         # F3 0F BC/BD register count without REX is exactly four bytes. A
         # longer record cannot be smuggled in as a legacy single instruction.
         short_count_prefix = (original[:3] in (b'\xf3\x0f\xbc', b'\xf3\x0f\xbd')
@@ -436,11 +476,15 @@ def patch_image(image, segments, main, modules, relocations, *, plan=None, activ
         index = bisect.bisect_left(relocation_targets, start - 7)
         if index < len(relocation_targets) and relocation_targets[index] < end:
             raise ValueError(f'Legacy CPU {label}: site overlaps a relocation.')
-        if is_span:
+        if kind == 'count_span':
             tail, evidence = _count_span_tail(site, original, body, image, main, locations, mapped, relocations)
             body.extend(tail)
             if evidence not in span_evidence:
                 span_evidence.append(evidence)
+        elif kind == 'short_span':
+            # The body already holds the moved neighbors in order.
+            module_symbols = main.get('symbols', []) if name == 'eboot.bin' else []
+            _short_span_check(site, start, end, base, module_symbols, relocations)
         cursor = (cursor + 15) & ~15
         fixups = site.get('rip_fixups', [])
         if not isinstance(fixups, list) or (fixups and plan['version'] < 2):

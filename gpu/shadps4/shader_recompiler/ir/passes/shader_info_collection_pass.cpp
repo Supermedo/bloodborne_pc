@@ -4,9 +4,18 @@
 #include "core/emulator_settings.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
-#include "video_core/buffer_cache/buffer_cache.h"
 
 namespace Shader::Optimization {
+
+static void AddFlatbuf(Info& info) {
+    if (!info.has_flatbuf) {
+        info.buffers.push_back({
+            .used_types = IR::Type::U32,
+            .buffer_type = BufferType::Flatbuf,
+        });
+        info.has_flatbuf = true;
+    }
+}
 
 void Visit(Info& info, const IR::Inst& inst) {
     switch (inst.GetOpcode()) {
@@ -19,7 +28,7 @@ void Visit(Info& info, const IR::Inst& inst) {
         info.stores.Set(inst.Arg(0).Attribute(), inst.Arg(2).U32());
         break;
     case IR::Opcode::GetUserData:
-        info.ud_mask.Set(inst.Arg(0).ScalarReg());
+        AddFlatbuf(info);
         break;
     case IR::Opcode::SetPatch: {
         const auto patch = inst.Arg(0).Patch();
@@ -83,6 +92,44 @@ void Visit(Info& info, const IR::Inst& inst) {
         break;
     case IR::Opcode::PackDouble2x32:
     case IR::Opcode::UnpackDouble2x32:
+    case IR::Opcode::FPAbs64:
+    case IR::Opcode::FPAdd64:
+    case IR::Opcode::FPFma64:
+    case IR::Opcode::FPMax64:
+    case IR::Opcode::FPMin64:
+    case IR::Opcode::FPMul64:
+    case IR::Opcode::FPDiv64:
+    case IR::Opcode::FPNeg64:
+    case IR::Opcode::FPRecip64:
+    case IR::Opcode::FPRecipSqrt64:
+    case IR::Opcode::FPSaturate64:
+    case IR::Opcode::FPClamp64:
+    case IR::Opcode::FPRoundEven64:
+    case IR::Opcode::FPFloor64:
+    case IR::Opcode::FPCeil64:
+    case IR::Opcode::FPTrunc64:
+    case IR::Opcode::FPFract64:
+    case IR::Opcode::FPFrexpSig64:
+    case IR::Opcode::FPFrexpExp64:
+    case IR::Opcode::FPOrdEqual64:
+    case IR::Opcode::FPUnordEqual64:
+    case IR::Opcode::FPOrdNotEqual64:
+    case IR::Opcode::FPUnordNotEqual64:
+    case IR::Opcode::FPOrdLessThan64:
+    case IR::Opcode::FPUnordLessThan64:
+    case IR::Opcode::FPOrdGreaterThan64:
+    case IR::Opcode::FPUnordGreaterThan64:
+    case IR::Opcode::FPOrdLessThanEqual64:
+    case IR::Opcode::FPUnordLessThanEqual64:
+    case IR::Opcode::FPOrdGreaterThanEqual64:
+    case IR::Opcode::FPUnordGreaterThanEqual64:
+    case IR::Opcode::FPIsNan64:
+    case IR::Opcode::FPIsInf64:
+    case IR::Opcode::ConvertS32F64:
+    case IR::Opcode::ConvertF32F64:
+    case IR::Opcode::ConvertF64F32:
+    case IR::Opcode::ConvertF64S32:
+    case IR::Opcode::ConvertF64U32:
         info.uses_fp64 = true;
         break;
     case IR::Opcode::ImageWrite:
@@ -144,13 +191,7 @@ void Visit(Info& info, const IR::Inst& inst) {
         info.uses_shader_clock = true;
         break;
     case IR::Opcode::ReadConst:
-        if (!info.has_readconst) {
-            info.buffers.push_back({
-                .used_types = IR::Type::U32,
-                .buffer_type = BufferType::Flatbuf,
-            });
-            info.has_readconst = true;
-        }
+        AddFlatbuf(info);
         if (inst.Flags<u32>() == 0) {
             info.readconst_types |= Info::ReadConstType::Immediate;
             info.readconst_types |= Info::ReadConstType::Dynamic;

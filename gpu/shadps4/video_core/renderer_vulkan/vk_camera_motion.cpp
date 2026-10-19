@@ -161,6 +161,66 @@ float CameraMotion::Near() const noexcept {
     return -current.proj[3] / current.proj[2];
 }
 
+namespace {
+using Matrix4 = std::array<float, 16>;
+
+/// Row vectors (v * m): the camera's projection, clip = (xs x, ys y, zs z + zo, z).
+Matrix4 Projection(const std::array<float, 4>& p) {
+    return {p[0], 0, 0, 0, 0, p[1], 0, 0, 0, 0, p[2], 1, 0, 0, p[3], 0};
+}
+
+Matrix4 InverseProjection(const std::array<float, 4>& p) {
+    return {1 / p[0], 0, 0, 0, 0, 1 / p[1], 0, 0, 0, 0, 0, 1 / p[3], 0, 0, 1, -p[2] / p[3]};
+}
+
+/// A 3x4 affine matrix (rows [R | t], column vectors) as row vectors.
+Matrix4 RowVectors(const std::array<float, 12>& a) {
+    return {a[0], a[4], a[8], 0, a[1], a[5], a[9], 0, a[2], a[6], a[10], 0, a[3], a[7], a[11], 1};
+}
+
+Matrix4 Multiply4(const Matrix4& a, const Matrix4& b) {
+    Matrix4 out{};
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            float v = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                v += a[r * 4 + k] * b[k * 4 + c];
+            }
+            out[r * 4 + c] = v;
+        }
+    }
+    return out;
+}
+} // namespace
+
+bool CameraMotion::ClipTransforms(std::array<float, 16>& view_to_clip,
+                                  std::array<float, 16>& clip_to_prev_clip,
+                                  std::array<float, 16>& prev_clip_to_clip) const noexcept {
+    if (!current.valid || !previous.valid || current.proj[0] == 0.0f ||
+        current.proj[1] == 0.0f || current.proj[3] == 0.0f || previous.proj[0] == 0.0f ||
+        previous.proj[1] == 0.0f || previous.proj[3] == 0.0f) {
+        return false;
+    }
+    view_to_clip = Projection(current.proj);
+    // Current clip -> current view -> world -> previous view -> previous clip, and back.
+    clip_to_prev_clip = Multiply4(
+        Multiply4(InverseProjection(current.proj),
+                  RowVectors(Multiply(previous.view, current.inv_view))),
+        Projection(previous.proj));
+    prev_clip_to_clip = Multiply4(
+        Multiply4(InverseProjection(previous.proj),
+                  RowVectors(Multiply(current.view, previous.inv_view))),
+        Projection(current.proj));
+    return true;
+}
+
+float CameraMotion::FarPlane(float fallback) const noexcept {
+    // depth = zs + zo / z is 1 at the far plane; zs = 1 is an infinite one.
+    const float zs = current.proj[2], zo = current.proj[3];
+    const float far_z = zs < 1.0f ? zo / (1.0f - zs) : 0.0f;
+    return far_z > Near() && far_z < 1e7f ? far_z : fallback;
+}
+
 std::array<std::array<float, 4>, 3> CameraMotion::TaaDepthParameters() const noexcept {
     const auto transform = Multiply(previous.view, current.inv_view);
     return {current.proj, previous.proj,

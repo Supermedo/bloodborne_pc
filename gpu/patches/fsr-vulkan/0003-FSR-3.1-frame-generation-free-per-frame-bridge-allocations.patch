@@ -1,0 +1,23 @@
+diff --git a/src/ffx_vk_fsr3_3_1_6_framegen.cpp b/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+index 9636cec..0b276c8 100644
+--- a/src/ffx_vk_fsr3_3_1_6_framegen.cpp
++++ b/src/ffx_vk_fsr3_3_1_6_framegen.cpp
+@@ -463,6 +463,10 @@ ffxVkFsr3_3_1_6FrameGenerationContextRecordPrepare(
+         !valid_image(info->depth, VK_FORMAT_R32_SFLOAT, info->renderWidth, info->renderHeight, false) ||
+         !valid_motion_image(info->motionVectors, info->renderWidth, info->renderHeight))
+         return FFX_VK_FSR3_3_1_6_FRAMEGEN_ERROR_INVALID_ARGUMENT;
++    /* The constant buffers and descriptor sets the bridge creates for this
++     * frame's jobs carry its id; RetireFrame frees them once the GPU is done.
++     * Without it they carry 0 and are kept until the context is destroyed. */
++    ffxVkFsr3_3_1_5BridgeBeginFrame(context->bridge, info->frameId);
+     if (!context->initialized) {
+         const OwnedSharedImage shared[] = {
+             context->opticalFlowVector, context->opticalFlowScd, context->dilatedDepth,
+@@ -676,6 +680,7 @@ ffxVkFsr3_3_1_6FrameGenerationContextRetireFrame(
+             ++retained;
+         }
+     }
++    ffxVkFsr3_3_1_5BridgeRetireFrame(context->bridge, completedFrameId);
+     return FFX_VK_FSR3_3_1_6_FRAMEGEN_OK;
+ }
+ 

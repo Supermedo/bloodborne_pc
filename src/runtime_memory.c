@@ -142,8 +142,19 @@ void runtime_memory_reserve(void) {
         win_fail("reserving the PS4 address range (link with --disable-high-entropy-va)",USER_MIN,USER_MAX-USER_MIN);
     region_insert(0,(HostRegion){USER_MIN,USER_MAX,0,0});
 }
+/* Guest memory committed only as the game maps it: the whole pool did not fit Windows' commit
+ * limit (RAM + page file) at once (pool()). */
+static int commit_on_map;
+static void commit_backing(uint64_t phys, uint64_t size) {
+    if (!commit_on_map || VirtualAlloc(backing_base+phys,size,MEM_COMMIT,PAGE_READWRITE)) return;
+    fprintf(stderr,"Runtime: cannot commit %" PRIu64 " MiB more guest memory (error %lu): Windows' "
+            "page file is too small for this resolution; let Windows manage its size, or use a "
+            "lower output resolution\n",size>>20,GetLastError());
+    win_fail("committing guest memory",(uintptr_t)(backing_base+phys),size);
+}
 static void view_map(const HostRegion *r, DWORD protect) {
     DWORD initial=protect==PAGE_NOACCESS ? PAGE_READWRITE : protect, old;
+    commit_backing(r->phys,r->end-r->start);
     if (!MapViewOfFile3(section,GetCurrentProcess(),(void *)r->start,r->phys,r->end-r->start,MEM_REPLACE_PLACEHOLDER,initial,NULL,0))
         win_fail("MapViewOfFile3",r->start,r->end-r->start);
     if (initial!=protect && !VirtualProtect((void *)r->start,r->end-r->start,protect,&old))
@@ -230,13 +241,28 @@ static int host_protect(uintptr_t address, uint64_t size, int prot) {
     return 0;
 }
 /* Released pages read as zero when reused, like the memfd's punched holes. */
-static void host_discard(uint64_t phys, uint64_t size) { memset(backing_base+phys,0,size); }
+static void host_discard(uint64_t phys, uint64_t size) { commit_backing(phys,size); memset(backing_base+phys,0,size); }
 /* Direct memory occupies [0,POOL_SIZE) of the section, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 static int pool(void) {
     if (backing_base) return 0;
     runtime_memory_reserve();
     uint64_t bytes=POOL_SIZE+FLEX_SPAN;
-    section=CreateFileMapping2(INVALID_HANDLE_VALUE,NULL,FILE_MAP_ALL_ACCESS,PAGE_EXECUTE_READWRITE,SEC_COMMIT,bytes,NULL,NULL,0);
+    /* BB_GUEST_COMMIT_ON_MAP=1: the fallback below from the start (tests). */
+    const char *on_map=getenv("BB_GUEST_COMMIT_ON_MAP");
+    if (on_map && on_map[0]=='1') SetLastError(ERROR_COMMITMENT_LIMIT);
+    else section=CreateFileMapping2(INVALID_HANDLE_VALUE,NULL,FILE_MAP_ALL_ACCESS,PAGE_EXECUTE_READWRITE,SEC_COMMIT,bytes,NULL,NULL,0);
+    if (!section && (GetLastError()==ERROR_NO_SYSTEM_RESOURCES || GetLastError()==ERROR_COMMITMENT_LIMIT)) {
+        /* The pool is sized for the largest resolutions (BB_DMEM_MB, 12+ GiB) and committed at
+         * once it exceeded RAM + page file (error 1450) although the game maps much less: then
+         * it is reserved and committed as the game maps it (commit_backing). */
+        DWORD error=GetLastError();
+        section=CreateFileMapping2(INVALID_HANDLE_VALUE,NULL,FILE_MAP_ALL_ACCESS,PAGE_EXECUTE_READWRITE,SEC_RESERVE,bytes,NULL,NULL,0);
+        if (section) {
+            commit_on_map=1;
+            printf("Runtime: %" PRIu64 " MiB of guest memory do not fit Windows' commit limit at once "
+                   "(error %lu): committed as the game maps it\n",bytes>>20,error);
+        }
+    }
     if (!section) { fprintf(stderr,"Runtime: cannot create %" PRIu64 " MiB of guest memory (error %lu); is the page file large enough?\n",bytes>>20,GetLastError()); return -1; }
     backing_base=MapViewOfFile3(section,GetCurrentProcess(),NULL,0,bytes,0,PAGE_READWRITE,NULL,0);
     return backing_base ? 0 : -1;

@@ -16,9 +16,11 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 7u; // bbport: interpolated integer fix (Pascal)
-static constexpr u32 ShaderMetaVersion = 7u; // bbport: ImageResource::needs_native
-static constexpr u32 PipelineKeyVersion = 5u; // bbport: Info layout (ImageResource::needs_native)
+// bbport: past both histories (port 7/7/5, upstream 0.20.1 9/6/3): caches of either are rebuilt.
+// 11: the push data block covers all 56 buffer offsets (shaders of 10 read some out of bounds).
+static constexpr u32 ShaderBinaryVersion = 11u;
+static constexpr u32 ShaderMetaVersion = 8u;
+static constexpr u32 PipelineKeyVersion = 6u;
 } // namespace Serialization
 
 namespace Vulkan {
@@ -96,7 +98,6 @@ void RegisterShaderBinary(std::vector<u32>&& spv, u64 pgm_hash, size_t perm_idx)
 }
 
 bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
-                    std::optional<Shader::Gcn::FetchShaderData>& fetch_shader_data,
                     Shader::StageSpecialization& spec, size_t& perm_idx) {
     Serialization::Reader meta{ar};
 
@@ -123,14 +124,6 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
     // recompiled for the current allocation, never loaded from a previous process.
     if (info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
         return false;
-    }
-
-    // bbport 0.6-pre1 / bloodborne-mac v0.7.0: stages are loaded Fragment → Vertex →
-    // Geometry. Only keep fetch data from a stage that has it, or a geometry stage
-    // overwrites the vertex fetch shader with empty and cached GS pipelines bind no
-    // vertex buffers.
-    if (spec.fetch_shader_data) {
-        fetch_shader_data = spec.fetch_shader_data;
     }
     return true;
 }
@@ -272,7 +265,8 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
 
     it.value() = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-        sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+        sel.runtime_infos, sel.fetch_shader ? &*sel.fetch_shader : nullptr, sel.modules, sdata,
+        true);
 
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
@@ -291,7 +285,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     Shader::StageSpecialization spec{};
     spec.info = &program->info;
     size_t perm_idx{};
-    if (!LoadShaderMeta(ar, program->info, sel.fetch_shader, spec, perm_idx)) {
+    if (!LoadShaderMeta(ar, program->info, spec, perm_idx)) {
         return false;
     }
 
@@ -355,6 +349,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
 
     sel.infos[stage] = &it_pgm.value()->info;
     sel.modules[stage] = module;
+    if (const auto& fetch = it_pgm.value()->modules[perm_idx].spec.fetch_shader_data;
+        !fetch.Empty()) {
+        sel.fetch_shader = fetch;
+    }
 
     return true;
 }
@@ -523,9 +521,9 @@ void StageSpecialization::Serialize(Serialization::Archive& ar) const {
 
     spec.Write(bitset.to_string());
 
-    if (fetch_shader_data) {
-        spec.Write(sizeof(*fetch_shader_data));
-        fetch_shader_data->Serialize(ar);
+    if (!fetch_shader_data.Empty()) {
+        spec.Write(sizeof(fetch_shader_data));
+        fetch_shader_data.Serialize(ar);
     } else {
         spec.Write(size_t{0});
     }

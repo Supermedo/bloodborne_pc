@@ -118,14 +118,22 @@ def no_console():
     return 0 if ctypes.windll.kernel32.GetConsoleWindow() else subprocess.CREATE_NO_WINDOW
 
 
-def run_script(name, *args, capture=False):
+def run_script(name, *args, capture=False, optional=False):
+    """Runs scripts/<name>. optional: a failure returns False instead of stopping the launch."""
     # Inside the packaged Bloodborne.exe (PyInstaller) the executable runs scripts itself.
     script = ['--script'] if getattr(sys, 'frozen', False) else []
     command = [sys.executable, *script, str(PORT / 'scripts' / name), *map(str, args)]
+    if optional and not capture:
+        try:
+            return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode == 0
+        except OSError:
+            return False
     if capture:
         result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True,
                                 creationflags=no_console())
         if result.returncode:
+            if optional:
+                return None
             sys.exit(result.returncode)
         return result.stdout
     # stdin given: the output handles are passed explicitly (a windowed Bloodborne.exe child would
@@ -202,7 +210,12 @@ def main():
     text_layer = out / 'quit_text'
     shutil.rmtree(text_layer, ignore_errors=True)
     if ini_value(config, 'quit_to_desktop') != '0' and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
-        run_script('quit_menu.py', game, '--out', text_layer)
+        # Optional: when its files cannot be written ("[WinError 5] Access is denied", an
+        # antivirus or the folder's permissions), the game starts without it.
+        if not run_script('quit_menu.py', game, '--out', text_layer, optional=True):
+            shutil.rmtree(text_layer, ignore_errors=True)
+            env['BB_QUIT_TO_DESKTOP'] = '0'  # patches.py: no menu entries without their texts
+            print('Quit to Desktop: its menu texts could not be written; the game starts without it')
     # Ultrawide outputs: the menu movies with full-screen backdrops widened and the HUD's corner
     # groups toward the screen edges (bbport.ini hud_position, 0 centred .. 100 edges), a layer
     # below the mods. Only for the
@@ -212,14 +225,35 @@ def main():
     canvas = hud_canvas(output_size(read_settings(Path(config))))
     if canvas != OUTPUT_SIZE and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
         position = ini_value(config, 'hud_position') or '100'
-        run_script('hud_layout.py', game, '--out', hud_layer, '--canvas-width', canvas[0],
-                   '--position', max(0, min(100, int(position) if position.isdigit() else 100)) / 100,
-                   '--source', text_layer)
-    game = Path(run_script('mods.py', game, '--out', out,
-                           '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
-                           '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
-                           '--enabled', env.get('BB_MODS_ENABLED', '1'),
-                           '--layer', text_layer, '--layer', hud_layer, capture=True).strip())
+        if not run_script('hud_layout.py', game, '--out', hud_layer, '--canvas-width', canvas[0],
+                          '--position', max(0, min(100, int(position) if position.isdigit() else 100)) / 100,
+                          '--source', text_layer, optional=True):
+            shutil.rmtree(hud_layer, ignore_errors=True)
+            print('HUD layout: its menu files could not be written; the HUD stays in the centre')
+    # Field of view (bbport.ini fov, degrees; 43 is the game's): the camera table with every
+    # camera's field of view scaled, a layer below the mods. fov.py keeps it between starts
+    # while the setting and the game file are the same.
+    fov_layer = out / 'fov'
+    fov = ini_value(config, 'fov')
+    if fov and fov.isdigit() and int(fov) != 43:
+        if not run_script('fov.py', game, '--out', fov_layer, '--fov', fov, optional=True):
+            shutil.rmtree(fov_layer, ignore_errors=True)
+            print('Field of view: its camera table could not be written; the game keeps its own')
+    else:
+        shutil.rmtree(fov_layer, ignore_errors=True)
+    mod_args = [game, '--out', out, '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
+                '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
+                '--enabled', env.get('BB_MODS_ENABLED', '1')]
+    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', hud_layer, '--layer', fov_layer,
+                      capture=True, optional=True)
+    if view is None:
+        # The game view could not be made with the port's own layers (Quit to Desktop's texts,
+        # the HUD layout); without them the game still starts, as it did before they existed.
+        print('Mods: the game view could not be made; starting without Quit to Desktop and the '
+              'HUD layout')
+        env['BB_QUIT_TO_DESKTOP'] = '0'
+        view = run_script('mods.py', *mod_args, capture=True)
+    game = Path(view.strip())
     mod_view = game if game.resolve() != original_game else None
     try:
         run_script('prepare.py', game, '--out', out)
@@ -317,7 +351,12 @@ def main():
         return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
     finally:
         if mod_view:
-            shutil.rmtree(mod_view, ignore_errors=True)
+            # Read-only game files leave read-only links (mods.remove_overlay clears them).
+            from mods import remove_overlay
+            try:
+                remove_overlay(mod_view, original_game)
+            except OSError:
+                pass
 
 
 if __name__ == '__main__':

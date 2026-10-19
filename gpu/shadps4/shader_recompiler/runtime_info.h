@@ -73,6 +73,7 @@ struct SwVertexRuntimeInfo {
     u32 step_rate_1;
     u16 vertex_sgpr_offset{};
     u16 instance_sgpr_offset{};
+    bool is_indirect{};
     bool tess_emulated_primitive{};
 
     bool operator==(const SwVertexRuntimeInfo& other) const noexcept = default;
@@ -169,9 +170,9 @@ struct HwGeometryRuntimeInfo {
     u64 vs_copy_hash;
 
     bool operator==(const HwGeometryRuntimeInfo& other) const {
-        return num_outputs == other.num_outputs && outputs == other.outputs && num_invocations &&
-               other.num_invocations && output_vertices == other.output_vertices &&
-               in_primitive == other.in_primitive &&
+        return num_outputs == other.num_outputs && outputs == other.outputs &&
+               num_invocations == other.num_invocations &&
+               output_vertices == other.output_vertices && in_primitive == other.in_primitive &&
                std::ranges::equal(out_primitive, other.out_primitive) &&
                vs_copy_hash == other.vs_copy_hash;
     }
@@ -190,9 +191,6 @@ struct PsColorBuffer {
     AmdGpu::NumberFormat num_format : 4;
     AmdGpu::NumberConversion num_conversion : 3;
     AmdGpu::ShaderExportFormat export_format : 4;
-    // GCN applies blend factors to min/max ops while Vulkan ignores them. For the self-scaled
-    // pattern min/max(src*src, dst*dst) the shader squares its color output instead, keeping
-    // the attachment in the squared domain end to end.
     u32 blend_self_scale : 1;
     AmdGpu::CompMapping swizzle;
 
@@ -201,10 +199,11 @@ struct PsColorBuffer {
 
 struct HwFragmentRuntimeInfo {
     struct PsInput {
-        u8 param_index;
-        bool is_default;
-        bool is_flat;
-        u8 default_value;
+        u16 param_index : 5;
+        u16 is_default : 1;
+        u16 is_flat : 1;
+        u16 default_value : 2;
+        u16 : 7;
 
         bool IsDefault() const {
             return is_default && !is_flat;
@@ -221,14 +220,16 @@ struct HwFragmentRuntimeInfo {
     u32 num_inputs;
     std::array<PsInput, 32> inputs;
     std::array<PsColorBuffer, MaxColorBuffers> color_buffers;
-    AmdGpu::ShaderExportFormat z_export_format;
-    u8 num_samples{1};
-    u8 mrtz_mask{};
-    bool front_face_all_bits{false};
-    bool dual_source_blending{false};
-    bool clip_distance_emulation{false};
+    AmdGpu::ShaderExportFormat z_export_format : 4;
+    u32 num_samples : 8;
+    u32 mrtz_mask : 4;
+    u32 front_face_all_bits : 1;
+    u32 dual_source_blending : 1;
+    u32 clip_distance_emulation : 1;
+    u32 depth_before_shader : 1;
     /// bbport: writes the object motion vector to MotionVectors::Output.
-    bool motion_vectors{false};
+    u32 motion_vectors : 1;
+    u32 : 11;
 
     bool operator==(const HwFragmentRuntimeInfo& other) const noexcept {
         return std::ranges::equal(color_buffers, other.color_buffers) &&
@@ -239,6 +240,7 @@ struct HwFragmentRuntimeInfo {
                dual_source_blending == other.dual_source_blending &&
                clip_distance_emulation == other.clip_distance_emulation &&
                motion_vectors == other.motion_vectors &&
+               depth_before_shader == other.depth_before_shader &&
                std::ranges::equal(inputs.begin(), inputs.begin() + num_inputs, other.inputs.begin(),
                                   other.inputs.begin() + num_inputs);
     }
@@ -263,13 +265,15 @@ struct RuntimeInfo {
     SwStage sw_stage;
     HwStage hw_stage;
     struct Properties {
-        AmdGpu::FpDenormMode fp_denorm_mode32;
-        AmdGpu::FpDenormMode fp_denorm_mode16_64;
-        AmdGpu::FpRoundMode fp_round_mode32;
-        AmdGpu::FpRoundMode fp_round_mode16_64;
-        u32 num_user_data;
-        u32 num_input_vgprs;
-        u32 num_allocated_vgprs;
+        AmdGpu::FpDenormMode fp_denorm_mode32 : 2;
+        AmdGpu::FpDenormMode fp_denorm_mode16_64 : 2;
+        AmdGpu::FpRoundMode fp_round_mode32 : 2;
+        AmdGpu::FpRoundMode fp_round_mode16_64 : 2;
+        u32 num_allocated_vgprs : 8;
+        u32 num_user_data : 5;
+        u32 num_input_vgprs : 2;
+        u32 dx10_clamp : 1;
+        u32 reserved : 8;
         bool operator==(const Properties&) const noexcept = default;
     } props;
     union SwInfo {

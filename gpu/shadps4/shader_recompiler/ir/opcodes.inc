@@ -21,6 +21,7 @@ OPCODE(ReadConstBuffer,                                     U32,            Opaq
 OPCODE(Barrier,                                             Void,                                                                                           )
 OPCODE(WorkgroupMemoryBarrier,                              Void,                                                                                           )
 OPCODE(DeviceMemoryBarrier,                                 Void,                                                                                           )
+OPCODE(SubgroupBarrier,                                     Void,                                                                                           )
 
 // Geometry shader specific
 OPCODE(EmitVertex,                                          Void,                                                                                           )
@@ -316,7 +317,6 @@ OPCODE(FPCmpClass32,                                        U1,             F32,
 // Integer operations
 OPCODE(IAdd32,                                              U32,            U32,            U32,                                                            )
 OPCODE(IAdd64,                                              U64,            U64,            U64,                                                            )
-OPCODE(IAddCarry32,                                         U32x2,          U32,            U32,                                                            )
 OPCODE(ISub32,                                              U32,            U32,            U32,                                                            )
 OPCODE(ISub64,                                              U64,            U64,            U64,                                                            )
 OPCODE(IMul32,                                              U32,            U32,            U32,                                                            )
@@ -450,7 +450,10 @@ OPCODE(ImageAtomicExchange32,                               U32,            Opaq
 OPCODE(ImageAtomicCmpSwap32,                                U32,            Opaque,         Opaque,         U32,            U32,                            )
 
 // Cube operations - optional, usable if profile.supports_native_cube_calc
-OPCODE(CubeFaceIndex,                                       F32,            F32x3,                                                                          )
+OPCODE(CubeFaceIndex,                                       F32,            F32,            F32,            F32,                                            )
+OPCODE(CubeFaceCoordS,                                      F32,            F32,            F32,            F32,                                            )
+OPCODE(CubeFaceCoordT,                                      F32,            F32,            F32,            F32,                                            )
+OPCODE(CubeFaceMajorAxis,                                   F32,            F32,            F32,            F32,                                            )
 
 // Warp operations
 OPCODE(LaneId,                                              U32,                                                                                            )

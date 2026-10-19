@@ -3,6 +3,7 @@
 
 #include <boost/container/small_vector.hpp>
 #include "bbport_toggles.h"
+#include "common/alignment.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -21,10 +22,10 @@ static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     switch (type) {
     case AmdGpu::ImageType::Color1D:
     case AmdGpu::ImageType::Color1DArray:
-        return vk::ImageType::e1D;
     case AmdGpu::ImageType::Color2D:
     case AmdGpu::ImageType::Color2DMsaa:
     case AmdGpu::ImageType::Color2DArray:
+    case AmdGpu::ImageType::Cube:
         return vk::ImageType::e2D;
     case AmdGpu::ImageType::Color3D:
         return vk::ImageType::e3D;
@@ -308,7 +309,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
 
-    boost::container::small_vector<vk::ImageCopy, 8> regions;
+    SmallVector<vk::ImageCopy, 8> regions;
 
     const vk::ImageAspectFlags src_aspect = src->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
     const vk::ImageAspectFlags dst_aspect = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
@@ -392,7 +393,6 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
     const u32 num_layers = std::min(src->info.resources.layers, dst->info.resources.layers);
-    ASSERT(src->info.resources.layers == dst->info.resources.layers && num_mips == 1);
 
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
@@ -410,7 +410,20 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         .imageOffset = {0, 0, 0},
         .imageExtent = {src->info.size.width, src->info.size.height, src->info.size.depth},
     };
-    const auto copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
+    u64 copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
+    SmallVector<vk::BufferImageCopy, 8> buffer_copies;
+    buffer_copies.push_back(buffer_copy);
+    for (u32 mip = 1; mip < num_mips; ++mip) {
+        auto mip_copy = buffer_copy;
+        mip_copy.bufferOffset = Common::AlignUp(offset + copy_size, 16);
+        mip_copy.imageSubresource.mipLevel = mip;
+        mip_copy.imageExtent = vk::Extent3D{std::max(src->info.size.width >> mip, 1u),
+                                            std::max(src->info.size.height >> mip, 1u),
+                                            std::max(src->info.size.depth >> mip, 1u)};
+        copy_size =
+            mip_copy.bufferOffset - offset + BufferImageCopySize(mip_copy, src->info.pixel_format);
+        buffer_copies.push_back(mip_copy);
+    }
 
     scheduler.EndRendering();
 
@@ -424,13 +437,22 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         FlushBarriers();
     }
 
-    const auto download_copy = buffer_copy;
-    buffer_copy.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    SmallVector<vk::BufferImageCopy, 8> upload_copies = buffer_copies;
+    for (auto& copy : upload_copies) {
+        copy.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    }
+    // Both spans must land in the chunk of the command that uses them.
+    scheduler.ReserveRecordData(2 * (buffer_copies.size() * sizeof(vk::BufferImageCopy) +
+                                     alignof(vk::BufferImageCopy)));
+    const auto download_span = scheduler.RecordData(
+        std::span<const vk::BufferImageCopy>(buffer_copies.data(), buffer_copies.size()));
+    const auto upload_span = scheduler.RecordData(
+        std::span<const vk::BufferImageCopy>(upload_copies.data(), upload_copies.size()));
     scheduler.Record([src_image = src->GetImage(), dst_image = dst->GetImage(),
-                      handle = buffer->Handle(), download_copy,
-                      upload_copy = buffer_copy](vk::CommandBuffer cmdbuf) {
+                      handle = buffer->Handle(), download_span,
+                      upload_span](vk::CommandBuffer cmdbuf) {
         cmdbuf.copyImageToBuffer(src_image, vk::ImageLayout::eTransferSrcOptimal, handle,
-                                 download_copy);
+                                 download_span);
         const vk::MemoryBarrier2 post_copy_barrier = {
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
             .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -443,7 +465,7 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
             .pMemoryBarriers = &post_copy_barrier,
         });
         cmdbuf.copyBufferToImage(handle, dst_image, vk::ImageLayout::eTransferDstOptimal,
-                                 upload_copy);
+                                 upload_span);
     });
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
@@ -454,7 +476,7 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     const auto dst_dim = dst->info.props.is_block ? 2 : 0;
     const auto mip_block_w = std::max(dst->info.size.width >> (mip + dst_dim), 1u);
     const auto mip_block_h = std::max(dst->info.size.height >> (mip + dst_dim), 1u);
-    const auto mip_block_p = std::max(dst->info.mips_layout[mip].pitch >> dst_dim, 1u);
+    const auto mip_block_p = std::max<u32>(dst->info.mips_layout[mip].pitch >> dst_dim, 1u);
 
     const auto src_dim = src->info.props.is_block ? 2 : 0;
     ASSERT(mip_block_w == (src->info.size.width >> src_dim));
@@ -506,8 +528,9 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
 
 void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
-        if (instance.IsMaintenance8Supported() ||
-            src->info.props.is_depth == dst->info.props.is_depth) {
+        if ((instance.IsMaintenance8Supported() ||
+             src->info.props.is_depth == dst->info.props.is_depth) &&
+            src->aspect_mask == dst->aspect_mask) {
             CopyImage(src, dst);
         } else {
             // Perform depth from/to color copy using the intermediate copy buffer.
@@ -692,6 +715,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     auto it = std::ranges::find(backing_images, num_samples,
                                 &VideoCore::Image::BackingImage::num_samples);
     if (it == backing_images.end()) {
+        const auto previous_size = Common::AlignUp(image->SizeBytes(), 1024);
         auto new_image_ci = backing->image.image_ci;
         new_image_ci.samples = LiverpoolToVK::NumSamples(num_samples, image->supported_samples);
 
@@ -699,6 +723,10 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         new_backing->num_samples = num_samples;
         new_backing->image = VideoCore::UniqueImage{instance.GetDevice(), instance.GetAllocator()};
         new_backing->image.Create(new_image_ci);
+        if (image->memory_usage_counter) {
+            *image->memory_usage_counter +=
+                Common::AlignUp(image->SizeBytes(), 1024) - previous_size;
+        }
 
         Vulkan::SetObjectName(instance.GetDevice(), new_backing->image.image,
                               "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{} (backing)",
@@ -759,24 +787,19 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
 
 bool Runtime::IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                                bool check_read_access) {
-    const AddressRange range = {
-        .resource = reinterpret_cast<u64>(handle),
-        .range_start = offset,
-        .range_end = offset + size - 1,
-    };
-    bool has_access = barrier_tracker.FindRange(range, Access::Write);
+    MakeCurrent(handle);
+    bool has_access = resource->write_ranges.Overlaps(offset, offset + size);
     if (check_read_access && !has_access) {
-        has_access |= barrier_tracker.FindRange(range, Access::Read);
+        has_access |= resource->read_ranges.Overlaps(offset, offset + size);
     }
     return has_access;
 }
 
 void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size,
                            vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access) {
-    AddressRange range = {
-        .resource = reinterpret_cast<u64>(handle),
-        .range_start = offset,
-        .range_end = offset + size - 1,
+    Interval range = {
+        .start = offset,
+        .end = offset + size,
     };
 
     constexpr static vk::AccessFlags2 READ_MASK =
@@ -793,37 +816,37 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
 
     // bbport: reads are tracked at 4 KiB granularity. Constant data comes from ring allocations
     // at a new offset every draw; rounded, they land in ranges already present and the
-    // insert returns early instead of growing the tree until the next barrier flush.
+    // add merges them instead of growing the list until the next barrier flush.
     // Wider read ranges only add barriers, never drop one.
     if (!(src_access & WRITE_MASK) && !BbToggle::Disabled(BbToggle::CoarseReadTracking)) {
-        range.range_start &= ~u64{0xFFF};
-        range.range_end |= 0xFFF;
+        range.start &= ~u64{0xFFF};
+        range.end = (range.end + 0xFFF) & ~u64{0xFFF};
     }
-    const auto insert = [&](Access access) {
-        if (BbToggle::Disabled(BbToggle::AccessMemo)) {
-            barrier_tracker.InsertRange(range, access);
-            return;
-        }
-        u64 hash = range.resource ^ range.range_start * 0x9E3779B97F4A7C15ull ^
-                   range.range_end << 13 ^ u64(access) << 61;
+    memory_barrier.srcStageMask |= src_stage;
+    const u32 access = (src_access & WRITE_MASK ? 1u : 0u) | (src_access & READ_MASK ? 2u : 0u);
+    AccessMemo* memo = nullptr;
+    if (!BbToggle::Disabled(BbToggle::AccessMemo)) {
+        u64 hash = reinterpret_cast<u64>(handle) ^ range.start * 0x9E3779B97F4A7C15ull ^
+                   range.end << 13 ^ u64(access) << 61;
         hash = (hash ^ hash >> 31) * 0xFF51AFD7ED558CCDull;
-        auto& memo = access_memo[(hash ^ hash >> 29) % access_memo.size()];
-        if (memo.epoch == access_epoch && memo.resource == range.resource &&
-            memo.start == range.range_start && memo.end == range.range_end &&
-            memo.access == u32(access)) {
+        memo = &access_memo[(hash ^ hash >> 29) % access_memo.size()];
+        if (memo->epoch == access_epoch && memo->handle == handle &&
+            memo->start == range.start && memo->end == range.end && memo->access == access) {
+            memory_barrier.srcAccessMask |= src_access & WRITE_MASK;
             return;
         }
-        barrier_tracker.InsertRange(range, access);
-        memo = {range.resource, range.range_start, range.range_end, access_epoch, u32(access)};
-    };
+    }
+    MakeCurrent(handle);
     if (src_access & WRITE_MASK) {
-        insert(Access::Write);
+        resource->write_ranges.Add(range);
     }
     if (src_access & READ_MASK) {
-        insert(Access::Read);
+        resource->read_ranges.Add(range);
+    }
+    if (memo) {
+        *memo = {handle, range.start, range.end, access_epoch, access};
     }
 
-    memory_barrier.srcStageMask |= src_stage;
     memory_barrier.srcAccessMask |= src_access & WRITE_MASK;
 }
 
@@ -861,8 +884,42 @@ void Runtime::FlushBarriers() {
     memory_barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
 
     image_barriers.clear();
-    barrier_tracker.Clear();
+    // bbport (toggle 512): the lists keep their storage; the memos of this epoch go stale.
+    for (std::size_t i = 0; i < num_resources; ++i) {
+        resources[i].read_ranges.Clear();
+        resources[i].write_ranges.Clear();
+    }
+    num_resources = 0;
     ++access_epoch;
+    resource = nullptr;
+}
+
+void Runtime::MakeCurrent(const VideoCore::Buffer* handle) {
+    if (resource && resource->handle == handle) {
+        return;
+    }
+    const bool memo_on = !BbToggle::Disabled(BbToggle::AccessMemo);
+    ResourceMemo& memo =
+        resource_memo[(reinterpret_cast<u64>(handle) >> 4) * 0x9E3779B97F4A7C15ull >> 56];
+    if (memo_on && memo.epoch == access_epoch && memo.handle == handle) {
+        resource = &resources[memo.index];
+        return;
+    }
+    std::size_t index = 0;
+    while (index < num_resources && resources[index].handle != handle) {
+        ++index;
+    }
+    if (index == num_resources) {
+        // An entry past the used ones keeps its (cleared) lists' storage.
+        if (num_resources == resources.size()) {
+            resources.emplace_back();
+        }
+        resources[num_resources++].handle = handle;
+    }
+    resource = &resources[index];
+    if (memo_on) {
+        memo = {handle, access_epoch, static_cast<u32>(index)};
+    }
 }
 
 } // namespace Vulkan

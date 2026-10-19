@@ -30,6 +30,16 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                 v.upscaler = u;
             }
         }
+    } else if (key == "frame_gen") {
+        for (int g = 0; g < FrameGenCount; ++g) {
+            if (value == FrameGenName(g)) {
+                v.frame_gen = g;
+            }
+        }
+    } else if (key == "frame_gen_multiplier") {
+        v.frame_gen_multiplier = std::clamp(i, 2, 4);
+    } else if (key == "frame_gen_fit_display") {
+        v.frame_gen_fit_display = i != 0;
     } else if (key == "preset") {
         v.preset = std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
@@ -52,6 +62,14 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
     } else if (key == "show_fps") {
         v.show_fps = i != 0;
+    } else if (key == "mute_unfocused") {
+        v.mute_unfocused = i != 0;
+    } else if (key == "button_prompts") {
+        v.button_prompts = value == "playstation" ? PromptsPlayStation
+                         : value == "keyboard"    ? PromptsKeyboard
+                         : value == "xbox"        ? PromptsXbox
+                         : value == "switch"      ? PromptsSwitch
+                                                  : PromptsAuto;
     } else if (key == "fsr4_auto_exposure") {
         v.fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
@@ -62,6 +80,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "hud_position") {
         v.hud_position = std::clamp(i, 0, 100);
+    } else if (key == "fov") {
+        v.fov = std::clamp(i, FovMin, FovMax);
     } else if (key == "output_res") {
         for (int r = 0; r < OutputCount; ++r) {
             if (value == std::to_string(OutputWidths[r]) + "x" + std::to_string(OutputHeights[r])) {
@@ -115,6 +135,8 @@ void Load() {
         {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"BB_FRAME_GEN", "frame_gen"},              {"BB_FRAME_GEN_MULTIPLIER", "frame_gen_multiplier"},
+        {"BB_FRAME_GEN_FIT_DISPLAY", "frame_gen_fit_display"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -130,6 +152,7 @@ void Load() {
     v.startup_model_lod = v.model_lod;
     v.startup_output_res = v.output_res;
     v.startup_hud_position = v.hud_position;
+    v.startup_fov = v.fov;
     v.startup_live_resolution = v.live_resolution;
 }
 
@@ -205,10 +228,18 @@ void Save() {
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
+    std::fprintf(file, "frame_gen=%s\nframe_gen_multiplier=%d\nframe_gen_fit_display=%d\n",
+                 FrameGenName(v.frame_gen), v.frame_gen_multiplier.load(),
+                 int(v.frame_gen_fit_display.load()));
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
+    std::fprintf(file, "mute_unfocused=%d\n", int(v.mute_unfocused.load()));
+    static constexpr const char* prompts[PromptsCount] = {"auto", "playstation", "keyboard", "xbox", "switch"};
+    std::fprintf(file, "button_prompts=%s\n", prompts[std::clamp(v.button_prompts.load(), 0, PromptsCount - 1)]);
     // Read by run.py at start (hud_layout.py).
     std::fprintf(file, "hud_position=%d\n", v.hud_position.load());
+    // Read by run.py at start (fov.py).
+    std::fprintf(file, "fov=%d\n", v.fov.load());
     // Read by run.sh at start.
     std::fprintf(file, "live_resolution=%s\n", v.live_resolution < 0 ? "auto"
                                                   : v.live_resolution ? "1" : "0");
@@ -224,6 +255,11 @@ const char* PresetName(int preset) {
     static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced",
                                                        "Performance", "Ultra Performance"};
     return names[std::clamp(preset, 0, PresetCount - 1)];
+}
+
+const char* FrameGenName(int frame_gen) {
+    static constexpr const char* names[FrameGenCount] = {"off", "fsr3", "dlss"};
+    return names[std::clamp(frame_gen, 0, FrameGenCount - 1)];
 }
 
 const char* UpscalerName(int upscaler) {

@@ -132,7 +132,8 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
     ranges.clear();
     merged.clear();
     range_index.clear();
-    for (const auto& attrib : fetch.attributes) {
+    for (u32 semantic = 0; semantic < fetch.attributes.size(); ++semantic) {
+        const auto& attrib = fetch.attributes[semantic];
         const auto step_rate = attrib.GetStepRate();
         const auto buffer = attrib.GetSharp(vs);
         // The V# may come from user data the guest is still writing: an unknown format leaves
@@ -146,13 +147,13 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
             return;
         }
         attributes.push_back({
-            .location = attrib.semantic,
-            .binding = attrib.semantic,
+            .location = semantic,
+            .binding = semantic,
             .format = format,
             .offset = 0,
         });
         bindings.push_back({
-            .binding = attrib.semantic,
+            .binding = semantic,
             .stride = buffer.GetStride(),
             .inputRate = step_rate == InstanceIdType::None ? vk::VertexInputRate::eVertex
                                                            : vk::VertexInputRate::eInstance,

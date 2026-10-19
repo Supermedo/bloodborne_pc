@@ -140,6 +140,44 @@ class ModTests(unittest.TestCase):
                                             [(name, self.moddir / name)])
                 self.assertEqual((result / 'dvdroot_ps4/chr/a.dcx').read_bytes(), name.encode())
 
+    def test_mod_site_layouts(self):
+        # As mods come from mod sites: notes without a suffix and previews beside the wrapper,
+        # two wrappers deep, and the game's folders next to screenshots.
+        layouts = {'Readme': 'Readme v1/dvdroot_ps4/chr', 'Deep': 'Deep/Deep v2/dvdroot_ps4/chr',
+                   'Shots': 'chr'}
+        for name, path in layouts.items():
+            folder = self.moddir / name / path
+            folder.mkdir(parents=True)
+            (folder / 'a.dcx').write_bytes(name.encode())
+        (self.moddir / 'Readme/README').write_text('notes')
+        (self.moddir / 'Readme/preview.webp').write_bytes(b'image')
+        (self.moddir / 'Readme/Nexus page.url').write_text('[InternetShortcut]')
+        (self.moddir / 'Shots/Screenshots').mkdir()
+        (self.moddir / 'Shots/Screenshots/1.png').write_bytes(b'image')
+        (self.moddir / 'Shots/readme.txt').write_text('notes')
+        self.assertEqual(mods.discover(self.moddir), ['Deep', 'Readme', 'Shots'])
+        for name in layouts:
+            with self.subTest(name=name):
+                result = mods.build_overlay(self.game, self.root / 'out',
+                                            [(name, self.moddir / name)])
+                self.assertEqual((result / 'dvdroot_ps4/chr/a.dcx').read_bytes(), name.encode())
+                self.assertFalse((result / 'dvdroot_ps4/Screenshots').exists())
+                self.assertFalse((result / 'dvdroot_ps4/readme.txt').exists())
+
+    def test_unrecognized_folders_say_why(self):
+        self.moddir.mkdir()
+        (self.moddir / 'Zipped').mkdir()
+        (self.moddir / 'Zipped/mod.zip').write_bytes(b'PK')
+        (self.moddir / 'Two/A/dvdroot_ps4').mkdir(parents=True)
+        (self.moddir / 'Two/B/dvdroot_ps4').mkdir(parents=True)
+        (self.moddir / 'Two/A/dvdroot_ps4/x').write_bytes(b'x')
+        (self.moddir / 'Empty').mkdir()
+        found = dict(mods.unrecognized(self.moddir))
+        self.assertEqual(sorted(found), ['Empty', 'Two', 'Zipped'])
+        self.assertIn('archive', found['Zipped'])
+        self.assertIn('several folders', found['Two'])
+        self.assertEqual(found['Empty'], 'empty')
+
     def test_invalid_profile_fails(self):
         self.mod('A')
         config = self.root / 'mods.json'

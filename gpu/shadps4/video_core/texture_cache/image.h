@@ -3,17 +3,21 @@
 
 #pragma once
 
-#include "common/enum.h"
-#include "common/incremental_id.h"
-#include "common/types.h"
-#include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/texture_cache/image_info.h"
-#include "video_core/texture_cache/image_view.h"
-
 #include <deque>
+#include <mutex>
 #include <optional>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
+
+#include "common/enum.h"
+#include "common/incremental_id.h"
+#include "common/lru_cache.h"
+#include "common/small_vector.h"
+#include "common/types.h"
+#include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/texture_cache/host_compatibility.h"
+#include "video_core/texture_cache/image_info.h"
+#include "video_core/texture_cache/image_view.h"
 
 namespace Vulkan {
 class Instance;
@@ -29,11 +33,12 @@ enum ImageFlagBits : u32 {
     Empty = 0,
     MaybeCpuDirty = 1 << 0, ///< The page this image is in was touched before the image address
     CpuDirty = 1 << 1,      ///< Contents have been modified from the CPU
-    GpuDirty = 1 << 2, ///< Contents have been modified from the GPU (valid data in buffer cache)
+    GpuDirty =
+        1 << 2, ///< Image contents have been modified from the GPU (valid data in buffer cache)
     Dirty = MaybeCpuDirty | CpuDirty | GpuDirty,
-    GpuModified = 1 << 3, ///< Contents have been modified from the GPU
-    Registered = 1 << 6,  ///< True when the image is registered
-    Picked = 1 << 7,      ///< Temporary flag to mark the image as picked
+    GpuModified = 1 << 3,   ///< Contents have been modified from the GPU
+    MaybeGpuDirty = 1 << 4, ///< Image contents may have been modified in the buffer cache
+    Registered = 1 << 6,    ///< True when the image is registered
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
@@ -49,7 +54,8 @@ struct UniqueImage {
     UniqueImage(UniqueImage&& other)
         : allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
-          image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)} {}
+          image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
+          size_bytes{std::exchange(other.size_bytes, 0)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         if (this == &other) return *this;
         Destroy();
@@ -58,10 +64,14 @@ struct UniqueImage {
         allocator = std::exchange(other.allocator, VK_NULL_HANDLE);
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         image_ci = std::move(other.image_ci);
+        size_bytes = std::exchange(other.size_bytes, 0);
         return *this;
     }
 
     void Create(const vk::ImageCreateInfo& image_ci);
+    /// bbport: as Create, but returns false where the GPU has no memory left for the image
+    /// (the texture cache frees unused images and tries again).
+    bool TryCreate(const vk::ImageCreateInfo& image_ci);
 
     void Destroy();
 
@@ -82,7 +92,7 @@ public:
     vk::DeviceSize size_bytes{};
 };
 
-struct Image {
+struct Image : public Common::LRUNode<> {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
                    Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info);
     ~Image();
@@ -90,30 +100,28 @@ struct Image {
     Image(const Image&) = delete;
     Image& operator=(const Image&) = delete;
 
-    Image(Image&&) = default;
-    Image& operator=(Image&&) = default;
+    Image(Image&&) = delete;
+    Image& operator=(Image&&) = delete;
 
-    bool Overlaps(VAddr overlap_cpu_addr, size_t overlap_size) const noexcept {
-        const VAddr overlap_end = overlap_cpu_addr + overlap_size;
-        const auto image_addr = info.guest_address;
-        const auto image_end = info.guest_address + info.guest_size;
-        return image_addr < overlap_end && overlap_cpu_addr < image_end;
+    bool Overlaps(VAddr addr, size_t size) const noexcept {
+        return info.guest_address < (addr + size) && addr < (info.guest_address + info.guest_size);
     }
 
     vk::Image GetImage() const {
         return backing->image.image;
     }
 
-    vk::DeviceSize GetHostImageSize() const {
-        return backing->image.size_bytes;
+    bool IsUntracked() {
+        return track_addr == 0 || track_addr_end == 0;
     }
 
-    bool IsTracked() {
-        return track_addr != 0 && track_addr_end != 0;
+    bool HasGpuValidData() const {
+        return True(flags & ImageFlagBits::GpuModified) && False(flags & ImageFlagBits::Dirty);
     }
 
-    bool SafeToDownload() const {
-        return True(flags & ImageFlagBits::GpuModified) && False(flags & (ImageFlagBits::Dirty));
+    bool CanBeDownloaded() {
+        return HasGpuValidData() && info.num_samples == 1 && !info.props.has_stencil &&
+               IsVulkanFormatCompatible(info.pixel_format, backing->image.image_ci.format);
     }
 
     void AssociateDepth(ImageId depth_image_id, u64 depth_image_uid) {
@@ -126,9 +134,18 @@ struct Image {
         depth_uid = {};
     }
 
+    vk::DeviceSize SizeBytes() const {
+        return std::accumulate(
+            backing_images.begin(), backing_images.end(), vk::DeviceSize(0),
+            [](vk::DeviceSize sum, const BackingImage& bi) { return sum + bi.image.size_bytes; });
+    }
+
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
 
-    using Barriers = boost::container::small_vector<vk::ImageMemoryBarrier2, 32>;
+    /// bbport: creates the Vulkan image again after allocation_failed; false while no memory.
+    bool RetryAllocation();
+
+    using Barriers = SmallVector<vk::ImageMemoryBarrier2, 32>;
     void GetBarriers(Barriers& out_barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
                      vk::PipelineStageFlags2 dst_stage,
                      std::optional<SubresourceRange> subres_range = {});
@@ -152,6 +169,8 @@ public:
         u32 vo_surface : 1;
     } usage{};
     bool scene_proxy = false; ///< bbport: SceneTargets holds a reduced-size proxy of it
+    /// bbport: no GPU memory for the image when it was created (RetryAllocation).
+    bool allocation_failed = false;
     VAddr track_addr = 0;
     VAddr track_addr_end = 0;
     VAddr guest_begin = 0; ///< info.guest_address
@@ -167,6 +186,7 @@ public:
     ImageInfo info;
     Vulkan::Runtime* runtime;
     Common::SlotVector<ImageView>* slot_image_views;
+    std::mutex mutex; ///< upstream garbage collector (downloads before eviction)
     vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
     vk::SampleCountFlags supported_samples = vk::SampleCountFlagBits::e1;
 
@@ -190,8 +210,10 @@ public:
     boost::container::static_vector<u64, 16> mip_hashes{};
     /// bbport: mip_hashes match guest memory (BB_KEEP_MIP_HASHES). Cleared on a CPU write.
     bool mip_hashes_current = false;
+    u64* memory_usage_counter{}; ///< upstream garbage collector: the cache's usage total
     u64 lru_id{};
-    u64 hash{};
+    u64 cpu_hash{};
+    u64 gpu_hash{};
 
 private:
     static Common::IncrementalIdProvider<u64> global_image_uid;

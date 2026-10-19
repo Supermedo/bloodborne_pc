@@ -96,6 +96,8 @@ private:
     Scheduler& scheduler;
     Runtime& runtime;
     Lookup lookup;
+    /// bbport: frees unused textures, up to the bytes given (TextureCache::ReclaimMemory).
+    std::function<u64(u64)> reclaim;
     SceneResolution::Size size;
     std::unordered_map<u64, std::unique_ptr<Entry>> entries; ///< by Key(uid, level)
     std::unordered_set<u64> tracked; ///< uids with proxies

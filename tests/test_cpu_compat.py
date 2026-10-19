@@ -246,9 +246,26 @@ class TranslatedBodyTests(unittest.TestCase):
         for site in plan['sites']:
             mnemonic, operands = site['instruction'].split(' ', 1)
             body = bytes.fromhex(site['body'])
+            translated = []
+            if site.get('kind') == 'short_span':
+                # Translated pieces and the moved neighbors' original bytes, in order. Only the
+                # translations must be baseline code: moved instructions already ran as they are.
+                original = bytes.fromhex(site['bytes'])
+                expected = b''
+                for kind, address, length, text in site['span']['pieces']:
+                    if kind == 'translate':
+                        translated.append(self.builder.body(*text.split(' ', 1)))
+                        expected += translated[-1]
+                    else:
+                        offset = address - site['address']
+                        expected += original[offset:offset + length]
+            else:
+                expected = self.builder.body(mnemonic, operands)
+                translated.append(body)
             with self.subTest(module=site['module'], address=site['address']):
-                self.assertEqual(body, self.builder.body(mnemonic, operands))
-                audit_baseline(body, capstone)
+                self.assertEqual(body, expected)
+                for code in translated:
+                    audit_baseline(code, capstone)
 
     def test_every_gpr_width_alias_and_arithmetic_edges(self):
         names = REGISTERS[:-1]
@@ -483,7 +500,7 @@ class AllocatorSpanTests(unittest.TestCase):
         spec.loader.exec_module(cls.builder)
         plan = json.loads((ROOT / 'tools/legacy-cpu-plan.json').read_text(encoding='utf-8'))
         cls.sites = [copy.deepcopy(s) for s in plan['sites'] if s.get('kind') == 'count_span']
-        if plan['version'] != 3 or {s['address'] for s in cls.sites} != {s[0] for s in SPANS}:
+        if plan['version'] not in (3, 4) or {s['address'] for s in cls.sites} != {s[0] for s in SPANS}:
             raise AssertionError('Selected CPU subject must contain exactly the four D015 v3 spans')
         if len(FUNCTION_BYTES) != 393 or hashlib.sha256(FUNCTION_BYTES).hexdigest() != FUNCTION_SHA256:
             raise AssertionError('Independent allocator context fixture was corrupted')

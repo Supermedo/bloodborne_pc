@@ -11,6 +11,7 @@
 #include <sys/resource.h>
 #endif
 #include "common/assert.h"
+#include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
@@ -619,10 +620,17 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // only from the flip (PR #28 as proposed) added the wake-up delay to every frame: 116 FPS
     // at a cap of 120.
     const u32 frame_limit = EmulatorSettings.GetFrameLimit();
-    const auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                          : std::chrono::nanoseconds(0);
-    const auto slack = frame_period / 16;
+    // bbport: frame generation with FIFO presentation lowers the limit while it runs
+    // (BbSettings::frame_gen_flip_limit, set by the Presenter).
+    const auto period_now = [frame_limit] {
+        const int fg_limit = BbSettings::Get().frame_gen_flip_limit.load(std::memory_order_relaxed);
+        const u32 limit = fg_limit > 0 && frame_limit ? std::min(frame_limit, u32(fg_limit))
+                                                      : frame_limit;
+        return limit ? std::chrono::nanoseconds(1000000000 / limit) : std::chrono::nanoseconds(0);
+    };
     const auto next_slot = [&](std::chrono::steady_clock::time_point slot) {
+        const auto frame_period = period_now();
+        const auto slack = frame_period / 16;
         return std::max(slot + frame_period,
                         std::chrono::steady_clock::now() + frame_period - slack);
     };

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -18,7 +19,9 @@ SceneTargets::SceneTargets(const Instance& i, Scheduler& s, Runtime& r,
                            VideoCore::TextureCache& t)
     : SceneTargets(i, s, r, [&t](VideoCore::ImageId id, u64 uid) {
         return t.TryGetImage(id, uid);
-    }) {}
+    }) {
+    reclaim = [&t](u64 bytes) { return t.ReclaimMemory(bytes); };
+}
 SceneTargets::SceneTargets(const Instance& i, Scheduler& s, Runtime& r, Lookup get)
     : instance{i}, scheduler{s}, runtime{r}, lookup{std::move(get)} {
     runtime.scene_targets = this;
@@ -124,7 +127,7 @@ void SceneTargets::NativeAccess(VideoCore::Image& image, vk::AccessFlags2 access
     constexpr auto writes = vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eTransferWrite |
         vk::AccessFlagBits2::eColorAttachmentWrite | vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
         vk::AccessFlagBits2::eMemoryWrite;
-    const u32 levels = std::min(16u, image.info.resources.levels);
+    const u32 levels = std::min<u32>(16u, image.info.resources.levels);
     for (u32 level = 0; level < levels; ++level) {
         const auto it = entries.find(Key(image.image_uid, level));
         if (it == entries.end()) continue;
@@ -184,7 +187,8 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
         copying = false;
         return;
     }
-    const VideoCore::SubresourceRange level_range{.base = {e.level, 0}, .extent = {1, 1}};
+    const VideoCore::SubresourceRange level_range{.base = {static_cast<u16>(e.level), 0},
+                                                  .extent = {1, 1}};
     runtime.Transit(&original, to_native ? vk::ImageLayout::eTransferDstOptimal
                                        : vk::ImageLayout::eTransferSrcOptimal,
                     vk::PipelineStageFlagBits2::eTransfer,
@@ -407,7 +411,24 @@ SceneTargets::Entry& SceneTargets::Get(VideoCore::ImageId id, u32 level) {
         const auto proxy = ProxySize(original, level);
         ci.extent = vk::Extent3D{proxy.width, proxy.height, 1};
         ci.mipLevels = 1;
-        entry->image.Create(ci);
+        // bbport: out of VRAM (4 GB cards): unused textures go and it is tried again, as for
+        // the texture cache's own images (TextureCache::InsertImage).
+        if (!entry->image.TryCreate(ci)) {
+            u64 freed = 0;
+            bool created = false;
+            for (const u64 want : {u64(64) << 20, u64(256) << 20, u64(1024) << 20}) {
+                freed += reclaim ? reclaim(want) : 0;
+                if ((created = entry->image.TryCreate(ci))) {
+                    break;
+                }
+            }
+            std::printf("GPU: video memory full: %llu MiB of unused textures freed for a "
+                        "%ux%u scene target%s\n", (unsigned long long)(freed >> 20),
+                        proxy.width, proxy.height, created ? "" : ", not enough");
+            std::fflush(stdout);
+            ASSERT_MSG(created, "Failed allocating image with error {}",
+                       vk::to_string(vk::Result::eErrorOutOfDeviceMemory));
+        }
         tracked.insert(original.image_uid);
     }
     recent[recent_next++ % recent.size()] = {key, entry.get()};
@@ -423,7 +444,8 @@ vk::ImageView SceneTargets::View(Entry& e, const VideoCore::Image& original,
     const auto format = original.info.props.is_depth ? original.backing->image.image_ci.format : info.format;
     auto view = Check(instance.GetDevice().createImageViewUnique({
         .image = e.image, .viewType = vk::ImageViewType::e2D, .format = format,
-        .components = info.mapping, .subresourceRange = {aspect,0,1,0,1},
+        .components = LiverpoolToVK::ComponentMapping(info.mapping),
+        .subresourceRange = {aspect,0,1,0,1},
     }));
     const auto result = *view;
     e.views.emplace_back(info, std::move(view));

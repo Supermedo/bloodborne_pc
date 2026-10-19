@@ -99,11 +99,55 @@ static void TestColonSuffixDiscarded(void) {
 
 /* CFG-005: a comma in the input (a combo) is out of scope and warned, not silently accepted
  * as a single bad token. */
-static void TestComboInputWarns(void) {
+/* CFG-005: "a, b, c" is a combo of up to three digital inputs held together (shadPS4). */
+static void TestComboBinding(void) {
     InputConfig cfg;
-    input_config_parse(&cfg, "l2 = lshift,mousewheelup\n");
-    assert(cfg.warnings == 1);
-    assert(BindingCountFor(&cfg, OUT_L2) == 0);
+    input_config_parse(&cfg, "l2 = lshift,mousewheelup\nr2 = lctrl, lshift, leftbutton\n");
+    assert(cfg.warnings == 0);
+    assert(BindingCountFor(&cfg, OUT_L2) == 1);
+    const InputBinding *b = &cfg.table.bindings[OUT_L2][0];
+    assert(b->kind == IN_KEY && b->value == SDL_SCANCODE_LSHIFT);
+    assert(b->extra_count == 1 && b->extra[0].kind == IN_MOUSE_WHEEL);
+    b = &cfg.table.bindings[OUT_R2][0];
+    assert(b->extra_count == 2 && b->extra[1].kind == IN_MOUSE_BUTTON && b->extra[1].value == SDL_BUTTON_LEFT);
+
+    /* The same combo twice is one binding; a different order is another binding. */
+    input_config_parse(&cfg, "cross = lshift, e\ncross = lshift, e\ncross = e, lshift\n");
+    assert(cfg.warnings == 0 && BindingCountFor(&cfg, OUT_CROSS) == 2);
+}
+
+/* mouse_invert_x/_y and mouse_sensitivity_y: the motion's per-axis multipliers. */
+static void TestMouseInvertAndVerticalSensitivity(void) {
+    InputConfig cfg;
+    input_config_parse(&cfg, "");
+    assert(input_mouse_scale_x(&cfg.mouse) == 1.0f && input_mouse_scale_y(&cfg.mouse) == 1.0f);
+    input_config_parse(&cfg, "mouse_invert_x = on\nmouse_invert_y = on\nmouse_sensitivity_y = 0.5\n");
+    assert(cfg.warnings == 0);
+    assert(input_mouse_scale_x(&cfg.mouse) == -1.0f && input_mouse_scale_y(&cfg.mouse) == -0.5f);
+    input_config_parse(&cfg, "mouse_invert_y = yes\nmouse_sensitivity_y = 0\nmouse_sensitivity_y = 11\n");
+    assert(cfg.warnings == 3);
+    assert(input_mouse_scale_y(&cfg.mouse) == 1.0f); /* rejected values keep the defaults */
+
+    /* mouse_camera_sync: on unless turned off. */
+    assert(cfg.mouse.camera_sync == 1);
+    input_config_parse(&cfg, "mouse_camera_sync = off\n");
+    assert(cfg.warnings == 0 && cfg.mouse.camera_sync == 0);
+}
+
+/* A combo is rejected (one warning, no binding) with more than three inputs, an analog or
+ * "unmapped" input, the same input twice, an empty input, or a reserved key. */
+static void TestInvalidComboWarns(void) {
+    static const char *const lines[] = {
+        "cross = a, b, c, d\n", "cross = lshift, axis_left_x_plus\n", "cross = l2, cross\n",
+        "cross = lshift, unmapped\n", "cross = e, e\n", "cross = lshift,\n", "cross = lshift, insert\n",
+        "cross = lshift, f7\n",
+    };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(*lines); ++i) {
+        InputConfig cfg;
+        input_config_parse(&cfg, lines[i]);
+        assert(cfg.warnings == 1);
+        assert(BindingCountFor(&cfg, OUT_CROSS) == 0);
+    }
 }
 
 /* CFG-006: an output this port does not support (key_toggle) is skipped with one warning, and
@@ -193,44 +237,45 @@ static void TestEscapeBindable(void) {
     assert(HasKeyBinding(&cfg, OUT_OPTIONS, SDL_SCANCODE_ESCAPE));
 }
 
-/* stick_socd / stick_release_delay_ms: last-wins and no delay by default. */
+/* stick_socd / stick_release_delay_ms: last-wins and a 60 ms hold by default. */
 static void TestStickSocdAndReleaseDelay(void) {
     InputConfig def;
     input_config_parse(&def, "cross = space\n");
     assert(def.stick_socd_last == 1);
-    assert(def.stick_release_delay_ms == 0);
+    assert(def.stick_release_delay_ms == 60);
 
     InputConfig cfg;
-    input_config_parse(&cfg, "stick_socd = Neutral\nstick_release_delay_ms = 60\n");
+    input_config_parse(&cfg, "stick_socd = Neutral\nstick_release_delay_ms = 0\n");
     assert(cfg.warnings == 0);
     assert(cfg.stick_socd_last == 0);
-    assert(cfg.stick_release_delay_ms == 60);
+    assert(cfg.stick_release_delay_ms == 0);
 
     InputConfig bad;
     input_config_parse(&bad, "stick_socd = first\nstick_release_delay_ms = 500\nstick_release_delay_ms = 6x\n");
     assert(bad.warnings == 3);
     assert(bad.stick_socd_last == 1);       /* default kept */
-    assert(bad.stick_release_delay_ms == 0); /* default kept */
+    assert(bad.stick_release_delay_ms == 60); /* default kept */
 }
 
-/* stick_circular / stick_turn_rate: round gate on, instant turns by default. */
+/* stick_circular / stick_turn_rate: square gate, 900 degrees/s turns by default (a keyboard
+ * sprint is kept through direction changes). */
 static void TestStickCircularAndTurnRate(void) {
     InputConfig def;
     input_config_parse(&def, "cross = space\n");
-    assert(def.stick_circular == 1);
-    assert(def.stick_turn_rate == 0);
+    assert(def.stick_circular == 0);
+    assert(def.stick_turn_rate == 900);
 
     InputConfig cfg;
-    input_config_parse(&cfg, "stick_circular = OFF\nstick_turn_rate = 900\n");
+    input_config_parse(&cfg, "stick_circular = ON\nstick_turn_rate = 0\n");
     assert(cfg.warnings == 0);
-    assert(cfg.stick_circular == 0);
-    assert(cfg.stick_turn_rate == 900);
+    assert(cfg.stick_circular == 1);
+    assert(cfg.stick_turn_rate == 0);
 
     InputConfig bad;
     input_config_parse(&bad, "stick_circular = round\nstick_turn_rate = -5\nstick_turn_rate = 9000\n");
     assert(bad.warnings == 3);
-    assert(bad.stick_circular == 1);
-    assert(bad.stick_turn_rate == 0);
+    assert(bad.stick_circular == 0);
+    assert(bad.stick_turn_rate == 900);
 }
 
 /* Section 4.2: analog_deadzone, including inner > outer rejection. */
@@ -388,7 +433,9 @@ int main(void) {
     TestDefaultHotkeyKeyReserved();
     TestWhitespaceCommentsAndCase();
     TestColonSuffixDiscarded();
-    TestComboInputWarns();
+    TestComboBinding();
+    TestInvalidComboWarns();
+    TestMouseInvertAndVerticalSensitivity();
     TestUnsupportedOutputWarnsAndContinues();
     TestUnmappedIsNotAWarning();
     TestDuplicateLineHarmless();

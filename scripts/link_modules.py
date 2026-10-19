@@ -327,9 +327,9 @@ def link(game, out, module_names=DEFAULT_MODULES):
               f"{cpu_compat['unhandled_count']} remain unhandled; "
               f"trampolines={cpu_compat['trampoline_bytes']} bytes")
         if cpu_compat['span_patches']:
-            print(f"CPU compatibility EXPERIMENTAL: {cpu_compat['span_patches']} count instructions translated "
-                  'as signed two-instruction spans; their MOV/CMP neighbors are preserved. '
-                  'Global indirect entries remain unproven.')
+            print(f"CPU compatibility: {cpu_compat['span_patches']} short instructions translated with their "
+                  'neighbors moved along (no jump into them was found; jump tables are not '
+                  'globally proven).')
         if cpu_compat['semantic_risk_sites']:
             print(f"CPU compatibility EXPERIMENTAL: {cpu_compat['semantic_risk_sites']} count instructions "
                   'can still have incorrect semantics; this is not a complete compatibility profile.')

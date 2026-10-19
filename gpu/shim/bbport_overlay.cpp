@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_overlay.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cfloat>
 #include <chrono>
+#include <string>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -59,7 +61,7 @@ float base_scale = 1.0f;
 
 // Present rate for the FPS counter.
 std::chrono::steady_clock::time_point last_present{};
-float frame_ms_avg = 0.0f;
+float frame_ms_avg = 0.0f, last_present_ms = 0.0f;
 
 void SetOpen(bool value) {
     if (menu_open.exchange(value) == value) {
@@ -155,6 +157,23 @@ void Hint(const char* text) {
     }
 }
 
+/// The presented frame rate; with frame generation adding frames also the game's own rate,
+/// which is what the GPU's load (resolution, upscaler) changes. The total follows the game's
+/// FPS cap times the multiplier while the GPU keeps up.
+std::string FpsText() {
+    const auto& s = BbSettings::Get();
+    const float shown = frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f;
+    char text[96];
+    const int generated = s.frame_gen != BbSettings::FrameGenOff ? s.frame_gen_now.load() : 0;
+    if (generated > 0 && s.game_fps > 0.0f) {
+        std::snprintf(text, sizeof(text), "%.0f FPS (game %.0f, frame gen %dx)", shown,
+                      s.game_fps.load(), int(shown / s.game_fps + 0.5f));
+    } else {
+        std::snprintf(text, sizeof(text), "%.0f FPS  %.1f ms", shown, frame_ms_avg);
+    }
+    return text;
+}
+
 void Menu() {
     auto& s = BbSettings::Get();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -173,8 +192,7 @@ void Menu() {
         ImGui::End();
         return;
     }
-    ImGui::Text("%.0f FPS  (%.1f ms)", frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f,
-                frame_ms_avg);
+    ImGui::Text("%s", FpsText().c_str());
 
     ImGui::SeparatorText("Temporal upscaling");
     static const char* upscalers[] = {"Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)",
@@ -296,6 +314,58 @@ void Menu() {
     Hint("Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel has accurate object motion, beyond camera motion. A moving object with no blue or red/green is treated as stationary and may leave trails.");
     ImGui::EndDisabled(); // upscaler off
 
+    ImGui::SeparatorText("Frame generation");
+    static const char* frame_gens[] = {"Off", "FSR 3.1 (any GPU)", "DLSS (NVIDIA RTX 40/50)"};
+    const int frame_gen = s.frame_gen;
+    if (ImGui::BeginCombo("Frame generation", frame_gens[frame_gen])) {
+        for (int i = 0; i < BbSettings::FrameGenCount; ++i) {
+            const bool supported = i != BbSettings::FrameGenDlss || s.dlssg_max_multiplier > 1;
+            ImGui::BeginDisabled(!supported);
+            if (ImGui::Selectable(frame_gens[i], i == frame_gen)) {
+                Store(s.frame_gen, i, true);
+            }
+            ImGui::EndDisabled();
+            if (!supported) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("- unsupported by this GPU");
+            }
+        }
+        ImGui::EndCombo();
+    }
+    Hint("Generates frames between two of the game's frames: 60 FPS on screen becomes 120. Needs a display with that refresh rate (120 Hz or more at 60 FPS); it pauses when the display cannot show the extra frames, and 3x/4x drop to what it can. Adds a little input latency. Menus and movies are not generated.");
+    const int max_multiplier =
+        s.frame_gen == BbSettings::FrameGenDlss ? s.dlssg_max_multiplier.load() : 2;
+    ImGui::BeginDisabled(s.frame_gen == BbSettings::FrameGenOff || max_multiplier <= 2);
+    int multiplier = std::min(s.frame_gen_multiplier.load(), max_multiplier);
+    if (ImGui::SliderInt("Multiplier", &multiplier, 2, std::max(max_multiplier, 2), "%dx")) {
+        Store(s.frame_gen_multiplier, multiplier, true);
+    }
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(s.frame_gen == BbSettings::FrameGenOff);
+    Checkbox("Fit to display refresh", s.frame_gen_fit_display);
+    ImGui::EndDisabled();
+    Hint("On: no more frames than the display shows (an uncapped game gets fewer generated frames, and the GPU does less). Off: the multiplier as chosen; past the refresh rate the display shows the newest frames.");
+    // What runs now (fitted: at most the frames the display shows between two of the game's).
+    if (s.frame_gen != BbSettings::FrameGenOff && s.frame_gen_display_hz > 0) {
+        const int now = std::min(s.frame_gen_now.load(), multiplier - 1);
+        if (now > 0 && s.frame_gen_flip_limit > 0) {
+            ImGui::TextDisabled("Now %dx on a %d Hz display; V-Sync (FIFO) caps the game at %d FPS",
+                                now + 1, s.frame_gen_display_hz.load(),
+                                s.frame_gen_flip_limit.load());
+        } else if (now > 0) {
+            ImGui::TextDisabled("Now %dx on a %d Hz display", now + 1,
+                                s.frame_gen_display_hz.load());
+        } else if (s.frame_gen_fit_display) {
+            ImGui::TextDisabled("Paused: no room on a %d Hz display at this frame rate",
+                                s.frame_gen_display_hz.load());
+        } else {
+            ImGui::TextDisabled("Paused: presenting fell behind (V-Sync on a slower display?)");
+        }
+    }
+    if (const char* problem = s.frame_gen_problem.load()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
+    }
+
     ImGui::SeparatorText("Output resolution");
     static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160",
                                     "2560 x 1080 (21:9)", "3440 x 1440 (21:9)",
@@ -349,6 +419,10 @@ void Menu() {
         }
         ImGui::EndCombo();
     }
+    int fov = s.fov;
+    Store(s.fov, fov, ImGui::SliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
+                                       fov == BbSettings::FovDefault ? "%d (game)" : "%d"));
+    Hint("Vertical field of view in degrees; the game's camera has 43. Every camera is scaled by the same amount (scripts/fov.py).");
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
         Checkbox(BbSettings::Effects[e].label, s.effects[e]);
     }
@@ -356,7 +430,7 @@ void Menu() {
     Hint("Free camera: hold Cross and press L3 (keyboard: Space + Z). Debug menu: left touchpad / Tab. Requires DbgFont14h.ccm and DbgFont14h.tpf in dvdroot_ps4/font from the debug-font mod. Right touchpad: Backspace.");
 
     bool restart = s.object_motion != s.startup_object_motion ||
-                   s.model_lod != s.startup_model_lod ||
+                   s.model_lod != s.startup_model_lod || s.fov != s.startup_fov ||
                    s.live_resolution != s.startup_live_resolution ||
                    BbSettings::ResolutionNeedsRestart();
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
@@ -373,6 +447,17 @@ void Menu() {
 
     ImGui::SeparatorText("Other");
     Checkbox("Show FPS counter", s.show_fps);
+    Checkbox("Mute when the game is in the background", s.mute_unfocused);
+    static const char* prompt_modes[] = {"Follow the device in use", "PlayStation", "Keyboard and mouse", "Xbox",
+                                         "Nintendo Switch"};
+    int prompts = s.button_prompts;
+    if (ImGui::BeginCombo("Button prompts", prompt_modes[prompts])) {
+        for (int i = 0; i < BbSettings::PromptsCount; ++i) {
+            if (ImGui::Selectable(prompt_modes[i], i == prompts)) Store(s.button_prompts, i, true);
+        }
+        ImGui::EndCombo();
+    }
+    Hint("The game's button icons: keyboard and mouse keys from input.ini while you play with them, the controller's (PlayStation, Xbox or Switch) while you use it.");
 
     ImGui::Spacing();
     if (ImGui::Button("Close")) {
@@ -440,8 +525,7 @@ void FpsCounter() {
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
     const auto& s = BbSettings::Get();
-    ImGui::Text("%.0f FPS  %.1f ms  %s", frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f,
-                frame_ms_avg,
+    ImGui::Text("%s  %s", FpsText().c_str(),
                 s.upscaler == BbSettings::UpscalerFsr3   ? "FSR 3.1"
                 : s.upscaler == BbSettings::UpscalerFsr4 ? "FSR 4"
                 : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
@@ -633,14 +717,38 @@ void SetTextEntry(bool active, const std::string& prompt, const std::string& tex
     text_entry_text = text;
 }
 
-void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
-    // Present interval for the FPS readout (measured also while nothing is drawn).
+// Called for every presented image: the interval for the FPS readout and BB_FPS_LOG.
+void NotePresent() {
     const auto now = std::chrono::steady_clock::now();
     const float ms = std::chrono::duration<float, std::milli>(now - last_present).count();
     last_present = now;
+    last_present_ms = ms;
     if (ms > 0.0f && ms < 1000.0f) {
         frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
     }
+    // BB_FPS_LOG=1: presents per second and the slowest frame, every 5 seconds (test runs).
+    static const bool fps_log = [] {
+        const char* env = std::getenv("BB_FPS_LOG");
+        return env && env[0] == '1';
+    }();
+    if (fps_log) {
+        static auto window_start = now;
+        static int frames = 0;
+        static float worst = 0.0f;
+        ++frames;
+        worst = std::max(worst, ms < 1000.0f ? ms : 0.0f);
+        const float elapsed = std::chrono::duration<float>(now - window_start).count();
+        if (elapsed >= 5.0f) {
+            std::printf("Frame rate: %.1f FPS, slowest frame %.1f ms\n", frames / elapsed, worst);
+            window_start = now;
+            frames = 0;
+            worst = 0.0f;
+        }
+    }
+}
+
+void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+    const float ms = last_present_ms;
     if (!Visible()) {
         return;
     }

@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <thread>
+
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -351,9 +356,24 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
     Platform::IrqC::Instance()->RegisterOnce(
         Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
             ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
-            ASSERT_MSG(port->buffer_labels[buf_id] == 1,
-                       "Out of order flip IRQ: buffer {}, label {}, previous {}, argument {}",
-                       buf_id, port->buffer_labels[buf_id], port->prev_index, flip_arg);
+            // bbport: the label write and this IRQ can arrive out of order (the write may still
+            // be on its way from the draw recording thread). This stopped the game ("Out of order
+            // flip IRQ"). Wait briefly for the label, then flip anyway: at worst a frame is shown
+            // twice, and the game still gets its flip event. From Awaken's port.
+            if (port->buffer_labels[buf_id] != 1) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(20);
+                while (reinterpret_cast<volatile u64&>(port->buffer_labels[buf_id]) != 1 &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::yield();
+                }
+                if (port->buffer_labels[buf_id] != 1) {
+                    static std::atomic<u32> reported{0};
+                    if (reported.fetch_add(1, std::memory_order_relaxed) < 5) {
+                        std::printf("VideoOut: flip IRQ for buffer %u before its label was set; "
+                                    "flipping anyway\n", buf_id);
+                    }
+                }
+            }
             const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true);
             ASSERT_MSG(result, "EOP flip submission failed");
         });

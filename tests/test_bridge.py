@@ -46,7 +46,7 @@ class HuntersDreamTests(unittest.TestCase):
         env = launcher.game_environment(settings)
         self.assertEqual((env['BB_NET_BACKEND'], env['BB_THD_ONLINE_ID'], env['BB_THD_TOKEN']),
                          ('thd', 'Hunter1', 'tok'))
-        self.assertTrue(env['BB_CLIENT_VERSION'].startswith('bbport '))
+        self.assertTrue(env['BB_CLIENT_VERSION'].startswith('bbport/'))
         launcher.HUNTERS_DREAM_POOL = False
         env = launcher.game_environment(settings)
         self.assertNotIn('BB_NET_BACKEND', env)

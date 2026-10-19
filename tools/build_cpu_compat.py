@@ -396,13 +396,213 @@ def count_span_site(mod, address, entry_evidence):
                      'function_end': end, 'function_sha256': digest, 'entry_evidence': entry_evidence}}
 
 
+SHORT_SPAN_MAX_TAIL = 2
+SHORT_SPAN_METHOD = 'short_span_entries_v1'
+
+
+def short_reason(mnemonic, error):
+    effect = ('may execute with incorrect BSF/BSR semantics.' if mnemonic in ('lzcnt', 'tzcnt')
+              else 'remains unsupported and can raise an illegal-instruction fault.')
+    return f'Short instruction: {error}; {effect}'
+
+
+def movable(row, last):
+    """An instruction that behaves the same at any address (`last`: may end the span)."""
+    _, _, mnemonic, operands = row
+    if 'rip' in operands or mnemonic in SUPPORTED:
+        return False
+    if mnemonic in ('ret', 'retq') and not operands:
+        return last
+    return not (mnemonic == 'call' or mnemonic.startswith(('j', 'loop', 'ret', 'iret'))
+                or mnemonic in ('syscall', 'sysenter', 'int', 'int3', 'ud2', 'hlt', 'enter', 'leave'))
+
+
+def short_span(rows, index, backward=False):
+    """(start, end, pieces) around the short instruction rows[index]: enough instructions for a
+    five-byte jump. Pieces are ('translate', row) or ('move', row), in order. Forward: the
+    following instructions (other short count/MOVBE ones translated too); backward: the
+    previous ones."""
+    pieces = [('translate', rows[index])]
+    total = rows[index][1]
+    if backward:
+        at = index - 1
+        while total < 5:
+            if at < 0 or len(pieces) > SHORT_SPAN_MAX_TAIL or not movable(rows[at], False):
+                raise ValueError('no movable instructions before it')
+            pieces.insert(0, ('move', rows[at]))
+            total += rows[at][1]
+            at -= 1
+        return pieces[0][1][0], rows[index][0] + rows[index][1], pieces
+    at = index + 1
+    while total < 5:
+        if at >= len(rows) or len(pieces) > SHORT_SPAN_MAX_TAIL:
+            raise ValueError('no room for a jump in the following instructions')
+        row = rows[at]
+        if row[2] in SUPPORTED:
+            # Translated as well (a long one then leaves its own site to this span).
+            pieces.append(('translate', row))
+        elif movable(row, True):
+            pieces.append(('move', row))
+            if row[2] in ('ret', 'retq'):
+                total += row[1]
+                break
+        else:
+            raise ValueError(f'the next instruction cannot move ({row[2]} {row[3]})')
+        total += row[1]
+        at += 1
+    if total < 5:
+        raise ValueError('no room for a jump in the following instructions')
+    last = pieces[-1][1]
+    return rows[index][0], last[0] + last[1], pieces
+
+
+def audit_short_span_entries(mod, spans):
+    """Entries into the moved instructions of `spans` ({start: end}): the D015 audit for many.
+
+    Function starts, symbols, relocation targets, every raw rel32 call/jump/jcc in the
+    executable segments and every rel8 jump near a span are checked; a raw candidate is
+    discarded only when it lies inside another decoded instruction. Jump tables and landing
+    pads are not globally resolved (as for D015). Returns {span start: [entries]}.
+    """
+    interiors = {}
+    for start, end in spans.items():
+        for a in range(start + 1, end):
+            interiors[a] = start
+    found = collections.defaultdict(list)
+    functions = function_ranges(mod)
+    starts = [a for a, _ in functions]
+    decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    cache = {}
+
+    def entry(kind, address, source=None):
+        if address in interiors:
+            found[interiors[address]].append({'kind': kind, 'address': address, 'source': source})
+
+    for address, _ in functions:
+        entry('function', address)
+    for symbol in mod['symbols']:
+        if symbol['section']:
+            entry('symbol', symbol['value'])
+    for source, kind, symid, addend in mod['relocs']:
+        if kind == 8:
+            entry('relocation', addend, source)
+        elif kind in (1, 6, 7) and mod['symbols'][symid]['section']:
+            entry('relocation', mod['symbols'][symid]['value'] + addend, source)
+
+    def candidate(source, target):
+        index = bisect.bisect_right(starts, source) - 1
+        owner = functions[index] if index >= 0 else None
+        if owner and owner[0] <= source < owner[0] + owner[1]:
+            start, length = owner
+            if start not in cache:
+                at = file_offset(mod, start, length, True)
+                cache[start] = list(decoder.disasm_lite(bytes(mod['elf'][at:at + length]), start))
+            row = next((row for row in cache[start] if row[0] <= source < row[0] + row[1]), None)
+            if row:
+                address, length, mnemonic, operands = row
+                if (mnemonic == 'call' or mnemonic.startswith(('j', 'loop'))) and operands == hex(target):
+                    entry('direct_branch', target, address)
+                    return
+                if address < source < address + length:
+                    return  # the raw bytes are inside another decoded instruction
+        entry('unresolved', target, source)
+
+    for ph in mod['ph']:
+        if ph['type'] != 1 or not ph['flags'] & 1:
+            continue
+        raw = bytes(mod['elf'][ph['offset']:ph['offset'] + ph['filesz']])
+        base = ph['vaddr']
+        for prefix in (b'\xe8', b'\xe9', *(bytes((15, x)) for x in range(0x80, 0x90))):
+            pos = raw.find(prefix)
+            while pos >= 0:
+                length = len(prefix) + 4
+                if pos + length <= len(raw):
+                    target = base + pos + length + struct.unpack_from('<i', raw, pos + len(prefix))[0]
+                    if target in interiors:
+                        candidate(base + pos, target)
+                pos = raw.find(prefix, pos + 1)
+        for start, end in spans.items():
+            low, high = max(base, start - 129), min(base + len(raw), end + 129)
+            for source in range(low, high - 1):
+                opcode = raw[source - base]
+                if 0x70 <= opcode <= 0x7f or 0xe0 <= opcode <= 0xe3 or opcode == 0xeb:
+                    target = source + 2 + struct.unpack_from('<b', raw, source - base + 1)[0]
+                    if target in interiors:
+                        candidate(source, target)
+    return found
+
+
+def add_short_spans(mod, name, candidates, plan):
+    """Plan sites for short instructions whose span nothing enters: forward spans first, then
+    backward ones for the rest; the others stay unhandled."""
+    done = set()
+    sites = []
+    failures = {}
+    for backward in (False, True):
+        spans = {}
+        for rows, index, function in candidates:
+            address = rows[index][0]
+            if address in done:
+                continue
+            try:
+                start, end, pieces = short_span(rows, index, backward)
+            except ValueError as error:
+                failures.setdefault(address, str(error))
+                continue
+            if any(piece[0] == 'translate' and piece[1][0] in done for piece in pieces):
+                continue
+            spans[start] = (end, pieces, rows[index], function)
+        entries = audit_short_span_entries(mod, {a: v[0] for a, v in spans.items()}) if spans else {}
+        for start, (end, pieces, row, function) in sorted(spans.items()):
+            if entries.get(start):
+                kinds = sorted({item['kind'] for item in entries[start]})
+                failures[row[0]] = 'an instruction it moves is entered (' + ', '.join(kinds) + ')'
+                continue
+            translated = [piece[1][0] for piece in pieces if piece[0] == 'translate']
+            if any(a in done for a in translated) or any(s0 < end and start < e0 for s0, e0 in
+                                                        ((x['image_span'][0], x['image_span'][1]) for x in sites)):
+                continue
+            try:
+                code = b''.join(body(r[2], r[3]) if kind == 'translate'
+                                else bytes(mod['elf'][file_offset(mod, r[0], r[1], True):][:r[1]])
+                                for kind, r in pieces)
+            except ValueError as error:
+                failures[row[0]] = str(error)
+                continue
+            at = file_offset(mod, start, end - start, executable=True)
+            original = bytes(mod['elf'][at:at + end - start])
+            done.update(translated)
+            sites.append({'kind': 'short_span', 'module': name, 'address': start,
+                          'bytes': original.hex(), 'body': code.hex(),
+                          'instruction': row[2] + ' ' + row[3], 'rip_fixups': [],
+                          'image_span': (start, end),
+                          'span': {'pieces': [[kind, r[0], r[1], r[2] + ' ' + r[3]] for kind, r in pieces],
+                                   'function': [function[0], function[1]],
+                                   'entry_audit': {'method': SHORT_SPAN_METHOD,
+                                                   'global_indirect_proof': False,
+                                                   'known_entries': [], 'unresolved_candidates': []}}})
+    # A long instruction a span translates loses its own site.
+    plan['sites'][:] = [site for site in plan['sites']
+                        if site['module'] != name or site.get('kind') == 'count_span'
+                        or site['address'] not in done]
+    for site in sites:
+        del site['image_span']
+        plan['sites'].append(site)
+    for rows, index, _ in candidates:
+        address, _, mnemonic, operands = rows[index]
+        if address not in done:
+            plan['unhandled'].append({'module': name, 'address': hex(address),
+                                      'instruction': mnemonic + ' ' + operands,
+                                      'reason': short_reason(mnemonic, failures.get(address, 'no span'))})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game', type=Path, help='Plaintext game directory, read only')
     parser.add_argument('--out', type=Path, default=PORT / 'tools/legacy-cpu-plan.json')
     args = parser.parse_args()
     game = args.game
-    plan = {'version': 3, 'modules': {}, 'sites': [], 'unhandled': [], 'coverage': {}}
+    plan = {'version': 4, 'modules': {}, 'sites': [], 'unhandled': [], 'coverage': {}}
     decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     detailed = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     detailed.detail = True
@@ -420,6 +620,7 @@ def main():
                 stream.write((json.dumps(entry_report, sort_keys=True, indent=2) + '\n').encode('utf-8'))
             entry_evidence = count_span_evidence(entry_report)
         functions = function_ranges(mod)
+        short_candidates = []
         coverage = {'declared_functions': len(functions), 'fully_decoded_functions': 0,
                     'partial_functions': 0, 'undecoded_bytes': 0, 'partial_samples': [],
                     'claim': 'Only unwind/export function ranges; no complete control-flow coverage claim.'}
@@ -428,7 +629,8 @@ def main():
         for index, (start, size) in enumerate(functions):
             offset = file_offset(mod, start, size, executable=True)
             decoded_end = start
-            for address, length, mnemonic, operands in decoder.disasm_lite(bytes(mod['elf'][offset:offset+size]), start):
+            rows = list(decoder.disasm_lite(bytes(mod['elf'][offset:offset+size]), start))
+            for row_index, (address, length, mnemonic, operands) in enumerate(rows):
                 decoded_end = address + length
                 if mnemonic not in SUPPORTED or (name, address) in seen:
                     continue
@@ -439,11 +641,12 @@ def main():
                 if name == 'eboot.bin' and address in COUNT_SPANS:
                     plan['sites'].append(count_span_site(mod, address, entry_evidence))
                     continue
+                if length < 5:
+                    # Short spans: the instruction and the next ones up to the jump's five bytes,
+                    # kept only if the entry audit finds no way into the moved ones.
+                    short_candidates.append((rows, row_index, (start, start + size)))
+                    continue
                 try:
-                    if length < 5:
-                        reason = ('may execute with incorrect BSF/BSR semantics.' if mnemonic in ('lzcnt', 'tzcnt')
-                                  else 'remains unsupported and can raise an illegal-instruction fault.')
-                        raise ValueError('Short instruction: unsafe to overwrite neighbors; ' + reason)
                     replacement = body(mnemonic, operands)
                     at = file_offset(mod, address, length, executable=True)
                     instruction = next(detailed.disasm(bytes(mod['elf'][at:at+length]), address))
@@ -465,6 +668,7 @@ def main():
                                   'functions_done': index + 1, 'functions_total': len(functions), 'sites': len(plan['sites'])}), flush=True)
                 report_time = time.monotonic()
         plan['coverage'][name] = coverage
+        add_short_spans(mod, name, short_candidates, plan)
     target = args.out
     with atomic_output(target) as stream:
         stream.write(json.dumps(plan, separators=(',', ':')).encode('utf-8'))

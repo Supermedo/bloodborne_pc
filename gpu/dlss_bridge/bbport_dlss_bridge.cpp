@@ -7,14 +7,19 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "bbport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
 
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_vk.h>
 #include <nvsdk_ngx_helpers_vk.h>
+#include <nvsdk_ngx_helpers_dlssg_vk.h>
 
 namespace {
 
@@ -28,10 +33,19 @@ struct State {
     const wchar_t* dll_path{};
     NVSDK_NGX_FeatureCommonInfo common{};
     NVSDK_NGX_FeatureDiscoveryInfo discovery{};
+    NVSDK_NGX_FeatureDiscoveryInfo discovery_fg{}; // Frame Generation
     NVSDK_NGX_Parameter* capabilities{};
     NVSDK_NGX_Parameter* parameters{};
     NVSDK_NGX_Handle* feature{};
     BbDlssFeature feature_desc{};
+    // Frame Generation: its own parameter map (NVIDIA's advice with two features).
+    NVSDK_NGX_Parameter* fg_parameters{};
+    NVSDK_NGX_Handle* fg_feature{};
+    BbDlssgFeature fg_desc{};
+    bool fg_device_supported{};
+    int32_t fg_max_count{};
+    // Extensions of both features, without duplicates.
+    std::vector<VkExtensionProperties> instance_extensions, device_extensions;
     VkDevice device{};
     bool configured{};
     bool initialized{};
@@ -72,18 +86,42 @@ int32_t Configure(const wchar_t* dll_directory, const wchar_t* data_directory, B
                                                 EngineVersion};
     state.discovery.ApplicationDataPath = state.data_directory.c_str();
     state.discovery.FeatureInfo = &state.common;
+    state.discovery_fg = state.discovery;
+    state.discovery_fg.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
     state.configured = true;
     return 1;
 }
 
+void Merge(std::vector<VkExtensionProperties>& into, const VkExtensionProperties* add,
+           uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto same = std::find_if(into.begin(), into.end(), [&](const auto& have) {
+            return std::strcmp(have.extensionName, add[i].extensionName) == 0;
+        });
+        if (same == into.end()) {
+            into.push_back(add[i]);
+        } else {
+            same->specVersion = std::max(same->specVersion, add[i].specVersion);
+        }
+    }
+}
+
 int32_t InstanceExtensions(uint32_t* count, const VkExtensionProperties** extensions) {
     VkExtensionProperties* required{};
+    uint32_t required_count{};
     if (!state.configured ||
         !Check("Instance extension query",
-               NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(&state.discovery, count,
-                                                                       &required)))
+               NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
+                   &state.discovery, &required_count, &required)))
         return 0;
-    *extensions = required;
+    state.instance_extensions.clear();
+    Merge(state.instance_extensions, required, required_count);
+    // Frame Generation's own needs; without them only DLSS is offered.
+    if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
+            &state.discovery_fg, &required_count, &required)))
+        Merge(state.instance_extensions, required, required_count);
+    *count = uint32_t(state.instance_extensions.size());
+    *extensions = state.instance_extensions.data();
     return 1;
 }
 
@@ -102,11 +140,29 @@ int32_t DeviceExtensions(VkInstance instance, VkPhysicalDevice physical, uint32_
         return 0;
     }
     VkExtensionProperties* required{};
+    uint32_t required_count{};
     if (!Check("Device extension query",
                NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
-                   instance, physical, &state.discovery, count, &required)))
+                   instance, physical, &state.discovery, &required_count, &required)))
         return 0;
-    *extensions = required;
+    state.device_extensions.clear();
+    Merge(state.device_extensions, required, required_count);
+    NVSDK_NGX_FeatureRequirement fg_support{};
+    state.fg_device_supported =
+        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureRequirements(instance, physical,
+                                                                  &state.discovery_fg,
+                                                                  &fg_support)) &&
+        fg_support.FeatureSupported == NVSDK_NGX_FeatureSupportResult_Supported &&
+        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
+            instance, physical, &state.discovery_fg, &required_count, &required));
+    if (state.fg_device_supported) {
+        Merge(state.device_extensions, required, required_count);
+    } else {
+        Log(0, "Frame Generation is not supported on this GPU or driver (code 0x%x)",
+            static_cast<unsigned>(fg_support.FeatureSupported));
+    }
+    *count = uint32_t(state.device_extensions.size());
+    *extensions = state.device_extensions.data();
     return 1;
 }
 
@@ -137,6 +193,22 @@ int32_t Initialize(VkInstance instance, VkPhysicalDevice physical, VkDevice devi
     if (!available) {
         Log(1, "DLSS Super Resolution is not available on this system");
         return 0;
+    }
+    int fg_available{}, fg_needs_driver{};
+    unsigned fg_max{};
+    NVSDK_NGX_Parameter_GetI(state.capabilities, NVSDK_NGX_Parameter_FrameGeneration_Available,
+                             &fg_available);
+    NVSDK_NGX_Parameter_GetI(state.capabilities,
+                             NVSDK_NGX_Parameter_FrameGeneration_NeedsUpdatedDriver,
+                             &fg_needs_driver);
+    if (NVSDK_NGX_FAILED(NVSDK_NGX_Parameter_GetUI(
+            state.capabilities, NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax, &fg_max)))
+        fg_max = 1;
+    if (state.fg_device_supported && fg_available) {
+        state.fg_max_count = static_cast<int32_t>(std::clamp(fg_max, 1u, 3u));
+        Log(0, "Frame Generation available (up to %dx)", state.fg_max_count + 1);
+    } else if (fg_needs_driver) {
+        Log(1, "Frame Generation needs a newer NVIDIA driver");
     }
     return 1;
 }
@@ -226,7 +298,145 @@ int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
                : 0;
 }
 
+int32_t FrameGenMaxCount() {
+    return state.initialized ? state.fg_max_count : 0;
+}
+
+void FrameGenRelease() {
+    if (state.fg_feature) {
+        NVSDK_NGX_VULKAN_ReleaseFeature(state.fg_feature);
+        state.fg_feature = nullptr;
+    }
+    if (state.fg_parameters) {
+        NVSDK_NGX_VULKAN_DestroyParameters(state.fg_parameters);
+        state.fg_parameters = nullptr;
+    }
+}
+
+int32_t FrameGenCreate(VkCommandBuffer command, const BbDlssgFeature* desc) {
+    if (!state.initialized || state.fg_max_count < 1 || !desc)
+        return 0;
+    FrameGenRelease();
+    if (!Check("Frame Generation parameter allocation",
+               NVSDK_NGX_VULKAN_AllocateParameters(&state.fg_parameters)))
+        return 0;
+    // Depth and motion vectors are smaller than the backbuffer (the game's own size).
+    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_Width, desc->width);
+    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_Height, desc->height);
+    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_InternalWidth,
+                              desc->render_width);
+    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_InternalHeight,
+                              desc->render_height);
+    NVSDK_NGX_Parameter_SetUI(state.fg_parameters, NVSDK_NGX_DLSSG_Parameter_DynamicResolution, 0);
+    NVSDK_NGX_DLSSG_Create_Params settings{};
+    settings.Width = desc->width;
+    settings.Height = desc->height;
+    settings.NativeBackbufferFormat = static_cast<unsigned>(desc->format);
+    settings.RenderWidth = desc->render_width;
+    settings.RenderHeight = desc->render_height;
+    const auto result = NGX_VK_CREATE_DLSSG(command, 1, 1, &state.fg_feature,
+                                            state.fg_parameters, &settings);
+    if (!Check("Frame Generation feature creation", result) || !state.fg_feature) {
+        state.fg_feature = nullptr;
+        return 0;
+    }
+    state.fg_desc = *desc;
+    Log(0, "Frame Generation %ux%u (depth and motion %ux%u)", desc->width, desc->height,
+        desc->render_width, desc->render_height);
+    return 1;
+}
+
+// Row-major, row vectors (D3D style: clip = view * m), depth 0 at the near plane.
+void Perspective(float (&m)[4][4], float fov, float aspect, float near_z, float far_z) {
+    std::memset(m, 0, sizeof(m));
+    const float y = 1.0f / std::tan(fov * 0.5f);
+    m[0][0] = y / aspect;
+    m[1][1] = y;
+    m[2][2] = far_z / (far_z - near_z);
+    m[2][3] = 1.0f;
+    m[3][2] = -near_z * far_z / (far_z - near_z);
+}
+
+void Inverse(float (&out)[4][4], const float (&m)[4][4]) {
+    // Of the perspective matrix above.
+    std::memset(out, 0, sizeof(out));
+    out[0][0] = 1.0f / m[0][0];
+    out[1][1] = 1.0f / m[1][1];
+    out[2][3] = 1.0f / m[3][2];
+    out[3][2] = 1.0f;
+    out[3][3] = -m[2][2] / m[3][2];
+}
+
+void Identity(float (&m)[4][4]) {
+    std::memset(m, 0, sizeof(m));
+    for (int i = 0; i < 4; ++i)
+        m[i][i] = 1.0f;
+}
+
+int32_t FrameGenEvaluate(VkCommandBuffer command, const BbDlssgEvaluate* evaluate) {
+    if (!state.fg_feature || !state.fg_parameters || !evaluate)
+        return 0;
+    auto backbuffer = Wrap(evaluate->backbuffer, false);
+    auto depth = Wrap(evaluate->depth, false);
+    auto motion = Wrap(evaluate->motion, false);
+    auto output = Wrap(evaluate->output, true);
+    NVSDK_NGX_VK_DLSSG_Eval_Params resources{};
+    resources.pBackbuffer = &backbuffer;
+    resources.pDepth = &depth;
+    resources.pMVecs = &motion;
+    resources.pOutputInterpFrame = &output;
+    NVSDK_NGX_Resource_VK hudless{};
+    if (evaluate->hudless.image != VK_NULL_HANDLE) {
+        hudless = Wrap(evaluate->hudless, false);
+        resources.pHudless = &hudless;
+    }
+    NVSDK_NGX_DLSSG_Opt_Eval_Params options{};
+    options.multiFrameCount = evaluate->multi_frame_count;
+    options.multiFrameIndex = evaluate->multi_frame_index;
+    const float aspect = float(state.fg_desc.render_width) / float(state.fg_desc.render_height);
+    Identity(options.clipToLensClip);
+    if (evaluate->has_matrices) {
+        // The game's cameras: DLSS separates the camera's motion from the objects' with them
+        // (the vectors hold both). A still camera here contradicted the vectors on every
+        // camera turn and smeared the generated frames.
+        std::memcpy(options.cameraViewToClip, evaluate->view_to_clip,
+                    sizeof(options.cameraViewToClip));
+        std::memcpy(options.clipToPrevClip, evaluate->clip_to_prev_clip,
+                    sizeof(options.clipToPrevClip));
+        std::memcpy(options.prevClipToClip, evaluate->prev_clip_to_clip,
+                    sizeof(options.prevClipToClip));
+    } else {
+        // Unknown camera: a plausible projection that stood still.
+        Perspective(options.cameraViewToClip, evaluate->camera_fov, aspect,
+                    evaluate->camera_near, evaluate->camera_far);
+        Identity(options.clipToPrevClip);
+        Identity(options.prevClipToClip);
+    }
+    Inverse(options.clipToCameraView, options.cameraViewToClip);
+    options.jitterOffset[0] = evaluate->jitter_x;
+    options.jitterOffset[1] = evaluate->jitter_y;
+    options.mvecScale[0] = options.mvecScale[1] = 1.0f;
+    options.cameraUp[1] = 1.0f;
+    options.cameraRight[0] = 1.0f;
+    options.cameraFwd[2] = 1.0f;
+    options.cameraNear = evaluate->camera_near;
+    options.cameraFar = evaluate->camera_far;
+    options.cameraFOV = evaluate->camera_fov;
+    options.cameraAspectRatio = aspect;
+    options.depthInverted = evaluate->depth_inverted != 0;
+    options.cameraMotionIncluded = true;
+    // No vector is invalid (0, the zero-initialised value, would mark every still pixel).
+    options.motionVectorsInvalidValue = std::numeric_limits<float>::max();
+    options.reset = evaluate->reset != 0 && evaluate->multi_frame_index == 1;
+    return Check("Frame Generation evaluation",
+                 NGX_VK_EVALUATE_DLSSG(command, state.fg_feature, state.fg_parameters,
+                                       &resources, &options))
+               ? 1
+               : 0;
+}
+
 void Shutdown() {
+    FrameGenRelease();
     ReleaseFeature();
     if (state.capabilities) {
         NVSDK_NGX_VULKAN_DestroyParameters(state.capabilities);
@@ -239,9 +449,10 @@ void Shutdown() {
     }
 }
 
-const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,      InstanceExtensions, DeviceExtensions,
-                    Initialize,             CreateFeature,  Evaluate,           ReleaseFeature,
-                    Shutdown};
+const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,        InstanceExtensions, DeviceExtensions,
+                    Initialize,             CreateFeature,    Evaluate,           ReleaseFeature,
+                    Shutdown,               FrameGenMaxCount, FrameGenCreate,     FrameGenEvaluate,
+                    FrameGenRelease};
 
 } // namespace
 

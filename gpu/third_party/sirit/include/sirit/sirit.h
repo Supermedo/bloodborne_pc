@@ -852,9 +852,13 @@ public:
     /// operand is the result. If both operands are NaN, the result is a NaN.
     Id OpNMax(Id result_type, Id x, Id y);
 
-    /// Result is min(max(x, minVal), maxVal). Result is undefined if minVal > maxVal.The semantics
-    /// used by min() and max() are those of FMin and FMax.
+    /// Result is min(max(x, minVal), maxVal). Result is undefined if minVal > maxVal.
+    /// The semantics used by min() and max() are those of FMin and FMax.
     Id OpFClamp(Id result_type, Id x, Id min_val, Id max_val);
+
+    /// Result is min(max(x, minVal), maxVal). The resulting value is poison if minVal > maxVal.
+    /// The semantics used by min() and max() are those of NMin and NMax.
+    Id OpNClamp(Id result_type, Id x, Id min_val, Id max_val);
 
     /// Result is min(max(x, minVal), maxVal), where x, minVal and maxVal are interpreted as
     /// unsigned integers. Result is undefined if minVal > maxVal.

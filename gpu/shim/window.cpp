@@ -1,4 +1,6 @@
 // bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <array>
@@ -8,9 +10,27 @@
 #include "sdl_window.h"
 #include "bbport_mouse.h"
 #include "bbport_overlay.h"
+#include "bbport_prompts.h"
 #include "bloodborne_cam.h"
 
 namespace Frontend {
+
+/// The buttons a controller has, for its prompts: SDL's type, by vendor and product.
+static BbPrompts::Device PadDevice(SDL_JoystickID id) {
+    switch (SDL_GetGamepadTypeForID(id)) {
+    case SDL_GAMEPAD_TYPE_PS3:
+    case SDL_GAMEPAD_TYPE_PS4:
+    case SDL_GAMEPAD_TYPE_PS5:
+        return BbPrompts::PlayStation;
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        return BbPrompts::Switch;
+    default:
+        return BbPrompts::Xbox; // Xbox, and the many controllers that copy its buttons
+    }
+}
 
 namespace {
 // MOU-007: each wheel step keeps its direction's bit set for 33 ms (shadPS4's pulse length,
@@ -109,6 +129,36 @@ bool WindowSDL::PollEvents() {
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // Button prompts follow the device that was used last: a key, a click, the wheel or a
+        // real mouse movement, or a controller button or a stick or trigger pushed past half.
+        switch (event.type) {
+        case SDL_EVENT_KEY_DOWN:
+            if (!event.key.repeat) BbPrompts::OnInput(BbPrompts::Keyboard);
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_WHEEL:
+            BbPrompts::OnInput(BbPrompts::Keyboard);
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            if (std::abs(event.motion.xrel) + std::abs(event.motion.yrel) >= 3.0f) {
+                BbPrompts::OnInput(BbPrompts::Keyboard);
+            }
+            break;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            BbPrompts::OnInput(PadDevice(event.gbutton.which));
+            break;
+        case SDL_EVENT_GAMEPAD_ADDED:
+            // The game starts with the controller's prompts.
+            std::printf("Prompts: controller %s: %s\n", SDL_GetGamepadNameForID(event.gdevice.which),
+                        SDL_GetGamepadStringForType(SDL_GetGamepadTypeForID(event.gdevice.which)));
+            BbPrompts::OnControllerConnected(PadDevice(event.gdevice.which));
+            break;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (std::abs(int(event.gaxis.value)) > 16000) BbPrompts::OnInput(PadDevice(event.gaxis.which));
+            break;
+        default:
+            break;
+        }
         // HOT-003: the toggle/reload hotkeys work regardless of the menu or text dialog (F8
         // must reload input.ini even with the menu open), so they are handled before anything
         // else gets a chance to consume the key event. Held-down repeats are ignored the same
@@ -211,6 +261,7 @@ bool WindowSDL::PollEvents() {
     // because the menu can also close from the render thread (bbport_overlay.cpp's "Close"
     // button sets menu_open there, not through an SDL event here).
     UpdateMouseCapture();
+    BbPrompts::Apply();
     UpdateMouseCamera();
     return is_open;
 }

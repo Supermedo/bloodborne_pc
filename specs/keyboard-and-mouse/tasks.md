@@ -72,10 +72,10 @@ stubs of `bbgpu_mouse_take`/`bbgpu_input_reload_requested`.
 
 ## Not done (left for later work)
 
-- **Multi-key combos** (e.g. Ctrl+E for one action). Two pieces, neither started: the C parser
-  would need to accept a comma-separated input and require both held at once (CFG-005 currently
-  rejects any comma as out of scope); the launcher's capture flow would need to accumulate held
-  modifier keys before committing a binding, instead of committing on the first keypress.
+- ~~**Multi-key combos**~~ — done later: CFG-005 now parses up to three comma-separated
+  digital inputs, a held combo takes its inputs from smaller bindings (`binding_consumed` in
+  `runtime_pad.c`), and the launcher's capture flow waits on Shift/Ctrl/Alt. See `docs/INPUT.md`,
+  "Combinations". Idea and launcher behaviour from Ryan Sousa's keyboard and mouse fork.
 - **Linux launcher remap page** (GTK) — the Windows Tkinter launcher's Controls page has no
   equivalent there yet.
 - **In-game remap UI** (ImGui, both platforms), with immediate application via the same mechanism

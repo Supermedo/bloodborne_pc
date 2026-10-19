@@ -418,11 +418,13 @@ def main():
         print(f'Patches: eboot.bin is not the {a.app_version} build the patches were made for: none '
               'applied (30 FPS, no effect or resolution patches; BB_FORCE_PATCHES=1 applies them)')
         return
-    names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
+    fps_names=FPS_PRESETS[a.fps]
+    names=fps_names+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
     validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
+    fps_count=len(compile_patches(a.xml,fps_names,a.app_version,segments))  # the first writes
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
     # it into the output-size image with a viewport scaled by output / 1920
@@ -440,7 +442,7 @@ def main():
             writes+=compile_patches(a.xml,[heap],a.app_version,segments)
             names.append(heap)
         print(f'Patches: scene {size[0]}x{size[1]}; UI {ui[0]}x{ui[1]}')
-    if read_settings(a.settings).get('quit_to_desktop','1')!='0':
+    if read_settings(a.settings).get('quit_to_desktop','1')!='0' and os.environ.get('BB_QUIT_TO_DESKTOP')!='0':
         # Quit to Desktop in the title and System menus (quit_menu.py; its texts are a mod layer).
         sys.path.insert(0,str(Path(__file__).resolve().parent))
         import quit_menu
@@ -453,8 +455,21 @@ def main():
             print(f'Patches: {error}; Quit to Desktop skipped')
     if a.patches_dir:
         # After the built-in ones: an external patch of the same bytes wins.
-        writes+=compile_external(external_selection(external_patches(a.patches_dir,a.app_version,a.xml),
-                                                    a.patches_config),segments)
+        selected=external_selection(external_patches(a.patches_dir,a.app_version,a.xml),a.patches_config)
+        fps_ranges=[(offset,offset+len(data)) for offset,data in writes[:fps_count]]
+        external=[]
+        for item in selected:
+            ours=compile_external([item],segments)
+            # An FPS patch of its own (e.g. "60FPS (no deltatime)", at 60 FPS++'s addresses with
+            # other values) replaces the built-in preset whole: applied over it, the two mixed.
+            if fps_count and any(start<offset+len(data) and offset<end
+                                 for offset,data in ours for start,end in fps_ranges):
+                print(f'Patches: external {item[0]} replaces the built-in {", ".join(fps_names)}')
+                writes=writes[fps_count:]
+                names=[n for n in names if n not in fps_names]
+                fps_count=0
+            external+=ours
+        writes+=external
     # BBPATCH2: the patch base, so the loader can rebase pointers the patches write into
     # relocated slots (60/90 FPS++ replace function pointers).
     blob=struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,len(writes))

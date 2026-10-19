@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <array>
+
+#include "common/interval_set.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
-#include "video_core/renderer_vulkan/vk_barrier_tracker.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/types.h"
@@ -112,24 +114,44 @@ public:
 private:
     void (*image_access_hook)(void*) = nullptr;
     void* image_access_context = nullptr;
+    void MakeCurrent(const VideoCore::Buffer* handle);
+
+private:
     const Instance& instance;
     Scheduler& scheduler;
     std::unique_ptr<VideoCore::BlitHelper> blit_helper;
     StagingBufferPool staging_pool;
-    BarrierTracker barrier_tracker;
-    VideoCore::Image::Barriers image_barriers;
-    vk::MemoryBarrier2 memory_barrier{};
-    // bbport: ranges inserted into barrier_tracker since its last Clear(); re-inserting a
-    // contained range is a no-op, and draws re-bind the same ranges constantly.
+    struct BufferBarriers {
+        const VideoCore::Buffer* handle;
+        using AccessList = IntervalList<Interval>;
+        AccessList read_ranges;
+        AccessList write_ranges;
+    };
+    BufferBarriers* resource{};
+    std::vector<BufferBarriers> resources;
+    /// bbport (toggle 512): the entries in use since the last flush; the rest keep their lists'
+    /// storage for the next ones (FlushBarriers runs many times a frame).
+    std::size_t num_resources{};
+    /// bbport (toggle 512): ranges added since the last flush (access_epoch). Vertex, index and
+    /// indirect buffers are tracked per draw too, and the same ranges come back draw after
+    /// draw: adding one again changes nothing. Also which entry a buffer has.
     struct AccessMemo {
-        u64 resource;
+        const VideoCore::Buffer* handle;
         u64 start;
         u64 end;
-        u32 epoch;
+        u64 epoch;
         u32 access;
     };
-    std::array<AccessMemo, 512> access_memo{};
-    u32 access_epoch = 1;
+    struct ResourceMemo {
+        const VideoCore::Buffer* handle;
+        u64 epoch;
+        u32 index;
+    };
+    std::array<AccessMemo, 1024> access_memo{};
+    std::array<ResourceMemo, 256> resource_memo{};
+    u64 access_epoch{1};
+    VideoCore::Image::Barriers image_barriers;
+    vk::MemoryBarrier2 memory_barrier{};
 };
 
 } // namespace Vulkan

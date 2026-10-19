@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// bbport: frame generation (FSR 3.1) interpolates the game's picture without its UI; this
+// frame's UI goes over the generated frame: where the finished frame differs from the picture
+// without UI, its pixel replaces the generated one.
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba8) uniform image2D generated_img;
+layout(binding = 1) uniform texture2D color_tex;   // the finished frame
+layout(binding = 2) uniform texture2D hudless_tex; // the same frame without its UI
+
+layout(push_constant) uniform Constants {
+    ivec2 size;
+};
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= size.x || pixel.y >= size.y) {
+        return;
+    }
+    const vec3 color = texelFetch(color_tex, pixel, 0).rgb;
+    const vec3 hudless = texelFetch(hudless_tex, pixel, 0).rgb;
+    const vec3 difference = abs(color - hudless);
+    // Both went through the same passes: equal outside the UI up to rounding.
+    if (max(difference.r, max(difference.g, difference.b)) > 1.5 / 255.0) {
+        imageStore(generated_img, pixel, vec4(color, 1.0));
+    }
+}

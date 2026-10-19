@@ -35,10 +35,22 @@ typedef enum {
     IN_AXIS_HALF,     /* value is an SDL_GAMEPAD_AXIS_*; sign carried in InputBinding.half_sign */
 } InputKind;
 
+/* Combos (shadPS4's "output = a, b, c"): up to 3 inputs that must all be held. Only digital
+ * inputs (keys, mouse buttons and wheel, controller buttons) take part in one. */
+#define INPUT_MAX_COMBO 3
+
+/* One more input of a combo binding. */
+typedef struct {
+    InputKind kind;
+    int32_t value;
+} InputComboPart;
+
 typedef struct {
     InputKind kind;
     int32_t value;
     int8_t half_sign; /* +1/-1 for IN_AXIS_HALF; unused otherwise */
+    uint8_t extra_count; /* combo: inputs held together with this one (0 = a single input) */
+    InputComboPart extra[INPUT_MAX_COMBO - 1];
 } InputBinding;
 
 /* OUT-004/OUT-005: thresholds used by runtime_pad.c (T2) to turn an analog input bound to a
@@ -61,7 +73,19 @@ typedef struct {
     int stick; /* 0=none, 1=left, 2=right; mouse_to_joystick */
     int camera_direct;        /* mouse_camera = direct (1) | stick (0, default) */
     float camera_sensitivity; /* mouse_camera_sensitivity; 1.0 default */
+    /* Both camera modes, applied to the mouse motion itself: */
+    int invert_x, invert_y;   /* mouse_invert_x / mouse_invert_y = on | off (default) */
+    float sensitivity_y;      /* mouse_sensitivity_y: vertical as a multiple of horizontal, 1.0 */
+    int camera_sync;          /* mouse_camera_sync = on (default) | off: the direct camera turns
+                               * its drawn position too, so a turn is not eased in by a spring */
 } MouseParams;
+
+/* The mouse motion's multipliers from MouseParams: -1 for an inverted axis, the vertical one
+ * times sensitivity_y. */
+static inline float input_mouse_scale_x(const MouseParams *m) { return m->invert_x ? -1.0f : 1.0f; }
+static inline float input_mouse_scale_y(const MouseParams *m) {
+    return (m->invert_y ? -1.0f : 1.0f) * m->sensitivity_y;
+}
 
 typedef struct {
     int inner, outer; /* analog_deadzone; 1..127 each, inner <= outer */
@@ -103,5 +127,8 @@ const char *input_config_default_text(void);
  * and fills *out on a match (case-insensitive), 0 otherwise. */
 int input_output_from_name(const char *name, InputOutput *out);
 const char *input_output_name(InputOutput out);
+/* A keyboard or mouse binding as input.ini names it, a combination joined with '+'
+ * ("lshift+leftbutton"); 0 for a controller binding or a name that does not fit `size`. */
+int input_binding_keyboard_text(const InputBinding *b, char *out, size_t size);
 
 #endif
