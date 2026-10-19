@@ -16,6 +16,10 @@ from pathlib import Path
 EBOOT_BASE=0x400000
 # BB_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
 FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++'],'uncap':['Uncap FPS++']}
+# Fixes applied with every preset. The game's two per-frame render heaps (256 KiB each,
+# mov edx,0x40000 at guest offsets 0x2195c09/0x2195c46) run out in a busy frame; the pool at
+# 0xe45560 then returns NULL and the caller copies into it (memcpy at guest offset 0x21d5b40).
+FIXES=['Larger Frame Heaps']
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
@@ -419,7 +423,7 @@ def main():
               'applied (30 FPS, no effect or resolution patches; BB_FORCE_PATCHES=1 applies them)')
         return
     fps_names=FPS_PRESETS[a.fps]
-    names=fps_names+[n.strip() for n in a.extra.split(';') if n.strip()]
+    names=fps_names+FIXES+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
     validate_patch_requirements(names,a.game_dir)
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
