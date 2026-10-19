@@ -14,17 +14,17 @@
 #include <miniz.h>
 
 #include <condition_variable>
+#include <exception>
 #include <functional>
-#include <future>
 #include <mutex>
 #include <queue>
 
 namespace {
 
-std::mutex submit_mutex{};
-u32 num_requests{};
 std::condition_variable_any request_cv{};
-std::queue<std::packaged_task<void()>> req_queue{};
+std::condition_variable idle_cv{};
+std::queue<std::function<void()>> req_queue{};
+bool io_busy{};
 std::mutex m_request{};
 
 mz_zip_archive zip_ar{};
@@ -37,33 +37,27 @@ namespace Storage {
 void ProcessIO(const std::stop_token& stoken) {
     Common::SetCurrentThreadName("shadPS4:PipelineCacheIO");
 
-    while (!stoken.stop_requested()) {
+    for (;;) {
+        std::function<void()> request;
         {
-            std::unique_lock lk{submit_mutex};
-            Common::CondvarWait(request_cv, lk, stoken, [&] { return num_requests; });
-        }
-
-        if (stoken.stop_requested()) {
-            break;
-        }
-
-        while (num_requests) {
-            std::packaged_task<void()> request{};
-            {
-                std::scoped_lock lock{m_request};
-                if (req_queue.empty()) {
-                    continue;
-                }
-                request = std::move(req_queue.front());
-                req_queue.pop();
+            std::unique_lock lk{m_request};
+            io_busy = false;
+            idle_cv.notify_all();
+            // bbport: one mutex guards the queue and the wait. The separate request count was
+            // changed under different locks and could lose queued writes.
+            Common::CondvarWait(request_cv, lk, stoken, [&] { return !req_queue.empty(); });
+            // A stop drains the writes already accepted.
+            if (req_queue.empty()) {
+                return;
             }
-
-            if (request.valid()) {
-                request();
-                request.get_future().wait();
-            }
-
-            --num_requests;
+            request = std::move(req_queue.front());
+            req_queue.pop();
+            io_busy = true;
+        }
+        try {
+            request();
+        } catch (const std::exception& e) {
+            LOG_ERROR(Render, "Cache write failed: {}", e.what());
         }
     }
 }
@@ -137,10 +131,19 @@ void DataBase::Close() {
     LOG_INFO(Render, "Cache dumped");
 }
 
+bool DataBase::Flush(std::chrono::milliseconds timeout) {
+    if (!IsOpened()) {
+        return true;
+    }
+    std::unique_lock lk{m_request};
+    return idle_cv.wait_for(lk, timeout, [] { return req_queue.empty() && !io_busy; });
+}
+
 template <typename T>
 bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector<T>&& v) {
     {
-        auto request = std::packaged_task<void()>{[=]() {
+        // bbport: the payload moves into the queue instead of being copied on the GPU thread.
+        std::function<void()> request = [type, path_ = std::move(path_), v = std::move(v)]() {
             auto path{path_};
             path.replace_extension(GetBlobFileExtension(type));
             if (EmulatorSettings.IsPipelineCacheArchived()) {
@@ -166,13 +169,11 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector
                 std::error_code error;
                 std::filesystem::rename(temp, path, error);
             }
-        }};
+        };
         std::scoped_lock lock{m_request};
         req_queue.emplace(std::move(request));
     }
 
-    std::scoped_lock lk{submit_mutex};
-    ++num_requests;
     request_cv.notify_one();
     return true;
 }

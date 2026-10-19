@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <functional>
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -15,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
+#include "video_core/renderer_vulkan/vk_occlusion.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -91,9 +94,9 @@ public:
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
-    void WaitHostCopies() {
+    void WaitHostCopies(std::source_location where = std::source_location::current()) {
         DrainDrawPipe();
-        scheduler.WaitHostCopies();
+        scheduler.WaitHostCopies(where);
     }
 
     /// bbport: GPU command thread: waits until the draw recording thread has recorded every
@@ -126,8 +129,25 @@ public:
     /// buffers, DMA, WriteData, fences); constants overlapping it are bound there, not copied here.
     void NotePendingGpuWrite(VAddr address, u64 size);
     /// Before a guest-visible write: fences deferred earlier are written first.
-    void WaitDeferredSignals() {
-        scheduler.WaitDeferredSignals();
+    void WaitDeferredSignals(std::source_location where = std::source_location::current()) {
+        scheduler.WaitDeferredSignals(where);
+    }
+    void WaitDeferredSignalsUpTo(u64 issued,
+                                 std::source_location where = std::source_location::current()) {
+        scheduler.WaitDeferredSignalsUpTo(issued, where);
+    }
+    /// End of sceGnmSubmitDone: drain + wait, or hand that to the draw thread (BB_SUBMIT_END_TASKS).
+    void FinishSubmissionIdle(std::function<void()> done);
+    Occlusion* GetOcclusion() const noexcept {
+        return occlusion.get();
+    }
+    void NoteLateCommandWrite(VAddr address, const void*, u64 size) {
+        NotePendingGpuWrite(address, size);
+    }
+    void NoteIssuedDraw() {
+        if (occlusion) {
+            occlusion->NoteIssued();
+        }
     }
     /// Runs `signal` after the guest memory copies issued so far, without waiting here.
     void SignalAfterHostCopies(std::function<void()> signal) {
@@ -267,6 +287,7 @@ private:
         const void* backing = nullptr;
         VideoCore::SubresourceRange range;
         bool proxy = false; ///< sampled from the scene proxy (view: SampleProxy on each use)
+        u64 uid = 0;        ///< Image::image_uid of `id`
     };
     struct TextureSet {
         u64 key = 0;
@@ -300,6 +321,12 @@ private:
     /// BB_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
     bool SkipOutputlessDraw(const GraphicsPipeline* pipeline);
+    /// bbport (BB_SKIP_UNCOMPILED): whether a scene draw of a pipeline still compiling is left
+    /// out (docs/pipeline_compiles.md).
+    bool SkipUncompiledDraw(const GraphicsPipeline* pipeline);
+    /// bbport: the handle to bind with the draw, or null when a command recorded before it
+    /// binds the pipeline once it is compiled (BB_LATE_PIPELINE_BIND, deferred recording).
+    vk::Pipeline BindWhenCompiled(const Pipeline* pipeline, vk::PipelineBindPoint bind_point);
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
     void BindIndexBuffer(u32 index_offset = 0, bool is_indirect = false);
@@ -334,6 +361,8 @@ private:
     std::unique_ptr<CameraMotion> camera_motion; // bbport: motion vectors (docs/upscaler.md)
     std::unique_ptr<SceneTargets> scene_targets;
     bool scene_started = false;
+    /// bbport: the scene depth of the frame before (SkipUncompiledDraw).
+    VideoCore::ImageId previous_scene_depth{};
     std::unique_ptr<ObjectMotion> object_motion;
     bool motion_draw = false;
     u64 motion_geometry{};    ///< vertex-stream identity of the current direct draw
@@ -521,6 +550,13 @@ private:
         return nullptr;
     }
     std::unique_ptr<ConstantRing> constant_ring;
+    std::unique_ptr<Occlusion> occlusion;
+    std::function<void()> submit_end_done;
+    struct SamplerMemoEntry {
+        u64 hash = 0;
+        vk::Sampler sampler{};
+    };
+    std::array<SamplerMemoEntry, 256> sampler_memo{};
     /// Submissions (prepared draws) kept alive until stage B reaches the position.
     std::deque<std::pair<u64, std::shared_ptr<const void>>> pipe_keepalive;
     std::unique_ptr<DrawPipe> draw_pipe;

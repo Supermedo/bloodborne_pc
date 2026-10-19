@@ -576,3 +576,27 @@ now reads guest memory for the constant ring, is not treated as a GPU-side threa
 (`IsGpuSideThreadId` accepts only stage B). Next: a run with `BB_WRITE_LOG=1` that crashes
 prints which logged write landed near the corrupted block; bisect the pipeline toggles
 (38 tasks, 39 pending fence waits, 41 recorder fences, 42 memory writes, 36 constant ring).
+
+## Awaken engine imports (off by default)
+
+Ported from Awakenchan/BloodBorneButPc `engine/bbhost-changes.patch` onto this tree.
+Each switch is **off** until a same-scene A/B (`BB_FRAME_STATS=1`) is accepted.
+
+| Switch | What it does |
+|---|---|
+| `BB_KEEP_MIP_HASHES=1` | Reuse mip hashes of a GPU-dirty image when the CPU did not write it |
+| `BB_PARALLEL_IMAGE_HASH=1` | Hash images ≥1 MiB on the copy threads |
+| `BB_LOCAL_TEXTURE_SETS=1` | Texture-set memo without prepared draw data |
+| `BB_SAMPLER_MEMO=1` | Remember the last samplers without the cache mutex |
+| `BB_MEMO_REVALIDATE=1` | Keep texture memos across image (un)registration |
+| `BB_ASYNC_PIPELINES=1` | Compile new graphics pipelines on helper threads |
+| `BB_SKIP_UNCOMPILED=1` | Skip a draw while its pipeline compiles |
+| `BB_LATE_PIPELINE_BIND=1` | The draw thread takes the compile job instead of waiting in line |
+| `BB_OCCLUSION=1` | Real occlusion query results (the FPS jump). Pop-in: `BB_OCCLUSION_MIN_SAMPLES`, `BB_OCCLUSION_HOLD_FRAMES` |
+| `BB_FENCE_ORDER=ordered` | WriteData/DMA wait only for fences already issued |
+| `BB_DMA_WAITS=needed\|all` | Extra fence waits before DMA into guest memory |
+| `BB_DRAWREC_LOOKAHEAD=N` | Prefetch N upcoming draw-pipe packets |
+| `BB_GPU_THREAD_PRIORITY=1` | GPU command and draw-recording threads above normal |
+| `BB_SUBMIT_END_TASKS=1` | Hand submit-end fence waits to the draw thread; `GpuIdle` after them |
+
+`BB_DEFER_PROTECT` is **not** imported (Awaken 0.9.24: stale distant textures).

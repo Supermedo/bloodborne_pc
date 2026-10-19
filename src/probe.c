@@ -8,6 +8,7 @@
 #include <cpuid.h>
 #include "runtime.h"
 #include "gpu/bbgpu.h"
+#include "respawn_patch.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -423,6 +424,7 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
  * applied at start). Descriptors are closed first so the old GPU device and its memory are
  * released before the new process opens its own. */
 void runtime_restart(void) {
+    bbgpu_flush_cache();
     fflush(NULL);
 #ifdef _WIN32
     /* run.py sets BB_RESTART_COMMAND: the launch command line, started again (new patches). */
@@ -680,6 +682,24 @@ int main(int argc, char **argv) {
     /* The Hunter's Dream backend reads the game's code before the patches change it. */
     bbnet_set_image(image, size);
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
+    const char *respawn_fix = getenv("BB_RESPAWN_DELAY_FIX");
+    if (!cpu_only && !(respawn_fix && respawn_fix[0] == '0')) {
+        size_t at = 0;
+        int state = 0;
+        unsigned found = 0;
+        for (uint64_t i = 0; i < ns; ++i)
+            if (segments[i].flags & 1)
+                found += bb_respawn_find(image, size, segments[i].address,
+                                         segments[i].address + segments[i].size, &at, &state);
+        if (found != 1) {
+            printf("Respawn loading: minimum-delay code %s; fix skipped\n",
+                   found ? "found more than once" : "not found");
+        } else {
+            if (state == BB_RESPAWN_ORIGINAL) bb_respawn_apply(image, at);
+            printf("Respawn loading: 12-second minimum delay removed at 0x%zx%s (BB_RESPAWN_DELAY_FIX=0 keeps it)\n",
+                   at, state == BB_RESPAWN_ALREADY_APPLIED ? ", already patched" : "");
+        }
+    }
 #ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif

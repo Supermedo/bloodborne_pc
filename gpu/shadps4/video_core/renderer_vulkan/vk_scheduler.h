@@ -16,6 +16,7 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+#include <source_location>
 
 #include "bbport_toggles.h"
 #include "common/assert.h"
@@ -681,15 +682,19 @@ public:
     void Flush();
 
     /// Sends the current execution context to the GPU and waits for it to complete.
-    void Finish();
+    void Finish(std::source_location where = std::source_location::current());
 
     /// bbport: waits for the work submitted so far but leaves the command buffer being
     /// recorded open, so a CommandBuffer() the caller holds stays valid (Finish() submits it:
     /// recording into a submitted buffer crashes AMD's driver).
-    void WaitSubmitted();
+    void WaitSubmitted(std::source_location where = std::source_location::current());
 
     /// Waits for the given tick to trigger on the GPU.
-    void Wait(u64 tick);
+    /// bbport: `where` is counted per call site with BB_FRAME_STATS (PrintWaitSites).
+    void Wait(u64 tick, std::source_location where = std::source_location::current());
+
+    /// bbport: the call sites that waited for the GPU longest since the last call.
+    static void PrintWaitSites(double window_seconds);
 
     /// Attempts to execute operations whose tick the GPU has caught up with.
     void PopPendingOperations();
@@ -805,7 +810,7 @@ public:
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
     /// (it may then rewrite the memory, e.g. UI vertices: flickering) and before the
     /// submission that reads them. Waits for all.
-    void WaitHostCopies();
+    void WaitHostCopies(std::source_location where = std::source_location::current());
 
     /// Runs `copy` on the recording thread in order with the commands (the thread spins for
     /// work anyway, so small copies cost no wakeup); WaitHostCopies() covers it.
@@ -827,7 +832,13 @@ public:
     /// fences, flip): waits until every signal handed to SignalAfterHostCopies ran, so that
     /// the write cannot overtake an earlier fence. Otherwise the guest, seeing the later value,
     /// may free memory the earlier fence then writes into (corrupted heap, guest fault).
-    void WaitDeferredSignals();
+    void WaitDeferredSignals(std::source_location where = std::source_location::current());
+    /// BB_FENCE_ORDER (default): wait only until `issued` (snapshot of DeferredSignalsIssued).
+    void WaitDeferredSignalsUpTo(u64 issued,
+                                 std::source_location where = std::source_location::current());
+    [[nodiscard]] u64 DeferredSignalsIssued() const noexcept {
+        return deferred_signals_issued.load(std::memory_order_relaxed);
+    }
 
     /// Whether a render pass with exactly this state is open.
     [[nodiscard]] bool IsRenderingWith(const RenderState& state) const {

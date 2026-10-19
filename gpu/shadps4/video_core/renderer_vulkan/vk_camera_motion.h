@@ -79,8 +79,9 @@ public:
     /// A bound constant buffer of 864 bytes: checks the scene constant signature.
     void OnConstants(const float* data);
 
-    /// The G-buffer pass (5+ color targets): its depth is the scene depth.
-    void OnGBufferPass(VideoCore::ImageId depth);
+    /// The G-buffer pass (5+ color targets): its depth is the scene depth. The viewport scales'
+    /// signs are applied to the projection stored for the motion shader.
+    void OnGBufferPass(VideoCore::ImageId depth, float xscale, float yscale);
 
     /// The pass copying the finished frame (`frame`, the last target drawn) to the display: the
     /// frame's depth and camera are complete. Records the debug overlay, starts a new frame.
@@ -109,6 +110,9 @@ private:
     ObjectMotion* object_motion = nullptr;
     Camera current, previous;
     bool frame_has_camera = false;
+    /// Sign of the G-buffer viewport scales, each +1 or -1. Zero and positive stay +1.
+    float viewport_x_sign = 1.f;
+    float viewport_y_sign = 1.f;
     std::array<float, 2> jitter{}, previous_jitter{};
     std::array<u32, 2> render_size{};
     VideoCore::ImageId depth_id{};

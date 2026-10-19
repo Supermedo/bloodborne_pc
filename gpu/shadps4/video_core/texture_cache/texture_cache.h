@@ -248,6 +248,15 @@ public:
         auto& image = slot_images[id];
         return !uid || image.image_uid == uid ? &image : nullptr;
     }
+    /// bbport: whether `image_id` is still the registered image `uid` (slot ids are reused).
+    [[nodiscard]] bool IsRegisteredImage(ImageId image_id, u64 uid) const {
+        if (!image_id || !slot_images.IsAllocated(image_id)) {
+            return false;
+        }
+        const Image& image = slot_images[image_id];
+        return image.image_uid == uid && True(image.flags & ImageFlagBits::Registered);
+    }
+
     [[nodiscard]] Image& GetImage(ImageId id) {
         auto& image = slot_images[id];
         TouchImage(image);

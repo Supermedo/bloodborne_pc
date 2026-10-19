@@ -69,6 +69,12 @@ enum : std::uint64_t {
     // when nothing moves. Static-camera flicker of railings/window bars p99.9 -45% (2026-10-03).
     TaaKeepNearerHistory = 1ull << 55,
     SceneMipBias = 1ull << 57, ///< negative LOD bias of G-buffer samplers at reduced scene sizes
+    KeepMipHashes = 1ull << 56,      ///< BB_KEEP_MIP_HASHES
+    ParallelImageHash = 1ull << 58,  ///< BB_PARALLEL_IMAGE_HASH
+    LocalTextureSets = 1ull << 59,   ///< BB_LOCAL_TEXTURE_SETS
+    SamplerMemo = 1ull << 60,        ///< BB_SAMPLER_MEMO
+    MemoRevalidate = 1ull << 61,     ///< BB_MEMO_REVALIDATE
+    AsyncPipelines = 1ull << 62,     ///< BB_ASYNC_PIPELINES
     // Bits 20-29 are used as raw debug toggles by the camera/object motion and the upscaler.
 };
 inline bool Disabled(std::uint64_t bit) {
@@ -90,8 +96,9 @@ inline std::atomic<std::uint64_t> draws{0}, dispatches{0}, submissions{0};
 inline std::atomic<std::uint64_t> gpu_frames{0};
 /// Wall time spent in operations suspected of stalls (ns, all threads).
 inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}, t_refresh{0},
-    t_staging{0}, t_host_wait{0}, t_copy{0}, copy_bytes{0}, t_read_faults{0}, read_faults{0},
-    t_write_faults{0}, t_copy_cpu{0}, copy_sys_us{0}, copy_minflt{0};
+    t_refresh_hash{0}, t_staging{0}, t_host_wait{0}, t_copy{0}, copy_bytes{0}, t_read_faults{0},
+    read_faults{0}, t_write_faults{0}, t_copy_cpu{0}, copy_sys_us{0}, copy_minflt{0};
+inline std::atomic<std::uint64_t> submit_done_calls{0};
 /// Diagnostics are collected only with BB_FRAME_STATS=1.
 inline const bool enabled = [] {
     const char* env = std::getenv("BB_FRAME_STATS");

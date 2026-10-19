@@ -158,6 +158,7 @@ private:
 
     void Run(std::stop_token stop) {
         Common::SetCurrentThreadName("bb:DrawRec");
+        BbThreads::RaiseRenderPriority();
         on_stage_b = true;
         stage_b_tid.store(static_cast<u32>(gettid()), std::memory_order_release);
         u64 at = 0;
@@ -197,6 +198,21 @@ private:
                 at += Capacity - at % Capacity;
                 consumed.store(at, std::memory_order_release);
                 continue;
+            }
+            static const u32 lookahead = [] {
+                const char* env = std::getenv("BB_DRAWREC_LOOKAHEAD");
+                return !env || !env[0] ? 4u : static_cast<u32>(std::strtoul(env, nullptr, 10));
+            }();
+            if (lookahead) {
+                u64 peek = at + header->size;
+                for (u32 n = 0; n < lookahead && peek < available; ++n) {
+                    const auto* next = reinterpret_cast<const Header*>(ring.get() + peek % Capacity);
+                    if (next->size == 0) {
+                        break;
+                    }
+                    _mm_prefetch(reinterpret_cast<const char*>(next), _MM_HINT_T0);
+                    peek += next->size;
+                }
             }
             const u64 start = __rdtsc();
             handler(context, reinterpret_cast<const u8*>(header + 1), header->payload);

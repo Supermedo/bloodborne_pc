@@ -136,7 +136,9 @@ renderer. The original README is in [docs/original-readme](docs/original-readme/
 Online play uses the network, NP and shadNet code of [shadPS4](https://github.com/shadps4-emu/shadPS4)
 0.20 and the shadNet server of the [shadPS4](https://shadps4.net) team, put together for this port
 by **Awaken** ([BloodBorneButPc](https://github.com/Awakenchan/BloodBorneButPc)), whose online code
-bbport now uses, including the backend for [The Hunter's Dream](https://thehuntersdream.com)
+bbport now uses, including the backend for [The Hunter's Dream](https://thehuntersdream.com).
+Awaken's engine work (occlusion queries, mip-hash reuse, async pipeline compiles, draw-thread
+waits) is being ported behind `BB_*` switches; see [docs/parallel_gpu.md](docs/parallel_gpu.md).
 adapted from [bbhost](https://github.com/droogie/bbhost) by droogie (GPL-3.0-or-later; see
 [gpu/bbnet/SHADNET-PORT.md](gpu/bbnet/SHADNET-PORT.md)). Thanks to Metr1k and The Hunter's Dream
 team for their guidance, and to Wozzardman's [shadp2p](https://github.com/Wozzardman/shadp2p),

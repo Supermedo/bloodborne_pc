@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <thread>
 #ifdef _WIN32
 #include <bit>
@@ -31,6 +32,17 @@ inline unsigned Available() {
 inline void MakeBackground() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
 }
+
+/// Render threads above the game's other work (BB_GPU_THREAD_PRIORITY=1).
+inline void RaiseRenderPriority() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_GPU_THREAD_PRIORITY");
+        return !(env && env[0] == '0');
+    }();
+    if (on) {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    }
+}
 #else
 
 /// Hardware threads available to the process.
@@ -48,6 +60,16 @@ inline void MakeBackground() {
     sched_param param{};
     if (sched_setscheduler(0, SCHED_IDLE, &param) != 0) {
         setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), 19);
+    }
+}
+
+inline void RaiseRenderPriority() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_GPU_THREAD_PRIORITY");
+        return !(env && env[0] == '0');
+    }();
+    if (on) {
+        setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), -5);
     }
 }
 #endif

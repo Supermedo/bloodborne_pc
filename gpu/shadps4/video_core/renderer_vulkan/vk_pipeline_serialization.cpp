@@ -8,7 +8,11 @@
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+
+#include <chrono>
+#include <cstdio>
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
@@ -285,23 +289,38 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         return false;
     }
 
+    const auto pgm_hash = program->info.pgm_hash;
     std::vector<u32> spv{};
-    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
-                                       fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
-                                       spv);
-    if (spv.empty()) {
+    const auto load_spv = [&] {
+        Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
+                                           fmt::format("{:#018x}_{}", pgm_hash, perm_idx), spv);
+        return !spv.empty();
+    };
+    // bbport BB_FAST_PRELOAD: a stage shared by many pipelines reuses its loaded module, so its
+    // SPIR-V is read only when a module has to be created.
+    const bool fast = FastPreloadEnabled();
+    if (!fast && !load_spv()) {
         return false;
     }
+    const auto compile = [&]() -> vk::ShaderModule {
+        if (fast && !load_spv()) {
+            return {};
+        }
+        return CompileSPV(spv, instance.GetDevice());
+    };
 
     // Permutation hash depends on shader variation index. To prevent collisions, we need insert it
     // at the exact position rather than append
 
     vk::ShaderModule module{};
 
-    auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
-    if (new_program) {
-        module = CompileSPV(spv, instance.GetDevice());
-        it_pgm.value() = std::move(program);
+    auto it_pgm = program_cache.find(pgm_hash);
+    if (it_pgm == program_cache.end()) {
+        module = compile();
+        if (!module) {
+            return false;
+        }
+        it_pgm = program_cache.try_emplace(pgm_hash, std::move(program)).first;
     } else {
         const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
         if (it != it_pgm.value()->modules.end()) {
@@ -318,9 +337,14 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             }
             module = it->module;
         } else {
-            module = CompileSPV(spv, instance.GetDevice());
+            module = compile();
+            if (!module) {
+                return false;
+            }
         }
     }
+    // The program read here is dropped when one with this hash is cached already.
+    spec.info = &it_pgm.value()->info;
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
 
     sel.infos[stage] = &it_pgm.value()->info;
@@ -376,6 +400,7 @@ void PipelineCache::WarmUp() {
 
     u32 num_pipelines{};
     u32 num_total_pipelines{};
+    const auto start = std::chrono::steady_clock::now();
 
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
@@ -406,6 +431,12 @@ void PipelineCache::WarmUp() {
         });
 
     LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
+    std::printf("Pipeline cache: preloaded %u of %u pipelines in %lld ms%s\n", num_pipelines,
+                num_total_pipelines,
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::steady_clock::now() - start)
+                                           .count()),
+                FastPreloadEnabled() ? " (BB_FAST_PRELOAD=1)" : "");
     if (num_total_pipelines > num_pipelines) {
         LOG_WARNING(Render, "{} stale pipelines were found. Consider re-generating the cache",
                     num_total_pipelines - num_pipelines);
