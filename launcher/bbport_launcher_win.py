@@ -2194,9 +2194,18 @@ class Launcher:
                 warned = True
                 self.ui_calls.put(lambda: self.messagebox.showwarning('Bloodborne', _(
                     "Your eboot.bin is not the clean 1.09 one (modified, or from another dump). The port "
-                    "cannot patch it: the game runs at 30 FPS, the Game & effects options do nothing, and "
-                    "some scenes (like the cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one "
-                    "from an unmodified 1.09 update.")))
+                    "cannot patch it: the game runs at 30 FPS in 16:9 (ultrawide and the output resolution "
+                    "do not apply), the Game & effects options do nothing, and some scenes (like the "
+                    "cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified "
+                    "1.09 update.")))
+            elif not warned and 'eboot.bin is modified, not the clean 01.09 build' in text:
+                # Some patch groups still apply (run.py): the line says which are off.
+                warned = True
+                detail = text.split(': ', 1)[-1].strip()
+                self.ui_calls.put(lambda: self.messagebox.showwarning('Bloodborne', _(
+                    "Your eboot.bin has been modified (for example with a 60 FPS patch already applied). "
+                    "Part of the port's patches cannot be used with it:\n\n{}\n\nFor every option, "
+                    "replace eboot.bin with the one from an unmodified 1.09 update.").format(detail)))
             if log:
                 log.write(text.replace('\r\n', '\n'))
         if log:
