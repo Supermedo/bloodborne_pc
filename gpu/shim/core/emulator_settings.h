@@ -27,9 +27,18 @@ public:
     u32 GetInternalScreenHeight() { static const auto value = u32(Number("BB_INTERNAL_HEIGHT", 1080)); return value; }
     std::string GetPresentMode() { const char* v = std::getenv("BB_PRESENT_MODE"); return v ? v : "Mailbox"; }
     int GetRcasAttenuation() { static const auto value = int(Number("BB_RCAS_ATTENUATION", 250)); return value; }
-    // bbport: Relaxed by default: without readbacks FaceGen reads stale GPU-written vertices
-    // (vertex explosions); in Hunter's Nightmare it costs no measurable frame rate.
-    u32 GetReadbacksMode() { static const auto value = u32(Number("BB_READBACKS", GpuReadbacksMode::Relaxed)); return value; }
+    // Relaxed by default: FaceGen GPU-writes the face, and the next upload must see those
+    // vertices. BB_READBACKS=0 (launcher Off) used to skip that copy and explode the hunter's
+    // face; Off is treated as Relaxed. BB_READBACKS=2 is Precise (read-protects every GPU page;
+    // can flicker cloth).
+    u32 GetReadbacksMode() {
+        static const auto value = []() -> u32 {
+            const long mode = Number("BB_READBACKS", GpuReadbacksMode::Relaxed);
+            return mode == GpuReadbacksMode::Disabled ? u32(GpuReadbacksMode::Relaxed)
+                                                      : u32(mode);
+        }();
+        return value;
+    }
     // bbport: BB_VBLANK_HZ=0 (uncapped presets): vblank runs at 480 Hz so a finished frame is
     // shown within ~2 ms instead of waiting for the next display-rate vblank (below the display
     // rate frames alternated 10/20 ms at 100 Hz: judder), and GetFrameLimit() caps the rate at

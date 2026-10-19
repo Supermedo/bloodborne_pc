@@ -63,7 +63,7 @@ DRAW_PIPE = [("Авто (8+ потоков)", ""), ("Включён", "1"), ("В
 LANGUAGES = [("Английский", "1"), ("Русский", "8"), ("Японский", "0"), ("Французский", "2"),
              ("Испанский", "3"), ("Немецкий", "4"), ("Итальянский", "5")]
 LIVE_RESOLUTION = [("Авто (по видеокарте)", "auto"), ("Выключена (быстрее)", "0"), ("Включена", "1")]
-READBACKS = [("Relaxed (по умолчанию)", ""), ("Выключены", "0"), ("Precise", "2")]
+READBACKS = [("Relaxed (по умолчанию)", ""), ("Precise", "2")]
 
 DEFAULTS = {
     "ui_language": "",
@@ -179,7 +179,7 @@ def game_environment(s):
         env["BB_FPS_LIMIT"] = str(s["fps_limit"])
     if s["draw_pipe"]:
         env["BB_DRAW_PIPE"] = s["draw_pipe"]
-    if s["readbacks"]:
+    if s["readbacks"] and s["readbacks"] != "0":
         env["BB_READBACKS"] = s["readbacks"]
     if s["mangohud"]:
         env["MANGOHUD"] = "1"

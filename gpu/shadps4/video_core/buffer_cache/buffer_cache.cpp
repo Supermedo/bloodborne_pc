@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <cstdlib>
 #include <magic_enum/magic_enum.hpp>
 #include "bbport_copy.h"
@@ -14,6 +15,7 @@
 #include <xxhash.h>
 
 #include "common/alignment.h"
+#include "core/emulator_settings.h"
 #include "core/debug_state.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -92,6 +94,12 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     if (arena_page_bits != MAX_ARENA_PAGE_BITS) {
         LOG_INFO(Render_Vulkan, "Buffer arenas of {} MiB (driver buffer limit {} MiB)",
                  arena_page_size >> 20, instance.GetMaxBufferSize() >> 20);
+    }
+    {
+        const u32 mode = EmulatorSettings.GetReadbacksMode();
+        std::printf("GPU: readbacks %s\n",
+                    mode == GpuReadbacksMode::Precise ? "precise" : "relaxed");
+        std::fflush(stdout);
     }
     const vk::BufferCreateInfo probe_ci = {
         .flags =
