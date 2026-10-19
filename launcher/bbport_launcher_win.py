@@ -185,6 +185,11 @@ CHEATS = [
     ('cheat_rally_no_decay', ('Rally never fades', 'Rally не угасает'), False),
     ('cheat_enemy_control', ('Control the targeted enemy (R3; L3 to go back; not with the free camera)',
                              'Управление выбранным врагом (R3; L3 — назад; не вместе со свободной камерой)'), False),
+    ('cheat_infinite_health', ('Infinite Health', 'Бесконечное здоровье'), False),
+    ('cheat_infinite_stamina', ('Infinite Stamina', 'Бесконечная выносливость'), False),
+    ('cheat_infinite_blood_echo', ('Infinite Blood Echoes', 'Бесконечные отголоски крови'), False),
+    ('cheat_infinite_lucidity', ('Infinite Insight', 'Бесконечное озарение'), False),
+    ('cheat_infinite_items', ('Infinite Items', 'Бесконечные предметы'), False),
 ]
 TWEAKS = [
     ('tweak_no_rally', ('No Rally (hits do not give health back)', 'Без Rally (удары не возвращают здоровье)'), False),

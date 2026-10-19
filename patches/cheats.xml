@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Patch>
+    <ID>CUSA03173</ID>
+    <ID>CUSA00900</ID>
+    <ID>CUSA00207</ID>
+    <ID>CUSA00208</ID>
+    <ID>CUSA00299</ID>
+    <ID>CUSA01363</ID>
+    <ID>CUSA03179</ID>
+    <ID>CUSA03014</ID>
+    <ID>CUSA03023</ID>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite Health" Author="Shiningami" isEnabled="false">
+        <Line Type="bytes" Address="0x1ffc5f7" Value="C787F8000000FFFFFF7F90"/>
+    </Metadata>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite Stamina" Author="Shiningami" isEnabled="false">
+        <Line Type="bytes" Address="0x54db836" Value="8B88380100008988340100008B80340100004189442434E98FC081FC"/>
+        <Line Type="bytes" Address="0x1cf78db" Value="E9563F7E0390"/>
+    </Metadata>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite BloodEcho" Author="bloo" isEnabled="false">
+        <Line Type="bytes" Address="0x54db800" Value="B9FFE0F505898A94000000E9914A82FC"/>
+        <Line Type="bytes" Address="0x1d0029b" Value="E960B57D0390"/>
+    </Metadata>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite Lucidity" Author="bloo" isEnabled="false">
+        <Line Type="bytes" Address="0x54db889" Value="BEFFE0F50589B3840000008BB384000000E91B6782FC"/>
+        <Line Type="bytes" Address="0x1d01fb4" Value="E9D0987D0390"/>
+    </Metadata>
+    <Metadata AppElf="eboot.bin" AppVer="01.09" Name="Infinite Items" Author="bloo" isEnabled="false">
+        <Line Type="bytes" Address="0x54db877" Value="4189C441BC1400000044896308E9D4DC3FFC"/>
+        <Line Type="bytes" Address="0x18d9556" Value="E91C23C0039090"/>
+    </Metadata>
+</Patch>

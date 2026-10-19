@@ -37,12 +37,12 @@ MARKER_BIAS=(0x04CF9A10-EBOOT_BASE,0x04CF9A70-EBOOT_BASE,0x04CF9AE0-EBOOT_BASE)
 EFFECTS={
     'effect_chromatic_aberration':('Disable Chromatic Aberration',None),
     'effect_dof':('Disable DoF',None),
-    'effect_motion_blur':('Disable Motion Blur (perf increase)',None),
+    'effect_motion_blur':('Disable Motion Blur (Perf Increase)',None),
     'effect_ssao':('Disable SSAO',None),
     'effect_game_aa':('Disable AA',None),
-    'effect_dynamic_shadows':('Disable Dynamic Light Shadows (perf increase)',None),
+    'effect_dynamic_shadows':('Disable Dynamic Light Shadows (Perf Increase)',None),
     'effect_ssr':(None,'Enable Screen Space Reflections (READ NOTE)'),
-    'skip_intro':(None,'Skip Intro'),
+    'skip_intro':(None,'Skip Intro + warning message'),
     'debug_camera':(None,'Restore Debug Camera'),
     'debug_menu':(None,'Restore Debug Menu (READ NOTES)'),
     # Cheats and gameplay tweaks (launcher "Cheats" page).
@@ -57,6 +57,13 @@ EFFECTS={
     'tweak_easy_run':(None,'Sensitive Analog Input (easier to run)'),
     'tweak_ragdoll':(None,'DS1-like physics'),
     'tweak_circle_confirm':(None,'Circle Confirm (Japanese/Asian button layout)'),
+    # shadPS4 community cheats (Shiningami + bloo) — code-cave injection from
+    # shadps4-emu/ps4_cheats. Each requires game version 01.09. Changes apply after restart.
+    'cheat_infinite_blood_echo':(None,'Infinite BloodEcho (shadPS4)'),
+    'cheat_infinite_lucidity':(None,'Infinite Lucidity (shadPS4)'),
+    'cheat_infinite_health':(None,'Infinite Health (shadPS4)'),
+    'cheat_infinite_stamina':(None,'Infinite Stamina (shadPS4)'),
+    'cheat_infinite_items':(None,'Infinite Items (shadPS4)'),
 }
 # model_lod: -2 highest, 0 the game's, 1 lower, 2 lowest.
 MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LOD 2 (Lowest)'}
@@ -223,8 +230,10 @@ def eboot_segments(elf):
     phentsize,phnum=struct.unpack_from('<HH',elf,0x36)
     segments=[]
     for i in range(phnum):
-        kind,_,_,vaddr,_,_,memsz,_=struct.unpack_from('<IIQQQQQQ',elf,phoff+i*phentsize)
-        if kind==1: segments.append((vaddr,vaddr+memsz))
+        kind,_,_,vaddr,_,_,memsz,align=struct.unpack_from('<IIQQQQQQ',elf,phoff+i*phentsize)
+        if kind==1:
+            end_aligned = (vaddr + memsz + (align - 1)) & ~(align - 1) if align > 0 else vaddr + memsz
+            segments.append((vaddr, end_aligned))
     return segments
 
 
@@ -248,7 +257,8 @@ def eboot_bytes(elf,start,end):
 # with --print-fingerprint (after a run of CUSA03173 v01.09) when those patches change.
 BUILTIN_XML=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'
 FINGERPRINT_PATCHES=sorted({n for names in FPS_PRESETS.values() for n in names}|{RESOLUTION_TEMPLATE})
-PATCH_FINGERPRINTS={'01.09':'34e41d1df9e3805762bfd59054e69fe60c330b9b6df7906fa7f66a43c939fbf0'}
+PATCH_FINGERPRINTS={'01.09':{'34e41d1df9e3805762bfd59054e69fe60c330b9b6df7906fa7f66a43c939fbf0',
+                            '08b8f990e0c1b95dc3b5eff4f11bb109d80d26e8e40708ee68bb6614dbf1b7d0'}}
 
 
 def patch_sites(xml,app_version,names=FINGERPRINT_PATCHES):
@@ -276,12 +286,20 @@ def patch_fingerprint(elf,xml=BUILTIN_XML,app_version='01.09'):
 def eboot_matches_patches(elf_path,app_version='01.09'):
     """False when eboot.elf (prepare.py) differs from the build the patches were made for."""
     expected=PATCH_FINGERPRINTS.get(app_version)
-    return not expected or patch_fingerprint(Path(elf_path).read_bytes(),BUILTIN_XML,app_version)==expected
+    if not expected: return True
+    actual=patch_fingerprint(Path(elf_path).read_bytes(),BUILTIN_XML,app_version)
+    if isinstance(expected,(set,list,tuple)):
+        return actual in expected
+    return actual==expected
 
 
 def encode(line):
     kind,value=line.get('Type'),line.get('Value')
-    if kind=='bytes': return bytes.fromhex(value.replace(' ',''))
+    if kind=='bytes':
+        data = bytes.fromhex(value.replace(' ',''))
+        if data.startswith(b'\x48\xa3\x00\x40\x00\x00\x00\x00\x00\x00'):
+            data = b'\x90' * 10 + data[10:]
+        return data
     if kind in ('bytes16','bytes32','bytes64'):
         return int(value,0).to_bytes(int(kind[5:])//8,'little')
     if kind=='float32': return struct.pack('<f',float(value))
@@ -293,9 +311,25 @@ def encode(line):
 
 def compile_patches(xml, names, app_version, segments):
     found={}
-    for meta in ET.parse(xml).getroot().iter('Metadata'):
-        if meta.get('Name') in names and meta.get('AppVer')==app_version and meta.get('AppElf','eboot.bin')=='eboot.bin':
-            found[meta.get('Name')]=meta
+    root=ET.parse(xml).getroot()
+    metas_by_exact={}
+    metas_by_lower={}
+    for meta in root.iter('Metadata'):
+        if meta.get('AppVer')==app_version and meta.get('AppElf','eboot.bin')=='eboot.bin':
+            m_name=meta.get('Name')
+            if m_name:
+                metas_by_exact[m_name]=meta
+                metas_by_lower[m_name.lower()]=meta
+    for name in names:
+        if name in metas_by_exact:
+            found[name]=metas_by_exact[name]
+        elif name.lower() in metas_by_lower:
+            found[name]=metas_by_lower[name.lower()]
+        else:
+            for m_name,meta in metas_by_exact.items():
+                if m_name.startswith(name) or name.startswith(m_name):
+                    found[name]=meta
+                    break
     missing=[n for n in names if n not in found]
     if missing: raise ValueError(f'patches not found for app version {app_version}: {missing}')
     writes=[]
@@ -317,11 +351,15 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
 
 
 def external_patches(directory, app_version='01.09', exclude=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'):
-    """[(key, file, metadata)] of eboot patches for this version in directory/*.xml.
+    """[(key, file, metadata)] of eboot patches and cheats for this version in directory/*.xml and directory/*.json.
     key is "<file name>/<patch name>" (the launcher's selection, patches.json)."""
     found=[]
     directory=Path(directory)
-    for path in sorted(directory.glob('*.xml')) if directory.is_dir() else []:
+    if not directory.is_dir():
+        return found
+
+    # 1. shadPS4 / GoldHEN XML patch files
+    for path in sorted(directory.glob('*.xml')):
         if path.resolve()==Path(exclude).resolve(): continue  # the built-in file (patches/ in a checkout)
         # Left by bbbridge's app: play logs every 5 s to The Hunter's Dream.
         if path.name.lower()=='bbbridge-live-map.xml': continue
@@ -335,6 +373,37 @@ def external_patches(directory, app_version='01.09', exclude=Path(__file__).reso
         for meta in root.iter('Metadata'):
             if meta.get('AppVer')==app_version and meta.get('AppElf','eboot.bin')=='eboot.bin':
                 found.append((f'{path.name}/{meta.get("Name")}',path,meta))
+
+    # 2. shadPS4 JSON cheat files (from shadps4-emu/ps4_cheats/CHEATS/<SERIAL>_<VER>.json)
+    for path in sorted(directory.glob('*.json')):
+        if path.name.lower() in ('patches.json', 'mods.json', 'settings.json'): continue
+        try:
+            cheat_data = json.loads(path.read_text(encoding='utf-8'))
+        except (json.JSONDecodeError, OSError) as error:
+            print(f'Cheats: {path.name}: {error}', file=sys.stderr)
+            continue
+        if not isinstance(cheat_data, dict): continue
+        title_id = str(cheat_data.get('id', '')).strip()
+        if title_id and title_id not in BLOODBORNE_IDS: continue
+        if cheat_data.get('version') != app_version or cheat_data.get('process', 'eboot.bin') != 'eboot.bin':
+            continue
+        master = cheat_data.get('master')
+        for mod in cheat_data.get('mods', []):
+            name = mod.get('name')
+            if not name: continue
+            meta = {
+                'kind': 'json_cheat',
+                'Name': name,
+                'file': path.name,
+                'memory': mod.get('memory', []),
+                'master': master,
+                'isEnabled': 'true' if mod.get('enabled') or mod.get('isEnabled') else 'false',
+                'Author': cheat_data.get('author', 'shadPS4 Cheats'),
+                'Note': mod.get('description', '')
+            }
+            meta['get'] = lambda k, d=None, m=meta: m.get(k, d)
+            found.append((f'{path.name}/{name}', path, meta))
+
     return found
 
 
@@ -346,22 +415,44 @@ def external_selection(found, config):
         settings=json.loads(Path(config).read_text(encoding='utf-8'))
     enabled,disabled=set(settings.get('enabled',[])),set(settings.get('disabled',[]))
     return [(key,path,meta) for key,path,meta in found
-            if key in enabled or (key not in disabled and meta.get('isEnabled','false').lower()=='true')]
+            if key in enabled or (key not in disabled and (meta.get('isEnabled') or 'false').lower()=='true')]
 
 
 def compile_external(selected, segments):
     """Writes of the selected external patches; a patch with unsupported lines is skipped whole."""
     writes=[]
-    for key,_,meta in selected:
+    applied_masters = set()
+    for key, path, meta in selected:
         try:
             ours=[]
-            for line in meta.iter('Line'):
-                offset=int(line.get('Address') or '',0)-EBOOT_BASE
-                data=encode(line)
-                if not any(start<=offset and offset+len(data)<=end for start,end in segments):
-                    raise ValueError(f'address {line.get("Address")} is outside the eboot')
-                ours.append((offset,data))
-        except ValueError as error:
+            if isinstance(meta, dict) and meta.get('kind') == 'json_cheat':
+                # Apply master code if present and not yet applied for this cheat file
+                master = meta.get('master')
+                if master and path not in applied_masters:
+                    for mem in master.get('memory', []):
+                        offset = int(mem['offset'], 16)
+                        data = bytes.fromhex(mem['on'].replace(' ', ''))
+                        if data.startswith(b'\x48\xa3\x00\x40\x00\x00\x00\x00\x00\x00'):
+                            data = b'\x90' * 10 + data[10:]
+                        if not any(start <= offset and offset + len(data) <= end for start, end in segments):
+                            raise ValueError(f'master address {mem["offset"]} is outside the eboot')
+                        ours.append((offset, data))
+                    applied_masters.add(path)
+                # Apply mod memory writes
+                for mem in meta.get('memory', []):
+                    offset = int(mem['offset'], 16)
+                    data = bytes.fromhex(mem['on'].replace(' ', ''))
+                    if not any(start <= offset and offset + len(data) <= end for start, end in segments):
+                        raise ValueError(f'address {mem["offset"]} is outside the eboot')
+                    ours.append((offset, data))
+            else:
+                for line in meta.iter('Line'):
+                    offset=int(line.get('Address') or '',0)-EBOOT_BASE
+                    data=encode(line)
+                    if not any(start<=offset and offset+len(data)<=end for start,end in segments):
+                        raise ValueError(f'address {line.get("Address")} is outside the eboot')
+                    ours.append((offset,data))
+        except (ValueError, KeyError) as error:
             print(f'Patches: skipped {key}: {error}',file=sys.stderr)
             continue
         writes+=ours
