@@ -76,6 +76,9 @@ int bbgpu_input_reload_requested(void);
 void bbgpu_mouse_camera_configure(int direct, float sensitivity, float scale_x, float scale_y, int sync);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
+/* The game's image is relocated, patched and protected: hooks in its code (the refill cheat,
+ * shim/bbport_refill.h). Before the game runs. */
+void bbgpu_image_ready(unsigned char *image, uint64_t size);
 #ifdef __cplusplus
 }
 #endif

@@ -714,6 +714,7 @@ int main(int argc, char **argv) {
             if (result) fail("module initializer failed");
         }
     }
+    bbgpu_image_ready(image, size);
     bbnet_initialize(); /* the online session starts with the game */
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     entered_game=1;
