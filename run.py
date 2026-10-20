@@ -507,7 +507,8 @@ def main():
         extra = env.get('BB_PATCHES', '')
         if env.get('BB_ONLINE') == '1' and env.get('BB_NET_BACKEND') == 'thd' and env.get('BB_BRIDGE_LIVE_MAP') == '1':
             extra = ';'.join(filter(None, (extra, LIVE_MAP_PATCH)))
-        if env.get('BB_LANGUAGE') in ('10', '11'):
+        lang = env.get('BB_LANGUAGE') or read_settings(config).get('language')
+        if lang in ('10', '11'):
             if 'Unlock Game Region' not in extra:
                 extra = ';'.join(filter(None, (extra, 'Unlock Game Region')))
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
