@@ -22,6 +22,7 @@ deck=0; [[ $(cat /sys/class/dmi/id/board_vendor 2>/dev/null) == Valve ]] && deck
 # (docs/WINDOWS_TROUBLESHOOTING.md: "Two-stage GPU pipeline: Off"). It is on by default with
 # 8 or more CPU threads, which the Deck has; off costs some frame rate (about 18% there).
 if (( deck )) && [[ -z ${BB_DRAW_PIPE:-} ]]; then export BB_DRAW_PIPE=0; fi
+echo "play.sh: Steam Deck $(( deck )), two-stage GPU pipeline BB_DRAW_PIPE=${BB_DRAW_PIPE:-auto}"
 # First start on a Steam Deck: the settings measured there (1280x720 output, FSR 3.1 Quality,
 # 96-97 FPS in the Hunter's Dream) instead of the PC defaults (1080p output, native AA), which
 # keep the Deck's GPU at its limit. The FPS counter starts on; the in-game menu (L3+R3, or
