@@ -23,6 +23,11 @@
 #include <dlfcn.h>
 #include <execinfo.h>
 #include <sys/syscall.h>
+/* glibc before 2.34 (the Steam Runtime's 2.31) has no SYS_close_range; the kernel has had the
+ * call since 5.9, and on older kernels the call fails harmlessly before exec. */
+#ifndef SYS_close_range
+#define SYS_close_range 436
+#endif
 #include <sys/uio.h>
 #endif
 

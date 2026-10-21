@@ -30,6 +30,17 @@
 #include <thread>
 #include <fcntl.h>
 #include <linux/userfaultfd.h>
+// bbport (Linux): older kernel headers (the Steam Runtime's are 5.10) lack these; the values are
+// the kernel's ABI, and UFFDIO_API reports at run time whether the running kernel has them.
+#ifndef UFFD_USER_MODE_ONLY
+#define UFFD_USER_MODE_ONLY 1
+#endif
+#ifndef UFFD_FEATURE_WP_HUGETLBFS_SHMEM
+#define UFFD_FEATURE_WP_HUGETLBFS_SHMEM (1 << 12)
+#endif
+#ifndef UFFD_FEATURE_WP_UNPOPULATED
+#define UFFD_FEATURE_WP_UNPOPULATED (1 << 13)
+#endif
 #include <poll.h>
 #include <unordered_set>
 #include <cstdio>
