@@ -15,11 +15,18 @@ export BB_FULLSCREEN=${BB_FULLSCREEN:-1}
 # Steam keeps its desktop mouse-and-keyboard layout and the game sees no gamepad input.
 if [[ -z ${SDL_VIDEO_DRIVER:-} && -n ${DISPLAY:-} ]]; then export SDL_VIDEO_DRIVER=x11,wayland; fi
 mkdir -p "$BB_DATA_DIR"
+deck=0; [[ $(cat /sys/class/dmi/id/board_vendor 2>/dev/null) == Valve ]] && deck=1
+# Steam Deck: the two-stage GPU pipeline off unless BB_DRAW_PIPE says otherwise. With it, the
+# Deck crashed 28 s to 3 min into play with "Guest fault (signal 11) at guest offset 0x263b8e7,
+# address 0x5300000000", the guest heap corruption docs/parallel_gpu.md traces to the pipeline
+# (docs/WINDOWS_TROUBLESHOOTING.md: "Two-stage GPU pipeline: Off"). It is on by default with
+# 8 or more CPU threads, which the Deck has; off costs some frame rate (about 18% there).
+if (( deck )) && [[ -z ${BB_DRAW_PIPE:-} ]]; then export BB_DRAW_PIPE=0; fi
 # First start on a Steam Deck: the settings measured there (1280x720 output, FSR 3.1 Quality,
 # 96-97 FPS in the Hunter's Dream) instead of the PC defaults (1080p output, native AA), which
 # keep the Deck's GPU at its limit. The FPS counter starts on; the in-game menu (L3+R3, or
 # Insert) changes any of these and saves them to bbport.ini.
-if [[ ! -e $BB_DATA_DIR/bbport.ini && $(cat /sys/class/dmi/id/board_vendor 2>/dev/null) == Valve ]]; then
+if [[ ! -e $BB_DATA_DIR/bbport.ini ]] && (( deck )); then
     printf 'upscaler=fsr3\npreset=1\noutput_res=1280x720\nshow_fps=1\n' > "$BB_DATA_DIR/bbport.ini"
 fi
 exec bash run.sh "$@"
