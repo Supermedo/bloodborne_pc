@@ -2293,6 +2293,9 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
             .frame_ms = frame_ms,
             .sharpness = settings.sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
         });
+        // A DLSS interposer (OptiScaler's Vulkan-on-D3D12 bridge) may continue the recording in
+        // another command buffer; dynamic state set before Evaluate is then undefined there.
+        scheduler.GetDynamicState().Invalidate();
     }
     if (!ok) {
         std::printf("Upscaler: DLSS failed; falling back to FSR 3.1\n");
