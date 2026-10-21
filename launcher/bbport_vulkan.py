@@ -74,9 +74,13 @@ def configure(env, manifest_dirs=MANIFEST_DIRS, library_dirs=LIBRARY_DIRS):
         return "Vulkan: bundled AMD/Intel drivers; no accessible NVIDIA ICD found"
 
     data, driver = found
-    # The driver version/path and mtime give each installed driver its own small
-    # cache. exec preserves process/signal behavior; the cache survives launch.
-    key = hashlib.sha256(f"{driver}:{driver.stat().st_mtime_ns}".encode()).hexdigest()[:16]
+    # Give each installed driver its own small cache. Path and mtime alone are not
+    # enough: ostree (Bazzite, Silverblue) ships an unversioned libGLX_nvidia.so.0
+    # with a fixed 1970 mtime, so a driver update would reuse the old cache.
+    # exec preserves process/signal behavior; the cache survives launch.
+    info = driver.stat()
+    identity = f"{driver}:{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}"
+    key = hashlib.sha256(identity.encode()).hexdigest()[:16]
     data_dir = Path(env.get("BB_DATA_DIR") or
                     str(Path(env.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "bbport"))
     cache = data_dir / "vulkan" / "nvidia" / key
@@ -89,14 +93,24 @@ def configure(env, manifest_dirs=MANIFEST_DIRS, library_dirs=LIBRARY_DIRS):
     for pattern in ("libnvidia-*.so*", "libGLX_nvidia.so*", "libEGL_nvidia.so*",
                     "libcuda.so*", "libnvcuextend.so*"):
         sources.extend(sorted(driver.parent.glob(pattern)))
-    for source in sources:
-        if not elf64(source):
-            continue
-        link = libraries / source.name
+    wanted = {source.name: str(source.resolve()) for source in sources if elf64(source)}
+    # Repair the cache rather than trusting it: a link left by an older driver
+    # (dangling, or to the wrong version) stops the ICD from loading at all.
+    for link in libraries.iterdir():
+        if link.name not in wanted and not link.name.endswith(".tmp"):
+            link.unlink(missing_ok=True)
+    for name, target in wanted.items():
+        link = libraries / name
         try:
-            link.symlink_to(source.resolve())
-        except FileExistsError:
+            if os.readlink(link) == target:
+                continue
+        except OSError:
             pass
+        # Replace atomically so a concurrent launch never sees a missing library.
+        temporary = libraries / f".{name}.{os.getpid()}.tmp"
+        temporary.unlink(missing_ok=True)
+        temporary.symlink_to(target)
+        temporary.replace(link)
     # Keep the manifest's API/architecture metadata, replace its library path.
     data["ICD"]["library_path"] = str(libraries / driver.name)
     manifest = cache / "nvidia_icd.json"

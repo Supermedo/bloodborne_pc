@@ -2,6 +2,7 @@
 from paths import ROOT
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -75,6 +76,40 @@ class PackagedVulkanTests(unittest.TestCase):
         self.env["LD_LIBRARY_PATH"] = "/bundled/lib"
         self.configure()
         self.assertEqual(self.env, before)
+
+    def test_stale_links_from_an_older_driver_are_repaired(self):
+        driver = self.library("libGLX_nvidia.so.0")
+        compiler = self.library("libnvidia-glvkspirv.so.580.2")
+        self.manifest()
+        self.configure()
+        cache = Path(self.env["LD_LIBRARY_PATH"].split(":")[0])
+        # What an update of the driver leaves behind under the same cache key.
+        (cache / "libnvidia-ngx.so.1").symlink_to(self.libs / "libnvidia-ngx.so.580.1")
+        (cache / compiler.name).unlink()
+        (cache / compiler.name).symlink_to(self.libs / "libnvidia-glvkspirv.so.580.1")
+        self.env["LD_LIBRARY_PATH"] = "/bundled/lib"
+        del self.env["VK_DRIVER_FILES"]
+        self.configure()
+        self.assertEqual(Path(self.env["LD_LIBRARY_PATH"].split(":")[0]), cache)
+        self.assertEqual((cache / compiler.name).resolve(), compiler)
+        self.assertFalse((cache / "libnvidia-ngx.so.1").is_symlink())
+        self.assertEqual({link.name for link in cache.iterdir()},
+                         {driver.name, compiler.name})
+
+    def test_ostree_driver_update_gets_a_new_cache(self):
+        # ostree keeps the unversioned name and a 1970 mtime across updates.
+        driver = self.library("libGLX_nvidia.so.0")
+        os.utime(driver, ns=(0, 0))
+        self.manifest()
+        self.configure()
+        first = Path(self.env["LD_LIBRARY_PATH"].split(":")[0])
+        driver.unlink()
+        driver.write_bytes(b"\x7fELF\x02\x01" + b"\0" * 12 + b"\x3e\0" + b"new driver")
+        os.utime(driver, ns=(0, 0))
+        self.env["LD_LIBRARY_PATH"] = "/bundled/lib"
+        del self.env["VK_DRIVER_FILES"]
+        self.configure()
+        self.assertNotEqual(Path(self.env["LD_LIBRARY_PATH"].split(":")[0]), first)
 
     def test_absolute_and_relative_icd_paths(self):
         driver = self.library("libGLX_nvidia.so.0")
