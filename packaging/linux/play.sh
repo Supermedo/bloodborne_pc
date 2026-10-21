@@ -15,4 +15,11 @@ export BB_FULLSCREEN=${BB_FULLSCREEN:-1}
 # Steam keeps its desktop mouse-and-keyboard layout and the game sees no gamepad input.
 if [[ -z ${SDL_VIDEO_DRIVER:-} && -n ${DISPLAY:-} ]]; then export SDL_VIDEO_DRIVER=x11,wayland; fi
 mkdir -p "$BB_DATA_DIR"
+# First start on a Steam Deck: the settings measured there (1280x720 output, FSR 3.1 Quality,
+# 96-97 FPS in the Hunter's Dream) instead of the PC defaults (1080p output, native AA), which
+# keep the Deck's GPU at its limit. The FPS counter starts on; the in-game menu (L3+R3, or
+# Insert) changes any of these and saves them to bbport.ini.
+if [[ ! -e $BB_DATA_DIR/bbport.ini && $(cat /sys/class/dmi/id/board_vendor 2>/dev/null) == Valve ]]; then
+    printf 'upscaler=fsr3\npreset=1\noutput_res=1280x720\nshow_fps=1\n' > "$BB_DATA_DIR/bbport.ini"
+fi
 exec bash run.sh "$@"
