@@ -30,4 +30,24 @@ echo "play.sh: Steam Deck $(( deck )), two-stage GPU pipeline BB_DRAW_PIPE=${BB_
 if [[ ! -e $BB_DATA_DIR/bbport.ini ]] && (( deck )); then
     printf 'upscaler=fsr3\npreset=1\noutput_res=1280x720\nshow_fps=1\n' > "$BB_DATA_DIR/bbport.ini"
 fi
+# BB_FSR=quality|balanced|performance|ultra_performance|native|off (e.g. in Steam's launch
+# options) sets the upscaler in bbport.ini before the game reads it; the choice stays there.
+set_ini() {  # set_ini KEY VALUE: replace the KEY= line (CRLF or not), or add it
+    local ini=$BB_DATA_DIR/bbport.ini; touch "$ini"
+    if grep -q "^$1=" "$ini"; then sed -i "s/^$1=.*/$1=$2/" "$ini"; else printf '%s=%s\n' "$1" "$2" >> "$ini"; fi
+}
+if [[ -n ${BB_FSR:-} ]]; then
+    case ${BB_FSR,,} in
+        native) set_ini upscaler fsr3; set_ini preset 0 ;;
+        quality) set_ini upscaler fsr3; set_ini preset 1 ;;
+        balanced) set_ini upscaler fsr3; set_ini preset 2 ;;
+        performance) set_ini upscaler fsr3; set_ini preset 3 ;;
+        ultra_performance|ultraperformance|ultra) set_ini upscaler fsr3; set_ini preset 4 ;;
+        off) set_ini upscaler off ;;
+        *) echo "play.sh: BB_FSR=$BB_FSR not known (quality, balanced, performance, ultra_performance, native, off)" >&2 ;;
+    esac
+    echo "play.sh: BB_FSR=$BB_FSR -> $(grep -E '^(upscaler|preset)=' "$BB_DATA_DIR/bbport.ini" | tr '\n' ' ')"
+fi
+# BB_PLAY_CONFIG_ONLY=1: stop after the settings above (checks without starting the game).
+[[ -n ${BB_PLAY_CONFIG_ONLY:-} ]] && exit 0
 exec bash run.sh "$@"
