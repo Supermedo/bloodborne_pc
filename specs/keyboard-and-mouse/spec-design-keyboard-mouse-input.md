@@ -157,6 +157,14 @@ and Windows (MSYS2 CLANG64).
   1 to 127. Below `inner` the output is 0; from `inner` to `outer` it ramps linearly to 127; at or
   above `outer` it is 127. This is shadPS4's `ApplyDeadzone` formula. The default (`1, 127`) is
   effectively no deadzone, matching the pre-existing behavior.
+  For `l2`/`r2` outputs, scale each configured limit with `limit * 255 / 127` (integer
+  division), sum and clamp bindings to 0..255, then ramp from the scaled inner limit to
+  the scaled outer limit over 0..255. Derive the trigger button bit from that adjusted
+  value. Equal limits give a step at the outer limit. The default `1, 127` preserves
+  the existing trigger values exactly. A digital binding still gives a full 255 press.
+  For example, `analog_deadzone = l2, 28, 127` suppresses LT readings up to 56/255;
+  full travel still produces 255. This affects the `l2` output, including remapped
+  inputs, rather than changing a physical trigger bound to a different button output.
 
 ### Mouse
 
