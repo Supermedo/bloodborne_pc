@@ -83,6 +83,7 @@ if [[ -n ${scaled_output:-} ]]; then
     # Bash builtins only: the AppImage's PATH has no sed/grep (a missing one ended run.sh silently).
     if [[ -z $live && -f $BB_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
+            line=${line%$'\r'}  # a bbport.ini brought over from Windows has CRLF lines
             [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
         done < "$BB_CONFIG"
     fi
@@ -117,7 +118,12 @@ else
     bash build.sh
     probe=out/bb-probe
 fi
-probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
+# GPU caches (shaders, pipelines) beside the saves, as run.py does on Windows; without it the
+# GPU library falls back to ~/.local/share/shadPS4, an installed shadPS4's own folder.
+user_dir=${BB_USER_DIR:-$data/user}
+mkdir -p "$user_dir"
+export BB_GPU_USER_DIR=${BB_GPU_USER_DIR:-$(cd -- "$user_dir" && pwd)}
+probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "$user_dir" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
     "$probe" "${probe_args[@]}" &
     mod_pid=$!
