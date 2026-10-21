@@ -83,6 +83,9 @@ if (NOT miniz_FOUND)
     add_library(miniz::miniz ALIAS miniz)
 endif()
 find_package(Zydis REQUIRED)
+# bbport (Linux): the texture cache's flat_hash_map. MSYS2's protobuf brings Abseil along; a
+# protobuf without it (or an Abseil-free toolchain) needs it named here.
+find_package(absl CONFIG REQUIRED)
 find_program(GLSLANG_COMPILER NAMES glslang glslangValidator REQUIRED)
 
 set(SIRIT_USE_SYSTEM_SPIRV_HEADERS OFF CACHE BOOL "" FORCE)
@@ -207,12 +210,13 @@ target_link_libraries(bbnet PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
 if (WIN32)
     target_sources(bbnet PRIVATE third_party/wepoll/wepoll.c)
     target_include_directories(bbnet PRIVATE third_party/wepoll)
-    find_path(MINIUPNPC_INCLUDE miniupnpc.h PATH_SUFFIXES miniupnpc REQUIRED)
-    find_library(MINIUPNPC_LIBRARY NAMES libminiupnpc.a miniupnpc REQUIRED)
-    target_include_directories(bbnet PRIVATE "${MINIUPNPC_INCLUDE}")
-    target_compile_definitions(bbnet PRIVATE MINIUPNP_STATICLIB)
-    target_link_libraries(bbnet PRIVATE "${MINIUPNPC_LIBRARY}")
 endif()
+# bbport (Linux): UPnP for online play on both platforms, not only Windows.
+find_path(MINIUPNPC_INCLUDE miniupnpc.h PATH_SUFFIXES miniupnpc REQUIRED)
+find_library(MINIUPNPC_LIBRARY NAMES libminiupnpc.a miniupnpc REQUIRED)
+target_include_directories(bbnet PRIVATE "${MINIUPNPC_INCLUDE}")
+target_compile_definitions(bbnet PRIVATE MINIUPNP_STATICLIB)
+target_link_libraries(bbnet PRIVATE "${MINIUPNPC_LIBRARY}")
 target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbnet PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 target_link_libraries(bbnet PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
@@ -234,17 +238,22 @@ target_compile_definitions(bbgpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     BB_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
+# bbport: xbyak from the submodule on every platform (MSYS2 and the Steam Runtime have no package).
+target_include_directories(bbgpu PRIVATE third_party/xbyak)
 target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against bb-probe.
 if (NOT WIN32)
     target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
+    # bbport (Linux): libraries bundled beside libbbgpu.so (libSDL3.so.0, packaging/linux) are
+    # found there; no build-machine paths in the run path.
+    set_target_properties(bbgpu PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "\$ORIGIN")
 endif()
 target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan
     ffx-vulkan::fsr3-vk-framegeneration-3.1.6)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
-    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit)
+    absl::flat_hash_map tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit)
 if (WIN32)
     # Guest code is entered with the System V ABI; NOMINMAX/WIN32_LEAN_AND_MEAN keep
     # <windows.h> out of the way of std::min/max and the Vulkan/SDL headers.
@@ -255,7 +264,6 @@ if (WIN32)
     set_source_files_properties(fsr411_dx12/fsr411_support.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
     target_include_directories(bbgpu PRIVATE fsr411_dx12 fsr411_dx12/sdk/api/include fsr411_dx12/sdk/upscalers/include)
     target_compile_options(bbgpu PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/shim/bb_win_compat.h)
-    target_include_directories(bbgpu PRIVATE third_party/xbyak)
     target_link_libraries(bbgpu PUBLIC Vulkan::Vulkan ws2_32 bcrypt ntdll synchronization winmm d3d12 dxgi dxguid)
 else()
     target_link_libraries(bbgpu PUBLIC PkgConfig::X11)
