@@ -40,9 +40,50 @@ if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
 original_game=$game
-game=$("$PYTHON" scripts/mods.py "$game" --out "$out" \
-    --mods-dir "${BB_MODS_DIR:-$data/mods}" --config "${BB_MODS_CONFIG:-$data/mods.json}" \
-    --enabled "${BB_MODS_ENABLED:-1}")
+# bbport.ini value (bash builtins only, CRLF accepted).
+ini_value() {
+    local line value=
+    [[ -f $BB_CONFIG ]] || return 0
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%$'\r'}
+        [[ $line == "$1="* ]] && value=${line#*=}
+    done < "$BB_CONFIG"
+    printf '%s' "$value"
+}
+# The port's own layers below the mods, as run.py makes them on Windows: Quit to Desktop's
+# menu texts (quit_menu.py), Rebirth at the Doll's talk script and texts (rebirth.py) and the
+# field of view (fov.py, bbport.ini fov). patches.py writes the code of the first two only when
+# their layer exists (BB_QUIT_TO_DESKTOP=0 / BB_REBIRTH=0 otherwise).
+text_layer=$out/quit_text rebirth_layer=$out/rebirth fov_layer=$out/fov
+"$PYTHON" -c 'import shutil,sys; [shutil.rmtree(p, ignore_errors=True) for p in sys.argv[1:]]' "$text_layer" "$rebirth_layer"
+if [[ $(ini_value quit_to_desktop) != 0 ]] && ! "$PYTHON" scripts/quit_menu.py "$game" --out "$text_layer"; then
+    "$PYTHON" -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$text_layer"
+    export BB_QUIT_TO_DESKTOP=0
+    echo 'Quit to Desktop: its menu texts could not be written; the game starts without it'
+fi
+if [[ $(ini_value rebirth) != 0 ]] && ! "$PYTHON" scripts/rebirth.py "$game" --out "$rebirth_layer" --source "$text_layer"; then
+    "$PYTHON" -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$rebirth_layer"
+    export BB_REBIRTH=0
+    echo "Rebirth: the Doll's script could not be written; the game starts without it"
+fi
+fov=$(ini_value fov)
+if [[ $fov =~ ^[0-9]+$ && $fov != 43 ]]; then
+    "$PYTHON" scripts/fov.py "$game" --out "$fov_layer" --fov "$fov" ||
+        echo 'Field of view: its camera table could not be written; the game keeps its own'
+else
+    "$PYTHON" -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$fov_layer"
+fi
+layers=()
+for layer in "$text_layer" "$rebirth_layer" "$fov_layer"; do
+    if [[ -d $layer ]]; then layers+=(--layer "$layer"); fi
+done
+mod_args=("$game" --out "$out" --mods-dir "${BB_MODS_DIR:-$data/mods}"
+          --config "${BB_MODS_CONFIG:-$data/mods.json}" --enabled "${BB_MODS_ENABLED:-1}")
+if ! game=$("$PYTHON" scripts/mods.py "${mod_args[@]}" "${layers[@]}"); then
+    echo 'Mods: the game view could not be made; starting without Quit to Desktop and Rebirth'
+    export BB_QUIT_TO_DESKTOP=0 BB_REBIRTH=0
+    game=$("$PYTHON" scripts/mods.py "${mod_args[@]}")
+fi
 # A private merged view lasts for this launch, including restarts. Cleanup only our own view.
 if [[ $game != "$(realpath "$original_game")" ]]; then
     mod_game=$game
