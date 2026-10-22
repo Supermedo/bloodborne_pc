@@ -171,8 +171,10 @@ GPUS = [
     ('amd', 'Integrated graphics (AMD)', 'Radeon 660M', 0, 30, 'igpu'),
     ('amd', 'Integrated graphics (AMD)', 'Radeon Vega 8 / Vega 11 (Ryzen 2000–5000 G and U)', 0, 15, 'igpu'),
     ('amd', 'Integrated graphics (AMD)', 'Radeon Graphics 2 CU (Ryzen 7000/9000 desktop)', 0, 7, 'igpu'),
-    ('intel', 'Integrated graphics (Intel)', 'Arc 140V / 130V (Core Ultra 200V)', 0, 50, 'igpu'),
-    ('intel', 'Integrated graphics (Intel)', 'Arc graphics (Core Ultra 100H)', 0, 42, 'igpu'),
+    ('intel', 'Integrated graphics (Intel)', 'Arc 140V / 130V (Core Ultra 200V)', 0, 85, 'igpu'),
+    # Measured by a tester (Core Ultra 5 125H): 40-55 FPS at 1080p native with the settings for it; the
+    # 200V's Arc is faster.
+    ('intel', 'Integrated graphics (Intel)', 'Arc graphics (Core Ultra 100H)', 0, 70, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'Iris Xe (11th–13th gen laptops)', 0, 20, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'UHD 770 / 730 (12th gen+ desktop)', 0, 10, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'UHD 620 / 630', 0, 6, 'igpu'),
