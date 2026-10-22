@@ -650,6 +650,29 @@ def server_check_hunters_dream():
     return '\n'.join(lines)
 
 
+def vulkan_verdict(env):
+    """scripts/vulkan_check.py's answer for this PC: what the game's renderer needs, asked of the graphics
+    driver, in a process of its own (a broken driver ends that one, not the launcher). A process the driver
+    took down: {'problem': 'crashed', 'code': its exit code}. None when it could not ask."""
+    script = PORT_DIR / 'scripts' / 'vulkan_check.py'
+    if not script.is_file():
+        return None
+    command = [sys.executable, '--script', str(script)] if FROZEN else [sys.executable, str(script)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=env,
+                                creationflags=NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    try:
+        return json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        # Ended by Windows (an exception code such as 0xC0000005) inside the driver: worth saying. Any other
+        # end without an answer is the check's own failure, not the PC's.
+        crashed = result.returncode < 0 or result.returncode >= 0xC0000000
+        return {'ok': False, 'problem': 'crashed', 'code': f'0x{result.returncode & 0xffffffff:08X}'} \
+            if crashed else None
+
+
 def motion_cache_available(graphics):
     return graphics.get('upscaler', INI_DEFAULTS['upscaler']) in ('fsr3', 'fsr4', 'fsr411') and \
         graphics.get('object_motion', INI_DEFAULTS['object_motion']) in ('1', True)
@@ -857,6 +880,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fsr411_downloading = False
         self.output = queue.Queue()
         self.gpu_text = _('• Checking the graphics card…', '• Проверка видеокарты…')
+        self.vulkan = None  # scripts/vulkan_check.py's answer for this PC (asked before PLAY)
         self.banner_image = None
         self.ui_calls = queue.Queue()  # work for the Tk thread from helper threads
         self.mod_order, self.mod_vars, self.patch_vars = [], {}, {}
@@ -1811,7 +1835,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk.Label(info, text=_('Ready check', 'Проверка'), style='Card.Section.TLabel').pack(anchor='w', pady=(0, px(8)))
         # One line per thing that matters; a line that is not fine leads to its fix with a click.
         self.checks, self.check_lines, self.check_targets = {}, {}, {}
-        for key in ('news', 'system', 'settings', 'game', 'saves', 'online', 'cheats', 'fsr4'):
+        for key in ('news', 'system', 'gpu', 'settings', 'game', 'saves', 'online', 'cheats', 'fsr4'):
             line = ttk.Frame(info, style='Inner.TFrame')
             line.pack(fill='x', pady=px(4))
             icon = tk.Label(line, text='', bg=CARD, fg=MUTED, font=(theme.ICONS, 11))
@@ -3472,6 +3496,9 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.check_line('game', eboot or game, (lambda: self.open_topic('eboot_modified')) if eboot and problem else
                         (lambda: self.show('game')) if not info or info[1] != PATCH_VERSION else None)
         self.check_line('saves', save, lambda: self.show('saves'))
+        # The start check (scripts/vulkan_check.py): only when the port cannot start on the card; Help says why.
+        self.check_line('gpu', _('✗ The graphics card cannot run the port: see Help') if self.gpu_problem() else '',
+                        lambda: self.show('help'))
         self.check_line('fsr4', _('• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)')
                         if missing and self.var('upscaler', 'ini').get() == 'fsr4' else '', self.download_fsr4)
         fsr411_ready, status = True, None
@@ -3586,6 +3613,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         except (OSError, subprocess.TimeoutExpired):
             pass
         self.gpu_text = text
+        self.vulkan = vulkan_verdict(env)
         support = bbport_fsr411.query(PORT_DIR, env)
         def fsr411_done():
             self.fsr411_support = support

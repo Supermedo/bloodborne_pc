@@ -516,6 +516,8 @@ class HelpMixin:
         self.help_button.configure(state='normal')
         if eboot:
             self.app['eboot_check'] = eboot
+        gpu = self.gpu_check()
+        checks = checks + ([gpu] if gpu else [])
         self.help_results = checks
         for child in self.help_list.winfo_children():
             child.destroy()
@@ -570,8 +572,52 @@ class HelpMixin:
                 'truncated': '✗ ' + _('eboot.bin is cut off: unpack the game again (Help)'),
                 'unreadable': '✗ ' + _('eboot.bin cannot be read (Help)')}.get(state)
 
+    def gpu_check(self):
+        """Help's line for the start check (scripts/vulkan_check.py): the card the game uses and its Vulkan,
+        or why the game would not start on it; None before it answered."""
+        verdict = getattr(self, 'vulkan', None)
+        if not verdict:
+            return None
+        if verdict.get('ok'):
+            device = verdict.get('device') or {}
+            return ('ok', None, _('Graphics card {0}: Vulkan {1} and everything else the port needs.').format(device.get('name', '?'), device.get('api', '?')))
+        return ('bad', 'driver', self.gpu_problem())
+
+    def gpu_problem(self):
+        """Why the game's renderer would not start on this PC, or None: scripts/vulkan_check.py asks the
+        graphics driver for what the renderer needs (a Vulkan 1.3 loader and card, its extensions and
+        features) on the card the game would use. No list of card names: the driver's own answer."""
+        verdict = getattr(self, 'vulkan', None) or {}
+        problem, device = verdict.get('problem'), verdict.get('device') or {}
+        if problem == 'loader':
+            return _('No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current '
+                     'driver for your graphics card.')
+        if problem == 'loader_version':
+            return _('The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install '
+                     'the current driver for your graphics card.').format(verdict.get('loader'))
+        if problem == 'devices':
+            return _('No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 '
+                     'or newer) with a current driver.')
+        if problem == 'device':
+            lacks = ', '.join(device.get('missing', []))  # its names in Vulkan's words: what to search for
+            return _('{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not '
+                     'help, the card is too old for the port.').format(device.get('name', '?'), lacks)
+        if problem == 'crashed':
+            return _('The graphics driver stopped while the launcher asked it about the card (code {}). Install the '
+                     'current driver for your graphics card.').format(verdict.get('code'))
+        return None
+
     def preflight(self):
         """Before PLAY: False when the start would fail for a reason the player can fix first."""
+        # A graphics card the port cannot run on: asked once per card (some play on one anyway).
+        verdict = getattr(self, 'vulkan', None) or {}
+        problem, card = self.gpu_problem(), (verdict.get('device') or {}).get('name') or verdict.get('problem')
+        if problem and self.app.get('gpu_warned') != card:
+            text = (problem + '\n\n' + _('The game will likely not start, or close right away.') + '\n\n' +
+                    _('Start anyway?'))
+            if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
+                return False
+            self.app['gpu_warned'] = card
         problem = memory_problem(self.var('output_res', 'ini').get())
         if problem:
             free, need, off = problem

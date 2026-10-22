@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(ROOT / 'launcher'))
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -63,6 +64,72 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual((need, off), (10, True))  # no page file: the limit is the RAM
         self.assertFalse(help_.memory_problem('1920x1080', (5.0, 24.0, 16.0))[2])
         self.assertIsNone(help_.memory_problem('1920x1080', (7.5, 24.0, 16.0)))
+
+
+class GraphicsCardTests(unittest.TestCase):
+    """The check before PLAY: what the game's renderer needs, as the graphics driver answers it
+    (scripts/vulkan_check.py); a GeForce 820M started and closed without a word."""
+
+    def window(self, vulkan=None, answer=True):
+        class Box:
+            def __init__(self):
+                self.asked = []
+
+            def askyesno(self, title, text, **_options):
+                self.asked.append(text)
+                return answer
+
+        class Window(help_.HelpMixin):
+            def var(self, key, store):
+                return type('Var', (), {'get': lambda _self: '1920x1080'})()
+        window = Window()
+        window.app, window.messagebox, window.vulkan = {}, Box(), vulkan
+        return window
+
+    @staticmethod
+    def verdict(problem, name='GeForce 820M', missing=(), **more):
+        return {'ok': problem is None, 'problem': problem, 'loader': '1.2.170',
+                'device': {'name': name, 'missing': list(missing)} if problem in (None, 'device') else None, **more}
+
+    def test_each_answer_says_what_to_do(self):
+        self.assertIn('vulkan-1.dll', self.window(self.verdict('loader')).gpu_problem())
+        self.assertIn('1.2.170', self.window(self.verdict('loader_version')).gpu_problem())
+        self.assertIn('Vulkan 1.3', self.window(self.verdict('devices')).gpu_problem())
+        text = self.window(self.verdict('device', missing=['Vulkan 1.3 (1.2.0)', 'VK_EXT_robustness2'])).gpu_problem()
+        self.assertTrue(text.startswith('GeForce 820M cannot run the port'))
+        self.assertIn('Vulkan 1.3 (1.2.0), VK_EXT_robustness2', text)
+        self.assertIn('0xC0000005', self.window(self.verdict('crashed', code='0xC0000005')).gpu_problem())
+
+    def test_helps_line(self):
+        ok = {'ok': True, 'problem': None, 'device': {'name': 'AMD Radeon RX 9070 XT', 'api': '1.4.359'}}
+        self.assertEqual(self.window(ok).gpu_check(), (
+            'ok', None, 'Graphics card AMD Radeon RX 9070 XT: Vulkan 1.4.359 and everything else the port needs.'))
+        state, topic, text = self.window(self.verdict('device', missing=['nullDescriptor'])).gpu_check()
+        self.assertEqual((state, topic), ('bad', 'driver'))
+        self.assertIn('nullDescriptor', text)
+        self.assertIsNone(self.window(None).gpu_check())
+
+    def test_the_play_page_shows_it_only_when_the_port_cannot_start(self):
+        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
+        self.assertIn("self.check_line('gpu', _('✗ The graphics card cannot run the port: see Help') if "
+                      "self.gpu_problem() else ''", source)
+
+    def test_nothing_to_say(self):
+        self.assertIsNone(self.window(self.verdict(None, 'RX 9070 XT')).gpu_problem())
+        self.assertIsNone(self.window(None).gpu_problem())  # not asked yet, or the check could not run
+
+    def test_asked_once_per_card(self):
+        window = self.window(self.verdict('device', missing=['VK_EXT_robustness2']))
+        with mock.patch.object(help_, 'memory_problem', lambda *_a: None):
+            self.assertTrue(window.preflight())
+            self.assertTrue(window.preflight())
+            self.assertEqual(len(window.messagebox.asked), 1)
+            window.vulkan = self.verdict('device', 'Other card', missing=['nullDescriptor'])
+            self.assertTrue(window.preflight())
+            self.assertEqual(len(window.messagebox.asked), 2)
+            no = self.window(self.verdict('loader'), answer=False)
+            self.assertFalse(no.preflight())
+            self.assertFalse(no.preflight())  # asked again until the player says start
 
 
 class FileTests(unittest.TestCase):

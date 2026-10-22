@@ -835,6 +835,32 @@ WORLD = {
             'Тест стабильности (для бета-версий)',
         'Start and sound':
             'Запуск и звук',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Видеокарта с Vulkan 1.3 не найдена. Порту нужна такая карта (GTX 1050 Ti, GTX 1650, RX 570 или новее) с '
+            'актуальным драйвером.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Рабочий драйвер Vulkan не найден (vulkan-1.dll отсутствует или повреждён). Установите актуальный '
+            'драйвер видеокарты.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Файлы Vulkan в драйвере видеокарты устарели ({} вместо нужной порту 1.3). Установите актуальный драйвер '
+            'видеокарты.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} не может запустить порт: в её драйвере нет {1}. Обновите драйвер видеокарты; если это не поможет, '
+            'карта слишком старая для порта.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Драйвер видеокарты аварийно завершился, когда лаунчер запрашивал данные о карте (код {}). Установите '
+            'актуальный драйвер видеокарты.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Видеокарта {0}: Vulkan {1} и всё остальное, что нужно порту.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ Видеокарта не может запустить порт: см. «Помощь»',
+        'The game will likely not start, or close right away.':
+            'Игра, скорее всего, не запустится или сразу закроется.',
         'Start anyway?':
             'Всё равно запустить?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -2370,6 +2396,32 @@ WORLD = {
             'اختبار الثبات (للإصدارات التجريبية)',
         'Start and sound':
             'التشغيل والصوت',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'لم يتم العثور على بطاقة رسومات تدعم Vulkan 1.3. يحتاج المنفذ إلى بطاقة كهذه (GTX 1050 Ti أو GTX 1650 أو '
+            'RX 570 أو أحدث) مع تعريف حديث.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'لم يتم العثور على تعريف Vulkan يعمل (الملف vulkan-1.dll مفقود أو تالف). ثبّت أحدث تعريف لبطاقة '
+            'الرسومات.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'ملفات Vulkan في تعريف بطاقة الرسومات قديمة جدًا ({} بدلًا من 1.3 التي يحتاجها المنفذ). ثبّت أحدث تعريف '
+            'لبطاقة الرسومات.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            'لا تستطيع {0} تشغيل المنفذ: ينقص تعريفها {1}. حدّث تعريف بطاقة الرسومات؛ وإن لم يساعد ذلك فالبطاقة أقدم '
+            'من أن تشغّل المنفذ.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'توقف تعريف بطاقة الرسومات بينما كان المشغّل يستعلم عن البطاقة (الرمز {}). ثبّت أحدث تعريف لبطاقة '
+            'الرسومات.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'بطاقة الرسومات {0}: \u200fVulkan {1} وكل ما يحتاجه المنفذ.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ لا تستطيع بطاقة الرسومات تشغيل المنفذ: راجع المساعدة',
+        'The game will likely not start, or close right away.':
+            'على الأرجح لن تبدأ اللعبة، أو ستُغلق فورًا.',
         'Start anyway?':
             'التشغيل على أي حال؟',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -3957,6 +4009,32 @@ WORLD = {
             'Prueba de estabilidad (para versiones beta)',
         'Start and sound':
             'Inicio y sonido',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'No se encontró ninguna tarjeta gráfica con Vulkan 1.3. El port necesita una (GTX 1050 Ti, GTX 1650, RX '
+            '570 o más nueva) con un controlador actual.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'No se encontró ningún controlador Vulkan que funcione (falta vulkan-1.dll o está dañado). Instala el '
+            'controlador actual de tu tarjeta gráfica.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Los archivos Vulkan del controlador gráfico son demasiado antiguos ({} en lugar de la 1.3 que necesita '
+            'el port). Instala el controlador actual de tu tarjeta gráfica.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} no puede ejecutar el port: a su controlador le falta {1}. Actualiza el controlador gráfico; si no '
+            'ayuda, la tarjeta es demasiado antigua para el port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'El controlador gráfico se detuvo mientras el launcher le preguntaba por la tarjeta (código {}). Instala '
+            'el controlador actual de tu tarjeta gráfica.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Tarjeta gráfica {0}: Vulkan {1} y todo lo demás que necesita el port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ La tarjeta gráfica no puede ejecutar el port: consulta la Ayuda',
+        'The game will likely not start, or close right away.':
+            'Lo más probable es que el juego no arranque o se cierre enseguida.',
         'Start anyway?':
             '¿Iniciar de todos modos?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -5547,6 +5625,32 @@ WORLD = {
             'Teste de estabilidade (para versões beta)',
         'Start and sound':
             'Início e som',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Nenhuma placa de vídeo com Vulkan 1.3 foi encontrada. O port precisa de uma (GTX 1050 Ti, GTX 1650, RX '
+            '570 ou mais nova) com um driver atual.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Nenhum driver Vulkan funcional foi encontrado (o vulkan-1.dll está ausente ou danificado). Instale o '
+            'driver atual da sua placa de vídeo.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Os arquivos Vulkan do driver de vídeo são antigos demais ({} em vez da 1.3 de que o port precisa). '
+            'Instale o driver atual da sua placa de vídeo.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} não consegue rodar o port: falta {1} no driver dela. Atualize o driver de vídeo; se não ajudar, a '
+            'placa é antiga demais para o port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'O driver de vídeo parou enquanto o launcher consultava a placa (código {}). Instale o driver atual da '
+            'sua placa de vídeo.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Placa de vídeo {0}: Vulkan {1} e tudo o mais de que o port precisa.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ A placa de vídeo não consegue rodar o port: veja a Ajuda',
+        'The game will likely not start, or close right away.':
+            'O jogo provavelmente não vai iniciar ou vai fechar logo em seguida.',
         'Start anyway?':
             'Iniciar mesmo assim?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -7135,6 +7239,32 @@ WORLD = {
             'Test de stabilité (pour les versions bêta)',
         'Start and sound':
             'Lancement et son',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            "Aucune carte graphique compatible Vulkan 1.3 n'a été trouvée. Le port en a besoin d'une (GTX 1050 Ti, "
+            'GTX 1650, RX 570 ou plus récente) avec un pilote à jour.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            "Aucun pilote Vulkan fonctionnel n'a été trouvé (vulkan-1.dll est absent ou endommagé). Installez le "
+            'pilote actuel de votre carte graphique.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Les fichiers Vulkan du pilote graphique sont trop anciens ({} au lieu de la 1.3 dont le port a besoin). '
+            'Installez le pilote actuel de votre carte graphique.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} ne peut pas faire tourner le port : il manque {1} à son pilote. Mettez à jour le pilote graphique ; '
+            'si cela ne suffit pas, la carte est trop ancienne pour le port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            "Le pilote graphique s'est arrêté pendant que le launcher l'interrogeait sur la carte (code {}). "
+            'Installez le pilote actuel de votre carte graphique.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Carte graphique {0} : Vulkan {1} et tout ce dont le port a besoin.',
+        '✗ The graphics card cannot run the port: see Help':
+            "✗ La carte graphique ne peut pas faire tourner le port : voir l'Aide",
+        'The game will likely not start, or close right away.':
+            'Le jeu ne démarrera probablement pas, ou se fermera aussitôt.',
         'Start anyway?':
             'Lancer quand même ?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -8728,6 +8858,32 @@ WORLD = {
             'Test di stabilità (per le build beta)',
         'Start and sound':
             'Avvio e audio',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Non è stata trovata nessuna scheda video con Vulkan 1.3. Il port ne richiede una (GTX 1050 Ti, GTX '
+            '1650, RX 570 o più recente) con un driver aggiornato.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Non è stato trovato alcun driver Vulkan funzionante (vulkan-1.dll manca o è danneggiato). Installa il '
+            'driver aggiornato della tua scheda video.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'I file Vulkan del driver video sono troppo vecchi ({} invece della 1.3 richiesta dal port). Installa il '
+            'driver aggiornato della tua scheda video.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} non può eseguire il port: al suo driver manca {1}. Aggiorna il driver video; se non basta, la '
+            'scheda è troppo vecchia per il port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Il driver video si è arrestato mentre il launcher lo interrogava sulla scheda (codice {}). Installa il '
+            'driver aggiornato della tua scheda video.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Scheda video {0}: Vulkan {1} e tutto il resto che serve al port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ La scheda video non può eseguire il port: vedi Aiuto',
+        'The game will likely not start, or close right away.':
+            'Probabilmente il gioco non si avvierà o si chiuderà subito.',
         'Start anyway?':
             'Avviare comunque?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -10318,6 +10474,32 @@ WORLD = {
             'Test stabilności (dla wersji beta)',
         'Start and sound':
             'Uruchamianie i dźwięk',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Nie znaleziono karty graficznej z Vulkan 1.3. Port wymaga takiej karty (GTX 1050 Ti, GTX 1650, RX 570 '
+            'lub nowszej) z aktualnym sterownikiem.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Nie znaleziono działającego sterownika Vulkan (brak pliku vulkan-1.dll lub jest uszkodzony). Zainstaluj '
+            'aktualny sterownik karty graficznej.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Pliki Vulkan sterownika graficznego są zbyt stare ({} zamiast wymaganej przez port wersji 1.3). '
+            'Zainstaluj aktualny sterownik karty graficznej.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} nie uruchomi portu: jej sterownikowi brakuje {1}. Zaktualizuj sterownik graficzny; jeśli to nie '
+            'pomoże, karta jest za stara dla portu.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Sterownik graficzny przestał działać, gdy launcher pytał go o kartę (kod {}). Zainstaluj aktualny '
+            'sterownik karty graficznej.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Karta graficzna {0}: Vulkan {1} i wszystko inne, czego potrzebuje port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ Karta graficzna nie uruchomi portu: zobacz Pomoc',
+        'The game will likely not start, or close right away.':
+            'Gra najpewniej się nie uruchomi albo od razu się zamknie.',
         'Start anyway?':
             'Uruchomić mimo to?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -11907,6 +12089,32 @@ WORLD = {
             'Kararlılık testi (beta sürümler için)',
         'Start and sound':
             'Başlangıç ve ses',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3 destekli bir ekran kartı bulunamadı. Port böyle bir karta (GTX 1050 Ti, GTX 1650, RX 570 '
+            'veya daha yenisi) ve güncel bir sürücüye ihtiyaç duyar.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Çalışan bir Vulkan sürücüsü bulunamadı (vulkan-1.dll eksik veya bozuk). Ekran kartınızın güncel '
+            'sürücüsünü yükleyin.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Ekran kartı sürücüsünün Vulkan dosyaları çok eski (portun ihtiyaç duyduğu 1.3 yerine {}). Ekran '
+            'kartınızın güncel sürücüsünü yükleyin.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} portu çalıştıramaz: sürücüsünde {1} eksik. Ekran kartı sürücüsünü güncelleyin; işe yaramazsa kart '
+            'port için çok eski.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Başlatıcı karta dair bilgi isterken ekran kartı sürücüsü durdu (kod {}). Ekran kartınızın güncel '
+            'sürücüsünü yükleyin.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Ekran kartı {0}: Vulkan {1} ve portun ihtiyaç duyduğu diğer her şey.',
+        '✗ The graphics card cannot run the port: see Help':
+            "✗ Ekran kartı portu çalıştıramaz: Yardım'a bakın",
+        'The game will likely not start, or close right away.':
+            'Oyun büyük olasılıkla başlamaz ya da hemen kapanır.',
         'Start anyway?':
             'Yine de başlatılsın mı?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -13494,6 +13702,27 @@ WORLD = {
             '稳定性测试（用于测试版）',
         'Start and sound':
             '启动与声音',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            '未找到支持 Vulkan 1.3 的显卡。移植版需要一块这样的显卡（GTX 1050 Ti、GTX 1650、RX 570 或更新），并使用最新驱动。',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '未找到可用的 Vulkan 驱动（vulkan-1.dll 缺失或已损坏）。请安装显卡的最新驱动。',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            '显卡驱动的 Vulkan 文件太旧（为 {}，移植版需要 1.3）。请安装显卡的最新驱动。',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} 无法运行移植版：其驱动缺少 {1}。请更新显卡驱动；如果仍不行，说明这块显卡对移植版来说太旧了。',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            '启动器查询显卡信息时，显卡驱动停止了响应（代码 {}）。请安装显卡的最新驱动。',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            '显卡 {0}：Vulkan {1}，以及移植版所需的其他一切。',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ 这块显卡无法运行移植版：请查看“帮助”',
+        'The game will likely not start, or close right away.':
+            '游戏很可能无法启动，或会立即关闭。',
         'Start anyway?':
             '仍要启动吗？',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -15076,6 +15305,27 @@ WORLD = {
             '安定性テスト（ベータ版向け）',
         'Start and sound':
             '起動とサウンド',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3 対応のグラフィックカードが見つかりません。移植版には最新ドライバーの入った対応カード（GTX 1050 Ti、GTX 1650、RX 570 以降）が必要です。',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '動作する Vulkan ドライバーが見つかりません（vulkan-1.dll がないか、壊れています）。グラフィックカードの最新ドライバーをインストールしてください。',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'グラフィックドライバーの Vulkan ファイルが古すぎます（移植版に必要な 1.3 ではなく {}）。グラフィックカードの最新ドライバーをインストールしてください。',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} では移植版を実行できません：ドライバーに {1} がありません。グラフィックドライバーを更新してください。それでも解決しない場合、このカードは移植版には古すぎます。',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'ランチャーがカードの情報を問い合わせている間にグラフィックドライバーが停止しました（コード {}）。グラフィックカードの最新ドライバーをインストールしてください。',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'グラフィックカード {0}：Vulkan {1} と、移植版に必要なその他すべて。',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ このグラフィックカードでは移植版を実行できません：ヘルプを参照',
+        'The game will likely not start, or close right away.':
+            'ゲームはおそらく起動しないか、すぐに終了します。',
         'Start anyway?':
             'このまま起動しますか？',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -16660,6 +16910,27 @@ WORLD = {
             '안정성 테스트 (베타 빌드용)',
         'Start and sound':
             '시작 및 사운드',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3을 지원하는 그래픽 카드를 찾지 못했습니다. 포트에는 최신 드라이버가 설치된 지원 카드(GTX 1050 Ti, GTX 1650, RX 570 이상)가 필요합니다.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '작동하는 Vulkan 드라이버를 찾지 못했습니다(vulkan-1.dll이 없거나 손상됨). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            '그래픽 드라이버의 Vulkan 파일이 너무 오래되었습니다(포트에 필요한 1.3 대신 {}). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0}에서는 포트를 실행할 수 없습니다: 드라이버에 {1}이(가) 없습니다. 그래픽 드라이버를 업데이트하세요. 그래도 안 되면 이 카드는 포트에 너무 오래되었습니다.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            '런처가 카드 정보를 조회하는 동안 그래픽 드라이버가 중지되었습니다(코드 {}). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            '그래픽 카드 {0}: Vulkan {1} 및 포트에 필요한 나머지 전부.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ 이 그래픽 카드로는 포트를 실행할 수 없습니다: 도움말 참조',
+        'The game will likely not start, or close right away.':
+            '게임이 시작되지 않거나 바로 종료될 가능성이 높습니다.',
         'Start anyway?':
             '그래도 시작할까요?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
