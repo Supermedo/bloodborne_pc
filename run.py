@@ -118,6 +118,39 @@ def wait_for(pid):
         kernel32.CloseHandle(handle)
 
 
+def game_running():
+    """Whether a game (bb-probe.exe) runs now; unknown counts as yes."""
+    try:
+        result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq bb-probe.exe', '/FO', 'CSV', '/NH'],
+                                capture_output=True, timeout=15, creationflags=no_console())
+    except (OSError, subprocess.SubprocessError):
+        return True
+    # Bytes: its "no tasks" line is in the console's code page and language.
+    return result.returncode != 0 or b'bb-probe.exe' in result.stdout.lower()
+
+
+def remove_stale_views(out, game):
+    """The game views with mods (mods.py's mod-game-* folders in out or beside the game) that a
+    game left behind when it did not end through run.py (ended in the Task Manager, the PC
+    turned off): removed before a new one is made, while no other game runs. They hold links
+    into the game folder; mods.remove_overlay deletes the links, never what they point to."""
+    places = {Path(out).resolve(), Path(game).parent}
+    stale = [path for place in places if place.is_dir() for path in place.glob('mod-game-*')
+             if path.is_dir() and not path.is_symlink() and not (hasattr(path, 'is_junction') and path.is_junction())]
+    if not stale or game_running():
+        return
+    from mods import remove_overlay
+    removed = 0
+    for path in stale:
+        try:
+            remove_overlay(path, game)
+            removed += 1
+        except OSError as error:
+            print(f'Mods: {path} could not be removed: {error}')
+    if removed:
+        print(f'Mods: removed {removed} game view(s) an earlier game left behind')
+
+
 def no_console():
     """Started without a console (the launcher): console programs must not open their own."""
     return 0 if ctypes.windll.kernel32.GetConsoleWindow() else subprocess.CREATE_NO_WINDOW
@@ -343,6 +376,7 @@ def main():
     sys.path.insert(0, str(PORT / 'scripts'))
     from patches import (OUTPUT_SIZE, PATCH_GROUPS, game_app_version, group_list, hud_canvas,
                          image_groups, output_size, read_settings)
+    remove_stale_views(out, original_game)
     # Patches exist for game version 01.09 only (patches.py applies none to others): other
     # versions keep the game's 30 FPS timing and change resolutions live. Of a 01.09 eboot.bin,
     # only the groups of patches whose code is the 01.09 build's are applied (patches.py
