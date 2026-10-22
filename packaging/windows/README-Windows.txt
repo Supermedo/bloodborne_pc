@@ -16,21 +16,24 @@ Requirements
   Nothing else: Python and the libraries are inside this folder.
 
 Starting
-- Bloodborne.exe opens the launcher. On "Game & effects" pick your game folder, adjust the
-  settings, press PLAY. The "Play" page checks the game version, saves, graphics card and
-  FSR 4 assets.
+- Bloodborne.exe opens the launcher. The first time, a short guide picks your game folder and
+  the settings for your PC; then press PLAY. The "Play" page checks the game version, saves,
+  graphics card and FSR 4 assets. The pages marked EXPERT in the side bar (All graphics, Game
+  files, Cheats, Your PC, Advanced) appear with the "Expert view" switch at its bottom; the game
+  folder can be changed later on "Game files".
 - Play Bloodborne.exe starts the game straight away with the settings saved in the launcher,
   without opening it. Set things up once in Bloodborne.exe, then use Play Bloodborne.exe (or a
-  shortcut to it, or "Add to Steam" on the Play page). If no game folder is chosen
+  shortcut to it, or "Add to Steam" on "Launcher customization"). If no game folder is chosen
   yet it opens the launcher. Bloodborne.exe --play does the same. The log goes to
   user\last_run.log.
-- Advanced -> "Desktop shortcut" puts Bloodborne on the desktop.
+- Launcher customization -> "Desktop shortcut" puts Bloodborne on the desktop.
 - Updates: when a new version is out, the launcher shows it at the bottom left; "Update"
   downloads and installs it and opens the launcher again (saves, settings and mods are kept).
   Advanced -> "Check for updates" checks by hand.
-- Advanced -> "Launcher language": English, Russian, Arabic, Spanish, Portuguese, French,
-  German, Italian, Polish, Turkish, Chinese, Japanese, Korean (default: the Windows language).
-- Game & effects -> "Text language" and "Voice language" are separate. Brazilian Portuguese
+- Launcher customization -> "Launcher language": English, Russian, Arabic, Spanish, Portuguese,
+  French, German, Italian, Polish, Turkish, Chinese, Japanese, Korean (default: the Windows
+  language).
+- Gameplay -> "Text language" and "Voice language" are separate. Brazilian Portuguese
   text uses the game's porbr files; voice tracks can use a different language. "As in the game"
   keeps the original voice selection. A missing translated file falls back to the original.
 - In the game, Insert (or L3+R3 on a gamepad) opens the port's menu (upscaler, resolution,
@@ -45,51 +48,55 @@ Data
 - Generated files (prepared game image, patches): out\.
 
 Online play (beta)
-- Register a shadNet account at https://shadnet.shadps4.net. In the launcher open
-  "Online co-op", tick "Play online", enter the account name (not the email) and password,
-  press "Test connection", then PLAY and choose online at the title screen.
-- Messages, bloodstains and ghosts come from The Hunter's Dream (https://thehuntersdream.com);
-  bells and summons go through the shadNet server. Everyone needs game version 1.09 and the
-  same co-op server. Summoning between players is not confirmed yet.
-- Playing with bbhost players on The Hunter's Dream's co-op pool is off in this port until it
-  works properly with their server. Please don't ask The Hunter's Dream for help with bbport:
-  use our Discord server (https://discord.gg/yTMG8c4Bqm) instead.
+- In the launcher open "Online play" and tick "Play online". Then choose who you play with:
+  - The Hunter's Dream (the default): co-op together with bbhost players. Press "Sign in with
+    Discord" once and enter the code on the page that opens.
+  - shadNet server: register an account at https://shadnet.shadps4.net and enter the account
+    name (not the email) and password.
+  Press "Test connection", then PLAY and choose online at the title screen.
+- Messages, bloodstains and ghosts come from The Hunter's Dream (https://thehuntersdream.com).
+  Everyone in a session needs game version 1.09 and the same co-op pool.
+- Please don't ask The Hunter's Dream for help with bbport: use our Discord server
+  (https://discord.gg/yTMG8c4Bqm) instead.
 
 Cheats
-- The "Cheats" page has cheats (never die, enemies do not see or hear you, Rally never fades,
-  control the targeted enemy) and gameplay tweaks (no Rally, camera further away, no camera
-  auto-rotation, run with less stick tilt, ragdoll physics, the Japanese/Asian button layout:
-  Circle confirms and interacts, Cross cancels and dodges, and the button icons follow). They
-  are game patches for 1.09, applied when the game starts.
+- The "Cheats" page (expert view) has cheats (never die, enemies do not see or hear you,
+  Rally never fades, control the targeted enemy) and gameplay tweaks (no Rally, camera further
+  away, no camera auto-rotation, run with less stick tilt, ragdoll physics, the Japanese/Asian
+  button layout: Circle confirms and interacts, Cross cancels and dodges, and the button icons
+  follow). They are game patches for 1.09, applied when the game starts.
 
 Problems
-- Black screen at start: Advanced -> "Clear shader cache", then start again (the first minutes
-  stutter while the cache is rebuilt).
-- Send user\last_run.log with any bug report.
+- Help checks the game folder and this PC and has the known problems with their fixes; after a
+  game that ended with an error it names the cause its log shows.
+- Black screen at start: Help -> "Only a black screen" -> "Clear the shader cache", then start
+  again (the first minutes stutter while the cache is rebuilt).
+- Help -> "Save a report" makes the zip the helpers ask for (the log, the settings without
+  passwords, this PC): attach it to any bug report.
 
 Upscaling
 - FSR 4.1.1 (experimental): choose FSR 4.1.1 in Upscaler, then AMD DX12 or
-  Vulkan (fsr4vk) in Graphics or Play's quick settings, and press PLAY. A method
+  Vulkan (fsr4vk) on "All graphics", and press PLAY. A method
   change applies at the next game start. AMD DX12 uses the included original AMD
   runtime through a shared GPU-fence bridge. Vulkan uses the included fsr4vk INT8
-  provider with the AMD Windows fix. Graphics -> Download fsr4vk repairs missing
+  provider with the AMD Windows fix. All graphics -> Download fsr4vk repairs missing
   or changed files (about 14 MB). Files in fsr4vk\ survive launcher updates.
   Existing profiles keep their saved method; new AMD profiles default to DX12.
   Standard outputs up to 3840 x 2160 were tested. See docs\FSR411_WINDOWS.md
   for hardware requirements and validation; these providers need no Linux setup.
-- DLSS: NVIDIA GeForce RTX 20 series or newer with a current driver (Graphics -> Upscaler ->
-  DLSS, or the in-game menu). On other GPUs the option is greyed out.
-- Graphics -> "Motion-vector cache (experimental)" is off by default. With FSR and
+- DLSS: NVIDIA GeForce RTX 20 series or newer with a current driver (All graphics ->
+  Upscaler -> DLSS, or the in-game menu). On other GPUs the option is greyed out.
+- All graphics -> "Motion-vector cache (experimental)" is off by default. With FSR and
   object motion vectors enabled, it can reuse render targets to reduce GPU waits,
   at the cost of additional VRAM. Applies at the next game start, including shortcuts.
   See docs\OBJECT_MOTION_CACHE.md for comparison steps. The published test.2 build
   retains its earlier automatic-cache behavior.
 - FSR 3.1 works on every GPU. FSR 4 needs its assets in fsr4_shaders\ (included in this
-  package, or Graphics -> "Download FSR 4 assets"); GPUs without the required shader features
-  fall back to FSR 3.1 by themselves.
+  package, or All graphics -> "Download FSR 4 assets"); GPUs without the required shader
+  features fall back to FSR 3.1 by themselves.
 
 Frame generation
-- Graphics -> Frame generation offers AMD ML-FG 4.0.1 on a supported RX 9000,
+- All graphics -> Frame generation offers AMD ML-FG 4.0.1 on a supported RX 9000,
   alongside the existing FSR 3.1 and DLSS methods. ML-FG generates one intermediate
   image per game frame (2x, SDR). The launcher checks the selected GPU, Windows 11,
   driver/runtime and GPU sharing; an unsupported saved selection falls back to FSR 3.1.
