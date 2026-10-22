@@ -58,6 +58,10 @@ HELP = {'de': {
     'close at once (code 3).':
         'Windows hat gerade nur {} GB für Programme frei; das Spiel reserviert beim Start etwa {} GB und würde '
         'sofort schließen (Code 3).',
+    'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+    'when you ask for help.':
+        'Das Spiel endete mit einem Fehler (Code {}). Die Hilfe hat die Prüfungen, und „Bericht speichern“ '
+        'erstellt die ZIP-Datei, die du anhängst, wenn du um Hilfe bittest.',
     'The game ended with an error (code {}). Its log names the cause:':
         'Das Spiel endete mit einem Fehler (Code {}). Sein Log nennt die Ursache:',
     # the problems

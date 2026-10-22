@@ -923,6 +923,10 @@ WORLD = {
             'В папке есть eboot.bin, но не вся игра (в журнале: gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Папка игры: та, в которой прямо лежат eboot.bin, sce_module, sce_sys и dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Игра завершилась с ошибкой (код {}). На странице «Помощь» есть проверки, а «Сохранить отчёт» создаёт '
+            'zip-файл, который нужно приложить, когда просите о помощи.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Игра завершилась с ошибкой (код {}). Причина указана в её журнале:',
         'The game folder is complete ({} files, {} GB).':
@@ -2474,6 +2478,10 @@ WORLD = {
             'يحتوي المجلد على eboot.bin لكن ليس على اللعبة كاملة (يذكر السجل gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'مجلد اللعبة: المجلد الذي يحتوي eboot.bin وsce_module وsce_sys وdvdroot_ps4 مباشرة.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'انتهت اللعبة بخطأ (الرمز {}). في المساعدة توجد الفحوصات، و«حفظ تقرير» ينشئ ملف zip لإرفاقه عندما '
+            'تطلب المساعدة.',
         'The game ended with an error (code {}). Its log names the cause:':
             'انتهت اللعبة بخطأ (الرمز {}). يذكر سجلها السبب:',
         'The game folder is complete ({} files, {} GB).':
@@ -4062,6 +4070,10 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'La carpeta del juego: la que tiene eboot.bin, sce_module, sce_sys y dvdroot_ps4 directamente '
             'dentro.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'El juego terminó con un error (código {}). La Ayuda tiene las comprobaciones, y «Guardar un informe» '
+            'crea el zip que debes adjuntar al pedir ayuda.',
         'The game ended with an error (code {}). Its log names the cause:':
             'El juego terminó con un error (código {}). Su registro indica la causa:',
         'The game folder is complete ({} files, {} GB).':
@@ -5649,6 +5661,10 @@ WORLD = {
             'A pasta tem eboot.bin, mas não o jogo inteiro (o registro diz gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'A pasta do jogo: a que tem eboot.bin, sce_module, sce_sys e dvdroot_ps4 diretamente dentro.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'O jogo terminou com um erro (código {}). A Ajuda tem as verificações, e "Salvar um relatório" cria o '
+            'zip para anexar quando você pedir ajuda.',
         'The game ended with an error (code {}). Its log names the cause:':
             'O jogo terminou com um erro (código {}). O registro dele indica a causa:',
         'The game folder is complete ({} files, {} GB).':
@@ -7240,6 +7256,10 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Le dossier du jeu : celui qui contient directement eboot.bin, sce_module, sce_sys et '
             'dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            "Le jeu s'est terminé avec une erreur (code {}). L'aide contient les vérifications, et « Enregistrer "
+            "un rapport » crée le zip à joindre quand vous demandez de l'aide.",
         'The game ended with an error (code {}). Its log names the cause:':
             'Le jeu s’est terminé avec une erreur (code {}). Son journal en indique la cause :',
         'The game folder is complete ({} files, {} GB).':
@@ -8833,6 +8853,10 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'La cartella del gioco: quella che contiene direttamente eboot.bin, sce_module, sce_sys e '
             'dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Il gioco è terminato con un errore (codice {}). La pagina Aiuto ha i controlli, e "Salva un rapporto" '
+            'crea lo zip da allegare quando chiedi aiuto.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Il gioco si è chiuso con un errore (codice {}). Il suo registro indica la causa:',
         'The game folder is complete ({} files, {} GB).':
@@ -10422,6 +10446,10 @@ WORLD = {
             'Folder ma eboot.bin, ale nie całą grę (w dzienniku jest gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Folder gry: ten, w którym bezpośrednio leżą eboot.bin, sce_module, sce_sys i dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Gra zakończyła się błędem (kod {}). Pomoc zawiera sprawdzenia, a „Zapisz raport” tworzy plik zip do '
+            'dołączenia, gdy prosisz o pomoc.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Gra zakończyła się błędem (kod {}). Jej dziennik podaje przyczynę:',
         'The game folder is complete ({} files, {} GB).':
@@ -12011,6 +12039,10 @@ WORLD = {
             'Klasörde eboot.bin var ama oyunun tamamı yok (günlükte gxshader.shaderbnd.dcx not found yazar).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Oyun klasörü: içinde doğrudan eboot.bin, sce_module, sce_sys ve dvdroot_ps4 bulunan klasör.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Oyun bir hatayla sona erdi (kod {}). Yardım\'da denetimler var; "Rapor kaydet", yardım isterken '
+            'ekleyeceğiniz zip dosyasını oluşturur.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Oyun bir hatayla kapandı (kod {}). Oyunun günlüğü nedeni belirtiyor:',
         'The game folder is complete ({} files, {} GB).':
@@ -13598,6 +13630,9 @@ WORLD = {
             '该文件夹有 eboot.bin，但游戏不完整（日志显示 gxshader.shaderbnd.dcx not found）。',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             '游戏文件夹：直接包含 eboot.bin、sce_module、sce_sys 和 dvdroot_ps4 的那个。',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            '游戏因错误而结束（代码 {}）。“帮助”中有各项检查，“保存报告”会生成求助时要附上的 zip 文件。',
         'The game ended with an error (code {}). Its log names the cause:':
             '游戏因错误而结束（代码 {}）。日志中给出了原因：',
         'The game folder is complete ({} files, {} GB).':
@@ -15180,6 +15215,9 @@ WORLD = {
             'フォルダーに eboot.bin はありますが、ゲーム全体がそろっていません（ログに gxshader.shaderbnd.dcx not found と出ます）。',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'ゲームフォルダー：eboot.bin、sce_module、sce_sys、dvdroot_ps4 が直下にあるフォルダーです。',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'ゲームはエラーで終了しました（コード {}）。ヘルプにはチェックがあり、「レポートを保存」で、助けを求めるときに添付する zip が作成されます。',
         'The game ended with an error (code {}). Its log names the cause:':
             'ゲームがエラーで終了しました（コード {}）。ログに原因が記録されています：',
         'The game folder is complete ({} files, {} GB).':
@@ -16764,6 +16802,9 @@ WORLD = {
             '폴더에 eboot.bin은 있지만 게임 전체가 없습니다 (로그에 gxshader.shaderbnd.dcx not found가 표시됨).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             '게임 폴더: eboot.bin, sce_module, sce_sys, dvdroot_ps4가 바로 안에 있는 폴더입니다.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            '게임이 오류로 종료되었습니다(코드 {}). 도움말에 점검 항목이 있고, "보고서 저장"은 도움을 요청할 때 첨부할 zip 파일을 만듭니다.',
         'The game ended with an error (code {}). Its log names the cause:':
             '게임이 오류로 종료되었습니다 (코드 {}). 로그에 나온 원인:',
         'The game folder is complete ({} files, {} GB).':

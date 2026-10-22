@@ -117,5 +117,58 @@ class FileTests(unittest.TestCase):
         self.assertEqual(clean['fps_mode'], 'uncap')
 
 
+class AfterExitTests(unittest.TestCase):
+    """After the game ended with an error. Started from Steam or a shortcut (--play), the launcher opens with
+    it: a log without a known cause gets a message too, where its own Play has the output on the screen."""
+
+    def run_after(self, log, code, always):
+        class Box:
+            def __init__(self):
+                self.shown = []
+
+            def showinfo(self, title, text):
+                self.shown.append(('info', text))
+
+            def askyesno(self, title, text):
+                self.shown.append(('ask', text))
+                return True
+
+        class Window(help_.HelpMixin):
+            def __init__(self, user):
+                self.app, self.messagebox, self.opened = {'user_dir': user}, Box(), []
+
+            def open_topic(self, key):
+                self.opened.append(key)
+        with tempfile.TemporaryDirectory() as tmp:
+            if log is not None:
+                (Path(tmp) / 'last_run.log').write_text(log, encoding='utf-8')
+            window = Window(tmp)
+            window.after_exit(code, always=always)
+        return window.messagebox.shown, window.opened
+
+    def test_a_known_cause_offers_its_fix(self):
+        shown, opened = self.run_after('GPU: device lost (submit)\n', 1, always=True)
+        self.assertEqual([kind for kind, _t in shown], ['ask'])
+        self.assertEqual(opened, ['driver'])
+
+    def test_without_a_known_cause_a_message_only_when_asked_for(self):
+        for log in ('Frame stats: 98.0 FPS\n', None):  # nothing known; no log at all
+            shown, opened = self.run_after(log, 3221225477, always=True)
+            self.assertEqual(len(shown), 1)
+            self.assertEqual(shown[0][0], 'info')
+            self.assertIn('code 0xC0000005', shown[0][1])  # as helpers know it, not 3221225477
+            self.assertEqual(opened, [])
+            self.assertEqual(self.run_after(log, 1, always=False), ([], []))
+
+    def test_nothing_after_a_normal_end(self):
+        self.assertEqual(self.run_after('GPU: device lost (submit)\n', 0, always=True), ([], []))
+
+    def test_play_opens_help_after_an_error(self):
+        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
+        main = source[source.index('\ndef main():'):]
+        self.assertIn("('help', result)", main)
+        self.assertIn('launcher.after_exit(failed, always=True)', main)
+
+
 if __name__ == '__main__':
     unittest.main()

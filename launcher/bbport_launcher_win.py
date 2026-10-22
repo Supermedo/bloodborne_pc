@@ -4630,12 +4630,14 @@ def main():
     if FROZEN and UPDATE_DIR not in PORT_DIR.parents:
         shutil.rmtree(UPDATE_DIR, ignore_errors=True)  # what a finished update left behind
     # Without a usable game folder there is nothing to play yet: open the launcher instead.
-    page = 'play'
+    page, failed = 'play', None
     if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() and CONFIG_FILE.exists():
         result = play_without_window(settings)
-        if result is not None:
-            sys.exit(result)
-        page = 'graphics'
+        if result == 0:
+            sys.exit(0)
+        # Ended with an error: the launcher opens on Help with what the log names, as after its own Play
+        # (from Steam or a shortcut the game used to close without a word).
+        page, failed = ('graphics', None) if result is None else ('help', result)
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # sharp text on scaled displays
     except (AttributeError, OSError):
@@ -4646,6 +4648,8 @@ def main():
     launcher = Launcher(root, tk, ttk, filedialog, messagebox)
     if page != 'play':
         launcher.show(page)
+    if failed:
+        root.after(500, lambda: launcher.after_exit(failed, always=True))
     root.mainloop()
 
 

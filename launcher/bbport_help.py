@@ -585,21 +585,28 @@ class HelpMixin:
                 return False
         return True
 
-    def after_exit(self, code):
-        """After the game ended with an error: the known causes its log names, with the fix."""
+    def after_exit(self, code, always=False):
+        """After the game ended with an error: the known causes its log names, with the fix. always: also
+        when it names none (the game started without the launcher's window, which has its output)."""
         if not code:
             return
+        # A Windows exception code the way helpers know it: 0xC0000005, not 3221225477.
+        shown = f'0x{code & 0xffffffff:08X}' if code < 0 or code > 255 else code
         try:
             log = Path(self.app.get('user_dir') or L.DATA_DIR / 'user') / 'last_run.log'
             text = log.read_text(encoding='utf-8', errors='replace')[-400_000:]
         except OSError:
-            return
+            text = ''
         topics = hints_in_log(text)
         if not topics:
+            if always:
+                self.messagebox.showinfo('Bloodborne', _('The game ended with an error (code {}). Help has the checks, '
+                                                         'and "Save a report" makes the zip to attach when you ask for '
+                                                         'help.').format(shown))
             return
         title, why, _steps = TOPICS[topics[0]]
         if self.messagebox.askyesno('Bloodborne', _('The game ended with an error (code {}). Its log names the '
-                                                    'cause:').format(code) + '\n\n' + _(title) + '\n' + _(why) +
+                                                    'cause:').format(shown) +'\n\n' + _(title) + '\n' + _(why) +
                                     '\n\n' + _('Show the fix?')):
             self.open_topic(topics[0])
 
