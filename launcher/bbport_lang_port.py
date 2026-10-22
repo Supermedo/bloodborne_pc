@@ -17,8 +17,8 @@ PORT_KEYS = [
     "Rebirth at the Doll: back to your origin's attributes for 5 Insight, levels regained free",
     'Auto (4 GB cards)',
     'Respec',
-    "Spread a character's attribute points again: same level, same Blood Echoes. Changes the save while "
-    "the game is closed; a copy of the saves is kept in respec-backups beside them.",
+    "Spread a character's attribute points again: same level, same Blood Echoes. Changes the save while the game is "
+    'closed; the saves from before go into your backups (Saves).',
     "Keyboard and mouse bindings, up to three per action, and the controller's buttons below. Both work "
     "side by side.",
     "Direct turns the game's camera by exact angles: no stick acceleration or turn-speed cap. While locked "
@@ -73,9 +73,8 @@ PORT = {
         'gibt es kostenlos zurück',
         'Auto (Karten mit 4 GB)',
         'Neu verteilen',
-        'Die Attributpunkte eines Charakters neu verteilen: gleiche Stufe, gleiche Blutechos. Ändert den '
-        'Spielstand, während das Spiel geschlossen ist; eine Kopie der Spielstände bleibt in respec-backups '
-        'daneben.',
+        'Die Attributpunkte eines Charakters neu verteilen: gleiche Stufe, gleiche Blutechos. Ändert den Spielstand, '
+        'während das Spiel geschlossen ist; die Spielstände von vorher kommen in deine Sicherungen (Spielstände).',
         'Tastatur- und Mausbelegung, bis zu drei pro Aktion, und darunter die Tasten des Controllers. Beides '
         'funktioniert nebeneinander.',
         'Direkt dreht die Kamera um genaue Winkel: ohne Stick-Beschleunigung und Drehgrenze. Beim Anvisieren '
@@ -130,8 +129,8 @@ PORT = {
         'Auto (cartes de 4 Go)',
         'Redistribuer',
         "Redistribuer les points d'attribut d'un personnage : même niveau, mêmes Échos de sang. Modifie la "
-        "sauvegarde pendant que le jeu est fermé ; une copie des sauvegardes est gardée dans respec-backups, à "
-        "côté.",
+        "sauvegarde pendant que le jeu est fermé ; les sauvegardes d'avant vont dans vos copies de sauvegarde "
+        '(Sauvegardes).',
         "Assignations clavier et souris, jusqu'à trois par action, et les boutons de la manette ci-dessous. "
         "Les deux fonctionnent ensemble.",
         'Le mode Direct tourne la caméra du jeu selon des angles exacts : sans accélération du stick ni vitesse '
@@ -185,8 +184,8 @@ PORT = {
         'niveles gratis',
         'Auto (tarjetas de 4 GB)',
         'Redistribuir',
-        'Vuelve a repartir los puntos de atributo de un personaje: mismo nivel, mismos ecos de sangre. Cambia '
-        'la partida con el juego cerrado; se guarda una copia de las partidas en respec-backups, a su lado.',
+        'Vuelve a repartir los puntos de atributo de un personaje: mismo nivel, mismos ecos de sangre. Cambia la '
+        'partida con el juego cerrado; las partidas de antes van a tus copias de seguridad (Partidas).',
         'Asignaciones de teclado y ratón, hasta tres por acción, y debajo los botones del mando. Ambos '
         'funcionan a la vez.',
         '«Directo» gira la cámara del juego en ángulos exactos: sin aceleración del stick ni límite de '
@@ -240,8 +239,8 @@ PORT = {
         'recuperados de graça',
         'Auto (placas de 4 GB)',
         'Redistribuir',
-        'Redistribui os pontos de atributo de um personagem: mesmo nível, mesmos Ecos de Sangue. Altera o save '
-        'com o jogo fechado; uma cópia dos saves fica em respec-backups, ao lado deles.',
+        'Redistribui os pontos de atributo de um personagem: mesmo nível, mesmos Ecos de Sangue. Altera o save com o '
+        'jogo fechado; os saves de antes vão para os seus backups (Saves).',
         'Mapeamentos de teclado e mouse, até três por ação, e os botões do controle abaixo. Os dois funcionam '
         'ao mesmo tempo.',
         'O modo Direto gira a câmera do jogo em ângulos exatos: sem aceleração do analógico nem limite de '
@@ -294,8 +293,8 @@ PORT = {
         'riottengono gratis',
         'Auto (schede da 4 GB)',
         'Ridistribuisci',
-        'Ridistribuisce i punti attributo di un personaggio: stesso livello, stessi Echi del sangue. Modifica '
-        'il salvataggio a gioco chiuso; una copia dei salvataggi resta in respec-backups, accanto.',
+        'Ridistribuisce i punti attributo di un personaggio: stesso livello, stessi Echi del sangue. Modifica il '
+        'salvataggio a gioco chiuso; i salvataggi di prima finiscono nei tuoi backup (Salvataggi).',
         'Assegnazioni di tastiera e mouse, fino a tre per azione, e sotto i pulsanti del controller. Funzionano '
         'entrambi insieme.',
         'Diretto ruota la telecamera del gioco di angoli esatti: niente accelerazione dello stick né limite '
@@ -348,8 +347,8 @@ PORT = {
         'Odrodzenie u Lalki: powrót do atrybutów twojego pochodzenia za 5 Wglądu, poziomy odzyskujesz za darmo',
         'Auto (karty 4 GB)',
         'Przydziel od nowa',
-        'Przydziel od nowa punkty atrybutów postaci: ten sam poziom, te same Echa krwi. Zmienia zapis, gdy gra '
-        'jest zamknięta; kopia zapisów zostaje w respec-backups obok nich.',
+        'Przydziel od nowa punkty atrybutów postaci: ten sam poziom, te same Echa krwi. Zmienia zapis, gdy gra jest '
+        'zamknięta; wcześniejsze zapisy trafiają do twoich kopii zapasowych (Zapisy).',
         'Przypisania klawiatury i myszy, do trzech na akcję, a poniżej przyciski kontrolera. Oba działają '
         'jednocześnie.',
         'Sterowanie bezpośrednie obraca kamerę gry o dokładne kąty: bez przyspieszenia gałki i limitu '
@@ -402,8 +401,8 @@ PORT = {
         'geri kazanılır',
         'Otomatik (4 GB kartlar)',
         'Yeniden dağıt',
-        'Bir karakterin nitelik puanlarını yeniden dağıtın: aynı seviye, aynı Kan Yankıları. Oyun kapalıyken '
-        'kaydı değiştirir; kayıtların bir kopyası yanlarındaki respec-backups klasöründe tutulur.',
+        'Bir karakterin nitelik puanlarını yeniden dağıtın: aynı seviye, aynı Kan Yankıları. Oyun kapalıyken kaydı '
+        'değiştirir; önceki kayıtlar yedeklerinize gider (Kayıtlar).',
         'Klavye ve fare atamaları, eylem başına üçe kadar, ve aşağıda kumandanın düğmeleri. İkisi birlikte '
         'çalışır.',
         '"Doğrudan", oyunun kamerasını tam açılarla döndürür: çubuk ivmesi veya dönüş hızı sınırı yoktur. '
@@ -455,8 +454,8 @@ PORT = {
         'الولادة من جديد عند الدمية: العودة إلى سمات أصلك مقابل 5 بصيرة، وتستعيد المستويات مجانًا',
         'تلقائي (بطاقات 4 غيغابايت)',
         'إعادة التوزيع',
-        'أعد توزيع نقاط سمات الشخصية: المستوى نفسه وأصداء الدم نفسها. يغيّر ملف الحفظ واللعبة مغلقة؛ وتُحفظ نسخة '
-        'من ملفات الحفظ في respec-backups بجانبها.',
+        'أعد توزيع نقاط سمات الشخصية: المستوى نفسه وأصداء الدم نفسها. يغيّر ملف الحفظ واللعبة مغلقة؛ وتذهب ملفات '
+        'الحفظ السابقة إلى نسخك الاحتياطية (ملفات الحفظ).',
         'تعيينات لوحة المفاتيح والفأرة، حتى ثلاثة لكل إجراء، وأزرار يد التحكم في الأسفل. يعمل الاثنان معًا.',
         'الوضع المباشر يدير كاميرا اللعبة بزوايا دقيقة: بلا تسارع للعصا ولا حد لسرعة الدوران. وأثناء التثبيت '
         'على الهدف، يغيّر تحريك الفأرة الهدف.',
@@ -502,7 +501,7 @@ PORT = {
         '在人偶处重生：花费 5 点启蒙回到出身的属性，等级可免费重新获得',
         '自动（4 GB 显卡）',
         '重新分配',
-        '重新分配角色的属性点：等级不变，血之回响不变。在游戏关闭时修改存档；存档的副本保存在旁边的 respec-backups 中。',
+        '重新分配角色的属性点：等级不变，血之回响不变。在游戏关闭时修改存档；之前的存档会放入你的备份（存档）。',
         '键盘和鼠标绑定，每个动作最多三个，下方是手柄的按键。两者可同时使用。',
         '“直接”模式按精确角度转动游戏镜头：没有摇杆加速，也没有转速上限。锁定目标时，移动鼠标会切换目标。',
         '手柄',
@@ -546,8 +545,7 @@ PORT = {
         '人形のもとで生まれ直し：啓蒙 5 で素性の能力値に戻り、レベルは無料で取り戻せます',
         '自動（4 GB のカード）',
         '振り直し',
-        'キャラクターの能力値ポイントを振り直します。レベルも血の遺志も同じままです。ゲームを閉じている間にセーブデータを変更し、'
-        'セーブデータのコピーを隣の respec-backups に残します。',
+        'キャラクターの能力値ポイントを振り直します。レベルも血の遺志も同じままです。ゲームを閉じている間にセーブデータを変更し、変更前のセーブデータはバックアップ（セーブデータ）に入ります。',
         'キーボードとマウスの割り当て（1 つの操作につき最大 3 つ）と、その下にコントローラーのボタン。両方を同時に使えます。',
         '「ダイレクト」はゲームのカメラを正確な角度で回します。スティックの加速や回転速度の上限はありません。ロックオン中は'
         'マウスを動かすとターゲットが切り替わります。',
@@ -595,8 +593,7 @@ PORT = {
         '인형 앞에서 다시 태어나기: 통찰 5로 출신의 능력치로 돌아가며, 레벨은 무료로 되찾습니다',
         '자동 (4 GB 그래픽카드)',
         '재분배',
-        '캐릭터의 능력치 포인트를 다시 분배합니다: 레벨과 피의 메아리는 그대로입니다. 게임이 꺼져 있을 때 세이브를 '
-        '바꾸며, 세이브의 사본은 옆의 respec-backups에 남습니다.',
+        '캐릭터의 능력치 포인트를 다시 분배합니다: 레벨과 피의 메아리는 그대로입니다. 게임이 꺼져 있을 때 세이브를 바꾸며, 이전 세이브는 백업(세이브)에 들어갑니다.',
         '키보드와 마우스 할당(동작마다 최대 3개)과 아래의 컨트롤러 버튼. 둘 다 함께 작동합니다.',
         '직접 방식은 게임 카메라를 정확한 각도만큼 돌립니다: 스틱 가속이나 회전 속도 제한이 없습니다. 록온 중에는 '
         '마우스를 움직이면 대상이 바뀝니다.',

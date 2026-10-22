@@ -2236,12 +2236,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.ttk.Button(holder, text=_('Respec a character…', 'Перераспределить характеристики…'),
                         command=self.open_respec).pack(side='left')
         self.row(f, '', holder,
-                 _('Spread a character\'s attribute points again: same level, same Blood Echoes. '
-                   'Changes the save while the game is closed; a copy of the saves is kept in '
-                   'respec-backups beside them.',
-                   'Заново распределить очки характеристик персонажа: тот же уровень и Отголоски '
-                   'крови. Меняет сохранение, пока игра закрыта; копия сохранений остаётся в '
-                   'respec-backups рядом с ними.'))
+                 _("Spread a character's attribute points again: same level, same Blood Echoes. Changes the save "
+                   'while the game is closed; the saves from before go into your backups (Saves).',
+                   'Заново распределить очки характеристик персонажа: тот же уровень и Отголоски крови. Меняет '
+                   'сохранение, пока игра закрыта; прежние сохранения попадают в ваши резервные копии (Сохранения).'))
 
     def open_respec(self):
         """The respec dialog (bbport_respec): a character, its six attributes, Apply."""
@@ -2303,13 +2301,20 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             folder, slot, who = current()
             try:
                 new = {a: values[a].get() for a in respec.ATTRIBUTES}
-                backup = respec.respec(folder, slot, new)
+                respec.check(who['attributes'], new)
+                # The saves from before in the backups (Saves: restorable there) when the backups cover
+                # this folder; else respec keeps a copy beside them.
+                game = self.var('game_dir', 'app').get()
+                made = saves.backup(user, game, reason='respec', detail=who.get('name', '')) \
+                    if saves.target_dir(user, game).resolve() == Path(folder).resolve() else None
+                backup = respec.respec(folder, slot, new, copy=made is None)
             except (ValueError, OSError, tk.TclError) as error:
                 self.messagebox.showerror(title, str(error), parent=win)
                 return
             who['attributes'] = new
+            self.refresh_saves()  # the new backup in the list
             self.messagebox.showinfo(title, _('Done. A copy of the saves from before is in {}.',
-                                              'Готово. Копия прежних сохранений: {}.').format(backup.parent),
+                                              'Готово. Копия прежних сохранений: {}.').format(made or backup.parent),
                                      parent=win)
             win.destroy()
 

@@ -438,6 +438,8 @@ UI = {'de': {
         'Vor einem Import',
     'Before a restore':
         'Vor dem Zurückholen',
+    'Before a respec':
+        'Vor einer Umverteilung',
     'From a file':
         'Aus einer Datei',
     'Earlier backup':

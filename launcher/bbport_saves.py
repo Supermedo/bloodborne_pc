@@ -296,7 +296,8 @@ def find_in(root, depth=6):
 BACKUP_DIR = 'save_backups'
 BACKUP_META = 'bbport-backup.json'
 REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'import': 'Before an import',
-           'restore': 'Before a restore', 'file': 'From a file', 'old': 'Earlier backup'}
+           'restore': 'Before a restore', 'respec': 'Before a respec', 'file': 'From a file',
+           'old': 'Earlier backup'}
 WORDS = dict(REASONS)  # the words for file names; the launcher puts its translations here
 AUTO_KEEP = 10  # automatic backups kept; the player's own are never removed by the launcher
 META_FILES = {'param.bin', 'icon0.png'}
