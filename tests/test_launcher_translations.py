@@ -17,6 +17,23 @@ LANGUAGES = [code for code, _name in bbport_lang.LANGUAGE_NAMES if code not in (
 FORMAT = string.Formatter()
 
 
+def launcher_texts():
+    """[(file, line, English, Russian or None)] of every _() call with a written-out text in the launcher's
+    windows (not the language modules, nor the Linux launcher)."""
+    import ast
+    found = []
+    for path in sorted((ROOT / 'launcher').glob('bbport_*.py')):
+        if path.name.startswith('bbport_lang') or path.name == 'bbport_launcher.py':
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_' \
+                    and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str) \
+                    and node.args[0].value.strip():
+                russian = node.args[1].value if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) else None
+                found.append((path.name, node.lineno, node.args[0].value, russian))
+    return found
+
+
 def sample(text):
     """Values for a text's fields in its order: a number where the format needs one."""
     return [1234.5 if spec and (spec[-1] in 'fdeg%' or ',' in spec) else 'x'
@@ -56,6 +73,24 @@ class TranslationTests(unittest.TestCase):
                     # Russian may come with the text in the code: _('Play', 'Играть')
                     found = table.get(text) or (inline.get(text) if language == 'ru' else None)
                     self.assertTrue(found, f'{text!r} has no {language} translation')
+
+    def test_every_text_is_translated_everywhere(self):
+        """Every text the launcher shows through _('English'[, 'Russian']) and Help's topics, in every
+        language: a new text without its translations shows English to everyone else (the Russian may
+        stand in the call)."""
+        import bbport_help
+        # Help's topics are translated where they are shown: their texts count as well.
+        topics = [(f'bbport_help.py TOPICS[{key}]', 0, text, None)
+                  for key, (title, why, steps) in bbport_help.TOPICS.items() for text in (title, why, *steps)]
+        topics += [('bbport_help.py TOPIC_ACTIONS', 0, text, None)
+                   for actions in bbport_help.TOPIC_ACTIONS.values() for text, _method in actions]
+        missing = {}
+        for path, line, text, russian in launcher_texts() + topics:
+            for language in LANGUAGES:
+                if not bbport_lang.table(language).get(text) and not (language == 'ru' and russian):
+                    missing.setdefault(f'{path}:{line} {text[:60]!r}', []).append(language)
+        self.assertFalse(missing, 'texts without a translation (add them to a bbport_lang module):\n' +
+                         '\n'.join(f'  {where}: {", ".join(languages)}' for where, languages in missing.items()))
 
     def test_the_processor_texts_are_translated_everywhere(self):
         import bbport_lang_cpu

@@ -1334,6 +1334,127 @@ WORLD = {
             '• Нет файлов FSR 4: пока используется FSR 3.1. Нажмите, чтобы скачать (30 МБ)',
         '• No saves yet: bring your character from another version, or the game creates them':
             '• Сохранений пока нет: перенесите персонажа из другой версии, или игра создаст их сама',
+        # Texts Russian players saw in English (the check: test_launcher_translations).
+        'Help':
+            'Помощь',
+        'Launcher customization':
+            'Настройки лаунчера',
+        "The launcher's language and look, what it does while you play, and shortcuts to the game.":
+            'Язык и вид лаунчера, что он делает во время игры, и ярлыки для запуска игры.',
+        'Launcher':
+            'Лаунчер',
+        'While you play':
+            'Во время игры',
+        'When the game starts':
+            'Когда игра запускается',
+        'Closed, it ends with the game; minimized, it waits on the task bar (or in the tray).':
+            'Закрытый — завершается вместе с игрой; свёрнутый — ждёт на панели задач (или в трее).',
+        'Open the launcher again when the game closes':
+            'Снова открывать лаунчер после закрытия игры',
+        'After a crash it always comes back, with the log.':
+            'После вылета он всегда возвращается — с журналом.',
+        'Minimize to the system tray':
+            'Сворачивать в системный трей',
+        'Minimized, the launcher leaves the task bar for an icon next to the clock: click it to open the launcher '
+        'again.':
+            'Свёрнутый лаунчер уходит с панели задач в значок рядом с часами: нажмите на него, чтобы снова открыть '
+            'лаунчер.',
+        'Shortcuts':
+            'Ярлыки',
+        'The desktop shortcut opens this launcher; the Steam entry starts the game straight away with these '
+        'settings.':
+            'Ярлык на рабочем столе открывает этот лаунчер; запись в Steam сразу запускает игру с этими '
+            'настройками.',
+        'Gameplay':
+            'Игровой процесс',
+        "The game's language and sound, and changes to how it plays and its menus.":
+            'Язык и звук игры, а также изменения игрового процесса и меню.',
+        'Starting the game and sound':
+            'Запуск игры и звук',
+        'Game patches for version 1.09, applied at start.':
+            'Патчи игры для версии 1.09, применяются при запуске.',
+        'Use my own servers':
+            'Использовать свои серверы',
+        'Off: the public servers. On: a private server, with the addresses from the person who runs it.':
+            'Выкл.: публичные серверы. Вкл.: частный сервер с адресами от того, кто его держит.',
+        'Key combinations and reserved keys':
+            'Сочетания клавиш и зарезервированные клавиши',
+        'Benchmark for bug reports…':
+            'Бенчмарк для отчётов об ошибках…',
+        'A fixed route in Cathedral Ward for testers: one zip to send.':
+            'Фиксированный маршрут в Соборном округе для тестеров: один zip-файл для отправки.',
+        'The benchmark plays a fixed route in Cathedral Ward on a save of its own, with your graphics settings, in '
+        'fullscreen (about 3 minutes). Your saves and settings stay as they are.\n'
+        '\n'
+        'Leave the mouse, keyboard and controller alone until it ends. Then a zip to send opens in Explorer.':
+            'Бенчмарк проходит фиксированный маршрут в Соборном округе на собственном сохранении, с вашими '
+            'настройками графики, в полноэкранном режиме (около 3 минут). Ваши сохранения и настройки не меняются.\n'
+            '\n'
+            'Не трогайте мышь, клавиатуру и контроллер, пока он не закончится. Затем в Проводнике откроется '
+            'zip-файл для отправки.',
+        'Benchmark finished. Send this file: {}':
+            'Бенчмарк завершён. Отправьте этот файл: {}',
+        'Open':
+            'Открыть',
+        'Quit':
+            'Выйти',
+        'Copy':
+            'Копировать',
+        'The benchmark stopped: {}':
+            'Бенчмарк остановлен: {}',
+        'Vulkan (fsr4vk)':
+            'Vulkan (fsr4vk)',
+        'AMD DX12':
+            'AMD DX12',
+        'Your eboot.bin is not the clean 1.09 one (modified, or from another release). The port cannot patch it: '
+        'the game runs at 30 FPS in 16:9 (ultrawide and the output resolution do not apply), the Game & effects '
+        'options do nothing, and some scenes (like the cutscene after Rom) can freeze.\n'
+        '\n'
+        'Replace eboot.bin with the one from an unmodified 1.09 update.':
+            'Ваш eboot.bin — не чистый файл 1.09 (изменён или из другого релиза). Порт не может его пропатчить: '
+            'игра идёт в 30 FPS в 16:9 (ультраширокий формат и разрешение вывода не применяются), параметры «Игра и '
+            'эффекты» ничего не делают, а некоторые сцены (например, ролик после Ром) могут зависать.\n'
+            '\n'
+            'Замените eboot.bin файлом из неизменённого обновления 1.09.',
+        "Your eboot.bin has been modified (for example with a 60 FPS patch already applied). Part of the port's "
+        'patches cannot be used with it:\n'
+        '\n'
+        '{}\n'
+        '\n'
+        'For every option, replace eboot.bin with the one from an unmodified 1.09 update.':
+            'Ваш eboot.bin изменён (например, в нём уже есть патч 60 FPS). Часть патчей порта с ним использовать нельзя:\n'
+            '\n'
+            '{}\n'
+            '\n'
+            'Чтобы работали все параметры, замените eboot.bin файлом из неизменённого обновления 1.09.',
+        'Resolution':
+            'Разрешение',
+        'The size of the picture. Your goal picks it for this PC; change it here if you like.':
+            'Размер изображения. Ваша цель подбирает его для этого ПК; при желании измените его здесь.',
+        'Saves folder':
+            'Папка сохранений',
+        'Output resolution':
+            'Разрешение вывода',
+        'Quality preset':
+            'Пресет',
+        'Frame cap (unlocked mode)':
+            'Ограничение FPS (режим без ограничения)',
+        'Model detail (LOD)':
+            'Детализация моделей',
+        'Object motion vectors':
+            'Векторы движения объектов',
+        'Sharpening (RCAS)':
+            'Резкость (RCAS)',
+        'Sharpness':
+            'Сила резкости',
+        'Frame generation':
+            'Генерация кадров',
+        'Off':
+            'Выключен',
+        'Game':
+            'Игра',
+        'Choose the folder with eboot.bin':
+            'Выберите папку с eboot.bin',
     },
     # ---- Arabic ----
     'ar': {
