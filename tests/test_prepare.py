@@ -3,7 +3,7 @@ import struct
 import unittest
 import tempfile
 from pathlib import Path
-from prepare import parse_self, inspect_libc, nid
+from prepare import parse_self, inspect_libc, nid, entries, segment
 
 
 def fixture():
@@ -75,6 +75,14 @@ class SelfTests(unittest.TestCase):
         struct.pack_into('<Q', data, 32, 0x100800)
         with self.assertRaisesRegex(ValueError, 'segment index'):
             parse_self(data)
+
+    def test_a_missing_table_names_the_file(self):
+        """Not the bare KeyError number a player saw ("prepare failed: 1627390005")."""
+        with self.assertRaisesRegex(ValueError, r'^eboot\.bin is not the original file: its string table is missing'):
+            entries({0x61000037: 4}, 0x61000035, 0x61000037, 'eboot.bin')
+        with self.assertRaisesRegex(ValueError, r'^sce_module/libc\.prx is not the original file: its dynamic section'):
+            segment([{'type': 1}], 2, 'sce_module/libc.prx')
+        self.assertEqual(entries({1: 8, 2: 16}, 1, 2, 'eboot.bin'), (8, 16))
 
 
 if __name__ == '__main__':

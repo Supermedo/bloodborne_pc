@@ -3467,10 +3467,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         save = (_('✓ Saves found in {}', '✓ Найдены сохранения в {}').format(user) if saves
                 else _('• No saves yet: bring your character from another version, or the game creates them'))
         missing = fsr4_missing()
-        eboot = self.eboot_note() if info else None
+        # Another version's eboot.bin differs anyway (the base game 1.00): its line is the version's, with
+        # the steps to copy the 1.09 update over it.
+        eboot = self.eboot_note() if info and info[1] == PATCH_VERSION else None
         problem = (self.app.get('eboot_check') or {}).get('state') not in (None, 'clean')
         self.check_line('game', eboot or game, (lambda: self.open_topic('eboot_modified')) if eboot and problem else
-                        (lambda: self.show('game')) if not info or info[1] != PATCH_VERSION else None)
+                        (lambda: self.show('game')) if not info else
+                        (lambda: self.open_topic('version')) if info[1] != PATCH_VERSION else None)
         self.check_line('saves', save, lambda: self.show('saves'))
         self.check_line('fsr4', _('• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)')
                         if missing and self.var('upscaler', 'ini').get() == 'fsr4' else '', self.download_fsr4)

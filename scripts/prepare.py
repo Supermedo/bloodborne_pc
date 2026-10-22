@@ -99,17 +99,47 @@ def nid(name):
     return base64.b64encode(digest).decode().rstrip('=').replace('/', '-')
 
 
+# A PS4 program's tables by the program header type or dynamic entry that points at them: named when one
+# is missing (a file another tool converted, or one from another release), where prepare used to fail
+# with the entry's number alone ("prepare failed: 1627390005").
+TABLES = {2: 'dynamic section', 0x61000000: 'library data', 0x61000035: 'string table', 0x61000037: 'string table',
+          0x61000039: 'symbol table', 0x6100003f: 'symbol table', 0x61000029: 'relocation table',
+          0x6100002d: 'relocation table', 0x6100002f: 'jump table', 0x61000031: 'jump table'}
+
+
+def not_original(name, key):
+    return ValueError(f'{name} is not the original file: its {TABLES.get(key, hex(key))} is missing '
+                      '(converted by another tool, or from another release)')
+
+
+def segment(ph, kind, name):
+    """The program header of that type, or why the file cannot be used."""
+    found = next((p for p in ph if p['type'] == kind), None)
+    if found is None:
+        raise not_original(name, kind)
+    return found
+
+
+def entries(tags, start, size, name):
+    """A table's offset and size from the dynamic section, or why the file cannot be used."""
+    for key in (start, size):
+        if key not in tags:
+            raise not_original(name, key)
+    return tags[start], tags[size]
+
+
 def inspect_libc(path):
     """Prove that this dump's _init_env is exactly RET; never assume it."""
+    name = f'{path.parent.name}/{path.name}'
     source = path.read_bytes()
     elf, header, ph, _, missing = parse_self(source)
-    dynamic = next(p for p in ph if p['type'] == 2)
+    dynamic = segment(ph, 2, name)
     tags = dict(unpack('<QQ', elf, pos) for pos in
                 range(dynamic['offset'], dynamic['offset'] + dynamic['filesz'], 16))
-    lib = next(p for p in ph if p['type'] == 0x61000000)
+    lib = segment(ph, 0x61000000, name)
     blob = span(elf, lib['offset'], lib['filesz'])
-    strings = span(blob, tags[0x61000035], tags[0x61000037])
-    syms = span(blob, tags[0x61000039], tags[0x6100003f])
+    strings = span(blob, *entries(tags, 0x61000035, 0x61000037, name))
+    syms = span(blob, *entries(tags, 0x61000039, 0x6100003f, name))
     evidence = {'sha256': hashlib.sha256(source).hexdigest(), 'init_env_is_ret': False}
     for pos in range(0, len(syms), 24):
         name, info, other, section, value, size = unpack('<IBBHQQ', syms, pos)
@@ -145,7 +175,7 @@ def prepare(game, out):
         if p['filesz'] > p['memsz']:
             raise ValueError('segment file size exceeds memory size')
         image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
-    dp = next(p for p in ph if p['type'] == 2)
+    dp = segment(ph, 2, 'eboot.bin')
     dyn = []
     for pos in range(dp['offset'], dp['offset'] + dp['filesz'], 16):
         tag, value = unpack('<QQ', elf, pos)
@@ -153,13 +183,13 @@ def prepare(game, out):
             break
         dyn.append((tag, value))
     tags = dict(dyn)
-    lib = next(p for p in ph if p['type'] == 0x61000000)
+    lib = segment(ph, 0x61000000, 'eboot.bin')
     blob = span(elf, lib['offset'], lib['filesz'])
-    strings = span(blob, tags[0x61000035], tags[0x61000037])
+    strings = span(blob, *entries(tags, 0x61000035, 0x61000037, 'eboot.bin'))
     def string(off):
         span(strings, off, 1)
         return strings[off:strings.index(0, off)].decode('ascii')
-    syms = span(blob, tags[0x61000039], tags[0x6100003f])
+    syms = span(blob, *entries(tags, 0x61000039, 0x6100003f, 'eboot.bin'))
     if len(syms) % 24:
         raise ValueError('bad symbol table size')
     symbols = []
@@ -168,7 +198,7 @@ def prepare(game, out):
         symbols.append(dict(name=string(name), type=info & 15, section=shndx, value=value, size=sz))
     relocs, counts, imports = [], collections.Counter(), {}
     for offset_tag, size_tag in ((0x61000029, 0x6100002d), (0x6100002f, 0x61000031)):
-        table = span(blob, tags[offset_tag], tags[size_tag])
+        table = span(blob, *entries(tags, offset_tag, size_tag, 'eboot.bin'))
         if len(table) % 24:
             raise ValueError('bad relocation table size')
         for pos in range(0, len(table), 24):

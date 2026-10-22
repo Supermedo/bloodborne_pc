@@ -73,6 +73,14 @@ TOPICS = {
         'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
         'Bloodborne.',
         ['Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).']),
+    'program_files': (
+        'A program file of the game is not the original',
+        'eboot.bin or a file in sce_module was converted by another tool or comes from another release (the log '
+        'says "is not the original file"). The port reads them as they come from a dump of your own game.',
+        ['Put the base game and the 1.09 update into two new, empty folders again.',
+         'Copy everything from the update folder into the base game folder and replace the files.',
+         'Choose that folder in the launcher: eboot.bin is exactly 93,825,704 bytes, and sce_module comes from '
+         'the same dump.']),
     'version': (
         'The game is not version 1.09',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at '
@@ -167,9 +175,9 @@ TOPICS = {
         'Windows shows this for programs it does not know yet.',
         ['Click More info, then Run anyway.']),
 }
-TOPIC_ORDER = ['eboot_modified', 'eboot_truncated', 'eboot_unreadable', 'version', 'update_only', 'empty_files',
-               'page_file', 'antivirus', 'location', 'save_lost', 'controller', 'black_screen', 'vram', 'driver',
-               'shader_cache', 'smartscreen']
+TOPIC_ORDER = ['eboot_modified', 'eboot_truncated', 'eboot_unreadable', 'program_files', 'version', 'update_only',
+               'empty_files', 'page_file', 'antivirus', 'location', 'save_lost', 'controller', 'black_screen', 'vram',
+               'driver', 'shader_cache', 'smartscreen']
 # Buttons under a topic's steps: (text, launcher method). They do the step for the player.
 TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'page_file': [('Open the memory settings', 'open_memory_settings')],
@@ -189,6 +197,7 @@ LOG_HINTS = [
     (r'gxshader\.shaderbnd\.dcx', 'update_only'),
     (r'not the 01\.09 build|Lance McDonald', 'eboot_modified'),
     (r'expected PS4 SELF', 'eboot_unreadable'),
+    (r'is not the original file', 'program_files'),
     (r'ErrorOutOfDeviceMemory|Texture cache: memory pressure', 'vram'),
     (r'ErrorDeviceLost|device lost', 'driver'),
 ]
@@ -331,7 +340,17 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
         state = cached.get('state') if cached and cached.get('key') == key else eboot_state(game)[0]
         eboot = {'key': key, 'state': state}
         size = number(stat.st_size)
-        checks.append({
+        values = {}
+        try:
+            from prepare import sfo
+            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
+        except (OSError, ValueError, ImportError):
+            pass
+        version = values.get('APP_VER')
+        # Another version's eboot.bin is not 1.09's anyway (the base game 1.00): the version line below
+        # says what to do, with the update's steps.
+        other_version = state == 'modified' and version and version != '01.09'
+        checks.append(None if other_version else {
             'clean': ('ok', None, _('eboot.bin is the clean 1.09 file ({} bytes).').format(size)),
             'lance': ('bad', 'eboot_modified', _('eboot.bin has Lance McDonald\'s 60 FPS patch built in: the game '
                                                  'crashes with it. Use the clean one.')),
@@ -341,13 +360,8 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
                           .format(size, number(EBOOT_SIZE))),
             'unreadable': ('bad', 'eboot_unreadable', _('eboot.bin cannot be read ({} bytes).').format(size)),
         }.get(state, ('bad', None, _('eboot.bin cannot be read.'))))
-        values = {}
-        try:
-            from prepare import sfo
-            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
-        except (OSError, ValueError, ImportError):
-            pass
-        version = values.get('APP_VER')
+        if checks[-1] is None:
+            checks.pop()
         if version and version != '01.09':
             checks.append(('warn', 'version', _('Game version {}: it needs the 1.09 update.').format(version)))
         scan = scan_game(game)
