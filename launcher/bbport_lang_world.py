@@ -925,6 +925,22 @@ WORLD = {
             'Папка игры: та, в которой прямо лежат eboot.bin, sce_module, sce_sys и dvdroot_ps4.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Игра завершилась с ошибкой (код {}). Причина указана в её журнале:',
+        'Files of different versions are mixed':
+            'Смешаны файлы разных версий',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Программа порта (bin\\bb-probe.exe) и его скрипты из разных версий — например, тестовая сборка '
+            'распакована поверх более старой версии или скопирована лишь часть пакета. Тогда игра останавливается '
+            'при запуске на чёрном экране (в журнале: «bad patch entry»).',
+        'Download the whole package of the version you want to play.':
+            'Скачайте весь пакет той версии, в которую хотите играть.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Распакуйте всё поверх этой папки с заменой файлов или в новую пустую папку.',
+        'Files of different versions in this installation: {}.':
+            'Файлы разных версий в этой установке: {}.',
+        "The port's files all belong to version {}.":
+            'Все файлы порта относятся к версии {}.',
         'The game folder is complete ({} files, {} GB).':
             'Папка игры полная (файлов: {}, {} ГБ).',
         'The game is not version 1.09':
@@ -2476,6 +2492,22 @@ WORLD = {
             'مجلد اللعبة: المجلد الذي يحتوي eboot.bin وsce_module وsce_sys وdvdroot_ps4 مباشرة.',
         'The game ended with an error (code {}). Its log names the cause:':
             'انتهت اللعبة بخطأ (الرمز {}). يذكر سجلها السبب:',
+        'Files of different versions are mixed':
+            'ملفات من إصدارات مختلفة مختلطة',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'برنامج المنفذ (bin\\bb-probe.exe) ونصوصه البرمجية من إصدارات مختلفة، مثلًا بعد فك نسخة تجريبية فوق '
+            'إصدار أقدم أو نسخ جزء من الحزمة فقط. عندها تتوقف اللعبة عند البدء بشاشة سوداء (يذكر السجل «bad patch '
+            'entry»).',
+        'Download the whole package of the version you want to play.':
+            'نزّل الحزمة الكاملة للإصدار الذي تريد اللعب به.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'فك ضغط كل شيء فوق هذا المجلد مع استبدال الملفات، أو في مجلد جديد فارغ.',
+        'Files of different versions in this installation: {}.':
+            'ملفات من إصدارات مختلفة في هذا التثبيت: {}.',
+        "The port's files all belong to version {}.":
+            'جميع ملفات المنفذ تنتمي إلى الإصدار {}.',
         'The game folder is complete ({} files, {} GB).':
             'مجلد اللعبة مكتمل ({} ملف، {} GB).',
         'The game is not version 1.09':
@@ -4064,6 +4096,22 @@ WORLD = {
             'dentro.',
         'The game ended with an error (code {}). Its log names the cause:':
             'El juego terminó con un error (código {}). Su registro indica la causa:',
+        'Files of different versions are mixed':
+            'Hay archivos de versiones distintas mezclados',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'El programa del port (bin\\bb-probe.exe) y sus scripts son de versiones distintas, por ejemplo tras '
+            'descomprimir una versión de prueba sobre una versión anterior o copiar solo parte de un paquete. El '
+            'juego se detiene al iniciar con la pantalla en negro (el registro dice «bad patch entry»).',
+        'Download the whole package of the version you want to play.':
+            'Descarga el paquete completo de la versión que quieras jugar.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Descomprímelo todo sobre esta carpeta reemplazando los archivos, o en una carpeta nueva y vacía.',
+        'Files of different versions in this installation: {}.':
+            'Archivos de versiones distintas en esta instalación: {}.',
+        "The port's files all belong to version {}.":
+            'Todos los archivos del port son de la versión {}.',
         'The game folder is complete ({} files, {} GB).':
             'La carpeta del juego está completa ({} archivos, {} GB).',
         'The game is not version 1.09':
@@ -5651,6 +5699,22 @@ WORLD = {
             'A pasta do jogo: a que tem eboot.bin, sce_module, sce_sys e dvdroot_ps4 diretamente dentro.',
         'The game ended with an error (code {}). Its log names the cause:':
             'O jogo terminou com um erro (código {}). O registro dele indica a causa:',
+        'Files of different versions are mixed':
+            'Arquivos de versões diferentes estão misturados',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'O programa do port (bin\\bb-probe.exe) e seus scripts são de versões diferentes, por exemplo depois de '
+            'extrair uma versão de teste sobre uma versão mais antiga ou copiar só parte de um pacote. O jogo então '
+            'para no início com tela preta (o log diz "bad patch entry").',
+        'Download the whole package of the version you want to play.':
+            'Baixe o pacote completo da versão que você quer jogar.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Extraia tudo sobre esta pasta substituindo os arquivos, ou em uma pasta nova e vazia.',
+        'Files of different versions in this installation: {}.':
+            'Arquivos de versões diferentes nesta instalação: {}.',
+        "The port's files all belong to version {}.":
+            'Todos os arquivos do port são da versão {}.',
         'The game folder is complete ({} files, {} GB).':
             'A pasta do jogo está completa ({} arquivos, {} GB).',
         'The game is not version 1.09':
@@ -7242,6 +7306,23 @@ WORLD = {
             'dvdroot_ps4.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Le jeu s’est terminé avec une erreur (code {}). Son journal en indique la cause :',
+        'Files of different versions are mixed':
+            'Des fichiers de versions différentes sont mélangés',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Le programme du port (bin\\bb-probe.exe) et ses scripts viennent de versions différentes, par exemple '
+            'après avoir décompressé une version de test sur une version plus ancienne ou copié seulement une '
+            "partie d'un paquet. Le jeu s'arrête alors au démarrage sur un écran noir (le journal indique « bad "
+            'patch entry »).',
+        'Download the whole package of the version you want to play.':
+            'Téléchargez le paquet complet de la version à laquelle vous voulez jouer.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Décompressez tout dans ce dossier en remplaçant les fichiers, ou dans un nouveau dossier vide.',
+        'Files of different versions in this installation: {}.':
+            'Fichiers de versions différentes dans cette installation : {}.',
+        "The port's files all belong to version {}.":
+            'Tous les fichiers du port appartiennent à la version {}.',
         'The game folder is complete ({} files, {} GB).':
             'Le dossier du jeu est complet ({} fichiers, {} Go).',
         'The game is not version 1.09':
@@ -8835,6 +8916,22 @@ WORLD = {
             'dvdroot_ps4.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Il gioco si è chiuso con un errore (codice {}). Il suo registro indica la causa:',
+        'Files of different versions are mixed':
+            'Sono mescolati file di versioni diverse',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Il programma del port (bin\\bb-probe.exe) e i suoi script vengono da versioni diverse, per esempio dopo '
+            'aver estratto una versione di prova sopra una versione più vecchia o copiato solo parte di un '
+            'pacchetto. Il gioco si ferma allora all\'avvio con lo schermo nero (il log dice "bad patch entry").',
+        'Download the whole package of the version you want to play.':
+            'Scarica il pacchetto completo della versione che vuoi giocare.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Estrai tutto sopra questa cartella sostituendo i file, oppure in una cartella nuova e vuota.',
+        'Files of different versions in this installation: {}.':
+            'File di versioni diverse in questa installazione: {}.',
+        "The port's files all belong to version {}.":
+            'Tutti i file del port appartengono alla versione {}.',
         'The game folder is complete ({} files, {} GB).':
             'La cartella del gioco è completa ({} file, {} GB).',
         'The game is not version 1.09':
@@ -10424,6 +10521,22 @@ WORLD = {
             'Folder gry: ten, w którym bezpośrednio leżą eboot.bin, sce_module, sce_sys i dvdroot_ps4.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Gra zakończyła się błędem (kod {}). Jej dziennik podaje przyczynę:',
+        'Files of different versions are mixed':
+            'Pomieszane są pliki z różnych wersji',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Program portu (bin\\bb-probe.exe) i jego skrypty pochodzą z różnych wersji, np. po rozpakowaniu wersji '
+            'testowej na starszą wersję albo skopiowaniu tylko części paczki. Gra zatrzymuje się wtedy przy starcie '
+            'na czarnym ekranie (w logu: „bad patch entry”).',
+        'Download the whole package of the version you want to play.':
+            'Pobierz całą paczkę wersji, w którą chcesz grać.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Rozpakuj wszystko do tego folderu, zastępując pliki, albo do nowego, pustego folderu.',
+        'Files of different versions in this installation: {}.':
+            'Pliki z różnych wersji w tej instalacji: {}.',
+        "The port's files all belong to version {}.":
+            'Wszystkie pliki portu należą do wersji {}.',
         'The game folder is complete ({} files, {} GB).':
             'Folder gry jest kompletny (pliki: {}, {} GB).',
         'The game is not version 1.09':
@@ -12013,6 +12126,22 @@ WORLD = {
             'Oyun klasörü: içinde doğrudan eboot.bin, sce_module, sce_sys ve dvdroot_ps4 bulunan klasör.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Oyun bir hatayla kapandı (kod {}). Oyunun günlüğü nedeni belirtiyor:',
+        'Files of different versions are mixed':
+            'Farklı sürümlerin dosyaları karışmış',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Portun programı (bin\\bb-probe.exe) ve betikleri farklı sürümlerden; örneğin bir test sürümü daha eski '
+            'bir sürümün üzerine açıldığında veya paketin yalnızca bir kısmı kopyalandığında. Oyun bu durumda '
+            'açılışta siyah ekranda kalır (günlükte "bad patch entry" yazar).',
+        'Download the whole package of the version you want to play.':
+            'Oynamak istediğiniz sürümün paketinin tamamını indirin.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Hepsini dosyaların yerine geçecek şekilde bu klasörün üzerine ya da yeni, boş bir klasöre açın.',
+        'Files of different versions in this installation: {}.':
+            'Bu kurulumda farklı sürümlerin dosyaları var: {}.',
+        "The port's files all belong to version {}.":
+            'Portun tüm dosyaları {} sürümüne ait.',
         'The game folder is complete ({} files, {} GB).':
             'Oyun klasörü eksiksiz ({} dosya, {} GB).',
         'The game is not version 1.09':
@@ -13600,6 +13729,20 @@ WORLD = {
             '游戏文件夹：直接包含 eboot.bin、sce_module、sce_sys 和 dvdroot_ps4 的那个。',
         'The game ended with an error (code {}). Its log names the cause:':
             '游戏因错误而结束（代码 {}）。日志中给出了原因：',
+        'Files of different versions are mixed':
+            '不同版本的文件混在了一起',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '移植版的程序（bin\\bb-probe.exe）和它的脚本来自不同版本，例如把测试版解压到旧版本上，或只复制了软件包的一部分。游戏会在启动时停在黑屏（日志中显示“bad patch entry”）。',
+        'Download the whole package of the version you want to play.':
+            '下载你想玩的那个版本的完整软件包。',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            '把全部内容解压到此文件夹并替换文件，或解压到一个新的空文件夹。',
+        'Files of different versions in this installation: {}.':
+            '此安装中有不同版本的文件：{}。',
+        "The port's files all belong to version {}.":
+            '移植版的文件全部属于版本 {}。',
         'The game folder is complete ({} files, {} GB).':
             '游戏文件夹完整（{} 个文件，{} GB）。',
         'The game is not version 1.09':
@@ -15182,6 +15325,21 @@ WORLD = {
             'ゲームフォルダー：eboot.bin、sce_module、sce_sys、dvdroot_ps4 が直下にあるフォルダーです。',
         'The game ended with an error (code {}). Its log names the cause:':
             'ゲームがエラーで終了しました（コード {}）。ログに原因が記録されています：',
+        'Files of different versions are mixed':
+            '異なるバージョンのファイルが混在しています',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '移植版のプログラム（bin\\bb-probe.exe）とスクリプトのバージョンが異なります。たとえばテスト版を古いバージョンの上に展開した場合や、パッケージの一部だけをコピーした場合です。ゲームは起動時に黒い画面のまま止まります（ログに「bad '
+            'patch entry」と表示されます）。',
+        'Download the whole package of the version you want to play.':
+            'プレイしたいバージョンのパッケージ一式をダウンロードしてください。',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'すべてをこのフォルダーに上書きして展開するか、新しい空のフォルダーに展開してください。',
+        'Files of different versions in this installation: {}.':
+            'このインストールに異なるバージョンのファイルがあります：{}。',
+        "The port's files all belong to version {}.":
+            '移植版のファイルはすべてバージョン {} のものです。',
         'The game folder is complete ({} files, {} GB).':
             'ゲームフォルダーはそろっています（{} ファイル、{} GB）。',
         'The game is not version 1.09':
@@ -16766,6 +16924,21 @@ WORLD = {
             '게임 폴더: eboot.bin, sce_module, sce_sys, dvdroot_ps4가 바로 안에 있는 폴더입니다.',
         'The game ended with an error (code {}). Its log names the cause:':
             '게임이 오류로 종료되었습니다 (코드 {}). 로그에 나온 원인:',
+        'Files of different versions are mixed':
+            '서로 다른 버전의 파일이 섞여 있습니다',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '포트 프로그램(bin\\bb-probe.exe)과 스크립트의 버전이 서로 다릅니다. 예를 들어 테스트 빌드를 이전 버전 위에 풀었거나 패키지의 일부만 복사한 경우입니다. 그러면 게임이 '
+            '시작할 때 검은 화면에서 멈춥니다(로그에 "bad patch entry"라고 나옵니다).',
+        'Download the whole package of the version you want to play.':
+            '플레이하려는 버전의 전체 패키지를 다운로드하세요.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            '모든 파일을 이 폴더에 덮어써서 풀거나, 새로운 빈 폴더에 푸세요.',
+        'Files of different versions in this installation: {}.':
+            '이 설치에 서로 다른 버전의 파일이 있습니다: {}.',
+        "The port's files all belong to version {}.":
+            '포트 파일이 모두 {} 버전입니다.',
         'The game folder is complete ({} files, {} GB).':
             '게임 폴더가 완전합니다 (파일 {}개, {} GB).',
         'The game is not version 1.09':

@@ -91,6 +91,13 @@ TOPICS = {
         'Unpacking broke: some files have 0 bytes.',
         ['Put the base game and the 1.09 update into new, empty folders again, then copy the update into the '
          'base game again.']),
+    'mixed_versions': (
+        'Files of different versions are mixed',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").',
+        ['Download the whole package of the version you want to play.',
+         'Unpack all of it over this folder and replace the files, or into a new, empty folder.']),
     'page_file': (
         'Windows has too little memory for the start',
         'The game reserves about 6 GB at its start (10 GB at 1440p and 4K) in one block, from the RAM and the '
@@ -180,6 +187,7 @@ TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'update_only': [('Choose the game folder', 'choose_game_page')],
                  'save_lost': [('Open the backups', 'open_backups')],
                  'controller': [('Open the controller test', 'open_controller_test')]}
+TOPIC_ORDER += [key for key in TOPICS if key not in TOPIC_ORDER]  # topics added later: at the end
 
 # The game's and run.py's messages that name the cause of a failed start or crash.
 LOG_HINTS = [
@@ -187,6 +195,7 @@ LOG_HINTS = [
     (r'WinError (?:32|5)\b|PermissionError', 'antivirus'),
     (r'out of bounds: 0x', 'eboot_truncated'),
     (r'gxshader\.shaderbnd\.dcx', 'update_only'),
+    (r'bad patch entry|Files: \d+ differ from the package', 'mixed_versions'),
     (r'not the 01\.09 build|Lance McDonald', 'eboot_modified'),
     (r'expected PS4 SELF', 'eboot_unreadable'),
     (r'ErrorOutOfDeviceMemory|Texture cache: memory pressure', 'vram'),
@@ -375,9 +384,30 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
     elif status:
         checks.append(('ok', None, _('Memory for the start: {} GB free (RAM and page file), about {} GB '
                                      'needed.').format(number(status[0], 1), memory_needed(output_res))))
+    version, differ = files_check(port_dir)
+    if differ:
+        checks.append(('bad', 'mixed_versions', _('Files of different versions in this installation: {}.').format(files_text(differ))))
+    elif version:
+        checks.append(('ok', None, _("The port's files all belong to version {}.").format(version)))
     if location_problem(port_dir):
         checks.append(('warn', 'location', _('The port is in {}.').format(port_dir)))
     return checks, eboot
+
+
+def files_check(port_dir, quick=False):
+    """scripts/package_files.py's (version, [files that differ]) for this installation; (None, []) for a build
+    from the sources (no list)."""
+    if not port_dir:
+        return None, []
+    try:
+        from package_files import check
+    except ImportError:
+        return None, []
+    return check(port_dir, quick)
+
+
+def files_text(differ):
+    return ', '.join(name.replace('/', '\\') for name in differ[:3]) + (' …' if len(differ) > 3 else '')
 
 
 # ---- the Help page -------------------------------------------------------------------------------
@@ -582,6 +612,14 @@ class HelpMixin:
                     '\n\n' + _('Start anyway?'))
             if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
                 self.open_topic('page_file')
+                return False
+        # Program files of different versions: the game would stop at a black screen ("bad patch entry").
+        _version, differ = files_check(L.PORT_DIR if L else None, quick=True)
+        if differ:
+            text = (_('Files of different versions in this installation: {}.').format(files_text(differ)) + '\n\n' +
+                    _(TOPICS['mixed_versions'][1]) + '\n\n' + _('Start anyway?'))
+            if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
+                self.open_topic('mixed_versions')
                 return False
         return True
 

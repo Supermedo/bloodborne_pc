@@ -123,6 +123,21 @@ def no_console():
     return 0 if ctypes.windll.kernel32.GetConsoleWindow() else subprocess.CREATE_NO_WINDOW
 
 
+def files_note(port):
+    """A line for the log when the program files are of different versions (scripts/package_files.py): the game
+    then stops with "bad patch entry" (a black screen), and the launcher's Help names the fix. None when they
+    match, or without the package's list (a build from the sources)."""
+    try:
+        sys.path.insert(0, str(Path(port) / 'scripts'))
+        from package_files import check
+        version, differ = check(port, quick=True)
+    except Exception:  # a check: never in the way of a start
+        return None
+    if not differ:
+        return None
+    return f'Files: {len(differ)} differ from the package {version}: {", ".join(differ[:5])}'
+
+
 def run_script(name, *args, capture=False, optional=False):
     """Runs scripts/<name>. optional: a failure returns False instead of stopping the launch."""
     # Inside the packaged Bloodborne.exe (PyInstaller) the executable runs scripts itself.
@@ -307,6 +322,9 @@ def main():
     # As run.sh: relative paths (BB_GAME_DIR, BB_DATA_DIR, fsr4_shaders/) are from the port.
     os.chdir(PORT)
     env = os.environ
+    note = files_note(PORT)
+    if note:
+        print(note)
     data = Path(env.get('BB_DATA_DIR', PORT))
     out = data / 'out'
     out.mkdir(parents=True, exist_ok=True)

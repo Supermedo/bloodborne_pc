@@ -45,6 +45,22 @@ HELP = {'de': {
         'Speicher für den Start: {} GB frei (RAM und Auslagerungsdatei), etwa {} GB nötig.',
     'Saved: {}': 'Gespeichert: {}', 'Empty files in the game folder, for example {}.':
         'Leere Dateien im Spielordner, zum Beispiel {}.',
+    'Files of different versions are mixed':
+        'Dateien verschiedener Versionen sind gemischt',
+    "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a test "
+    'build was unpacked over an older version or only part of a package was copied. The game then stops at the '
+    'start with a black screen (the log says "bad patch entry").':
+        'Das Programm des Ports (bin\\bb-probe.exe) und seine Skripte stammen aus verschiedenen Versionen, zum '
+        'Beispiel wenn eine Testversion über eine ältere Version entpackt oder nur ein Teil eines Pakets kopiert '
+        'wurde. Das Spiel bleibt dann beim Start mit schwarzem Bild stehen (im Log steht „bad patch entry“).',
+    'Download the whole package of the version you want to play.':
+        'Lade das ganze Paket der Version herunter, die du spielen willst.',
+    'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+        'Entpacke alles über diesen Ordner und ersetze die Dateien, oder in einen neuen, leeren Ordner.',
+    'Files of different versions in this installation: {}.':
+        'Dateien verschiedener Versionen in dieser Installation: {}.',
+    "The port's files all belong to version {}.":
+        'Die Dateien des Ports gehören alle zu Version {}.',
     'The game folder is complete ({} files, {} GB).': 'Der Spielordner ist vollständig ({} Dateien, {} GB).',
     'The page file is off. ': 'Die Auslagerungsdatei ist aus. ', 'Could not save it: {}': 'Speichern fehlgeschlagen: {}',
     'eboot.bin is the clean 1.09 file ({} bytes).': 'eboot.bin ist die saubere 1.09-Datei ({} Bytes).',

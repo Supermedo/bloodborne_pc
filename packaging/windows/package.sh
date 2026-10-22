@@ -111,6 +111,8 @@ for package in protobuf abseil-cpp openssl miniupnpc zlib; do
     if [[ -f $license ]]; then cp "$license" "$dest/licenses/$package-LICENSE.txt"; fi
 done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
+# The program files of this version (bbport-files.json): run.py and Help find mixed versions with it.
+out/pyenv/Scripts/python.exe scripts/package_files.py --write "$dest" "$(sed -n "s/^VERSION = '\(.*\)'$/\1/p" launcher/bbport_launcher_win.py)"
 mkdir -p dist
 # Publish this source archive alongside the Windows ZIP; SOURCE.txt names both the
 # companion archive and its original download. Keep it outside the playable folder.
