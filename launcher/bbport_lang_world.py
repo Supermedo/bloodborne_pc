@@ -743,6 +743,12 @@ WORLD = {
             'Как разрешение вывода',
         'Save':
             'Сохранение',
+        'Collecting the report… (up to a minute)':
+            'Собираем отчёт… (до минуты)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool не создал zip-файл.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Краткая сводка в буфере обмена: вставьте её в свой пост в #help, затем приложите zip-файл.',
         'Save a report':
             'Сохранить отчёт',
         'Save as zip':
@@ -2270,6 +2276,12 @@ WORLD = {
             'مثل دقة الإخراج',
         'Save':
             'ملف الحفظ',
+        'Collecting the report… (up to a minute)':
+            'جارٍ جمع التقرير… (حتى دقيقة)',
+        'The BB Report Tool made no zip.':
+            'لم تُنشئ أداة BB Report Tool ملف zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'الملخص في الحافظة: الصقه في منشورك في \u200e#help ثم أرفق ملف zip.',
         'Save a report':
             'حفظ تقرير',
         'Save as zip':
@@ -3857,6 +3869,12 @@ WORLD = {
             'Igual que la resolución de salida',
         'Save':
             'Partida',
+        'Collecting the report… (up to a minute)':
+            'Recopilando el informe… (hasta un minuto)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool no creó ningún zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'El resumen está en el portapapeles: pégalo en tu publicación de #help y luego adjunta el zip.',
         'Save a report':
             'Guardar un informe',
         'Save as zip':
@@ -5447,6 +5465,12 @@ WORLD = {
             'Igual à resolução de saída',
         'Save':
             'Save',
+        'Collecting the report… (up to a minute)':
+            'Coletando o relatório… (até um minuto)',
+        'The BB Report Tool made no zip.':
+            'O BB Report Tool não criou nenhum zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'O resumo está na área de transferência: cole-o no seu post em #help e depois anexe o zip.',
         'Save a report':
             'Salvar um relatório',
         'Save as zip':
@@ -7035,6 +7059,12 @@ WORLD = {
             'Comme la résolution de sortie',
         'Save':
             'Sauvegarde',
+        'Collecting the report… (up to a minute)':
+            'Création du rapport… (jusqu’à une minute)',
+        'The BB Report Tool made no zip.':
+            "BB Report Tool n'a créé aucun zip.",
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Le résumé est dans le presse-papiers : collez-le dans votre message #help, puis joignez le zip.',
         'Save a report':
             'Enregistrer un rapport',
         'Save as zip':
@@ -8628,6 +8658,12 @@ WORLD = {
             'Come la risoluzione di uscita',
         'Save':
             'Salvataggio',
+        'Collecting the report… (up to a minute)':
+            'Raccolta del rapporto… (fino a un minuto)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool non ha creato nessuno zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Il riepilogo è negli appunti: incollalo nel tuo post in #help, poi allega lo zip.',
         'Save a report':
             'Salva un rapporto',
         'Save as zip':
@@ -10218,6 +10254,12 @@ WORLD = {
             'Jak rozdzielczość wyjścia',
         'Save':
             'Zapis',
+        'Collecting the report… (up to a minute)':
+            'Zbieranie raportu… (do minuty)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool nie utworzył pliku zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Podsumowanie jest w schowku: wklej je do swojego posta na #help, a potem dołącz plik zip.',
         'Save a report':
             'Zapisz raport',
         'Save as zip':
@@ -11807,6 +11849,12 @@ WORLD = {
             'Çıkış çözünürlüğüyle aynı',
         'Save':
             'Kayıt',
+        'Collecting the report… (up to a minute)':
+            'Rapor hazırlanıyor… (bir dakikaya kadar)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool bir zip dosyası oluşturmadı.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Özet panoda: #help gönderinize yapıştırın, ardından zip dosyasını ekleyin.',
         'Save a report':
             'Rapor kaydet',
         'Save as zip':
@@ -13394,6 +13442,12 @@ WORLD = {
             '与输出分辨率相同',
         'Save':
             '存档',
+        'Collecting the report… (up to a minute)':
+            '正在收集报告…（最多一分钟）',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool 未生成 zip 文件。',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '摘要已在剪贴板中：将其粘贴到你在 #help 的帖子里，然后附上 zip 文件。',
         'Save a report':
             '保存报告',
         'Save as zip':
@@ -14976,6 +15030,12 @@ WORLD = {
             '出力解像度と同じ',
         'Save':
             'セーブデータ',
+        'Collecting the report… (up to a minute)':
+            'レポートを作成しています…（最大 1 分）',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool は zip を作成しませんでした。',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '概要はクリップボードにあります：#help の投稿に貼り付けてから、zip を添付してください。',
         'Save a report':
             'レポートを保存',
         'Save as zip':
@@ -16560,6 +16620,12 @@ WORLD = {
             '출력 해상도와 같게',
         'Save':
             '세이브',
+        'Collecting the report… (up to a minute)':
+            '보고서를 수집하는 중…(최대 1분)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool이 zip 파일을 만들지 못했습니다.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '요약이 클립보드에 있습니다: #help 게시물에 붙여넣은 다음 zip 파일을 첨부하세요.',
         'Save a report':
             '보고서 저장',
         'Save as zip':

@@ -416,6 +416,7 @@ class HelpMixin:
         row.pack(anchor='w', pady=(px(10), 0))
         button = ttk.Button(row, text=_('Save a report'), style='Card.Accent.TButton', command=self.save_report)
         button.pack(side='left')
+        self.report_button = button
         self.index_entry(button, _('Save a report'), key='button:report')
         ttk.Button(row, text=_('Copy a summary'), style='Card.TButton', command=self.copy_diagnostics).pack(
             side='left', padx=(px(8), 0))
@@ -604,6 +605,66 @@ class HelpMixin:
             self.open_topic(topics[0])
 
     def save_report(self):
+        """The BB Report Tool's zip, the one the Discord helpers ask for: run without its window into
+        <bbport>/reports, then shown selected in Explorer with its summary in the clipboard for the #help
+        post. Without the tool (a build from the sources): the launcher's own zip on the desktop."""
+        import subprocess
+        import time
+        tool = report_tool()
+        if not tool:
+            return self.save_own_report()
+        self.collect()  # the tool reads the settings from the files
+        folder = L.DATA_DIR / 'reports'
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            self.report_note.configure(text=_('Could not save it: {}').format(error), fg=theme.BLOOD_LIGHT)
+            return
+        self.report_button.state(['disabled'])
+        self.report_note.configure(text=_('Collecting the report… (up to a minute)'), fg=theme.MUTED)
+        # BBTOOL_*: the port, its settings and version, and the folder for the zip; it asks nothing then.
+        env = {**os.environ, 'BBTOOL': str(tool), 'BBTOOL_PORT': str(L.PORT_DIR),
+               'BBTOOL_SETTINGS': str(L.CONFIG_FILE), 'BBTOOL_VERSION': L.VERSION, 'BBTOOL_OUT': str(folder)}
+        started = time.time()
+
+        def work():
+            error = None
+            try:
+                subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                                'Invoke-Expression ([IO.File]::ReadAllText($env:BBTOOL))'], env=env,
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=300, creationflags=L.NO_WINDOW)
+            except (OSError, subprocess.TimeoutExpired) as failure:
+                error = failure
+            made = sorted((p for p in folder.glob('BB-Report-*.zip') if p.stat().st_mtime >= started - 2),
+                          key=lambda p: p.stat().st_mtime)
+            self.ui_calls.put(lambda: self.report_done(made[-1] if made else None, error))
+        threading.Thread(target=work, daemon=True).start()
+
+    def report_done(self, archive, error=None):
+        """The report is there (or not): Explorer with it selected, its summary in the clipboard."""
+        import subprocess
+        import zipfile
+        self.report_button.state(['!disabled'])
+        if archive is None:
+            why = error or _('The BB Report Tool made no zip.')
+            self.report_note.configure(text=_('Could not save it: {}').format(why), fg=theme.BLOOD_LIGHT)
+            return
+        text = _('Saved: {}').format(archive)
+        try:
+            with zipfile.ZipFile(archive) as z:
+                summary = z.read('report.txt').decode('utf-8-sig', errors='replace').strip()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(summary)
+            text += '\n' + _('Its summary is in the clipboard: paste it into your #help post, then attach the zip.')
+        except (OSError, KeyError, zipfile.BadZipFile):
+            pass
+        self.report_note.configure(text=text, fg=theme.GOLD_LIGHT)
+        try:
+            subprocess.Popen(['explorer', '/select,', str(archive)])
+        except OSError:
+            pass
+
+    def save_own_report(self):
         """A zip on the desktop for asking for help: the log, the settings without passwords, this PC
         and the checks."""
         import json
@@ -628,6 +689,14 @@ class HelpMixin:
             self.report_note.configure(text=_('Saved: {}').format(target), fg=theme.GOLD_LIGHT)
         except OSError as error:
             self.report_note.configure(text=_('Could not save it: {}').format(error), fg=theme.BLOOD_LIGHT)
+
+
+def report_tool():
+    """BB-Report-Tool.bat beside Bloodborne.exe (packaging/windows in the sources), or None."""
+    for path in (L.PORT_DIR / 'BB-Report-Tool.bat', L.PORT_DIR / 'packaging' / 'windows' / 'BB-Report-Tool.bat'):
+        if path.is_file():
+            return path
+    return None
 
 
 SECRET = re.compile(r'password|token|secret|npid|online_id|user$', re.I)

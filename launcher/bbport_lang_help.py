@@ -26,6 +26,13 @@ HELP = {'de': {
         'Frag im Hilfe-Forum des Community-Discords. Speichere einen Bericht und häng ihn an: Er enthält das Log, '
         'deine Einstellungen und die Daten dieses PCs (keine Passwörter), so sieht ein Helfer die Ursache sofort.',
     'Save a report': 'Bericht speichern', 'Open the Discord': 'Discord öffnen',
+    'Collecting the report… (up to a minute)':
+        'Der Bericht wird erstellt … (bis zu einer Minute)',
+    'The BB Report Tool made no zip.':
+        'Das BB Report Tool hat keine ZIP-Datei erstellt.',
+    'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+        'Die Zusammenfassung ist in der Zwischenablage: Füge sie in deinen #help-Beitrag ein und hänge dann die '
+        'ZIP-Datei an.',
     'eboot.bin has a 60 FPS patch built in: the game crashes with it (Help)':
         'In eboot.bin ist ein 60-FPS-Patch eingebaut: Das Spiel stürzt damit ab (Hilfe)',
     'eboot.bin is not the clean 1.09 one: 30 FPS, no effect options (Help)':
