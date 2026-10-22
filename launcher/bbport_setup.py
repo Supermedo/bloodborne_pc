@@ -1178,6 +1178,12 @@ class SetupMixin:
                                   'kept; the ones you make yourself always.').format(saves.AUTO_KEEP),
                      bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9), justify='left',
                      wraplength=px(640)).pack(anchor='w', padx=(px(26), 0))
+            ttk.Checkbutton(body, text=_('Back up after every game exit'),
+                            variable=self.var('exit_backup', 'app'), style='Card.TCheckbutton').pack(anchor='w', pady=(px(8), 0))
+            tk.Label(body, text=_('Copies the final save after a normal exit or crash. No periodic copies; exit backups are kept.'),
+                     bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9), justify='left',
+                     wraplength=px(640)).pack(anchor='w', padx=(px(26), 0))
+
             items = [b for b in saves.backups(self.save_user_dir()) if b.ok]
             if not items:
                 tk.Label(body, text=_('No backups yet.'), bg=theme.CARD, fg=theme.MUTED,
@@ -1699,6 +1705,7 @@ class SetupMixin:
         self.backups_view.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
         # the card is drawn anew on every change: the search points at the card
         self.index_entry(self.backups_view, _('Back up automatically before every start'), _('Backups'), 'auto_backup')
+        self.index_entry(self.backups_view, _('Back up after every game exit'), _('Backups'), 'exit_backup')
         self.index_entry(self.backups_view, _('Back up now'), _('Backups'), 'button:backup')
         self.section(f, _('From other versions'))
         self.note(f, _('Characters from shadPS4, Awaken\'s port, bbhost or a PS4 export: found on this PC and copied '
