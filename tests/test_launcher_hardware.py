@@ -64,6 +64,20 @@ class TableTests(unittest.TestCase):
             cpu = hardware.cpu_from_name(name)
             self.assertEqual((cpu.score, cpu.laptop, cpu.label), (score, laptop, label), name)
 
+    def test_the_hard_limits_follow_the_processors_instructions(self):
+        def cpu(avx=True, bmi1=True, movbe=True, lzcnt=True):
+            def cpuid(leaf, _subleaf=0):
+                return {0: (0x16, 0, 0, 0), 0x80000000: (0x80000008, 0, 0, 0),
+                        1: (0, 0, (avx << 28) | (avx << 27) | (movbe << 22), 0), 7: (0, bmi1 << 3, 0, 0),
+                        0x80000001: (0, 0, lzcnt << 5, 0)}.get(leaf, (0, 0, 0, 0))
+            return hardware.instruction_lines(hardware.instructions(cpuid))
+        self.assertEqual(cpu()[0][0], 'ok')
+        self.assertEqual(cpu(bmi1=False, movbe=False, lzcnt=False)[0], (
+            'warn', 'Your processor lacks BMI1, MOVBE, LZCNT: the port translates them (compatibility mode), so '
+                    'expect bugs.'))
+        self.assertEqual(cpu(avx=False)[0][0], 'bad')
+        self.assertEqual(hardware.instruction_lines(None), [])
+
     def test_the_laptops_dedicated_card_wins(self):
         lines = ['AMD Radeon(TM) Graphics, integrated, 512 MiB', 'NVIDIA GeForce RTX 4060 Laptop GPU, discrete, 8188 MiB']
         self.assertEqual(hardware.best_gpu_line(lines), lines[1])

@@ -333,6 +333,45 @@ def processor_support():
         return None
 
 
+INSTRUCTIONS = ('AVX', 'BMI1', 'MOVBE', 'LZCNT')  # HARD_LIMITS: AVX or nothing; the others are translated
+
+
+def instructions(cpuid=None):
+    """{name: True/False} for INSTRUCTIONS on this CPU, from CPUID as cpu_compat reads it (`cpuid` for
+    tests); None when CPUID cannot be read here."""
+    cleanup = None
+    try:
+        import cpu_compat
+        if cpuid is None:
+            found = cpu_compat._cpuid_windows()
+            if not found:
+                return None
+            cpuid, cleanup = found
+        ecx = cpuid(1)[2]
+        missing = set(cpu_compat.missing_host_extensions(cpuid) or ())
+        have = {'AVX': bool(ecx >> 28 & 1 and ecx >> 27 & 1)}  # AVX and OSXSAVE
+        have.update({name: name not in missing for name in cpu_compat.HOST_EXTENSIONS})
+        return {name: have[name] for name in INSTRUCTIONS}
+    except Exception:  # an unknown CPU never stops the launcher
+        return None
+    finally:
+        if cleanup:
+            cleanup()
+
+
+def instruction_lines(have, tr=str):
+    """[(state, text)] for the System page's hard limits: this CPU's instructions, when known."""
+    if have is None:
+        return []
+    missing = [name for name in INSTRUCTIONS if not have.get(name)]
+    if not have.get('AVX'):
+        return [('bad', tr('Your processor has no AVX: the port cannot run on it.'))]
+    if missing:
+        return [('warn', tr('Your processor lacks {}: the port translates them (compatibility mode), so expect '
+                            'bugs.').format(', '.join(missing)))]
+    return [('ok', tr('Your processor has AVX, BMI1, MOVBE and LZCNT: the port runs on it directly.'))]
+
+
 def detect_cpu():
     name = processor_name()
     cpu = cpu_from_name(name) if name else Cpu('', None)

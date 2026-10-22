@@ -65,6 +65,7 @@ class SetupMixin:
     # ---- hardware ------------------------------------------------------------------------------
     def init_hardware(self):
         self.gpu_line, self.cpu, self.ram, self.rating, self.guide = '', None, 0, None, None
+        self.cpu_instructions = None  # hardware.instructions(), with the processor (detect_gpu)
         self.hw_ready = False
         self.rating_views = []  # callables redrawing what shows the rating
 
@@ -1793,9 +1794,20 @@ class SetupMixin:
         self.rating_views.append(draw_requirements)
 
         self.section(f, _('Hard limits'))
-        for text in hardware.HARD_LIMITS:
-            self.state_line(f, 'warn', _(text), L.PANEL, wrap=760).grid(
-                row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=px(3))
+        limits = tk.Frame(f, bg=L.PANEL)
+        limits.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
+
+        def draw_limits():  # this processor's instructions first, when CPUID could be read; the rules below them
+            for child in limits.winfo_children():
+                child.destroy()
+            found = hardware.instruction_lines(getattr(self, 'cpu_instructions', None), _)
+            for state, text in found:
+                self.state_line(limits, state, text, L.PANEL, wrap=760).pack(fill='x', pady=px(3))
+            for text in hardware.HARD_LIMITS:
+                self.state_line(limits, 'info' if found else 'warn', _(text), L.PANEL, wrap=760).pack(
+                    fill='x', pady=px(3))
+        draw_limits()
+        self.rating_views.append(draw_limits)
         self.section(f, _('Driver notes'))
         drivers = tk.Frame(f, bg=L.PANEL)
         drivers.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
