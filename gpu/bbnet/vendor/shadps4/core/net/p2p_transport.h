@@ -184,6 +184,9 @@ private:
     std::shared_ptr<Connection> connection_;
 };
 
+int VoicePeerCount();
+int SendVoice(std::span<const u8> data);
+
 class Transport : public std::enable_shared_from_this<Transport> {
 public:
     static std::shared_ptr<Transport> Create(int family, const Endpoint& bind_address,

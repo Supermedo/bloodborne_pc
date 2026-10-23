@@ -38,7 +38,6 @@
 #define PLAYGO_BAD_POINTER ((int32_t)0x80B2000A)
 #define PLAYGO_BAD_SIZE ((int32_t)0x80B2000B)
 #define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
-#define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
@@ -225,17 +224,6 @@ static ABI int32_t np_poll(int32_t request,int32_t *result) { (void)request; if 
 static ABI int32_t np_compare(const void *a,const void *b) {
     if (!a || !b) return NP_INVALID_ARGUMENT;
     return memcmp(a,b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
-}
-
-/* ---- Voice chat: ports exist, carry no audio ---- */
-static ABI int32_t voice_port(void *param,uint32_t *port) { (void)param; if (!port) return (int32_t)0x8029000b; *port=(uint32_t)new_id(); return 0; }
-static ABI int32_t voice_read(uint32_t port,void *data,uint32_t *size) { (void)port; (void)data; if (size) *size=0; return 0; }
-static ABI int32_t voice_write(uint32_t port,const void *data,uint32_t *size) { (void)port; (void)data; (void)size; return 0; }
-static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
-    (void)port;
-    if (!info) return (int32_t)0x8029000b;
-    memset(info,0,40); /* type, state=unconnected, no bytes available */
-    return 0;
 }
 
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
@@ -430,7 +418,6 @@ static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) 
     memset(data,0,40); return 1; /* timestamp 0, connected=false */
 }
 static ABI int32_t mouse_close(int32_t handle) { (void)handle; return 0; }
-static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
 
 
 static const RuntimeExport exports[]={
@@ -517,11 +504,6 @@ static const RuntimeExport exports[]={
     {"sceNpScoreGetRankingByNpIdPcId",np_signed_out}, {"sceNpScoreGetRankingByRange",np_signed_out},
     {"sceNpScoreRecordGameData",np_signed_out}, {"sceNpScoreRecordScore",np_signed_out},
     {"sceNpScoreSetPlayerCharacterId",ok_void},
-    {"sceVoiceCreatePort",voice_port}, {"sceVoiceDeletePort",ok_void},
-    {"sceVoiceConnectIPortToOPort",ok_void}, {"sceVoiceDisconnectIPortFromOPort",ok_void},
-    {"sceVoiceStart",ok_void}, {"sceVoiceStop",ok_void}, {"sceVoiceGetPortInfo",voice_info},
-    {"sceVoiceReadFromOPort",voice_read}, {"sceVoiceWriteToIPort",voice_write},
-    {"sceAudioInInput",audio_in_open}, {"sceAudioInClose",audio_in_open},
     {"sceNpMatching2Initialize",ok_void}, {"sceNpMatching2Terminate",ok_void},
     {"sceNpMatching2CreateContext",np_signed_out},
     {"sceNpSignalingInitialize",ok_void}, {"sceNpSignalingTerminate",ok_void},
@@ -544,9 +526,7 @@ static const RuntimeExport exports[]={
     {"scePlayGoInitialize",playgo_init}, {"scePlayGoOpen",playgo_open}, {"scePlayGoGetChunkId",playgo_chunk_ids},
     {"scePlayGoGetLocus",playgo_locus}, {"scePlayGoSetInstallSpeed",playgo_speed},
     {"sceMouseInit",ok_void}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",mouse_close},
-    {"sceAudioInOpen",audio_in_open},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
-    {"sceVoiceInit",ok_void}, {"sceVoiceEnd",ok_void},
 };
 /* Co-op (BB_ONLINE=1): network and PSN calls go to the shadNet libraries in bbgpu when they
  * implement them. Trophies, voice and the store/profile dialogs stay here. */

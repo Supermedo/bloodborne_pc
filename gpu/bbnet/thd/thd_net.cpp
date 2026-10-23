@@ -35,6 +35,10 @@
 #include <vector>
 
 #include "core/libraries/libs.h"
+#include "core/net/p2p_transport.h"
+
+extern "C" void runtime_voice_net_start(void);
+extern "C" void runtime_voice_receive(const std::uint8_t* data, std::size_t size, std::uint64_t key);
 
 namespace BbThd {
 namespace {
@@ -390,6 +394,26 @@ std::uint64_t source_key(std::uint32_t addr, std::uint16_t port_nbo) {
 
 std::map<std::uint16_t, std::shared_ptr<UdpPort>> g_p2p_ports;
 
+constexpr std::uint8_t kVoiceMagic = 0xbb, kVoiceTag = 'V';
+std::mutex g_voice_mu;
+std::map<std::uint64_t, std::chrono::steady_clock::time_point> g_voice_peers;
+
+void voice_peer_seen(std::uint32_t addr, std::uint16_t port_nbo) {
+    std::lock_guard lk(g_voice_mu);
+    g_voice_peers[source_key(addr, port_nbo)] = std::chrono::steady_clock::now();
+}
+
+std::vector<std::uint64_t> voice_active_peers() {
+    const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(3);
+    std::vector<std::uint64_t> out;
+    std::lock_guard lk(g_voice_mu);
+    for (auto it = g_voice_peers.begin(); it != g_voice_peers.end();) {
+        if (it->second < cutoff) it = g_voice_peers.erase(it);
+        else out.push_back((it++)->first);
+    }
+    return out;
+}
+
 struct NetSock {
     int domain = 2;
     int type = 1;
@@ -445,6 +469,10 @@ void p2p_reader(std::shared_ptr<UdpPort> port) {
             std::memmove(buf, buf + 4, static_cast<std::size_t>(n - 4));
             n -= 4;
             sa.sin_port = bswap16(from_vport);
+        }
+        if (n >= 3 && buf[0] == kVoiceMagic && buf[1] == kVoiceTag) {
+            runtime_voice_receive(buf + 2, static_cast<std::size_t>(n - 2), source_key(sa.sin_addr.s_addr, sa.sin_port));
+            continue;
         }
         std::uint16_t src = 0, dst = 0;
         const std::size_t hdr = p2p_header(buf, static_cast<std::size_t>(n), &src, &dst);
@@ -540,6 +568,7 @@ std::shared_ptr<UdpPort> p2p_port_open(std::uint16_t want) {
     Log("net: P2P port %u open", port->port);
     port->reader = std::thread(p2p_reader, port);
     g_p2p_ports[port->port] = port;
+    runtime_voice_net_start();
     return port;
 }
 
@@ -671,6 +700,7 @@ int dgram_send(int s, const void* buf, std::uint64_t len, int flags, const SceSo
             dst_vport, static_cast<unsigned long long>(len), static_cast<long long>(n));
     }
     if (n < 0) return sock_errno() == EAGAIN ? net_again() : net_fail();
+    if (sock.p2p) voice_peer_seen(to->addr, to->port);
     return static_cast<int>(len);
 }
 
@@ -1250,3 +1280,45 @@ void RegisterNet(Core::Loader::SymbolsResolver* sym) {
 }
 
 } // namespace BbThd
+
+extern "C" int bbgpu_voice_peers(void) {
+    return static_cast<int>(BbThd::voice_active_peers().size()) + Core::Net::P2P::VoicePeerCount();
+}
+
+extern "C" int bbgpu_voice_send(const std::uint8_t* data, std::size_t size) {
+    using namespace BbThd;
+    if (!data || !size || size + 2 > 1200) return 0;
+    int sent = Core::Net::P2P::SendVoice({data, size});
+    sockfd_t fd = kBadSock;
+    {
+        std::lock_guard lk(g_net_mu);
+        if (!g_p2p_ports.empty()) fd = g_p2p_ports.begin()->second->fd;
+    }
+    if (!sock_ok(fd)) return sent;
+    std::uint8_t frame[kRelayHeader + 2 + 1200];
+    std::uint8_t* pkt = frame + kRelayHeader;
+    pkt[0] = kVoiceMagic;
+    pkt[1] = kVoiceTag;
+    std::memcpy(pkt + 2, data, size);
+    for (const std::uint64_t key : voice_active_peers()) {
+        const auto addr = static_cast<std::uint32_t>(key);
+        const auto port = static_cast<std::uint16_t>(key >> 32);
+        std::uint8_t token[kStunTokenLen];
+        sockaddr_in sa{};
+        ssize_type n;
+        if (relay_target(addr, port, token, &sa)) {
+            frame[0] = kRelayMagic;
+            frame[1] = kRelayToServer;
+            std::memcpy(frame + 2, token, kStunTokenLen);
+            std::memcpy(frame + 10, &port, 2);
+            n = sock_sendto(fd, frame, kRelayHeader + 2 + size, true, &sa);
+        } else {
+            sa.sin_family = AF_INET;
+            sa.sin_port = port;
+            sa.sin_addr.s_addr = addr;
+            n = sock_sendto(fd, pkt, 2 + size, true, &sa);
+        }
+        if (n >= 0) ++sent;
+    }
+    return sent;
+}

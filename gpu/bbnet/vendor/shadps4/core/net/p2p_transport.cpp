@@ -12,6 +12,9 @@
 #include <netinet/in.h>
 #endif
 
+extern "C" void runtime_voice_net_start(void);
+extern "C" void runtime_voice_receive(const std::uint8_t* data, std::size_t size, std::uint64_t key);
+
 namespace Core::Net::P2P {
 
 struct DatagramBinding {
@@ -64,6 +67,38 @@ auto Canonical(const Endpoint& e) {
         scope = in6->sin6_scope_id;
     }
     return std::tuple{e.Family(), address, port, scope};
+}
+
+constexpr u8 VoiceMagic = 0xbb, VoiceTag = 'V';
+std::mutex voice_mutex;
+Host::NativeSocket voice_socket = Host::InvalidSocket;
+std::map<Endpoint, Clock::time_point> voice_peers;
+
+void VoicePeerSeen(const Endpoint& to) {
+    std::scoped_lock lock{voice_mutex};
+    voice_peers[to] = Clock::now();
+}
+
+std::vector<Endpoint> VoiceActivePeers() {
+    const auto cutoff = Clock::now() - std::chrono::seconds(3);
+    std::vector<Endpoint> out;
+    for (auto it = voice_peers.begin(); it != voice_peers.end();) {
+        if (it->second < cutoff) {
+            it = voice_peers.erase(it);
+        } else {
+            out.push_back((it++)->first);
+        }
+    }
+    return out;
+}
+
+u64 VoiceKey(const Endpoint& e) {
+    const auto [family, address, port, scope] = Canonical(e);
+    u64 h = 1469598103934665603ull;
+    for (const u8 b : address) {
+        h = (h ^ b) * 1099511628211ull;
+    }
+    return (h ^ static_cast<u64>(port) ^ (static_cast<u64>(scope) << 16)) * 1099511628211ull;
 }
 
 } // namespace
@@ -152,6 +187,12 @@ std::shared_ptr<Transport> Transport::Create(int family, const Endpoint& bind_ad
     t->bound_port_ =
         Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&actual), actual_len).Port();
     t->thread_ = std::thread([raw = t.get()] { raw->ThreadMain(); });
+    {
+        std::scoped_lock lock{voice_mutex};
+        voice_socket = t->socket_;
+        voice_peers.clear();
+    }
+    runtime_voice_net_start();
     *error = Error::Ok;
     return t;
 }
@@ -161,6 +202,13 @@ Transport::~Transport() {
     kick_.Signal();
     if (thread_.joinable()) {
         thread_.join();
+    }
+    {
+        std::scoped_lock lock{voice_mutex};
+        if (voice_socket == socket_) {
+            voice_socket = Host::InvalidSocket;
+            voice_peers.clear();
+        }
     }
     Host::CloseSocket(socket_); // thread is stopped by now
 }
@@ -221,6 +269,12 @@ void Transport::ThreadMain() {
                                           0, reinterpret_cast<sockaddr*>(&from), &from_len);
             if (r.error != Error::Ok) {
                 break;
+            }
+            if (r.value >= 3 && receive_buffer_[0] == VoiceMagic && receive_buffer_[1] == VoiceTag) {
+                runtime_voice_receive(
+                    receive_buffer_.data() + 2, static_cast<size_t>(r.value) - 2,
+                    VoiceKey(Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&from), from_len)));
+                continue;
             }
             HandlePacket({receive_buffer_.data(), static_cast<size_t>(r.value)},
                          Endpoint::FromSockaddr(reinterpret_cast<sockaddr*>(&from), from_len), now);
@@ -410,7 +464,9 @@ std::shared_ptr<Connection> Transport::NewConnection(const ConnectionKey& key,
     connection->tcp = std::make_unique<TcpConnection>(
         config_.tcp, codec_->StreamPseudoHeader(peer), key.local_vport, key.peer_vport, NewIss(),
         [this, peer, protection](std::span<const u8> segment) {
-            SendPacket(codec_->EncodeStream(segment, peer, protection), peer);
+            if (SendPacket(codec_->EncodeStream(segment, peer, protection), peer) == Error::Ok) {
+                VoicePeerSeen(peer);
+            }
         });
     connections_[key] = connection;
     return connection;
@@ -514,6 +570,9 @@ IoResult DatagramSocket::SendTo(std::span<const u8> data, const Endpoint* to, u1
     const auto packet =
         transport_->codec_->EncodeDatagram(binding_->vport, to_vport, data, *to, protection);
     const Error e = transport_->SendPacket(packet, *to);
+    if (e == Error::Ok) {
+        VoicePeerSeen(*to);
+    }
     if (e == Error::WouldBlock || e == Error::NoBufs) {
         // PS4 drops instead of returning ENOBUFS
         return {data.size(), Error::Ok};
@@ -837,6 +896,32 @@ u32 StreamSocket::Events() const {
 std::optional<TcpState> StreamSocket::State() const {
     std::scoped_lock lock{transport_->mutex_};
     return connection_ ? std::optional{connection_->tcp->State()} : std::nullopt;
+}
+
+int VoicePeerCount() {
+    std::scoped_lock lock{voice_mutex};
+    return voice_socket == Host::InvalidSocket ? 0 : static_cast<int>(VoiceActivePeers().size());
+}
+
+int SendVoice(std::span<const u8> data) {
+    if (data.empty() || data.size() + 2 > 1200) {
+        return 0;
+    }
+    std::vector<u8> packet{VoiceMagic, VoiceTag};
+    packet.insert(packet.end(), data.begin(), data.end());
+    std::scoped_lock lock{voice_mutex};
+    if (voice_socket == Host::InvalidSocket) {
+        return 0;
+    }
+    int sent = 0;
+    for (const Endpoint& peer : VoiceActivePeers()) {
+        if (Host::SendTo(voice_socket, packet.data(), packet.size(), 0, peer.Sockaddr(),
+                         peer.Length())
+                .error == Error::Ok) {
+            ++sent;
+        }
+    }
+    return sent;
 }
 
 bool StreamSocket::GetPeer(Endpoint* peer, u16* peer_vport) const {

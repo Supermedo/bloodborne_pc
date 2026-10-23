@@ -91,6 +91,8 @@ struct Values {
     std::atomic<bool> show_fps{false};
     /// Silence the game while its window does not have focus (bbgpu_audio_muted).
     std::atomic<bool> mute_unfocused{false};
+    std::atomic<bool> voice_chat{true};
+    std::atomic<bool> voice_mic{true};
     /// Keyboard and mouse button prompts: with the device in use (auto), or always one kind.
     std::atomic<int> button_prompts{PromptsAuto};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.

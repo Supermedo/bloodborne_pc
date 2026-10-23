@@ -351,6 +351,11 @@ extern "C" int bbgpu_audio_muted(void) {
     return g_window && BbSettings::Get().mute_unfocused && !g_window->IsFocused() ? 1 : 0;
 }
 
+extern "C" int bbgpu_voice_flags(void) {
+    const auto& s = BbSettings::Get();
+    return (s.voice_chat ? 1 : 0) | (s.voice_chat && s.voice_mic ? 2 : 0);
+}
+
 extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {
     if (!g_window) return 0;
     g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");

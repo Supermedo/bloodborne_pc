@@ -11,7 +11,9 @@ third-party license notices.
 
 The bbport changes: the shadNet session starts once the game is loaded
 (`NpManager::InitializeRuntime`, called by `bbnet_initialize`), and the client reports
-itself to the server as this port (`BB_CLIENT_VERSION`), not as shadPS4.
+itself to the server as this port (`BB_CLIENT_VERSION`), not as shadPS4. The P2P transport
+also carries the port's voice chat: it remembers the peers it sends game traffic to and hands
+`[0xbb]['V']` datagrams to `runtime_voice.c` before decoding (`VoicePeerCount`, `SendVoice`).
 
 The renderer, shaders and upscalers were not imported. `bbnet_glue.cpp` and `include/`
 implement what these libraries need from the rest of shadPS4 (kernel threads, user

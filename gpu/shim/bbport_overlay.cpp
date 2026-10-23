@@ -44,6 +44,7 @@ extern "C" const unsigned char bb_font_ttf[];
 extern "C" const unsigned char bb_font_ttf_end[];
 
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
+extern "C" void runtime_voice_status(int* peers, int* talking, int* hearing);
 
 namespace BbOverlay {
 
@@ -498,6 +499,20 @@ void Menu() {
             BbSettings::Save();
             runtime_restart();
         }
+    }
+
+    ImGui::SeparatorText("Voice chat");
+    Checkbox("Voice chat", s.voice_chat);
+    Hint("Talk with the other hunters in your world (co-op). Off: nothing is sent or played.");
+    if (s.voice_chat) {
+        ImGui::SameLine();
+        Checkbox("Microphone", s.voice_mic);
+        Hint("Off: you still hear the others, they do not hear you.");
+        int peers = 0, talking = 0, hearing = 0;
+        runtime_voice_status(&peers, &talking, &hearing);
+        if (!peers) ImGui::TextDisabled("Nobody in your world yet");
+        else ImGui::Text("%d hunter%s connected%s%s", peers, peers == 1 ? "" : "s",
+                         talking ? "  -  you are talking" : "", hearing ? "  -  someone is talking" : "");
     }
 
     ImGui::SeparatorText("Other");

@@ -68,6 +68,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.show_fps = i != 0;
     } else if (key == "mute_unfocused") {
         v.mute_unfocused = i != 0;
+    } else if (key == "voice_chat") {
+        v.voice_chat = i != 0;
+    } else if (key == "voice_mic") {
+        v.voice_mic = i != 0;
     } else if (key == "button_prompts") {
         v.button_prompts = value == "playstation" ? PromptsPlayStation
                          : value == "keyboard"    ? PromptsKeyboard
@@ -314,6 +318,7 @@ void Save() {
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
     std::fprintf(file, "mute_unfocused=%d\n", int(v.mute_unfocused.load()));
+    std::fprintf(file, "voice_chat=%d\nvoice_mic=%d\n", int(v.voice_chat.load()), int(v.voice_mic.load()));
     static constexpr const char* prompts[PromptsCount] = {"auto", "playstation", "keyboard", "xbox", "switch"};
     std::fprintf(file, "button_prompts=%s\n", prompts[std::clamp(v.button_prompts.load(), 0, PromptsCount - 1)]);
     // Read by run.py at start (hud_layout.py).
