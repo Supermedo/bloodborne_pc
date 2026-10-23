@@ -231,6 +231,13 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
 }
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
+    // bbport: a pipeline that failed to load (a stale stage) returned with the stages it had
+    // already loaded still selected, and the next one kept them for the stages it does not have:
+    // a shadow pipeline (no fragment shader) was built with another pipeline's fragment shader,
+    // and cast striped shadows (Chalice Dungeons, NVIDIA, a cache with stale entries).
+    sel.infos.fill(nullptr);
+    sel.modules.fill(nullptr);
+    sel.fetch_shader.reset();
     sel.graphics_key.Deserialize(ar);
 
     // bbport: motion-vector pipelines are never preloaded. Their vertex shader embeds session-
