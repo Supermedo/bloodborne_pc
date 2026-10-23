@@ -39,6 +39,35 @@ Object motion vectors: off
   writes `Thermal: GPU 87 C, 60 W: the driver is slowing the card down to cool it` to the log
   when an NVIDIA card is throttled for heat (checked every 20 seconds with `nvidia-smi`).
 
+## FSR 4.1.1 on RX 6000 series
+
+AMD Adrenalin 26.10.1 adds FSR 4.1 support for Radeon RX 6000 cards. On Windows, this port
+offers two FSR 4.1.1 providers: AMD DX12 and Vulkan (`fsr4vk`). Provider availability is still
+checked per adapter and API; the AMD driver does not automatically inject FSR 4.1.1 into this
+port's Vulkan renderer.
+
+On an RX 6900 XT with Adrenalin 26.10.1, the capability helper reported Vulkan ready while the
+DX12 interop check failed. That combination is a valid reason to use Vulkan, but other RX 6000
+cards or driver versions may report different results. Check the selected adapter with:
+
+```
+bin\bb-gpu-capabilities.exe --fsr411
+```
+
+If Vulkan is supported but its provider files are missing, first close the game and launcher and
+try **Graphics → Recheck support**, then use the launcher's **Download fsr4vk** action. If that
+action remains disabled and Python is available, run this from the port directory:
+
+```
+py -3 scripts\fetch_fsr4vk.py --dir fsr4vk
+py -3 scripts\fetch_fsr4vk.py --dir fsr4vk --check
+```
+
+Then select **FSR 4.1.1** and **Vulkan (fsr4vk)**. The saved settings are
+`upscaler=fsr411` and `fsr411_backend=vk`. If the Vulkan capability check fails, changing the
+INI alone cannot provide support; send the complete `user\last_run.log` with the GPU and driver
+version.
+
 ## Online play
 
 - `HandleLoginReply: Login rejected error code 8`: shadNet error 8 is `LoginInvalidPassword`
@@ -70,7 +99,7 @@ icons follow. Two things that do not work for this:
 
 - Swapping Cross and Circle in the pad input: the buttons move, but the game still draws the
   Cross icon for interacting.
-- The PS4 system setting for the confirm button (`sceSystemServiceParamGetInt` 1000): the game
+- The PS4 system setting for the confirm button (`sceSystemServiceParamGetInt 1000`): the game
   asks for it but takes the layout from its region instead.
 
 ## Korean text
