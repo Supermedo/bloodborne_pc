@@ -37,6 +37,18 @@ class SharedSettingsTests(unittest.TestCase):
         with patch.object(launcher.bbport_fsr411, 'query', return_value=rx6000):
             self.assertEqual(launcher.bbport_fsr411.default_backend(self.folder), 'vk')
 
+    def test_saved_dx12_backend_migrates_to_ready_vulkan_provider(self):
+        self.ini.write_text('upscaler=fsr411\nfsr411_backend=dx12\n')
+        rx6000 = {
+            'vendor_id': 0x1002,
+            'dx12': {'supported': False, 'reason': 'interop', 'detail': 'unavailable'},
+            'vk': {'supported': True, 'reason': 'ready', 'detail': ''},
+        }
+        with patch.object(launcher.bbport_fsr411, 'query', return_value=rx6000):
+            graphics, _ = launcher.load_ini()
+        self.assertEqual(graphics['fsr411_backend'], 'vk')
+        self.assertIn('fsr411_backend=vk', self.ini.read_text())
+
     def test_migrate_legacy_profile_once_preserves_unrelated_lines(self):
         original = '# existing config\nupscaler=fsr411\nobject_motion=1\nsharpness=0.75\n'
         self.ini.write_text(original)
