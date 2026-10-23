@@ -33,9 +33,15 @@ static bool Better(VkPhysicalDevice a, VkPhysicalDevice b) {
         return x.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU;
     return Memory(a) > Memory(b);
 }
-int main() {
+int main(int argc, char** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-    const auto result = []() -> Fg401Support {
+    uint32_t version = Fg401Version;
+    if (argc != 1) {
+        if (argc != 3 || std::strcmp(argv[1], "--provider") ||
+            (std::strcmp(argv[2], "4.0.1") && std::strcmp(argv[2], "4.0.2"))) return 2;
+        if (!std::strcmp(argv[2], "4.0.2")) version = Fg402Version;
+    }
+    const auto result = [version]() -> Fg401Support {
         if (!Fg401WindowsSupported())
             return {false, "windows11"};
         VkApplicationInfo a{VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -110,9 +116,10 @@ int main() {
         vkGetPhysicalDeviceExternalSemaphoreProperties(selected, &external, &sharing);
         if (!(sharing.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT))
             return {false, "interop"};
-        return ProbeFg401(id.deviceLUID);
+        return ProbeFg401(id.deviceLUID, version);
     }();
-    std::printf("{\"supported\":%s,\"reason\":\"%s\",\"detail\":\"%s\",\"provider\":\"4.0.1\"}\n",
-                result.supported ? "true" : "false", result.reason.c_str(), result.detail.c_str());
+    std::printf("{\"supported\":%s,\"reason\":\"%s\",\"detail\":\"%s\",\"provider\":\"%s\"}\n",
+                result.supported ? "true" : "false", result.reason.c_str(), result.detail.c_str(),
+                Fg401VersionName(version));
     return 0;
 }

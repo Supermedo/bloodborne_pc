@@ -1,5 +1,11 @@
 # AMD ML frame generation on Windows
 
+The FSR 4.1 integration also retains **ML-FG 4.0.2** as an independent choice.
+Both ML versions require their exact provider and use the existing 2× SDR path.
+See [FSR 4.1 on Windows](FSR41_WINDOWS.md) for the current combined launcher,
+installed-driver discovery and Windows requirements. Measurements below
+refer to the original 4.0.1 integration.
+
 This branch adds **AMD ML-FG 4.0.1** alongside the existing Vulkan FSR 3.1 and
 DLSS frame-generation methods. It builds on the FSR 4.1.1 providers and optional
 motion-vector cache in [PR #76](https://github.com/Supermedo/bloodborne_pc/pull/76).

@@ -134,6 +134,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
 import bbport_fg401  # noqa: E402
 import bbport_fsr411  # noqa: E402
+import bbport_fsr412  # noqa: E402
+import bbport_fsr41
+import bbport_fsr41_ui
 import bbport_character as character  # noqa: E402
 import bbport_tray  # noqa: E402
 import bbport_lang_setup  # noqa: E402,F401 (the setup guide's texts)
@@ -141,6 +144,7 @@ import bbport_lang_help  # noqa: E402,F401 (the Help page's and the game tests' 
 import bbport_lang_ui  # noqa: E402,F401 (the regrouped pages, the side bar, the guide)
 import bbport_lang_world  # noqa: E402,F401 (the new texts in the other eleven languages)
 import bbport_lang_port  # noqa: E402,F401 (the 1.9.3 texts and the Controls page's key names)
+import bbport_fsr41_translations  # noqa: E402,F401
 import bbport_hardware as hardware  # noqa: E402
 import bbport_frame  # noqa: E402
 import bbport_display as display  # noqa: E402
@@ -236,11 +240,11 @@ TWEAKS = [
 ]
 # Effects that are taste, not performance: on Picture & performance (the others on All graphics).
 TASTE_EFFECTS = ('effect_chromatic_aberration', 'effect_dof', 'effect_motion_blur')
-INI_FLAGS = {'sharpen', 'object_motion', 'object_motion_cache', 'show_fps', 'mute_unfocused', 'frame_gen_fit_display',
+INI_FLAGS = {'sharpen', 'object_motion', 'object_motion_cache', 'fsr_compatibility_options', 'show_fps', 'mute_unfocused', 'frame_gen_fit_display',
              *(k for k, _t, _o in EFFECTS + EXTRAS + CHEATS + TWEAKS)}
-INI_DEFAULTS = {'upscaler': 'fsr4', 'preset': '1', 'sharpen': '1', 'sharpness': '0.50',
+INI_DEFAULTS = {'upscaler': 'fsr3', 'preset': '1', 'sharpen': '1', 'sharpness': '0.50',
                 'object_motion': '1', 'show_fps': '1', 'output_res': '1920x1080', 'model_lod': '0',
-                'fsr411_backend': 'vk', 'object_motion_cache': '0',
+                'fsr411_backend': 'vk', 'fsr41_version': 'fsr412', 'object_motion_cache': '0', 'fsr_compatibility_options': '0',
                 'live_resolution': 'auto', 'hud_position': '100', 'fov': '43', 'mute_unfocused': '0',
                 'button_prompts': 'auto',
                 'frame_gen': 'off', 'frame_gen_multiplier': '2', 'frame_gen_fit_display': '0',
@@ -292,6 +296,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
+             ('fsr412', ('FSR 4.1.2 (experimental)',)),
              ('fsr411', ('FSR 4.1.1 (experimental)', 'FSR 4.1.1 (экспериментально)')),
              ('fsr3', ('FSR 3.1 (every GPU)', 'FSR 3.1 (любая видеокарта)')),
              ('taa', ('TAA (native resolution anti-aliasing)', 'TAA (нативное сглаживание)')),
@@ -300,6 +305,7 @@ UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
 FRAME_GENERATION = [('off', ('Off', 'Выключена')),
                     ('fsr3', ('AMD FSR 3.1 Frame Generation (any GPU)', 'AMD FSR 3.1 (любая видеокарта)')),
                     ('fsr401', ('AMD ML-FG 4.0.1 (RX 9000, 2× SDR, experimental)',)),
+                    ('fsr402', ('AMD ML-FG 4.0.2 (RX 9000, 2× SDR, experimental)',)),
                     ('dlss', ('NVIDIA DLSS Frame Generation (GeForce RTX 40/50)',
                               'NVIDIA DLSS (GeForce RTX 40/50)'))]
 FRAME_GEN_MULTIPLIERS = [('2', ('2× (one generated frame)', '2× (один кадр)')),
@@ -424,10 +430,28 @@ def load_ini(legacy_settings=None):
     if migrated:
         save_ini(migrated, lines)
         return load_ini(legacy_settings)
+    if 'upscaler' not in present:
+        env = bbport_fsr411.environment(PORT_DIR, legacy_settings or {})
+        support = bbport_fsr41.query(PORT_DIR, env)
+        states = bbport_fsr41.method_statuses(PORT_DIR, DATA_DIR, support, fetch_fsr4vk, env)
+        choice = bbport_fsr41.preferred_route(states,
+            backend=values['fsr411_backend'] if 'fsr411_backend' in present else None)
+        if choice is not None:
+            values['upscaler'], values['fsr411_backend'] = bbport_fsr41.ROUTES[choice][:2]
     if 'fsr411_backend' not in present:
-        values['fsr411_backend'] = bbport_fsr411.default_backend(PORT_DIR, legacy_settings)
+        if 'upscaler' in present and values['upscaler'] in ('fsr411', 'fsr412'):
+            env = bbport_fsr411.environment(PORT_DIR, legacy_settings or {})
+            support = bbport_fsr41.query(PORT_DIR, env)
+            states = bbport_fsr41.method_statuses(PORT_DIR, DATA_DIR, support, fetch_fsr4vk, env)
+            choice = bbport_fsr41.preferred_route(states, version=values['upscaler'])
+            values['fsr411_backend'] = bbport_fsr41.ROUTES[choice][1] if choice is not None else 'vk'
+        elif values['upscaler'] not in ('fsr411', 'fsr412'):
+            values['fsr411_backend'] = bbport_fsr411.default_backend(PORT_DIR, legacy_settings)
     values['fsr411_backend'] = fsr411_backend(values)
+    values['fsr41_version'] = values['upscaler'] if values['upscaler'] in ('fsr411', 'fsr412') else \
+        'fsr411' if values.get('fsr41_version') == 'fsr411' else 'fsr412'
     values['object_motion_cache'] = '1' if values.get('object_motion_cache') == '1' else '0'
+    values['fsr_compatibility_options'] = '1' if values.get('fsr_compatibility_options') == '1' else '0'
     return values, lines
 
 
@@ -651,7 +675,7 @@ def server_check_hunters_dream():
 
 
 def motion_cache_available(graphics):
-    return graphics.get('upscaler', INI_DEFAULTS['upscaler']) in ('fsr3', 'fsr4', 'fsr411') and \
+    return graphics.get('upscaler', INI_DEFAULTS['upscaler']) in ('fsr3', 'fsr4', 'fsr411', 'fsr412') and \
         graphics.get('object_motion', INI_DEFAULTS['object_motion']) in ('1', True)
 
 
@@ -711,11 +735,14 @@ def cache_folder(s):
 
 def game_environment(s, graphics=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith(('BB_FG_', 'BB_FG401_'))}
+    import bbport_driver_runtime
+    bbport_driver_runtime.configure_environment(env, replace=True)
     graphics = graphics if graphics is not None else load_ini(s)[0]
+    env['BB_UI_LANGUAGE'] = s.get('ui_language') or LANG
     env['BB_GAME_DIR'] = s['game_dir']
     if s['user_dir']:
         env['BB_USER_DIR'] = s['user_dir']
-    if cache_folder(s) != saves_folder(s):  # else run.py puts them beside the saves, as before
+    if cache_folder(s) != saves_folder(s):
         env['BB_GPU_USER_DIR'] = str(cache_folder(s))
     if s['dlc_dir']:
         env['BB_DLC_DIR'] = s['dlc_dir']
@@ -942,6 +969,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
     def choice(self, parent, key, store, options, width=38, style='TCombobox'):
         """A combobox over (value, (english, russian)) pairs, kept in sync with its variable."""
+        if key == 'upscaler':
+            return bbport_fsr41_ui.upscaler_choice(self, parent, options, width, _)
         var = self.var(key, store)
         values = [v for v, _t in options]
         box = self.ttk.Combobox(parent, values=[_(*text) for _v, text in options], state='readonly', width=width,
@@ -950,21 +979,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             var.set(values[0])
 
         def show(*_args):
-            shown = options
-            caps = getattr(self, 'fsr411_support', None)
-            if key == 'upscaler' and caps is not None and var.get() != 'fsr411' and not any(
-                    caps[m]['supported'] or caps[m]['reason'] == 'files' for m in ('vk', 'dx12')):
-                shown = [(v, t) for v, t in options if v != 'fsr411']
-            values[:] = [v for v, _t in shown]
-            box.configure(values=[_(*text) for _v, text in shown])
             current = var.get()
             box.current(values.index(current) if current in values else 0)
         show()
-        box.bind('<<ComboboxSelected>>', lambda _e: var.set(values[box.current()]))
+        box.bind('<<ComboboxSelected>>', lambda _event: var.set(values[box.current()]))
         var.trace_add('write', show)
         box.setting_key = key  # for the search (row() indexes it)
-        if key == 'upscaler' and hasattr(self, 'fsr411_upscaler_refreshers'):
-            self.fsr411_upscaler_refreshers.append(show)
         return box
 
     def fg401_choice(self, parent, width=52):
@@ -972,14 +992,17 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         box = self.ttk.Combobox(parent, state='readonly', width=width)
         values = []
         def refresh(*_args):
-            ready = bool(self.fg401_support and self.fg401_support.get('supported'))
-            options = [(v,t) for v,t in FRAME_GENERATION if v!='fsr401' or ready]
+            def ready(value):
+                status = bbport_fg401.status_for(self.fg401_support, value)
+                return bool(status and status.get('supported'))
+            options = [(v,t) for v,t in FRAME_GENERATION if v not in ('fsr401','fsr402') or ready(v)]
             values[:] = [v for v,t in options]
             box.configure(values=[_(*t) for v,t in options])
-            if var.get()=='fsr401' and not ready:
+            if var.get() in ('fsr401','fsr402') and not ready(var.get()):
                 # Display the saved choice without offering it as a new unsupported choice.
-                box.set(_('ML-FG 4.0.1: checking support…') if self.fg401_support is None else
-                        _(bbport_fg401.KEYS[0]))
+                version = '4.0.2' if var.get() == 'fsr402' else '4.0.1'
+                key = 'ML-FG 4.0.1: checking support…' if self.fg401_support is None else bbport_fg401.KEYS[0]
+                box.set(_(key.replace('4.0.1', version)))
             else:
                 box.current(values.index(var.get()) if var.get() in values else values.index('off'))
             self.refresh_fg401_status()
@@ -997,10 +1020,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
     def refresh_fg401_status(self):
         if hasattr(self, 'fg401_status'):
-            selected = self.var('frame_gen', 'ini').get() == 'fsr401'
-            # only with ML-FG chosen: on other PCs it is not offered, and its reasons would be noise
-            text = bbport_fg401.message(self.fg401_support, _, hdr=bool(self.var('hdr', 'app').get()),
-                                        selected=selected) if selected else ''
+            selected = self.var('frame_gen', 'ini').get()
+            text = bbport_fg401.message(bbport_fg401.status_for(self.fg401_support, selected), _,
+                hdr=bool(self.var('hdr', 'app').get()), selected=selected in ('fsr401','fsr402'),
+                version='4.0.2' if selected == 'fsr402' else '4.0.1') if selected in ('fsr401','fsr402') else ''
             self.fg401_status.configure(text=text)
             for widget in (self.fg401_status, getattr(self, 'fg401_recheck', None)):
                 if widget is not None:
@@ -1010,7 +1033,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fg401_support = None
         self.refresh_fg401()
         def work():
-            support = bbport_fg401.query(PORT_DIR, bbport_fsr411.environment(PORT_DIR, self.app))
+            support = bbport_fg401.query_versions(PORT_DIR, bbport_fsr411.environment(PORT_DIR, self.app))
             def done():
                 self.fg401_support = support
                 self.refresh_fg401()
@@ -1018,73 +1041,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         threading.Thread(target=work, daemon=True).start()
 
     def fsr411_choice(self, parent, width=38):
-        backend = self.var('fsr411_backend', 'ini')
-        upscaler = self.var('upscaler', 'ini')
-        values = [value for value, _text in FSR411_BACKENDS]
-        box = self.ttk.Frame(parent)
-        # A menu can disable individual methods while keeping their names visible.
-        # Negative width is a minimum: long translated captions get their natural width.
-        box.button = self.ttk.Menubutton(box, width=-width, style='Fsr411.TMenubutton')
-        box.button.grid(row=0, column=0, sticky='w')
-        box.menu = self.tk.Menu(box.button, tearoff=False, background=CARD, foreground=TEXT,
-                               activebackground=BLOOD, activeforeground=TEXT, disabledforeground=MUTED)
-        box.button.configure(menu=box.menu)
-        # Menu clicks are provisional until the requested method is ready.
-        box.selection = self.tk.StringVar(value=backend.get())
-        def choose(method):
-            self.select_fsr411_backend(method)
-            refresh()
-        for value, text in FSR411_BACKENDS:
-            box.menu.add_radiobutton(label=_(*text), variable=box.selection, value=value,
-                command=lambda method=value: choose(method))
-        box.hint = self.ttk.Label(box, style='Muted.TLabel', wraplength=self.px(width * 9), justify='left')
-        box.hint.grid(row=1, column=0, sticky='w', pady=(3, 0))
-        if backend.get() not in values:
-            backend.set(values[0])
+        return bbport_fsr41_ui.settings_button(self, parent, _)
 
-        def refresh(*_args):
-            active = upscaler.get() == 'fsr411'
-            statuses = {method: self.fsr411_status(method) for method in values}
-            selected = statuses[backend.get()]
-            downloading = getattr(self, 'fsr411_downloading', False)
-            offer = not getattr(self, 'process', None) and bbport_fsr411.can_download(
-                statuses['vk'], getattr(self, 'fsr411_support', None))
-            labels = {method: _(*text) for method, text in FSR411_BACKENDS}
-            if bbport_fsr411.needs_download(statuses['vk']):
-                labels['vk'] = _(bbport_fsr411.VULKAN_DOWNLOAD_LABEL)
-            for index, method in enumerate(values):
-                box.menu.entryconfigure(index, label=labels[method],
-                    state='normal' if active and not downloading and
-                        (statuses[method]['supported'] or method == 'vk' and offer) else 'disabled')
-            box.selection.set(backend.get())
-            box.button.configure(state='normal' if active and not downloading else 'disabled',
-                text=labels[backend.get()] if active else '—',
-                style='Unavailable.Fsr411.TMenubutton' if active and not selected['supported'] and
-                    not (backend.get() == 'vk' and offer) else 'Fsr411.TMenubutton')
-            if active and not selected['supported'] and selected['reason'] != 'download':
-                text = bbport_fsr411.hint(selected, _)
-                if bbport_fsr411.needs_download(selected):
-                    text = bbport_fsr411.message({k: v for k, v in selected.items() if k != 'files_problem'}, _)
-            else:
-                text = ''
-            box.hint.configure(text=text)
-            if text:
-                box.hint.grid()
-            else:
-                box.hint.grid_remove()
-        traces = [(var, var.trace_add('write', refresh)) for var in (backend, upscaler)]
-        if hasattr(self, 'fsr411_refreshers'):
-            self.fsr411_refreshers.append(refresh)
-        def cleanup(event):
-            if event.widget == box:
-                for var, trace in traces:
-                    var.trace_remove('write', trace)
-                if refresh in getattr(self, 'fsr411_refreshers', []):
-                    self.fsr411_refreshers.remove(refresh)
-        box.bind('<Destroy>', cleanup)
-        refresh()
-        box.setting_key = 'fsr411_backend'  # for the search (row() indexes it)
-        return box
+    def open_fsr41_settings(self):
+        return bbport_fsr41_ui.open_settings(self, _)
 
     def size_entry(self, parent, text, used, note):
         """An entry for a size like 2400x1080: used once it is a size (when left or confirmed);
@@ -1177,13 +1137,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         return holder
 
     def select_fsr411_backend(self, method):
-        if self.var('upscaler', 'ini').get() != 'fsr411' or getattr(self, 'fsr411_downloading', False):
+        if self.var('upscaler', 'ini').get() not in ('fsr411','fsr412') or getattr(self, 'fsr411_downloading', False):
             return
         backend = self.var('fsr411_backend', 'ini')
-        status = self.fsr411_status(method)
+        status = self.fsr41_status(method)
         if status['supported']:
             backend.set(method)
-        elif method == 'vk' and not getattr(self, 'process', None) and bbport_fsr411.can_download(
+        elif self.var('upscaler','ini').get() == 'fsr411' and method == 'vk' and not getattr(self, 'process', None) and bbport_fsr411.can_download(
                 status, getattr(self, 'fsr411_support', None)):
             if not self.messagebox.askyesno(bbport_fsr411.DOWNLOAD_TITLE, _(bbport_fsr411.DOWNLOAD_QUESTION), parent=self.root):
                 return
@@ -1204,7 +1164,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         row = self.next_row(parent)
         button.grid(row=row, column=0, columnspan=2, sticky='w', pady=(8, 0))
         self.ttk.Label(parent, text=_(
-            'May improve FSR performance; uses extra VRAM. Requires object motion vectors. '
+            'May solve general FSR FPS drops; uses extra VRAM. Requires object motion vectors. '
             'Applies at next game start.'), style='Muted.TLabel', wraplength=self.px(640),
             justify='left').grid(row=row + 1, column=0, columnspan=2, sticky='w', padx=(26, 0))
         self.index_entry(button, _('Motion-vector cache (experimental)'), key='object_motion_cache')
@@ -1987,13 +1947,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                    'a GPU with INT8 dot products; otherwise the game falls back to FSR 3.1 by itself.',
                    'Временной апскейлинг с векторами движения игры. FSR 4 нужны ассеты (ниже) и GPU с INT8; '
                    'иначе игра сама переключится на FSR 3.1.'))
+        before = set(f.grid_slaves())
+        self.row(f, '', self.fsr411_choice(f))
+        fsr411_rows = list(set(f.grid_slaves()) - before)
         self.row(f, _('Quality preset', 'Пресет'), self.choice(f, 'preset', 'ini', PRESETS),
                  _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
                    'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
-        before = set(f.grid_slaves())
-        self.row(f, _('FSR 4.1.1 backend'), self.fsr411_choice(f),
-                 _("AMD DX12 uses AMD's FSR library. Vulkan uses fsr4vk. Switching applies the next time the game starts."))
-        fsr411_rows = list(set(f.grid_slaves()) - before)
         self.row(f, _('Output resolution', 'Разрешение вывода'), self.output_choice(f),
                  _('What the upscaler produces; the HUD is drawn at this size too.',
                    'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
@@ -2101,10 +2060,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fsr411_progress.pack(side='left', padx=12)
         self.ttk.Button(holder, text=_('Recheck support'), command=self.recheck_fsr411).pack(side='left')
         self.note(f, _('Download fsr4vk here. AMD DX12 is included.'), top=6)
-        fsr411_rows += list(set(f.grid_slaves()) - before)
+        fsr411_asset_rows = list(set(f.grid_slaves()) - before)
 
         def show_fsr411(*_a):
             for widget in fsr411_rows:
+                widget.grid()
+            for widget in fsr411_asset_rows:
                 widget.grid() if self.var('upscaler', 'ini').get() == 'fsr411' else widget.grid_remove()
         self.var('upscaler', 'ini').trace_add('write', show_fsr411)
         show_fsr411()
@@ -3552,8 +3513,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         if info and info[1] != PATCH_VERSION:
             fps = ('30 FPS',)
         upscaler = dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0]
-        if self.var('upscaler', 'ini').get() == 'fsr411':
-            upscaler += ' · ' + ('DX12' if self.var('fsr411_backend', 'ini').get() == 'dx12' else 'fsr4vk')
+        selected = self.var('upscaler', 'ini').get()
+        if selected in ('fsr411', 'fsr412'):
+            upscaler += ' · ' + ('DX12' if self.var('fsr411_backend', 'ini').get() == 'dx12'
+                                  else 'AMD Vulkan' if selected == 'fsr412' else 'fsr4vk')
         output = self.var('output_res', 'ini').get().replace('x', ' × ')
         online = _('Online') if self.var('online', 'app').get() else _('Offline')
         if self.var('online', 'app').get() and self.var('online_pool', 'app').get() == 'huntersdream':
@@ -3586,13 +3549,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         except (OSError, subprocess.TimeoutExpired):
             pass
         self.gpu_text = text
-        support = bbport_fsr411.query(PORT_DIR, env)
+        support = bbport_fsr41.query(PORT_DIR, env)
         def fsr411_done():
             self.fsr411_support = support
             self.refresh_fsr411()
             self.refresh_status()
         self.ui_calls.put(fsr411_done)
-        self.fg401_support = bbport_fg401.query(PORT_DIR, env)
+        self.fg401_support = bbport_fg401.query_versions(PORT_DIR, env)
         self.gpu_line = hardware.best_gpu_line(names)  # 'Name, discrete, 16304 MiB' for the hardware check
         try:
             self.cpu, self.ram = hardware.detect_cpu(), hardware.memory_gb()
@@ -3620,6 +3583,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             getattr(self, 'fsr411_support', None), fetch_fsr4vk,
             bbport_fsr411.environment(PORT_DIR, self.app))
 
+    def fsr41_status(self, method):
+        if self.var('upscaler', 'ini').get() == 'fsr412':
+            return bbport_fsr412.method_status(method, getattr(self, 'fsr411_support', None))
+        return self.fsr411_status(method)
+
     def fsr411_folder(self):
         env = bbport_fsr411.environment(PORT_DIR, self.app)
         return bbport_fsr411.vulkan_folder(PORT_DIR, DATA_DIR, env)
@@ -3628,7 +3596,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fsr411_support = None
         self.refresh_fsr411()
         def work():
-            support = bbport_fsr411.query(PORT_DIR, bbport_fsr411.environment(PORT_DIR, self.app), refresh=True)
+            support = bbport_fsr41.query(PORT_DIR,
+                bbport_fsr411.environment(PORT_DIR, self.app), refresh=True)
             def done():
                 self.fsr411_support = support
                 self.refresh_fsr411()
@@ -3931,9 +3900,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         if self.var('output_display', 'app').get():
             self.var('output_res', 'ini').set(display.size_text(self.game_monitor_size()))
         self.collect()
-        if self.ini.get('upscaler') == 'fsr411':
-            self.fsr411_support = bbport_fsr411.query(PORT_DIR, bbport_fsr411.environment(PORT_DIR, self.app), refresh=True)
-            status = self.fsr411_status(self.ini['fsr411_backend'])
+        if self.ini.get('upscaler') in ('fsr411', 'fsr412'):
+            self.fsr411_support = bbport_fsr41.query(PORT_DIR,
+                bbport_fsr411.environment(PORT_DIR, self.app), refresh=True)
+            status = self.fsr41_status(self.ini['fsr411_backend'])
             if not status['supported']:
                 self.show('graphics')
                 self.refresh_fsr411()
@@ -4483,6 +4453,13 @@ def play_without_window(settings):
     attach_stdio()
     values, lines = load_ini(settings)
     graphics = values
+    # The engine reads the same INI even when this shortcut skips the GUI.
+    present = {line.split('=', 1)[0].strip() for line in lines
+               if '=' in line and not line.lstrip().startswith('#')}
+    missing = {key: values[key] for key in ('upscaler', 'fsr411_backend') if key not in present}
+    if missing:
+        save_ini(missing, lines)
+        lines = ini_path().read_text(encoding='utf-8').splitlines()
     if settings.get('output_display'):  # the game monitor's own size, as the launcher's Play does
         m = display.monitor(settings.get('game_monitor', ''))
         if m and values.get('output_res') != display.size_text(m.size):
@@ -4494,14 +4471,16 @@ def play_without_window(settings):
         except OSError:
             pass  # never in the way of a start
     placer = display.Placer(settings, display.parse_size(values.get('output_res')) or (1920, 1080)).start()
-    if graphics.get('upscaler') == 'fsr411':
+    if graphics.get('upscaler') in ('fsr411', 'fsr412'):
         env = bbport_fsr411.environment(PORT_DIR, settings)
-        support = bbport_fsr411.query(PORT_DIR, env, refresh=True)
-        status = bbport_fsr411.method_status(PORT_DIR, DATA_DIR, graphics['fsr411_backend'],
-            support, fetch_fsr4vk, env)
+        support = bbport_fsr41.query(PORT_DIR, env, refresh=True)
+        status = (bbport_fsr412.method_status(graphics['fsr411_backend'], support)
+            if graphics['upscaler'] == 'fsr412' else
+            bbport_fsr411.method_status(PORT_DIR, DATA_DIR, graphics['fsr411_backend'],
+                support, fetch_fsr4vk, env))
         if not status['supported']:
-            text = bbport_fsr411.message(status, _)
-            print('FSR 4.1.1: ' + text)
+            print('FSR 4.1: ' + _('FSR 4.1 unavailable') +
+                  ' (' + status['reason'] + ': ' + status.get('detail', '') + ')')
             return None  # Show the launcher controls instead of a popup.
     log_dir = Path(settings.get('user_dir') or DATA_DIR / 'user')
     log_dir.mkdir(parents=True, exist_ok=True)

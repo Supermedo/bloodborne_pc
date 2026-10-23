@@ -28,6 +28,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include "bbport_fsr4vk_package.h"
 
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -77,8 +78,7 @@ bool Fsr4Vk::FilesPresent() {
     if (setting && setting[0] == '0') {
         return false;
     }
-    std::error_code error;
-    return std::filesystem::is_regular_file(Directory() / LibraryName, error);
+    return Fsr4VkPackage::Verified(Directory());
 #else
     return false;
 #endif

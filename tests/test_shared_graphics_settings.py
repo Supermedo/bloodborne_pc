@@ -27,6 +27,9 @@ class SharedSettingsTests(unittest.TestCase):
         self.environment = patch.dict(os.environ, {'BB_CONFIG': str(self.ini)})
         self.environment.start()
         self.addCleanup(self.environment.stop)
+        self.ini_path = patch.object(launcher, 'ini_path', return_value=self.ini)
+        self.ini_path.start()
+        self.addCleanup(self.ini_path.stop)
 
     def test_migrate_legacy_profile_once_preserves_unrelated_lines(self):
         original = '# existing config\nupscaler=fsr411\nobject_motion=1\nsharpness=0.75\n'
@@ -115,6 +118,7 @@ class OpenLauncherTests(unittest.TestCase):
         self.ui.app = dict(launcher.APP_DEFAULTS)
         self.ui.ini, self.ui.ini_lines = dict(launcher.INI_DEFAULTS), []
         self.ui.vars = {}
+        self.ui.fsr411_refreshers = []
         self.ui.mod_order, self.ui.patch_vars = [], {}
         self.ui.remap_edits, self.ui.mouse_edited = {}, False
         frame = ttk.Frame(self.root)

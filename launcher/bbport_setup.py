@@ -149,6 +149,7 @@ class SetupMixin:
         """{key: (title, options or kind)} of the settings the profile sets, for showing them."""
         flags = {key: title for key, title, _on in L.EFFECTS}
         return {'output_res': (_('Output resolution'), L.OUTPUTS), 'upscaler': (_('Upscaler', 'Апскейлер'), L.UPSCALERS),
+                'fsr411_backend': (_('FSR 4.1 backend'), L.FSR411_BACKENDS),
                 'preset': (_('Quality preset'), L.PRESETS), 'fps_mode': (_('Frame rate', 'Частота кадров'), L.FPS_MODES),
                 'frame_cap': (_('Frame cap (unlocked mode)'), L.FRAME_CAPS),
                 'effect_game_aa': (_(*flags['effect_game_aa']), 'flag'),
@@ -186,8 +187,18 @@ class SetupMixin:
         available = hardware.outputs(*self.display_size())
         res = res if res in available else hardware.recommended_class(self.rating, available)
         output = available.get(res, '1920x1080')
-        return res, output, hardware.profile(self.rating, res, output, self.current_settings(),
-                                             self.var('goal', 'app').get())
+        entries = hardware.profile(self.rating, res, output, self.current_settings(),
+                                   self.var('goal', 'app').get())
+        capabilities = getattr(self, 'fsr411_support', None)
+        states = L.bbport_fsr41.method_statuses(L.PORT_DIR, L.DATA_DIR, capabilities,
+            L.fetch_fsr4vk, L.bbport_fsr411.environment(L.PORT_DIR, self.app))
+        route = L.bbport_fsr41.preferred_route(states)
+        if route is not None:
+            version, backend, title, _role = L.bbport_fsr41.ROUTES[route]
+            entries = [(store, key, version if key == 'upscaler' else value, why)
+                       for store, key, value, why in entries]
+            entries.append(('ini', 'fsr411_backend', backend, _('FSR 4.1 Settings') + ': ' + title))
+        return res, output, entries
 
     def differences(self):
         """[(key, current, recommended, why)] where the settings differ from the recommendation."""

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #ifdef _WIN32
 #include "video_core/renderer_vulkan/vk_fsr411_native.h"
+#include "bbport_settings.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "native_fsr411.h"
@@ -103,6 +104,7 @@ struct Fsr411Native::Impl {
     void Ensure(Fsr4Upscaler::Frame& f) {
         NativeFsr411Config next{f.render_width, f.render_height, f.output.width, f.output.height,
             uint32_t(NativeFormat(f.color.format)), uint32_t(NativeFormat(f.depth.format)), f.hdr, {}};
+        next.model_version=BbSettings::Get().upscaler==BbSettings::UpscalerFsr412 ? ((4u<<22)|(1u<<12)|2u) : ((4u<<22)|(1u<<12)|1u);
         // Color, motion and the result cross the API boundary as shared textures.
         // Depth keeps the buffer route to support the game's depth/stencil format.
         next.shared_texture_mask = (1u << 0) | (1u << 2) | (1u << 3);
@@ -117,7 +119,7 @@ struct Fsr411Native::Impl {
             next.output_width == config.output_width &&
             next.output_height == config.output_height &&
             next.color_format == config.color_format && next.depth_format == config.depth_format &&
-            next.hdr == config.hdr)
+            next.hdr == config.hdr && next.model_version == config.model_version)
             return;
         const std::array texture_formats{
             next.color_format == DXGI_FORMAT_R8G8B8A8_UNORM   ? vk::Format::eR8G8B8A8Unorm

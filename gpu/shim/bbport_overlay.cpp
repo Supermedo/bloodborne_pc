@@ -13,6 +13,8 @@
 
 #include <SDL3/SDL.h>
 #include "bbport_settings.h"
+#include "bbport_fsr41_ui.h"
+#include <filesystem>
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -174,6 +176,78 @@ std::string FpsText() {
     return text;
 }
 
+bool IsFsr41(int upscaler) {
+    return upscaler == BbSettings::UpscalerFsr411 || upscaler == BbSettings::UpscalerFsr412;
+}
+struct Fsr41Route { int version, backend; const char* title; const char* method; int hint; };
+static constexpr Fsr41Route Fsr41Routes[] = {
+    {BbSettings::UpscalerFsr412, 0, "FSR 4.1.2 - AMD Vulkan", "AMD Vulkan", Fsr41Ui::Hint412Vk},
+    {BbSettings::UpscalerFsr412, 1, "FSR 4.1.2 - AMD DX12", "AMD DX12", Fsr41Ui::Hint412Dx},
+    {BbSettings::UpscalerFsr411, 1, "FSR 4.1.1 - AMD DX12", "AMD DX12", Fsr41Ui::Hint411Dx},
+    {BbSettings::UpscalerFsr411, 0, "FSR 4.1.1 - Vulkan (fsr4vk)", "Vulkan (fsr4vk)", Fsr41Ui::Hint411Vk},
+};
+bool AnyFsr41() {
+    const auto& s=BbSettings::Get();
+    for(const auto& route:Fsr41Routes) if(s.FsrMethodSupported(route.version,route.backend)) return true;
+    return false;
+}
+void Fsr41Settings() {
+    auto& s=BbSettings::Get();
+    const float max_width=std::max(300.f, ImGui::GetMainViewport()->WorkSize.x-60.f*base_scale);
+    ImGui::SetNextWindowSize(ImVec2(std::min(420.f*base_scale,max_width),0), ImGuiCond_Appearing);
+    const std::string title=std::string(Fsr41Ui::Text(Fsr41Ui::Settings))+"###FSR41Settings";
+    if(!ImGui::BeginPopupModal(title.c_str(),nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoTitleBar)) return;
+    ImGui::TextUnformatted(Fsr41Ui::Text(Fsr41Ui::Settings));
+    ImGui::Spacing();
+    if(ImGui::BeginTable("FSR41Methods",2,ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Method",ImGuiTableColumnFlags_WidthStretch,1.1f);
+        ImGui::TableSetupColumn("Support",ImGuiTableColumnFlags_WidthStretch,1.f);
+        for(const auto& route:Fsr41Routes) {
+            if ((route.backend==0 && route.version==BbSettings::UpscalerFsr412) ||
+                (route.backend==1 && route.version==BbSettings::UpscalerFsr411)) {
+                ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
+                ImGui::TextDisabled("FSR %s",route.version==BbSettings::UpscalerFsr412 ? "4.1.2" : "4.1.1");
+            }
+            const bool ready=s.FsrMethodSupported(route.version,route.backend);
+            const bool selected=s.upscaler==route.version && s.fsr411_backend==route.backend;
+            int status=ready ? 0 : s.fsr41_status[route.version==BbSettings::UpscalerFsr412][route.backend].load();
+            if(status<0 || status>8 || (!ready && status==0)) status=5;
+            ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
+            if(selected) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,IM_COL32(45,42,34,255));
+            ImGui::BeginDisabled(!ready);
+            const std::string label=std::string(route.method)+"###"+route.title;
+            if(ImGui::RadioButton(label.c_str(),selected)) {
+                Store(s.fsr41_version,route.version,true);
+                Store(s.fsr411_backend,route.backend,true);
+                Store(s.upscaler,route.version,true);
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::PushID(route.title);
+            ImGui::SmallButton("(i)");
+            if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) || ImGui::IsItemFocused()) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize()*30.f);
+                ImGui::TextUnformatted(Fsr41Ui::Text(route.hint));
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
+            }
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            const ImVec4 color=status==0 ? ImVec4(.47f,.74f,.57f,1) :
+                status==1 ? ImVec4(.88f,.47f,.44f,1) :
+                status==5 || status==6 || status==8 ? ImVec4(.54f,.55f,.56f,1) : ImVec4(.85f,.64f,.25f,1);
+            ImGui::PushTextWrapPos();
+            ImGui::TextColored(color,"%s",Fsr41Ui::Text(Fsr41Ui::Supported+status));
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
+    if(ImGui::Button(Fsr41Ui::Text(Fsr41Ui::Close))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void Menu() {
     auto& s = BbSettings::Get();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -196,22 +270,51 @@ void Menu() {
 
     ImGui::SeparatorText("Temporal upscaling");
     static const char* upscalers[] = {"Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (experimental)",
-                                     "TAA (native anti-aliasing)", "DLSS (NVIDIA RTX)"};
+                                     "TAA (native anti-aliasing)", "DLSS (NVIDIA RTX)", "FSR 4.1.2 (experimental)"};
     static const char* later[] = {"XeSS"};
     int upscaler = s.upscaler;
-    if (ImGui::BeginCombo("Upscaler", upscalers[upscaler])) {
-        for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
+    if (ImGui::BeginCombo("Upscaler", IsFsr41(upscaler) ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[upscaler])) {
+        static const int order[] = {BbSettings::UpscalerOff, BbSettings::UpscalerFsr3,
+            BbSettings::UpscalerFsr4,
+#ifdef _WIN32
+            BbSettings::UpscalerFsr412,
+#else
+            BbSettings::UpscalerFsr411,
+#endif
+            BbSettings::UpscalerTaa, BbSettings::UpscalerDlss};
+        static_assert(sizeof(order) / sizeof(*order) == BbSettings::UpscalerCount - 1);
+        for (const int i : order) {
             const bool supported = i == BbSettings::UpscalerFsr4 ? s.fsr4_supported.load()
                 : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
+                : i == BbSettings::UpscalerFsr412 ? AnyFsr41()
                 : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load() : true;
             ImGui::BeginDisabled(!supported);
-            if (ImGui::Selectable(upscalers[i], i == upscaler)) {
-                Store(s.upscaler, i, true);
+            const bool family = i == BbSettings::UpscalerFsr412;
+            if (ImGui::Selectable(family ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[i],
+                                  family ? IsFsr41(upscaler) : i == upscaler)) {
+                if (family) {
+                    if (!IsFsr41(upscaler)) {
+                        bool restored=false;
+                        if(s.FsrMethodSupported(s.fsr41_version,s.fsr411_backend)) {
+                            Store(s.upscaler,s.fsr41_version.load(),true);
+                            restored=true;
+                        }
+                        if(!restored) for (const auto& route : Fsr41Routes) {
+                            if (!s.FsrMethodSupported(route.version, route.backend)) continue;
+                            Store(s.fsr41_version, route.version, true);
+                            Store(s.fsr411_backend, route.backend, true);
+                            Store(s.upscaler, route.version, true);
+                            break;
+                        }
+                    }
+                } else Store(s.upscaler, i, true);
             }
             ImGui::EndDisabled();
             if (!supported) {
                 ImGui::SameLine();
-                if (i == BbSettings::UpscalerFsr411) {
+                if (family) {
+                    ImGui::TextDisabled("- %s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
+                } else if (i == BbSettings::UpscalerFsr411) {
                     ImGui::TextDisabled("- unavailable");
                     if (const char* problem = s.fsr411_problem.load()) Hint(problem);
                 } else {
@@ -229,23 +332,21 @@ void Menu() {
         ImGui::EndCombo();
     }
 #ifdef _WIN32
-    const bool fsr411_selected = s.upscaler == BbSettings::UpscalerFsr411;
-    static const char* fsr411_backends[] = {"Vulkan (fsr4vk)", "AMD DX12"};
+    const bool fsr411_selected = IsFsr41(s.upscaler);
+    const std::string settings_button = std::string(Fsr41Ui::Text(Fsr41Ui::Settings))+"##FSR41SettingsButton";
     ImGui::BeginDisabled(!fsr411_selected);
-    int backend = s.fsr411_backend;
-    if (ImGui::BeginCombo("FSR 4.1.1 backend", fsr411_selected ? fsr411_backends[backend] : "-")) {
-        for (int i = 0; i < 2; ++i) {
-            if (ImGui::Selectable(fsr411_backends[i], i == backend)) {
-                Store(s.fsr411_backend, i, true);
-            }
-        }
-        ImGui::EndCombo();
-    }
+    if (ImGui::Button(settings_button.c_str())) ImGui::OpenPopup("###FSR41Settings");
     ImGui::EndDisabled();
-    Hint("AMD DX12 uses AMD's FSR library through the Windows bridge. Vulkan uses fsr4vk. The method is saved with the launcher settings in bbport.ini and applies after restarting the game.");
-    if (fsr411_selected && s.fsr411_backend != s.startup_fsr411_backend) {
-        ImGui::TextDisabled("Active method: %s; selected method applies after restart",
-                            fsr411_backends[s.startup_fsr411_backend]);
+    if (fsr411_selected) {
+        ImGui::SameLine();
+        for (const auto& route : Fsr41Routes) if (route.version==s.upscaler && route.backend==s.fsr411_backend)
+            ImGui::TextDisabled("%s: %s", Fsr41Ui::Text(Fsr41Ui::Selected), route.title);
+    } else if (!AnyFsr41()) ImGui::TextDisabled("%s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
+    Fsr41Settings();
+    if (const char* problem = s.fsr4_method_problem.load(); problem && fsr411_selected) {
+        ImGui::PushTextWrapPos();
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
+        ImGui::PopTextWrapPos();
     }
 #endif
     if (const char* problem = s.dlss_problem.load(); problem && upscaler == BbSettings::UpscalerDlss) {
@@ -259,7 +360,9 @@ void Menu() {
         ImGui::PopTextWrapPos();
     }
     if (BbSettings::IsFsr4(s.upscaler)) {
-        if (s.upscaler == BbSettings::UpscalerFsr411) {
+        if (s.upscaler == BbSettings::UpscalerFsr412) {
+            Hint("FSR 4.1.2 uses the original AMD Vulkan driver or AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
+        } else if (s.upscaler == BbSettings::UpscalerFsr411) {
 #ifdef _WIN32
             Hint("FSR 4.1.1 temporal upscaling uses the method selected above. AMD DX12 is included in the Windows package; Vulkan assets can be downloaded in the launcher. Quality presets and sharpening apply to both methods.");
 #else
@@ -340,9 +443,9 @@ void Menu() {
     const bool cache_available = s.object_motion &&
         (s.upscaler == BbSettings::UpscalerFsr3 || BbSettings::IsFsr4(s.upscaler));
     ImGui::BeginDisabled(!cache_available);
-    Checkbox("Motion-vector cache (experimental)", s.object_motion_cache);
+    Checkbox(Fsr41Ui::Text(Fsr41Ui::MotionCacheLabel), s.object_motion_cache);
     ImGui::EndDisabled();
-    Hint("Reuses object-motion render targets and may improve FSR performance. Uses extra VRAM and requires object motion vectors. The saved choice applies after restarting the game.");
+    Hint(Fsr41Ui::Text(Fsr41Ui::MotionCacheHelp));
     if (cache_available && BbSettings::FsrSettingsNeedRestart()) {
         const bool active = s.startup_object_motion_cache && s.startup_object_motion &&
             (s.startup_upscaler == BbSettings::UpscalerFsr3 || BbSettings::IsFsr4(s.startup_upscaler));
@@ -357,12 +460,15 @@ void Menu() {
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText("Frame generation");
-    static const char* frame_gens[] = {"Off", "FSR 3.1 (any GPU)", "DLSS (NVIDIA RTX 40/50)", "AMD ML-FG 4.0.1 (RX 9000, 2x SDR, experimental)"};
+    static const char* frame_gens[] = {"Off", "FSR 3.1 (any GPU)", "DLSS (NVIDIA RTX 40/50)",
+        "AMD ML-FG 4.0.1 (RX 9000, 2x SDR, experimental)",
+        "AMD ML-FG 4.0.2 (RX 9000, 2x SDR, experimental)"};
+    static_assert(sizeof(frame_gens) / sizeof(*frame_gens) == BbSettings::FrameGenCount);
     const int frame_gen = s.frame_gen;
     if (ImGui::BeginCombo("Frame generation", frame_gens[frame_gen])) {
         for (int i = 0; i < BbSettings::FrameGenCount; ++i) {
             const bool supported = (i != BbSettings::FrameGenDlss || s.dlssg_max_multiplier > 1) &&
-                (i != BbSettings::FrameGenFsr401 || s.fg401_supported);
+                (!BbSettings::IsMlFrameGen(i) || s.MlFgSupported(i));
             ImGui::BeginDisabled(!supported);
             if (ImGui::Selectable(frame_gens[i], i == frame_gen)) {
                 BbSettings::SelectFrameGen(i);
@@ -371,9 +477,9 @@ void Menu() {
             ImGui::EndDisabled();
             if (!supported) {
                 ImGui::SameLine();
-                ImGui::TextDisabled(i == BbSettings::FrameGenFsr401 ? "- unavailable" : "- unsupported by this GPU");
-                if (i == BbSettings::FrameGenFsr401)
-                    if (const char* problem = s.fg401_problem.load()) Hint(problem);
+                ImGui::TextDisabled(BbSettings::IsMlFrameGen(i) ? "- unavailable" : "- unsupported by this GPU");
+                if (BbSettings::IsMlFrameGen(i))
+                    if (const char* problem = s.MlFgProblem(i)) Hint(problem);
             }
         }
         ImGui::EndCombo();
@@ -408,8 +514,8 @@ void Menu() {
             ImGui::TextDisabled("Paused: presenting fell behind (V-Sync on a slower display?)");
         }
     }
-    if (s.frame_gen == BbSettings::FrameGenFsr401) {
-        if (const char* problem = s.fg401_problem.load()) {
+    if (BbSettings::IsMlFrameGen(s.frame_gen)) {
+        if (const char* problem = s.MlFgProblem(s.frame_gen)) {
             ImGui::PushTextWrapPos();
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
             ImGui::PopTextWrapPos();
@@ -584,6 +690,7 @@ void FpsCounter() {
                 s.upscaler == BbSettings::UpscalerFsr3   ? "FSR 3.1"
                 : s.upscaler == BbSettings::UpscalerFsr4 ? "FSR 4"
                 : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
+                : s.upscaler == BbSettings::UpscalerFsr412 ? "FSR 4.1.2"
                 : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
                 : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
                                                          : "");
@@ -612,11 +719,29 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     style.GrabRounding = 4.0f;
     style.Colors[ImGuiCol_WindowBg].w = 0.92f;
 
+    static ImVector<ImWchar> picker_glyphs;
+    ImFontGlyphRangesBuilder ranges;
+    ranges.AddRanges(io.Fonts->GetGlyphRangesDefault());
+    ranges.AddRanges(io.Fonts->GetGlyphRangesCyrillic());
+    for (const char* text : Fsr41Ui::texts[Fsr41Ui::Language()]) ranges.AddText(text);
+    ranges.BuildRanges(&picker_glyphs);
     ImFontConfig font_config;
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
-                                   int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config);
+                                   int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config, picker_glyphs.Data);
 
+#ifdef _WIN32
+    if (const char* windows=std::getenv("WINDIR")) {
+        const std::string language=Fsr41Ui::languages[Fsr41Ui::Language()];
+        const char* candidates[] = {"msyh.ttc","YuGothM.ttc","msgothic.ttc","malgun.ttf"};
+        if (language=="zh" || language=="ja" || language=="ko") for(const char* file:candidates) {
+            const auto path=std::filesystem::path(windows)/"Fonts"/file;
+            if(!std::filesystem::is_regular_file(path)) continue;
+            ImFontConfig merge; merge.MergeMode=true;
+            io.Fonts->AddFontFromFileTTF(path.string().c_str(),18.f,&merge,picker_glyphs.Data);
+        }
+    }
+#endif
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
         instance.ApiVersion(),

@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 void PrintFsr411Capabilities(VkPhysicalDevice device);
+void PrintFsr412Capabilities(VkPhysicalDevice device, int dx12);
 #endif
 
 static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
@@ -131,6 +132,12 @@ int main(int argc, char **argv) {
             if (better_device(devices[i], selected)) selected = devices[i];
     }
 #ifdef _WIN32
+    if (argc > 1 && (!strcmp(argv[1], "--fsr412-vulkan") || !strcmp(argv[1], "--fsr412-dx12"))) {
+        PrintFsr412Capabilities(selected, !strcmp(argv[1], "--fsr412-dx12"));
+        free(devices);
+        vkDestroyInstance(instance, NULL);
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "--fsr411")) {
         PrintFsr411Capabilities(selected);
         free(devices);

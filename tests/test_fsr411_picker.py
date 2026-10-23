@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'launcher'))
 import bbport_launcher_win as launcher
 import bbport_fsr411 as support
+import bbport_fsr41_ui as picker
+import bbport_fsr41 as family
 
 READY = dict(vendor_id=0x1002, **{m: dict(supported=True, reason='ready', detail='') for m in ('vk', 'dx12')})
 
@@ -49,6 +51,7 @@ class PickerFixture:
         ui.fsr411_support = copy.deepcopy(READY)
         ui.fsr411_refreshers, ui.fsr411_upscaler_refreshers = [], []
         ui.process, ui.fsr411_downloading = None, False
+        ui.index_entry = Mock()
         ui.messagebox = types.SimpleNamespace(askyesno=Mock(return_value=False), showerror=Mock())
         self.parent = ttk.Frame(self.root)
         self.pick = ui.fsr411_choice(self.parent)
@@ -62,124 +65,95 @@ class PickerFixture:
 
 
 class PickerTests(PickerFixture, unittest.TestCase):
-    def test_missing_vulkan_offers_download_and_declining_keeps_preference(self):
-        self.assertEqual(self.pick.menu.entrycget(0, 'label'), support.VULKAN_DOWNLOAD_LABEL)
-        self.assertEqual(self.pick.menu.entrycget(0, 'state'), 'normal')
-        self.assertEqual(self.pick.menu.entrycget(1, 'state'), 'normal')
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-        self.assertEqual(self.pick.button.cget('text'), support.VULKAN_DOWNLOAD_LABEL)
-        self.assertEqual(self.pick.hint.winfo_manager(), '')
-        self.pick.menu.invoke(1)
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
-        self.pick.menu.invoke(0)
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
-        self.assertEqual(self.pick.selection.get(), 'dx12')
-        self.ui.messagebox.askyesno.assert_called_once_with(support.DOWNLOAD_TITLE, support.DOWNLOAD_QUESTION, parent=self.root)
-        self.fetch.fetch.assert_not_called()
-
-    def test_repaired_package_enables_and_corruption_offers_download(self):
-        path = self.repair()
-        self.assertEqual(self.pick.menu.entrycget(0, 'state'), 'normal')
-        self.assertEqual(self.pick.menu.entrycget(0, 'label'), 'Vulkan (fsr4vk)')
-        self.assertEqual(self.pick.button.cget('text'), 'Vulkan (fsr4vk)')
-        self.assertEqual(self.pick.hint.cget('text'), '')
-        self.pick.menu.invoke(1)
-        self.pick.menu.invoke(0)
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-        path.write_bytes(b'changed package')
-        for refresh in self.ui.fsr411_refreshers: refresh()
-        self.assertEqual(self.pick.menu.entrycget(0, 'state'), 'normal')
-        self.assertEqual(self.pick.menu.entrycget(0, 'label'), support.VULKAN_DOWNLOAD_LABEL)
-        self.assertEqual(self.pick.hint.winfo_manager(), '')
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-
-    def test_other_upscaler_shows_dash_and_restores_saved_method(self):
-        self.repair()
-        for upscaler in ('fsr3', 'taa', 'off'):
-            self.ui.vars['upscaler'].set(upscaler)
-            self.assertEqual(self.pick.button.cget('text'), '—')
-            self.assertTrue(self.pick.button.instate(['disabled']))
-            self.pick.menu.invoke(1)
-            self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-        self.ui.vars['upscaler'].set('fsr411')
-        self.assertEqual(self.pick.button.cget('text'), 'Vulkan (fsr4vk)')
+    def test_missing_package_is_disabled_and_settings_remain_accessible(self):
+        window=self.ui.open_fsr41_settings()
+        self.assertTrue(window.cards[3][1].instate(['disabled']))
+        self.assertEqual(window.cards[3][2].cget('text'),launcher._('Files missing'))
         self.assertFalse(self.pick.button.instate(['disabled']))
-
-    def test_install_does_not_override_hardware_or_failed_probe(self):
-        self.repair()
-        for reason in ('hardware', 'check', 'checking'):
-            self.ui.fsr411_support['vk'] = dict(supported=False, reason=reason, detail='feature')
-            for refresh in self.ui.fsr411_refreshers: refresh()
-            self.assertEqual(self.pick.menu.entrycget(0, 'state'), 'disabled')
-            self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-
-    def test_missing_package_with_unsupported_or_unchecked_gpu_stays_disabled(self):
-        for caps in (None, {**READY, 'vk':dict(supported=False, reason='hardware', detail='feature')},
-                     {**READY, 'vk':dict(supported=False, reason='check', detail='')}):
-            self.ui.fsr411_support = caps
-            for refresh in self.ui.fsr411_refreshers: refresh()
-            self.assertEqual(self.pick.menu.entrycget(0, 'state'), 'disabled')
-            self.pick.menu.invoke(0)
+        window.cards[2][1].invoke()
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'dx12')
+        window.cards[3][1].invoke()
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'dx12')
         self.ui.messagebox.askyesno.assert_not_called()
 
-    def test_short_hint_in_all_languages_and_two_controls_stay_synchronized(self):
-        previous = launcher.LANG
-        try:
-            for lang in support.TEXTS:
-                launcher.LANG = lang
-                second = self.ui.fsr411_choice(self.parent)
-                self.assertEqual(second.menu.entrycget(0, 'label'), support.VULKAN_DOWNLOAD_TEXTS[lang])
-                self.assertEqual(second.button.cget('text'), support.VULKAN_DOWNLOAD_TEXTS[lang])
-                self.assertEqual(second.hint.winfo_manager(), '')
-                second.menu.invoke(1)
-                self.assertEqual(self.pick.button.cget('text'), launcher._('AMD DX12'))
-                second.menu.invoke(0)
-                self.assertEqual(self.ui.messagebox.askyesno.call_args.args[1], support.DOWNLOAD_QUESTIONS[lang])
-                self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
-                self.ui.vars['fsr411_backend'].set('vk')
-        finally:
-            launcher.LANG = previous
+    def test_repaired_package_enables_and_corruption_disables_route(self):
+        window=self.ui.open_fsr41_settings()
+        path=self.repair()
+        self.assertFalse(window.cards[3][1].instate(['disabled']))
+        window.cards[2][1].invoke();window.cards[3][1].invoke()
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'vk')
+        path.write_bytes(b'changed package')
+        for refresh in list(self.ui.fsr411_refreshers):refresh()
+        self.assertTrue(window.cards[3][1].instate(['disabled']))
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'vk')
 
-    def test_quick_settings_caption_gets_its_full_width_in_all_languages(self):
-        import tkinter.font as font
-        previous = launcher.LANG
+    def test_other_upscalers_disable_settings_and_preserve_saved_method(self):
+        self.repair()
+        for upscaler in ('fsr3','taa','off'):
+            self.ui.vars['upscaler'].set(upscaler)
+            self.assertTrue(self.pick.button.instate(['disabled']))
+            self.assertEqual(self.ui.vars['fsr411_backend'].get(),'vk')
+        window=self.ui.open_fsr41_settings();window.cards[2][1].invoke()
+        self.assertEqual(self.ui.vars['upscaler'].get(),'fsr411')
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'dx12')
+
+    def test_install_does_not_override_hardware_or_failed_probe(self):
+        self.repair();window=self.ui.open_fsr41_settings()
+        for reason in ('hardware','check','checking'):
+            self.ui.fsr411_support['vk']=dict(supported=False,reason=reason,detail='feature')
+            for refresh in list(self.ui.fsr411_refreshers):refresh()
+            self.assertTrue(window.cards[3][1].instate(['disabled']))
+            self.assertEqual(self.ui.vars['fsr411_backend'].get(),'vk')
+
+    def test_failed_check_keeps_saved_method_and_explains_status(self):
+        self.ui.fsr411_support['vk']=dict(supported=False,reason='check',detail='')
+        window=self.ui.open_fsr41_settings()
+        self.assertEqual(window.cards[3][2].cget('text'),launcher._('Files missing'))
+        self.repair()
+        self.assertEqual(window.cards[3][2].cget('text'),launcher._('Support check failed'))
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(),'vk')
+
+    def test_all_languages_and_two_controls_stay_synchronized(self):
+        self.repair();previous=launcher.LANG
         try:
-            for lang in support.TEXTS:
-                launcher.LANG = lang
-                variables = [self.ui.vars[key] for key in ('upscaler', 'fsr411_backend')]
-                traces = [len(var.trace_info()) for var in variables]
-                quick = self.ui.fsr411_choice(self.parent, width=26)
-                quick.pack()
-                self.parent.pack()
-                self.root.update_idletasks()
-                text_font = font.Font(root=self.root, font=self.ui.ttk.Style().lookup(
-                    'Fsr411.TMenubutton', 'font') or 'TkDefaultFont')
-                text_width = text_font.measure(support.VULKAN_DOWNLOAD_TEXTS[lang])
-                self.assertGreaterEqual(quick.button.winfo_reqwidth(), text_width + 12, lang)
-                self.assertLess(int(quick.button.cget('width')), 0)
+            for lang in family.TEXTS:
+                launcher.LANG=lang
+                second=self.ui.fsr411_choice(self.parent)
+                window=self.ui.open_fsr41_settings()
+                self.assertEqual(window.title(), '')
+                heading = window.winfo_children()[0].winfo_children()[0]
+                self.assertEqual(heading.cget('text'), launcher._('FSR 4.1 Settings'))
+                window.cards[2][1].invoke()
+                self.assertIn('AMD DX12',second.summary.cget('text'))
+                self.assertIn('AMD DX12',self.pick.summary.cget('text'))
+                self.assertEqual(window.cards[2][2].cget('text'),launcher._('Supported'))
+                window.destroy();second.destroy()
+        finally:launcher.LANG=previous
+
+    def test_settings_caption_width_and_destroy_cleanup_in_all_languages(self):
+        import tkinter.font as font
+        previous=launcher.LANG
+        try:
+            for lang in family.TEXTS:
+                launcher.LANG=lang
+                variables=[self.ui.vars[key] for key in ('upscaler','fsr411_backend')]
+                traces=[len(var.trace_info()) for var in variables]
+                quick=self.ui.fsr411_choice(self.parent,width=26)
+                quick.pack();self.parent.pack();self.root.update_idletasks()
+                actual=font.Font(root=self.root,font=self.ui.ttk.Style().lookup('TButton','font') or 'TkDefaultFont')
+                self.assertGreaterEqual(quick.button.winfo_reqwidth(),actual.measure(quick.button.cget('text')),lang)
                 quick.destroy()
-                self.assertEqual([len(var.trace_info()) for var in variables], traces)
-        finally:
-            launcher.LANG = previous
+                self.assertEqual([len(var.trace_info()) for var in variables],traces)
+        finally:launcher.LANG=previous
 
     def test_play_enabled_only_with_valid_selected_method(self):
-        self.ui.process, self.ui.fsr411_downloading, self.ui.gpu_text = None, False, 'GPU'
-        # the Play page's ready check and the rest of the page are not under test
-        self.ui.check_line, self.ui.show_hunters, self.ui.test_running = Mock(), Mock(), Mock(return_value=False)
-        self.ui.play_button = self.ui.ttk.Button(self.parent)
-        self.ui.status = self.ui.tk.Label(self.parent)
-        with patch.object(launcher, 'game_info', return_value=('fixture', launcher.PATCH_VERSION)), \
-             patch.object(launcher, 'fsr4_missing', return_value=[]):
-            self.ui.refresh_status()
-            self.assertTrue(self.ui.play_button.instate(['disabled']))
-            self.assertEqual(self.ui.status.cget('text'), support.DOWNLOAD_HINT)
-            self.pick.menu.invoke(1)
-            self.ui.refresh_status()
-            self.assertFalse(self.ui.play_button.instate(['disabled']))
-            self.ui.vars['fsr411_backend'].set('vk')
-            self.repair()
-            self.ui.refresh_status()
-            self.assertFalse(self.ui.play_button.instate(['disabled']))
+        self.ui.process,self.ui.fsr411_downloading,self.ui.gpu_text=None,False,'GPU'
+        self.ui.check_line,self.ui.show_hunters,self.ui.test_running=Mock(),Mock(),Mock(return_value=False)
+        self.ui.play_button=self.ui.ttk.Button(self.parent);self.ui.status=self.ui.tk.Label(self.parent)
+        with patch.object(launcher,'game_info',return_value=('fixture',launcher.PATCH_VERSION)),patch.object(launcher,'fsr4_missing',return_value=[]):
+            self.ui.refresh_status();self.assertTrue(self.ui.play_button.instate(['disabled']))
+            self.ui.open_fsr41_settings().cards[2][1].invoke()
+            self.ui.refresh_status();self.assertFalse(self.ui.play_button.instate(['disabled']))
 
 
 class DownloadTests(PickerFixture, unittest.TestCase):
@@ -205,8 +179,8 @@ class DownloadTests(PickerFixture, unittest.TestCase):
             path.write_bytes(self.payload if outcome == 'success' else b'corrupt result')
             progress(len(self.payload), len(self.payload))
         self.fetch.fetch.side_effect = fetch
-        self.pick.menu.invoke(1)
-        self.pick.menu.invoke(0)
+        ui.var('fsr411_backend','ini').set('dx12')
+        ui.download_fsr411()
 
     def finish_download(self):
         self.workers.pop()()
@@ -214,16 +188,16 @@ class DownloadTests(PickerFixture, unittest.TestCase):
         while not self.ui.ui_calls.empty():
             self.ui.ui_calls.get_nowait()()
 
-    def test_success_uses_shared_download_and_changes_method_only_after_verification(self):
+    def test_repair_uses_shared_download_and_enables_route_after_verification(self):
         self.make_download()
         self.assertTrue(self.ui.fsr411_downloading)
         self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
-        self.assertTrue(self.pick.button.instate(['disabled']))
+        self.assertFalse(self.pick.button.instate(['disabled']))
         self.fetch.fetch.assert_not_called()
         self.finish_download()
         self.fetch.fetch.assert_called_once()
-        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'vk')
-        self.assertEqual(self.pick.menu.entrycget(0, 'label'), 'Vulkan (fsr4vk)')
+        self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
+        self.assertTrue(self.ui.fsr411_status('vk')['supported'])
         self.assertFalse(self.ui.fsr411_downloading)
         self.ui.messagebox.showerror.assert_not_called()
 
@@ -255,7 +229,7 @@ class DownloadTests(PickerFixture, unittest.TestCase):
     def test_graphics_button_download_keeps_selected_method(self):
         self.make_download()
         self.finish_download()
-        self.pick.menu.invoke(1)
+        self.ui.var('fsr411_backend','ini').set('dx12')
         self.ui.download_fsr411()
         self.finish_download()
         self.assertEqual(self.ui.vars['fsr411_backend'].get(), 'dx12')
@@ -281,6 +255,7 @@ class ShortcutTests(unittest.TestCase):
             ui, root = Mock(), Mock()
             with patch.object(launcher.sys, 'argv', ['Bloodborne.exe', '--play']), \
                  patch.object(launcher, 'FROZEN', False), \
+                 patch.object(launcher, 'CONFIG_FILE', Path(temp)/'eboot.bin'), \
                  patch.object(launcher, 'load_json', return_value={'game_dir':temp}), \
                  patch.object(launcher, 'play_without_window', return_value=None), \
                  patch.object(tk, 'Tk', return_value=root), \

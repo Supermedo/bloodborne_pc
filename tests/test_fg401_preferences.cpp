@@ -14,6 +14,24 @@ int main() {
     _wputenv_s(L"BB_CONFIG", path);
     _putenv_s("BB_FRAME_GEN", "");
     auto& s = Get();
+    for (const int choice : {FrameGenFsr401, FrameGenFsr402}) {
+        SelectFrameGen(choice);
+        ConfigureFg401Support(true, nullptr, choice);
+        assert(s.MlFgSupported(choice));
+        FrameGenFailure(choice, "ML provider unavailable.");
+        assert(s.frame_gen == choice && s.ActiveFrameGen() == FrameGenFsr3);
+        Save(); Load();
+        assert(s.frame_gen == choice && s.ActiveFrameGen() == choice);
+        FrameGenFailure(choice, "ML runtime failed.");
+        const int other = choice == FrameGenFsr401 ? FrameGenFsr402 : FrameGenFsr401;
+        SelectFrameGen(other);
+        assert(s.ActiveFrameGen() == other); // Failure belongs to one provider only.
+        FrameGenFailure(other, "Other provider failed.");
+        FrameGenFailure(FrameGenFsr3, "Fallback failed.");
+        assert(s.frame_gen == other && s.ActiveFrameGen() == FrameGenOff);
+        Save(); Load();
+        assert(s.frame_gen == other && s.ActiveFrameGen() == other);
+    }
     SelectFrameGen(FrameGenFsr401);
     ConfigureFg401Support(true, nullptr);
     assert(s.ActiveFrameGen() == FrameGenFsr401);

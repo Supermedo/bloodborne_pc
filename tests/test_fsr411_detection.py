@@ -100,7 +100,12 @@ class DetectionTests(unittest.TestCase):
         for vendor, expected in ((0x1002, 'dx12'), (0x10de, 'vk'), (0x8086, 'vk'), (None, 'vk')):
             caps = {**READY, 'vendor_id': vendor}
             with patch.object(support, 'query', return_value=caps), \
+                 patch.object(launcher.bbport_fsr41, 'query', return_value=caps), \
+                 patch.object(launcher.bbport_fsr41, 'method_statuses', return_value=[
+                     dict(supported=False), dict(supported=False),
+                     dict(supported=vendor == 0x1002), dict(supported=True)]), \
                  patch.object(launcher, 'ini_path', return_value=ini):
+                self.assertEqual(support.default_backend(self.root), expected)
                 ini.write_text('upscaler=fsr411\n# retain\n')
                 before = ini.read_bytes()
                 self.assertEqual(launcher.load_ini()[0]['fsr411_backend'], expected)
@@ -138,13 +143,14 @@ class DetectionTests(unittest.TestCase):
         ui.fsr411_downloading = False
         ui.app = dict(launcher.APP_DEFAULTS)
         ui.ini = {'upscaler': 'fsr411', 'fsr411_backend': 'vk'}
+        ui.vars = {}
         ui.var = lambda *args: types.SimpleNamespace(get=lambda: '' if args[0] != 'online_pool' else 'supermedo')
         for method in ('collect', 'show', 'refresh_status', 'refresh_fsr411'):
             setattr(ui, method, unittest.mock.Mock())
         ui.messagebox = types.SimpleNamespace(showwarning=unittest.mock.Mock())
         status = dict(supported=False, reason='download', detail=support.DLL['vk'])
-        ui.fsr411_status = lambda method: status
-        with patch.object(support, 'query', return_value=READY), \
+        ui.fsr41_status = lambda method: status
+        with patch.object(launcher.bbport_fsr41, 'query', return_value=READY), \
              patch.object(launcher.subprocess, 'Popen') as popen:
             ui.play()
         popen.assert_not_called()
@@ -182,28 +188,34 @@ class SelectionWidgetsTest(unittest.TestCase):
     def test_unsupported_methods_are_disabled_and_saved_selection_is_retained(self):
         ui = self.ui
         upscale = ui.choice(self.parent, 'upscaler', 'ini', launcher.UPSCALERS)
-        self.assertFalse(any('4.1.1' in text for text in upscale['values']))
+        labels=[upscale.menu.entrycget(i,'label') for i in range(upscale.menu.index('end')+1)]
+        family=labels.index(launcher._('FSR 4.1 (experimental)'))
+        self.assertEqual(upscale.menu.entrycget(family,'state'),'disabled')
         ui.vars['upscaler'].set('fsr411')
-        self.assertIn('4.1.1', upscale.get())
+        self.assertEqual(upscale.button.cget('text'),launcher._('FSR 4.1 (experimental)'))
+        ui.index_entry=lambda *a,**k:None
         methods = ui.fsr411_choice(self.parent)
-        self.assertEqual(methods.menu.entrycget(1, 'label'), 'AMD DX12')
-        self.assertEqual(methods.menu.entrycget(1, 'state'), 'disabled')
+        dialog=ui.open_fsr41_settings()
+        self.assertTrue(dialog.cards[2][1].instate(['disabled']))
+        self.assertFalse(methods.button.instate(['disabled']))
         self.assertEqual(ui.vars['fsr411_backend'].get(), 'vk')
         ui.fsr411_support = copy.deepcopy(READY)
         for refresh in ui.fsr411_refreshers + ui.fsr411_upscaler_refreshers:
             refresh()
-        self.assertEqual(methods.menu.entrycget(1, 'state'), 'normal')
+        self.assertFalse(dialog.cards[2][1].instate(['disabled']))
         ui.vars['upscaler'].set('fsr3')
-        self.assertEqual(methods.button.cget('text'), '—')
+        self.assertEqual(methods.button.cget('text'),launcher._('FSR 4.1 Settings')+' …')
         self.assertEqual(ui.vars['fsr411_backend'].get(), 'vk')
 
     def test_unverified_probe_hides_new_selection_but_keeps_saved_selection(self):
         ui = self.ui
         ui.fsr411_support = {m: dict(supported=False, reason='check', detail='') for m in ('vk', 'dx12')}
         upscale = ui.choice(self.parent, 'upscaler', 'ini', launcher.UPSCALERS)
-        self.assertFalse(any('4.1.1' in text for text in upscale['values']))
+        labels=[upscale.menu.entrycget(i,'label') for i in range(upscale.menu.index('end')+1)]
+        family=labels.index(launcher._('FSR 4.1 (experimental)'))
+        self.assertEqual(upscale.menu.entrycget(family,'state'),'disabled')
         ui.vars['upscaler'].set('fsr411')
-        self.assertIn('4.1.1', upscale.get())
+        self.assertEqual(upscale.button.cget('text'),launcher._('FSR 4.1 (experimental)'))
 
 
 if __name__ == '__main__':

@@ -59,6 +59,7 @@ int main(int argc, char** argv) {
     assert(s.startup_fsr411_backend == Fsr411Dx12 && s.startup_object_motion_cache);
     assert(!FsrSettingsNeedRestart());
     s.fsr411_backend = Fsr411Vulkan;
+    assert(!FsrSettingsNeedRestart()); // Backend changes are live; the cache is not.
     s.object_motion_cache = false;
     assert(FsrSettingsNeedRestart());
     assert(s.startup_fsr411_backend == Fsr411Dx12 && s.startup_object_motion_cache);

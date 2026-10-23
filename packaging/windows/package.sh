@@ -94,7 +94,7 @@ cp packaging/windows/licenses/*.txt "$dest/licenses/"
 cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
-cp docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
+cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"

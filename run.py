@@ -20,6 +20,13 @@ import time
 PORT = Path(__file__).resolve().parent
 
 
+def prepare_driver_environment(env):
+    """The direct/frozen runner needs the same automatic driver lookup as the GUI."""
+    sys.path.insert(0, str(PORT / 'launcher'))
+    import bbport_driver_runtime
+    return bbport_driver_runtime.configure_environment(env)
+
+
 # Co-op: the community service that answers Bloodborne's own game-server requests
 # (messages, bloodstains, sign-in); summon requests go to the shadNet server instead.
 COMMUNITY_SERVER = 'https://thehuntersdream.com'
@@ -186,7 +193,7 @@ def refresh_shared_graphics(env, config):
     env['BB_FSR411_NATIVE'] = '1' if backend == 'dx12' else '0'
     cache = values.get('object_motion_cache') == '1' and \
         values.get('object_motion', '1') == '1' and \
-        values.get('upscaler', 'fsr4') in ('fsr3', 'fsr4', 'fsr411')
+        values.get('upscaler', 'fsr4') in ('fsr3', 'fsr4', 'fsr411', 'fsr412')
     env['BB_OBJECT_MOTION_CACHE'] = '1' if cache else '0'
 
 
@@ -307,6 +314,7 @@ def main():
     # As run.sh: relative paths (BB_GAME_DIR, BB_DATA_DIR, fsr4_shaders/) are from the port.
     os.chdir(PORT)
     env = os.environ
+    prepare_driver_environment(env)
     data = Path(env.get('BB_DATA_DIR', PORT))
     out = data / 'out'
     out.mkdir(parents=True, exist_ok=True)

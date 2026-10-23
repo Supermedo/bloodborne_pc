@@ -10,15 +10,23 @@
 namespace BbSettings {
 
 enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, UpscalerFsr411 = 3,
-                      UpscalerTaa = 4, UpscalerDlss = 5, UpscalerCount };
+                      UpscalerTaa = 4, UpscalerDlss = 5, UpscalerFsr412 = 6, UpscalerCount };
 /// FSR 4 v07 or FSR 4.1.1: the same inputs, settings and placement in the frame.
 inline bool IsFsr4(int upscaler) {
-    return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411;
+    return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411 || upscaler == UpscalerFsr412;
+}
+/// Every FSR 4.1 provider delegates RCAS to the host, independently of other providers.
+inline bool UsesHostSharpen(int upscaler, bool active) {
+    return active && (upscaler == UpscalerFsr411 || upscaler == UpscalerFsr412);
 }
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 /// Frame generation (vk_frame_generation.h): frames generated between two of the game's.
-enum FrameGen : int { FrameGenOff = 0, FrameGenFsr3 = 1, FrameGenDlss = 2, FrameGenFsr401 = 3, FrameGenCount };
+enum FrameGen : int { FrameGenOff = 0, FrameGenFsr3 = 1, FrameGenDlss = 2, FrameGenFsr401 = 3,
+                      FrameGenFsr402 = 4, FrameGenCount };
+inline bool IsMlFrameGen(int provider) {
+    return provider == FrameGenFsr401 || provider == FrameGenFsr402;
+}
 enum Fsr411Backend : int { Fsr411Vulkan = 0, Fsr411Dx12 = 1 };
 
 /// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
@@ -81,9 +89,21 @@ struct Values {
     std::atomic<bool> jitter{true};
     std::atomic<bool> reactive{false};
     std::atomic<bool> object_motion{true};
-    /// Shared launcher/overlay preferences, applied on the next game start.
+    /// Shared launcher/overlay preference; the renderer applies it at a frame boundary.
     std::atomic<int> fsr411_backend{Fsr411Vulkan};
+    std::atomic<int> fsr41_version{UpscalerFsr412};
+    std::atomic<int> active_fsr411_backend{Fsr411Vulkan};
+    int ActiveFsr411Backend() const { return active_fsr411_backend.load(); }
+    std::atomic<bool> fsr41_backend_supported[2][2]{};
+    /// FSR41 UI status codes shared with the launcher (bbport_fsr41.py).
+    std::atomic<int> fsr41_status[2][2]{{5, 5}, {5, 5}};
+    bool FsrMethodSupported(int version, int method) const {
+        return fsr41_backend_supported[version == UpscalerFsr412][method].load();
+    }
+    std::atomic<const char*> fsr4_method_problem{nullptr};
     std::atomic<bool> object_motion_cache{false};
+    /// UI visibility only; saved compatibility selections remain visible.
+    std::atomic<bool> fsr_compatibility_options{false};
     std::atomic<float> reactive_scale{1.0f};
     std::atomic<float> reactive_threshold{0.2f};
     std::atomic<float> reactive_max{0.9f};
@@ -121,10 +141,12 @@ struct Values {
     std::atomic<int> frame_gen{FrameGenOff};
     /// Session fallback is separate from the saved ML-FG selection.
     std::atomic<int> fg401_fallback{-1};
+    std::atomic<int> fg401_fallback_source{-1};
     int ActiveFrameGen() const {
         const int selected = frame_gen.load();
         const int fallback = fg401_fallback.load();
-        return selected == FrameGenFsr401 && fallback >= 0 ? fallback : selected;
+        return IsMlFrameGen(selected) && fg401_fallback_source.load() == selected && fallback >= 0
+                   ? fallback : selected;
     }
     std::atomic<int> frame_gen_multiplier{2};
     /// At most the frames the display shows between two of the game's (an uncapped game then
@@ -132,6 +154,14 @@ struct Values {
     std::atomic<bool> frame_gen_fit_display{false};
     std::atomic<bool> fg401_supported{false};
     std::atomic<const char*> fg401_problem{nullptr};
+    std::atomic<bool> fg402_supported{false};
+    std::atomic<const char*> fg402_problem{nullptr};
+    bool MlFgSupported(int provider) const {
+        return provider == FrameGenFsr402 ? fg402_supported.load() : fg401_supported.load();
+    }
+    const char* MlFgProblem(int provider) const {
+        return provider == FrameGenFsr402 ? fg402_problem.load() : fg401_problem.load();
+    }
     std::atomic<bool> frame_gen_hdr{false};
     std::atomic<int> dlssg_max_multiplier{1};
     std::atomic<const char*> frame_gen_problem{nullptr};
@@ -169,14 +199,14 @@ void Load();
 void ConfigureUpscalerSupport(bool fsr4, bool fsr411, const char* fsr411_problem = nullptr);
 /// After device creation: DLSS availability; a DLSS setting falls back to FSR 3.1 without it.
 void ConfigureDlssSupport(bool available, const char* problem);
-void ConfigureFg401Support(bool available, const char* problem);
+void ConfigureFg401Support(bool available, const char* problem, int provider = FrameGenFsr401);
 void SelectFrameGen(int provider);
 void FrameGenFailure(int provider, const char* problem);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
 int RenderPreset();
 bool ResolutionNeedsRestart();
-/// Provider/cache choices are saved now, and retain their startup behavior until restart.
+/// The cache keeps its startup behavior; provider changes apply live.
 bool FsrSettingsNeedRestart();
 /// Writes the file (menu changes).
 void Save();

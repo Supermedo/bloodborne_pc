@@ -54,8 +54,12 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.object_motion = i != 0;
     } else if (key == "fsr411_backend") {
         v.fsr411_backend = value == "dx12" ? Fsr411Dx12 : Fsr411Vulkan;
+    } else if (key == "fsr41_version") {
+        v.fsr41_version = value == "fsr411" ? UpscalerFsr411 : UpscalerFsr412;
     } else if (key == "object_motion_cache") {
         v.object_motion_cache = value == "1";
+    } else if (key == "fsr_compatibility_options") {
+        v.fsr_compatibility_options = value == "1";
     } else if (key == "reactive_scale") {
         v.reactive_scale = Clamp(f, 0.0f, 16.0f);
     } else if (key == "reactive_threshold") {
@@ -111,11 +115,16 @@ Values& Get() {
 void Load() {
     auto& v = Get();
     v.fg401_fallback = -1;
+    v.fg401_fallback_source = -1;
     v.frame_gen_hdr = false;
     v.frame_gen_problem = nullptr;
     v.fg401_problem = nullptr;
+    v.fg402_problem = nullptr;
     v.fsr411_backend = Fsr411Vulkan;
+    v.fsr41_version = UpscalerFsr412;
+    v.fsr4_method_problem = nullptr;
     v.object_motion_cache = false;
+    v.fsr_compatibility_options = false;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -168,9 +177,11 @@ void Load() {
         }
     }
     v.startup_preset = v.preset;
+    if (v.upscaler == UpscalerFsr411 || v.upscaler == UpscalerFsr412) v.fsr41_version = v.upscaler.load();
     v.startup_upscaler = v.upscaler;
     v.startup_object_motion = v.object_motion;
     v.startup_fsr411_backend = v.fsr411_backend;
+    v.active_fsr411_backend = v.fsr411_backend.load();
     v.startup_object_motion_cache = v.object_motion_cache;
     for (int e = 0; e < EffectCount; ++e) {
         v.startup_effects[e] = v.effects[e];
@@ -204,28 +215,34 @@ void ConfigureUpscalerSupport(bool fsr4, bool fsr411, const char* fsr411_problem
     }
 }
 
-void ConfigureFg401Support(bool available, const char* problem) {
+void ConfigureFg401Support(bool available, const char* problem, int provider) {
     auto& v = Get();
-    v.fg401_supported = available;
-    static std::string kept;
-    kept = problem ? problem : "";
-    v.fg401_problem = available || kept.empty() ? nullptr : kept.c_str();
+    auto& supported = provider == FrameGenFsr402 ? v.fg402_supported : v.fg401_supported;
+    auto& message = provider == FrameGenFsr402 ? v.fg402_problem : v.fg401_problem;
+    supported = available;
+    static std::string kept[2];
+    auto& text = kept[provider == FrameGenFsr402];
+    text = problem ? problem : "";
+    message = available || text.empty() ? nullptr : text.c_str();
 }
 
 void SelectFrameGen(int provider) {
     auto& v = Get();
     v.frame_gen = provider;
     v.fg401_fallback = -1;
+    v.fg401_fallback_source = -1;
     v.frame_gen_problem = nullptr;
 }
 
 void FrameGenFailure(int provider, const char* problem) {
     auto& v = Get();
-    if (provider == FrameGenFsr401) {
-        ConfigureFg401Support(false, problem);
+    if (IsMlFrameGen(provider)) {
+        ConfigureFg401Support(false, problem, provider);
+        v.fg401_fallback_source = provider;
         v.fg401_fallback = FrameGenFsr3;
         v.frame_gen_problem = "ML-FG failed; FSR 3.1 FG active.";
-    } else if (v.frame_gen == FrameGenFsr401) {
+    } else if (IsMlFrameGen(v.frame_gen)) {
+        v.fg401_fallback_source = v.frame_gen.load();
         v.fg401_fallback = FrameGenOff;
         v.frame_gen_problem = "Frame generation unavailable; FG off.";
     } else {
@@ -277,8 +294,7 @@ bool FsrSettingsNeedRestart() {
     const auto& v = Get();
     const bool fsr_now = v.upscaler == UpscalerFsr3 || IsFsr4(v.upscaler);
     const bool fsr_start = v.startup_upscaler == UpscalerFsr3 || IsFsr4(v.startup_upscaler);
-    return v.fsr411_backend != v.startup_fsr411_backend ||
-        v.object_motion_cache != v.startup_object_motion_cache ||
+    return v.object_motion_cache != v.startup_object_motion_cache ||
         (v.object_motion_cache &&
          (fsr_now && v.object_motion) != (fsr_start && v.startup_object_motion));
 }
@@ -304,6 +320,8 @@ void Save() {
     std::fprintf(file, "fsr411_backend=%s\nobject_motion_cache=%d\n",
                  v.fsr411_backend == Fsr411Dx12 ? "dx12" : "vk",
                  int(v.object_motion_cache.load()));
+    std::fprintf(file, "fsr_compatibility_options=%d\n", int(v.fsr_compatibility_options.load()));
+    std::fprintf(file, "fsr41_version=%s\n", v.fsr41_version == UpscalerFsr411 ? "fsr411" : "fsr412");
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
@@ -338,12 +356,12 @@ const char* PresetName(int preset) {
 }
 
 const char* FrameGenName(int frame_gen) {
-    static constexpr const char* names[FrameGenCount] = {"off", "fsr3", "dlss", "fsr401"};
+    static constexpr const char* names[FrameGenCount] = {"off", "fsr3", "dlss", "fsr401", "fsr402"};
     return names[std::clamp(frame_gen, 0, FrameGenCount - 1)];
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss", "fsr412"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 

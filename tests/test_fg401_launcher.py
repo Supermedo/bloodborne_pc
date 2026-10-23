@@ -26,6 +26,14 @@ class CapabilityTests(unittest.TestCase):
     def test_exact_verified_provider(self):
         self.assertTrue(self.result('{"supported":true,"provider":"4.0.1"}')['supported'])
 
+    def test_driver_provider_requires_matching_version(self):
+        with patch.object(fg.Path, 'is_file', return_value=True), \
+             patch.object(fg.subprocess, 'run', return_value=types.SimpleNamespace(
+                 returncode=0, stdout='{"supported":true,"provider":"4.0.2"}')) as run:
+            self.assertTrue(fg.query(ROOT, version='4.0.2')['supported'])
+            self.assertEqual(run.call_args.args[0][-2:], ['--provider', '4.0.2'])
+            self.assertFalse(fg.query(ROOT)['supported'])
+
     def test_unavailable_or_other_provider(self):
         for stdout in ['{}','[]','null','broken','{"supported":false}',
                        '{"supported":true,"provider":"3.1.6"}',
@@ -76,6 +84,10 @@ class CapabilityTests(unittest.TestCase):
                     self.assertEqual(launcher._(key),fg.TRANSLATIONS[language][key])
                     self.assertEqual(key.count('{}'), fg.TRANSLATIONS[language][key].count('{}'))
                     self.assertTrue(launcher._(key).format('test.dll'))
+                    if '4.0.1' in key:
+                        new_key = key.replace('4.0.1', '4.0.2')
+                        self.assertEqual(launcher._(new_key),
+                                         fg.TRANSLATIONS[language][key].replace('4.0.1', '4.0.2'))
                 label=fg.TEXTS[language][0]
                 self.assertIn('RX 9000',label)
                 self.assertIn('2×',label)
@@ -146,7 +158,7 @@ class SelectionTests(unittest.TestCase):
             return types.SimpleNamespace(start=target)
         for status in [dict(supported=False, reason='check'), dict(supported=True)]:
             with patch.object(launcher.threading, 'Thread', side_effect=thread), \
-                 patch.object(fg, 'query', return_value=status):
+                 patch.object(fg, 'query_versions', return_value=status):
                 self.obj.recheck_fg401()
             self.assertEqual(self.var.get(), 'fsr401')
             self.obj.ui_calls.get_nowait()()
@@ -171,6 +183,25 @@ class SelectionTests(unittest.TestCase):
                 self.var.set(value)
                 self.obj.refresh_fg401()
                 self.assertEqual(self.var.get(),value)
+
+    def test_providers_are_independently_available(self):
+        self.obj.fg401_support = {'fsr401': dict(supported=True),
+                                 'fsr402': dict(supported=False, reason='provider')}
+        self.obj.refresh_fg401()
+        self.assertTrue(any('4.0.1' in text for text in self.box['values']))
+        self.assertFalse(any('4.0.2' in text for text in self.box['values']))
+        self.obj.fg401_support['fsr402'] = dict(supported=True)
+        self.obj.refresh_fg401()
+        self.assertTrue(any('4.0.2' in text for text in self.box['values']))
+        self.var.set('fsr402')
+        self.obj.var('hdr', 'app').set(True)
+        self.obj.refresh_fg401()
+        self.assertIn('HDR', self.obj.fg401_status.cget('text'))
+        self.obj.fg401_support['fsr402'] = dict(supported=False, reason='provider')
+        self.obj.refresh_fg401()
+        self.assertEqual(self.var.get(), 'fsr402')
+        self.assertIn('4.0.2', self.obj.fg401_status.cget('text'))
+        self.assertIn('4.0.2', self.box.get())
 
 if __name__=='__main__':
     unittest.main()

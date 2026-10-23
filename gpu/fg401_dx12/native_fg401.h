@@ -11,6 +11,7 @@ struct NativeFg401Config {
     uint8_t adapter_luid[8];
     uint32_t shared_texture_mask{};
     bool async_compute{};
+    uint32_t provider_version{(4u << 22) | 1u};
 };
 struct NativeFg401Plane {
     uint64_t offset;
