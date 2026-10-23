@@ -77,6 +77,12 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
                                            static_cast<u64>(device_local_memory / 100 * percent));
     }
     trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
+    // bbport: the marks in the log, so a player's log tells where eviction starts on that card.
+    std::printf("Texture cache: VRAM budget %lld MiB; marks: collect %llu, pressure %llu, critical %llu MiB\n",
+                static_cast<long long>(device_local_memory >> 20),
+                static_cast<unsigned long long>(trigger_gc_memory >> 20),
+                static_cast<unsigned long long>(pressure_gc_memory >> 20),
+                static_cast<unsigned long long>(critical_gc_memory >> 20));
 }
 
 TextureCache::~TextureCache() = default;
@@ -1183,10 +1189,20 @@ void TextureCache::GarbageCollectImages() {
     size_t num_deletions = 0;
     u32 visited = 0;
 
+    // bbport: a mark counts only where evicting textures can bring the usage under it, at most half
+    // of them. On 8 GB cards the game's other memory alone (~4 GB at 1440p: its memory's backing,
+    // the upscaler) sat over the pressure mark, the usage hardly fell with what was evicted, and
+    // every texture unused for 5 s went and was uploaded again all session: 1200-3000 a minute in
+    // the players' logs. There the idle rule goes on (unused for BB_GC_IDLE_SECONDS).
+    // BbToggle::GcRelievable set: every mark counts, as before.
+    const auto relievable = [&](u64 mark) {
+        return BbToggle::Disabled(BbToggle::GcRelievable) || total_used_memory - mark < image_bytes / 2;
+    };
     // emergency: still over the critical mark after evicting what was unused for a second.
     const auto configure = [&](bool allow_aggressive, bool emergency = false) {
-        pressured = total_used_memory >= pressure_gc_memory;
-        aggresive = allow_aggressive && total_used_memory >= critical_gc_memory;
+        pressured = total_used_memory >= pressure_gc_memory && relievable(pressure_gc_memory);
+        aggresive = allow_aggressive && total_used_memory >= critical_gc_memory &&
+                    relievable(critical_gc_memory);
         const u64 ticks_to_destroy = std::min<u64>(aggresive ? 160 : pressured ? 80 : 16, gc_tick);
         below_tick = gc_tick - ticks_to_destroy;
         if (!pressured && !aggresive) {
@@ -1285,6 +1301,18 @@ void TextureCache::GarbageCollectImages() {
                         (unsigned long long)gc_dropped);
             gc_report_time = now;
             gc_evictions = gc_downloads = gc_dropped = 0;
+        }
+    } else if (gc_evictions != 0) {
+        // bbport: evictions by the idle rule too (at most every 5 s), so two runs compare.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - gc_report_time >= std::chrono::seconds(5)) {
+            std::printf("Texture cache: %llu of %llu MiB: %llu idle images evicted since the last report "
+                        "(textures %llu MiB)\n",
+                        (unsigned long long)(total_used_memory >> 20),
+                        (unsigned long long)(pressure_gc_memory >> 20),
+                        (unsigned long long)gc_evictions, (unsigned long long)(image_bytes >> 20));
+            gc_report_time = now;
+            gc_evictions = 0;
         }
     }
 }

@@ -58,6 +58,7 @@ enum : std::uint64_t {
     SceneAttachmentsOnly = 1ull << 47,
     SampleSceneProxies = 1ull << 48,
     OrderedGuestWrites = 1ull << 49,
+    GcRelievable = 1ull << 59, ///< eviction marks count only where evicting textures can relieve them
     SceneHalfRes = 1ull << 50, ///< live scaling also reduces the 960x540 post targets
     UpdateImageFastPath = 1u << 30,
     // TAA A/B in one run: optional techniques, off by default (no measured gain, 2026-10-02).
