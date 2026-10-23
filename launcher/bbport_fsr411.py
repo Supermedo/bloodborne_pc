@@ -65,7 +65,16 @@ def query(port, env=None, refresh=False):
 
 
 def default_backend(port, settings=None):
-    return 'dx12' if query(port, environment(port, settings)).get('vendor_id') == 0x1002 else 'vk'
+    capabilities = query(port, environment(port, settings))
+    # AMD's DX12 provider is not available on every Radeon generation/driver
+    # combination. Prefer the first provider that the selected adapter says is
+    # ready, then retain the old vendor fallback when support could not be
+    # queried (for example before the packaged helper is available).
+    if capabilities.get('dx12', {}).get('supported'):
+        return 'dx12'
+    if capabilities.get('vk', {}).get('supported'):
+        return 'vk'
+    return 'dx12' if capabilities.get('vendor_id') == 0x1002 else 'vk'
 
 
 def method_status(port, data_dir, method, capabilities, fetch_fsr4vk, env=None):

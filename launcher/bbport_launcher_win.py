@@ -427,6 +427,15 @@ def load_ini(legacy_settings=None):
     if 'fsr411_backend' not in present:
         values['fsr411_backend'] = bbport_fsr411.default_backend(PORT_DIR, legacy_settings)
     values['fsr411_backend'] = fsr411_backend(values)
+    # Older launchers saved DX12 for every AMD adapter. If that saved choice is
+    # no longer valid but Vulkan is ready, migrate it so an update fixes an
+    # existing RX 6000 installation without requiring a manual INI edit.
+    if values.get('upscaler') == 'fsr411' and values['fsr411_backend'] == 'dx12':
+        capabilities = bbport_fsr411.query(PORT_DIR, bbport_fsr411.environment(PORT_DIR, legacy_settings))
+        if not capabilities.get('dx12', {}).get('supported') and capabilities.get('vk', {}).get('supported'):
+            values['fsr411_backend'] = 'vk'
+            save_ini({'fsr411_backend': 'vk'}, lines)
+            return load_ini(legacy_settings)
     values['object_motion_cache'] = '1' if values.get('object_motion_cache') == '1' else '0'
     return values, lines
 
