@@ -2532,7 +2532,6 @@ class SetupGuide:
 
             def sign_in():
                 status.configure(text=_('Starting the sign-in…'), fg=theme.MUTED)
-                game = app.var('online_community', 'app').get()
 
                 def on_code(page, text):
                     app.ui_calls.put(lambda: (status.configure(
@@ -2543,7 +2542,7 @@ class SetupGuide:
 
                 def work():
                     try:
-                        name, token = L.thd_sign_in(game, on_code)
+                        name, token = L.thd_sign_in(on_code)
                     except (OSError, ValueError) as error:
                         app.ui_calls.put(lambda e=error: status.configure(
                             text=_('Sign-in failed: {}').format(e), fg=theme.BLOOD_LIGHT))

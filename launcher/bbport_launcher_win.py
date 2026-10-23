@@ -544,6 +544,33 @@ def community_address(value):
     return f'{scheme or "https"}://{host}'
 
 
+def game_server(s):
+    """The game server the game uses: the address field only where the Online page shows it (shadNet with
+    "Use my own servers"), The Hunter's Dream otherwise. Its sign-in and backend exist on The Hunter's Dream
+    only, and other tools write their own address into the field (a co-op tool's: "has no account
+    service" at the sign-in)."""
+    if s.get('online_pool') == 'shadnet' and s.get('online_custom_servers'):
+        return community_address(s.get('online_community', ''))
+    return COMMUNITY_SERVER
+
+
+def shadnet_servers(s):
+    """(server, WebAPI) of shadNet the game uses: the address fields only with "Use my own servers" (the Online
+    page shows them only then), the public server otherwise. A field another tool or an earlier setup left behind
+    (a WebAPI with https://, where shadNet speaks http) then cannot break the public one."""
+    if s.get('online_custom_servers'):
+        return str(s.get('online_server', '')).strip() or APP_DEFAULTS['online_server'], webapi_setting(s)
+    server = APP_DEFAULTS['online_server']
+    return server, webapi_address(server)
+
+
+def has_own_servers(s):
+    """For settings saved before "Use my own servers" existed: on when they hold other addresses (a
+    private server, a friend's), which the game used then."""
+    return any(str(s.get(key, '')).strip() not in ('', APP_DEFAULTS[key])
+               for key in ('online_server', 'online_webapi', 'online_community'))
+
+
 def webapi_setting(s):
     """The WebAPI field, unless it holds the game server's address (a common mix-up): then the
     co-op server's own WebAPI is used."""
@@ -585,31 +612,46 @@ def server_check(server, webapi, community):
 HUNTERS_DREAM_POOL = os.environ.get('BB_HUNTERS_DREAM', '1') != '0'
 
 
-def thd_call(url, body):
+def thd_open(request):
+    return urllib.request.urlopen(request, timeout=10)
+
+
+def thd_call(url, body, tries=3):
     """A call to The Hunter's Dream's account service (bbhost's): its reply, or ValueError with
-    the server's reason."""
+    the server's reason. What is no answer of the service (an error page, a timeout, a dropped
+    connection) is asked again, up to `tries` times: testers saw "has no account service" at the
+    sign-in, and it passed after a few clicks."""
     request = urllib.request.Request(url, data=json.dumps(body).encode(), method='POST',
                                      headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            text = response.read()
-    except urllib.error.HTTPError as error:
-        text = error.read()
-    try:
-        reply = json.loads(text)
-    except ValueError:
-        reply = None
-    if not isinstance(reply, dict) or 'ResKind' not in reply:
-        raise ValueError(f'{url} has no account service')
-    if reply['ResKind'] != 0:
-        raise ValueError(reply.get('Message') or 'refused')
-    return reply
+    status = None
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(attempt)  # 1 s, then 2 s
+        try:
+            with thd_open(request) as response:
+                status, text = getattr(response, 'status', None), response.read()
+        except urllib.error.HTTPError as error:
+            status, text = error.code, error.read()
+        except OSError:  # a timeout, a dropped connection, a certificate: the last one is shown
+            if attempt == tries - 1:
+                raise
+            continue
+        try:
+            reply = json.loads(text)
+        except ValueError:
+            reply = None
+        if isinstance(reply, dict) and 'ResKind' in reply:
+            if reply['ResKind'] != 0:
+                raise ValueError(reply.get('Message') or 'refused')
+            return reply
+    host = url.split('://', 1)[-1].split('/')[0]
+    raise ValueError(f'{host} did not answer properly (HTTP {status}); try again in a minute')
 
 
-def thd_sign_in(game_server, on_code):
-    """Discord sign-in the way bbhost does it: a code to approve on the website. on_code(page,
-    code) shows it. Returns (online id, token); raises ValueError."""
-    auth = community_address(game_server)
+def thd_sign_in(on_code):
+    """Discord sign-in the way bbhost does it: a code to approve on The Hunter's Dream's website.
+    on_code(page, code) shows it. Returns (online id, token); raises ValueError."""
+    auth = COMMUNITY_SERVER
     start = thd_call(auth + '/auth/device/start', {'DeviceName': f'bbport on {os.environ.get("COMPUTERNAME", "PC")}'})
     device, user_code = start.get('DeviceCode', ''), start.get('UserCode', '')
     if not device or not user_code:
@@ -756,14 +798,14 @@ def game_environment(s, graphics=None):
     cache = graphics.get('object_motion_cache', '0') == '1' and motion_cache_available(graphics)
     env['BB_OBJECT_MOTION_CACHE'] = '1' if cache else '0'
     if s.get('online'):
-        server = str(s['online_server']).strip() or APP_DEFAULTS['online_server']
+        server, webapi = shadnet_servers(s)
         env['BB_ONLINE'] = '1'
         env['BB_SHADNET_SERVER'] = server
-        env['BB_SHADNET_WEBAPI'] = webapi_setting(s)
+        env['BB_SHADNET_WEBAPI'] = webapi
         env['BB_SHADNET_NPID'] = str(s['online_npid']).strip()
         env['BB_SHADNET_PASSWORD'] = str(s['online_password'])
         env['BB_UPNP'] = '1' if s['online_upnp'] else '0'
-        env['BB_COMMUNITY_SERVER'] = community_address(s['online_community'])
+        env['BB_COMMUNITY_SERVER'] = game_server(s)
         if s.get('online_pool') != 'shadnet' and HUNTERS_DREAM_POOL:  # also a pool the launcher no longer has
             # The engine's Hunter's Dream backend with the Discord-linked account (run.py sets
             # the game server and the backend's addresses).
@@ -818,6 +860,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.root = root
         saved = load_json(CONFIG_FILE, {})
         self.app = {**APP_DEFAULTS, **saved}
+        if 'online_custom_servers' not in saved:
+            self.app['online_custom_servers'] = has_own_servers(self.app)
         if self.app.get('online_pool') not in ('huntersdream', 'shadnet'):  # SuperMedo Server left the launcher
             self.app['online_pool'] = 'huntersdream'
         for key in ('supermedo_user', 'supermedo_password'):  # its account, the password in plain text
@@ -2326,8 +2370,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def build_online(self):
         ttk = self.ttk
         f = self.scrolled_page('online', _('Online co-op'),
-                               _("Messages, bloodstains and ghosts come from The Hunter's Dream; bells and summons "
-                                 'go through a shadNet server.'))
+                               _("Co-op with other hunters on The Hunter's Dream (with bbhost players) or a shadNet "
+                                 "server; messages, bloodstains and ghosts come from The Hunter's Dream."))
         self.check(f, 'online', 'app', _('Play online'),
                    _('Off: the game stays offline, as before.'))
         self.var('online', 'app').trace_add('write', lambda *_a: self.refresh_status())
@@ -2388,7 +2432,6 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         def sign_in():
             signing.configure(text=_('Starting the sign-in…'))
             show_code()
-            game = self.var('online_community', 'app').get()
 
             def on_code(page, code):
                 text = _('In the page that opened ({0}), sign in with Discord and enter this code:').format(page)
@@ -2397,7 +2440,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
             def work():
                 try:
-                    name, token = thd_sign_in(game, on_code)
+                    name, token = thd_sign_in(on_code)
                 except (OSError, ValueError) as error:
                     self.ui_calls.put(lambda e=error: (signing.configure(text=_('Sign-in failed: {}').format(e)),
                                                        show_code()))
@@ -2425,10 +2468,6 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                  _('Saved on this PC with the other launcher settings.'))
         # The servers' addresses only for those who play on their own (a private server, a friend's):
         # everyone else plays on the public ones and never needs to see a port number.
-        if 'online_custom_servers' not in self.app:
-            self.app['online_custom_servers'] = any(
-                self.app.get(key, '').strip() not in ('', APP_DEFAULTS[key])
-                for key in ('online_server', 'online_webapi', 'online_community'))
         custom = self.var('online_custom_servers', 'app')
         self.check(f, 'online_custom_servers', 'app', _('Use my own servers'),
                    _('Off: the public servers. On: a private server, with the addresses from the person who '
@@ -2456,10 +2495,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         def check():
             values = {key: self.var(key, 'app').get()
                       for key in ('online_server', 'online_webapi', 'online_community')}
-            address = values['online_server'].strip() or APP_DEFAULTS['online_server']
-            webapi, game = webapi_setting(values), community_address(values['online_community'])
             online_on = self.var('online', 'app').get()
             pool_name = pool.get()
+            own = custom.get()
+            address, webapi = shadnet_servers({**values, 'online_custom_servers': own})
+            game = game_server({**values, 'online_pool': pool_name, 'online_custom_servers': own})
             hunters_dream = pool_name == 'huntersdream'
             signed_in = thd_id.get() if thd_token.get() else ''
             result.configure(text=_('Checking…'))
@@ -2471,7 +2511,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                     _('Not signed in: use "Sign in with Discord" above.'))
                 else:
                     text = server_check(address, webapi, game)
-                if pool_name == 'shadnet' and values['online_webapi'].strip() and values['online_webapi'].strip() != webapi:
+                if pool_name == 'shadnet' and own and values['online_webapi'].strip() \
+                        and values['online_webapi'].strip() != webapi:
                     text += '\n' + _('The WebAPI box holds the game server address; it is ignored.')
                 if not online_on:
                     text += '\n' + _('"Play online" is off: the game starts offline.')

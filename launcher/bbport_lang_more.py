@@ -4,7 +4,7 @@ listed here too, since these texts have no Russian next to them in the launcher.
 
 MORE_KEYS = [
     'Online co-op',
-    "Messages, bloodstains and ghosts come from The Hunter's Dream; bells and summons go through a shadNet server.",
+    "Co-op with other hunters on The Hunter's Dream (with bbhost players) or a shadNet server; messages, bloodstains and ghosts come from The Hunter's Dream.",
     'Play online',
     'Off: the game stays offline, as before.',
     'Game server (messages, bloodstains, ghosts)',
@@ -56,7 +56,7 @@ MORE_KEYS = [
 MORE = {
     'ru': [
         'Онлайн-кооператив',
-        "Сообщения, пятна крови и призраки приходят с сервера The Hunter's Dream; колокола и призывы идут через сервер shadNet.",
+        "Кооператив с другими охотниками через The Hunter's Dream (вместе с игроками bbhost) или сервер shadNet; сообщения, пятна крови и призраки приходят с The Hunter's Dream.",
         'Играть онлайн',
         'Выключено: игра остаётся офлайн, как раньше.',
         'Игровой сервер (сообщения, пятна крови, призраки)',
@@ -105,7 +105,7 @@ MORE = {
     ],
     'ar': [
         'اللعب التعاوني عبر الإنترنت',
-        "الرسائل وبقع الدم والأشباح تأتي من خادم The Hunter's Dream، أما الأجراس والاستدعاء فتمر عبر خادم shadNet.",
+        "اللعب التعاوني مع صيادين آخرين عبر The Hunter's Dream (مع لاعبي bbhost) أو خادم shadNet؛ الرسائل وبقع الدم والأشباح تأتي من The Hunter's Dream.",
         'العب عبر الإنترنت',
         'عند الإيقاف: تبقى اللعبة بدون إنترنت كما كانت.',
         'خادم اللعبة (الرسائل، بقع الدم، الأشباح)',
@@ -154,7 +154,7 @@ MORE = {
     ],
     'es': [
         'Cooperativo en línea',
-        "Los mensajes, manchas de sangre y fantasmas vienen de The Hunter's Dream; las campanas y las invocaciones pasan por un servidor shadNet.",
+        "Cooperativo con otros cazadores en The Hunter's Dream (con jugadores de bbhost) o en un servidor shadNet; los mensajes, las manchas de sangre y los fantasmas vienen de The Hunter's Dream.",
         'Jugar en línea',
         'Desactivado: el juego sigue sin conexión, como antes.',
         'Servidor del juego (mensajes, manchas de sangre, fantasmas)',
@@ -203,7 +203,7 @@ MORE = {
     ],
     'pt': [
         'Cooperativo online',
-        "Mensagens, manchas de sangue e fantasmas vêm do The Hunter's Dream; sinos e invocações passam por um servidor shadNet.",
+        "Cooperativo com outros caçadores no The Hunter's Dream (com jogadores do bbhost) ou em um servidor shadNet; mensagens, manchas de sangue e fantasmas vêm do The Hunter's Dream.",
         'Jogar online',
         'Desligado: o jogo continua offline, como antes.',
         'Servidor do jogo (mensagens, manchas de sangue, fantasmas)',
@@ -252,7 +252,7 @@ MORE = {
     ],
     'fr': [
         'Coopération en ligne',
-        "Les messages, taches de sang et fantômes viennent de The Hunter's Dream ; les cloches et invocations passent par un serveur shadNet.",
+        "Coopération avec d'autres chasseurs sur The Hunter's Dream (avec les joueurs bbhost) ou un serveur shadNet ; les messages, taches de sang et fantômes viennent de The Hunter's Dream.",
         'Jouer en ligne',
         'Désactivé : le jeu reste hors ligne, comme avant.',
         'Serveur du jeu (messages, taches de sang, fantômes)',
@@ -301,7 +301,7 @@ MORE = {
     ],
     'de': [
         'Online-Koop',
-        "Nachrichten, Blutflecken und Geister kommen von The Hunter's Dream; Glocken und Beschwörungen laufen über einen shadNet-Server.",
+        "Koop mit anderen Jägern über The Hunter's Dream (mit bbhost-Spielern) oder einen shadNet-Server; Nachrichten, Blutflecken und Geister kommen von The Hunter's Dream.",
         'Online spielen',
         'Aus: Das Spiel bleibt wie bisher offline.',
         'Spielserver (Nachrichten, Blutflecken, Geister)',
@@ -350,7 +350,7 @@ MORE = {
     ],
     'it': [
         'Cooperativa online',
-        "Messaggi, macchie di sangue e fantasmi arrivano da The Hunter's Dream; campane ed evocazioni passano da un server shadNet.",
+        "Cooperativa con altri cacciatori su The Hunter's Dream (con i giocatori bbhost) o su un server shadNet; messaggi, macchie di sangue e fantasmi arrivano da The Hunter's Dream.",
         'Gioca online',
         'Disattivato: il gioco resta offline, come prima.',
         'Server di gioco (messaggi, macchie di sangue, fantasmi)',
@@ -399,7 +399,7 @@ MORE = {
     ],
     'pl': [
         'Kooperacja online',
-        "Wiadomości, plamy krwi i duchy pochodzą z The Hunter's Dream; dzwony i przywołania idą przez serwer shadNet.",
+        "Kooperacja z innymi łowcami przez The Hunter's Dream (z graczami bbhost) lub serwer shadNet; wiadomości, plamy krwi i duchy pochodzą z The Hunter's Dream.",
         'Graj online',
         'Wyłączone: gra zostaje offline, jak dotąd.',
         'Serwer gry (wiadomości, plamy krwi, duchy)',
@@ -448,7 +448,7 @@ MORE = {
     ],
     'tr': [
         'Çevrim içi ortak oyun',
-        "Mesajlar, kan lekeleri ve hayaletler The Hunter's Dream'den gelir; çanlar ve çağırmalar bir shadNet sunucusundan geçer.",
+        "Diğer avcılarla The Hunter's Dream (bbhost oyuncularıyla birlikte) veya bir shadNet sunucusu üzerinden ortak oyun; mesajlar, kan lekeleri ve hayaletler The Hunter's Dream'den gelir.",
         'Çevrim içi oyna',
         'Kapalı: oyun eskisi gibi çevrim dışı kalır.',
         'Oyun sunucusu (mesajlar, kan lekeleri, hayaletler)',
@@ -497,7 +497,7 @@ MORE = {
     ],
     'zh': [
         '在线合作',
-        "留言、血迹和幽灵来自 The Hunter's Dream；铃铛和召唤通过 shadNet 服务器进行。",
+        "通过 The Hunter's Dream（与 bbhost 玩家一起）或 shadNet 服务器与其他猎人合作；留言、血迹和幽灵来自 The Hunter's Dream。",
         '在线游玩',
         '关闭：游戏保持离线，和以前一样。',
         '游戏服务器（留言、血迹、幽灵）',
@@ -546,7 +546,7 @@ MORE = {
     ],
     'ja': [
         'オンライン協力プレイ',
-        "メッセージ、血痕、幻影は The Hunter's Dream から届きます。鐘と召喚は shadNet サーバーを経由します。",
+        "The Hunter's Dream（bbhost のプレイヤーと一緒に）または shadNet サーバーで他の狩人と協力プレイ。メッセージ、血痕、幽霊は The Hunter's Dream から届きます。",
         'オンラインでプレイ',
         'オフ：これまでどおりオフラインで起動します。',
         'ゲームサーバー（メッセージ、血痕、幻影）',
@@ -595,7 +595,7 @@ MORE = {
     ],
     'ko': [
         '온라인 협동',
-        "메시지, 혈흔, 유령은 The Hunter's Dream에서 오고, 종과 소환은 shadNet 서버를 거칩니다.",
+        "The Hunter's Dream(bbhost 플레이어와 함께) 또는 shadNet 서버를 통해 다른 사냥꾼과 협동; 메시지, 혈흔, 유령은 The Hunter's Dream에서 옵니다.",
         '온라인으로 플레이',
         '끄면: 게임이 지금처럼 오프라인으로 실행됩니다.',
         '게임 서버 (메시지, 혈흔, 유령)',
