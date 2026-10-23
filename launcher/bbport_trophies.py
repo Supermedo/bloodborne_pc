@@ -94,6 +94,19 @@ def append_log(path, trophy, when):
         pass
 
 
+def merge_log(source, target):
+    """The unlocks of another saves folder's trophies.log added to `target` (a character brought over keeps its
+    achievements); returns how many trophies were not in `target` before. Nothing is removed; the earliest time
+    counts, as in read_log."""
+    have = read_log(target)
+    new = 0
+    for trophy, when in sorted(read_log(source).items(), key=lambda item: item[1]):
+        if trophy not in have or when < have[trophy]:
+            append_log(target, trophy, when)
+            new += trophy not in have
+    return new
+
+
 def unlocks_in(text):
     """Trophy ids the game's output reports as unlocked, in order."""
     return [int(m.group(1)) for m in UNLOCK_LINE.finditer(text)]

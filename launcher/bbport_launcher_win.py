@@ -699,14 +699,21 @@ def saves_folder(s):
     return Path(s.get('user_dir') or DATA_DIR / 'user')
 
 
+def saves_in_other_installation(s):
+    """Whether the saves folder lies in another installation of the port (bbport_help.other_installations)."""
+    saves = {'user_dir': str(saves_folder(s))}
+    return any(key == 'user_dir' for key, _name, _other in bbport_help.other_installations(saves, PORT_DIR, DATA_DIR))
+
+
 def cache_folder(s):
     """Where the shader and pipeline caches, the logs and the temporary files go: the cache folder the
-    player chose, else the saves folder; a saves folder in a cloud folder keeps them on this PC
-    (every PC builds the shaders for its own graphics card, and they are big)."""
+    player chose, else this installation's user folder, wherever the saves are. Saves may be shared (a
+    cloud folder, a folder several installations use); shaders belong to one build and one graphics
+    card: another build's shaders turned testers' pictures dark ("stale pipelines" in the log, gone
+    with an own cache)."""
     if s.get('cache_dir'):
         return Path(s['cache_dir'])
-    saves = saves_folder(s)
-    return DATA_DIR / 'user' if synced_folder(saves) else saves
+    return DATA_DIR / 'user'
 
 
 def game_environment(s, graphics=None):

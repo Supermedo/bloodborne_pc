@@ -16,7 +16,8 @@ This port reads one folder only: <saves folder>/savedata/1/<the dump's INSTALL_D
 TITLE_ID>/SPRJ0005, so a save is copied there whatever its folder was called. The game's files are
 copied through a staging folder, after the current saves were packed into
 <saves folder>/save_backups/; nothing is written to the source. Folders beside the save in
-<save title>/ count as saves to the game, so nothing else is ever put there.
+<save title>/ count as saves to the game, so nothing else is ever put there. The achievements of a bbport
+saves folder (its trophies.log) come along with its characters: added to this one's, never removed.
 """
 import datetime
 import glob
@@ -29,6 +30,7 @@ import zipfile
 from pathlib import Path
 
 import bbport_character as character
+import bbport_trophies as trophies
 
 SAVE_DIR = 'SPRJ0005'
 DEFAULT_TITLE = 'CUSA00207'  # what the Game of the Year Edition (CUSA03173) and the EU base game use
@@ -614,6 +616,23 @@ def import_set(save, user_dir, game_dir=''):
                 shutil.copyfile(folder / 'icon0.png', meta / 'icon0.png')
                 break
     return archive
+
+
+def bring_trophies(save, user_dir):
+    """The achievements of the saves folder `save` lies in (another installation's trophies.log) added to this
+    one's, so a character brought over keeps them; how many were new here. Saves from elsewhere (shadPS4,
+    bbhost, a backup) have none."""
+    parts = [part.lower() for part in save.folder.parts]
+    if 'savedata' not in parts:
+        return 0
+    root = Path(*save.folder.parts[:len(parts) - 1 - parts[::-1].index('savedata')])
+    source, target = root / trophies.LOG_NAME, Path(user_dir) / trophies.LOG_NAME
+    try:
+        if not source.is_file() or source.resolve() == target.resolve():
+            return 0
+    except OSError:
+        return 0
+    return trophies.merge_log(source, target)
 
 
 def restore(archive, user_dir, game_dir=''):

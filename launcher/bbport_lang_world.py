@@ -139,6 +139,22 @@ WORLD = {
             'Пробуждение',
         'Back up automatically before every start':
             'Автоматически создавать копию перед каждым запуском',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} находится в другой установке порта: {1}.',
+        'A folder of another installation is in use':
+            'Используется папка другой установки',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Папка модов или кэша из настроек лаунчера находится в другой папке порта (более старой версии или '
+            'тестовой сборки): обе установки делят её. Кэш шейдеров другой версии может приводить к вылетам, а её '
+            'моды действуют и здесь.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Нажмите кнопку ниже: эта установка снова будет использовать свои папки модов и кэша. Папка сохранений '
+            'остаётся прежней, а с ней ваши персонажи и достижения.',
+        "Use this installation's own folders":
+            'Использовать папки этой установки',
         'Back up now':
             'Создать копию сейчас',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -179,6 +195,14 @@ WORLD = {
             'CUSA03173: издание Game of the Year Edition с The Old Hunters.',
         'Cache folder':
             'Папка кэша',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Папка сохранений находится в другой установке порта: эта установка хранит шейдеры в своей папке, '
+            'потому что шейдеры другой версии могут испортить изображение.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Шейдеры, журналы и временные файлы этой установки. Пусто: её папка user ({}), чтобы у каждой версии и '
+            'каждого ПК были свои шейдеры, где бы ни лежали сохранения.',
         'Caches now: {}':
             'Кэш сейчас: {}',
         'Cancel':
@@ -757,6 +781,8 @@ WORLD = {
             'Сохранения и онлайн',
         'Saves backed up: {}':
             'Сохранения скопированы: {}',
+        'Your achievements from there came along: {} new here.':
+            'Ваши достижения оттуда тоже перенесены: новых здесь — {}.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Сохранения импортированы. Ваши персонажи — в игровом меню «Загрузить игру».',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -789,8 +815,6 @@ WORLD = {
             'Настройки: {} отличаются от рекомендуемых для вашего ПК',
         'Setup':
             'Мастер настройки',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Шейдеры, журналы и временные файлы этого ПК. Пусто: в папке сохранений, а если папка сохранений находится в облачной папке (OneDrive, Dropbox, Google Drive) — на этом ПК, чтобы у каждого ПК были свои шейдеры.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Тени от динамических источников: включены с уровня «Выше минимума».',
         'Show all ({})':
@@ -1493,6 +1517,22 @@ WORLD = {
             'رجوع',
         'Back up automatically before every start':
             'انسخ احتياطيًا تلقائيًا قبل كل تشغيل',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} موجود في تثبيت آخر للمنفذ: {1}.',
+        'A folder of another installation is in use':
+            'يُستخدم مجلد من تثبيت آخر',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'مجلد التعديلات أو الذاكرة المؤقتة في إعدادات المشغّل موجود في مجلد منفذ آخر (إصدار أقدم أو نسخة '
+            'تجريبية): يتشاركه التثبيتان. قد تتسبب ذاكرة الظلال المؤقتة لإصدار آخر في تعطل اللعبة، وتُطبَّق '
+            'تعديلاته هنا أيضًا.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'انقر الزر أدناه: يعود هذا التثبيت لاستخدام مجلدي التعديلات والذاكرة المؤقتة الخاصين به. يبقى مجلد '
+            'الحفظ كما هو، ومعه شخصياتك وإنجازاتك.',
+        "Use this installation's own folders":
+            'استخدام مجلدات هذا التثبيت',
         'Back up now':
             'انسخ الآن',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -1539,6 +1579,14 @@ WORLD = {
             'CUSA03173: إصدار Game of the Year Edition، مع The Old Hunters.',
         'Cache folder':
             'مجلد الكاش',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'مجلد الحفظ موجود في تثبيت آخر للمنفذ: هذا التثبيت يحفظ المظللات في مجلده الخاص، لأن مظللات إصدار آخر '
+            'قد تفسد الصورة.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'المظللات والسجلات والملفات المؤقتة لهذا التثبيت. فارغ: مجلد user الخاص به ({})، حتى يحتفظ كل إصدار وكل '
+            'جهاز بمظللاته الخاصة، أينما كانت ملفات الحفظ.',
         'Caches now: {}':
             'الكاش الآن: {}',
         'Camera':
@@ -2284,6 +2332,8 @@ WORLD = {
             'ملفات الحفظ والإنترنت',
         'Saves backed up: {}':
             'تم نسخ ملفات الحفظ: {}',
+        'Your achievements from there came along: {} new here.':
+            'انتقلت إنجازاتك من هناك أيضًا: {} جديدة هنا.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'تم استيراد ملفات الحفظ. شخصياتك موجودة في قائمة «تحميل اللعبة» داخل اللعبة.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -2322,8 +2372,6 @@ WORLD = {
             'الإعدادات: {} تختلف عن التوصية لحاسوبك',
         'Setup':
             'الإعداد الأولي',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'الشيدر والسجلات والملفات المؤقتة لهذا الحاسوب. فارغ: في مجلد الحفظ، أو على هذا الحاسوب إذا كان مجلد الحفظ داخل مجلد سحابي (OneDrive أو Dropbox أو Google Drive)، كي يحتفظ كل حاسوب بالشيدر الخاص به.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'ظلال الأضواء المتحركة: مفعّلة بدءًا من «فوق الحد الأدنى».',
         'Show all ({})':
@@ -3077,6 +3125,22 @@ WORLD = {
             'Atrás',
         'Back up automatically before every start':
             'Hacer una copia automática antes de cada inicio',
+        'The {0} is in another installation of the port: {1}.':
+            'La {0} está en otra instalación del port: {1}.',
+        'A folder of another installation is in use':
+            'Se usa una carpeta de otra instalación',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'La carpeta de mods o caché de los ajustes del launcher está en otra carpeta del port (una versión '
+            'anterior o de prueba): ambas instalaciones la comparten. La caché de shaders de otra versión puede '
+            'cerrar el juego, y sus mods se aplican aquí también.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Pulsa el botón de abajo: esta instalación vuelve a usar sus propias carpetas de mods y caché. La '
+            'carpeta de partidas se queda, y con ella tus personajes y logros.',
+        "Use this installation's own folders":
+            'Usar las carpetas de esta instalación',
         'Back up now':
             'Hacer copia ahora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -3123,6 +3187,14 @@ WORLD = {
             'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
         'Cache folder':
             'Carpeta de caché',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Tu carpeta de partidas está en otra instalación del port: esta guarda sus shaders en su propia '
+            'carpeta, porque los shaders de otra versión pueden estropear la imagen.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, registros y archivos temporales de esta instalación. Vacío: su carpeta user ({}), para que '
+            'cada versión y cada PC tenga sus propios shaders, estén donde estén las partidas.',
         'Caches now: {}':
             'Cachés ahora: {}',
         'Camera':
@@ -3871,6 +3943,8 @@ WORLD = {
             'Partidas y en línea',
         'Saves backed up: {}':
             'Partidas copiadas: {}',
+        'Your achievements from there came along: {} new here.':
+            'Tus logros de allí también se han traído: {} nuevos aquí.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Partidas importadas. Tus personajes están en el menú «Cargar partida» del juego.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -3909,8 +3983,6 @@ WORLD = {
             'Ajustes: {} difieren de la recomendación para tu PC',
         'Setup':
             'Configuración',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, registros y archivos temporales de este PC. Vacío: en la carpeta de partidas, o en este PC si la carpeta de partidas está en una carpeta en la nube (OneDrive, Dropbox, Google Drive), para que cada PC conserve sus propios shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Sombras de luces dinámicas: activadas a partir de «Por encima del mínimo».',
         'Show all ({})':
@@ -4668,6 +4740,22 @@ WORLD = {
             'Voltar',
         'Back up automatically before every start':
             'Fazer backup automático antes de cada início',
+        'The {0} is in another installation of the port: {1}.':
+            'A {0} está em outra instalação do port: {1}.',
+        'A folder of another installation is in use':
+            'Uma pasta de outra instalação está em uso',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'A pasta de mods ou cache das configurações do launcher fica em outra pasta do port (uma versão mais '
+            'antiga ou de teste): as duas instalações a compartilham. O cache de shaders de outra versão pode '
+            'derrubar o jogo, e os mods dela valem aqui também.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Clique no botão abaixo: esta instalação volta a usar as próprias pastas de mods e cache. A pasta de '
+            'saves fica, e com ela os seus personagens e conquistas.',
+        "Use this installation's own folders":
+            'Usar as pastas desta instalação',
         'Back up now':
             'Fazer backup agora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -4714,6 +4802,14 @@ WORLD = {
             'CUSA03173: a Game of the Year Edition, com The Old Hunters.',
         'Cache folder':
             'Pasta de cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'A sua pasta de saves está noutra instalação do port: esta guarda os shaders na sua própria pasta, '
+            'porque shaders de outra versão podem estragar a imagem.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, registos e ficheiros temporários desta instalação. Vazio: a sua pasta user ({}), para que '
+            'cada versão e cada PC tenha os seus próprios shaders, estejam os saves onde estiverem.',
         'Caches now: {}':
             'Caches agora: {}',
         'Camera':
@@ -5461,6 +5557,8 @@ WORLD = {
             'Saves e online',
         'Saves backed up: {}':
             'Backup dos saves feito: {}',
+        'Your achievements from there came along: {} new here.':
+            'As suas conquistas de lá vieram junto: {} novas aqui.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Saves importados. Os seus personagens estão em Carregar jogo, no menu do jogo.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -5499,8 +5597,6 @@ WORLD = {
             'Configurações: {} diferem da recomendação para o seu PC',
         'Setup':
             'Configuração inicial',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, logs e arquivos temporários deste PC. Vazio: na pasta de saves, ou neste PC quando a pasta de saves estiver numa pasta na nuvem (OneDrive, Dropbox, Google Drive), para que cada PC mantenha seus próprios shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Sombras de luzes dinâmicas: ligadas a partir de "Acima do mínimo".',
         'Show all ({})':
@@ -6255,6 +6351,22 @@ WORLD = {
             'Retour',
         'Back up automatically before every start':
             'Faire une copie automatique avant chaque lancement',
+        'The {0} is in another installation of the port: {1}.':
+            'Le {0} se trouve dans une autre installation du port : {1}.',
+        'A folder of another installation is in use':
+            "Un dossier d'une autre installation est utilisé",
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Le dossier de mods ou de cache des réglages du launcher se trouve dans un autre dossier du port (une '
+            "version plus ancienne ou de test) : les deux installations le partagent. Le cache de shaders d'une "
+            "autre version peut faire planter le jeu, et ses mods s'appliquent aussi ici.",
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Cliquez sur le bouton ci-dessous : cette installation utilise de nouveau ses propres dossiers de mods '
+            'et de cache. Le dossier de sauvegardes reste, et avec lui vos personnages et vos succès.',
+        "Use this installation's own folders":
+            'Utiliser les dossiers de cette installation',
         'Back up now':
             'Copier maintenant',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -6301,6 +6413,14 @@ WORLD = {
             'CUSA03173 : la Game of the Year Edition, avec The Old Hunters.',
         'Cache folder':
             'Dossier du cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Ton dossier de sauvegardes se trouve dans une autre installation du port : celle-ci garde ses shaders '
+            "dans son propre dossier, car les shaders d'une autre version peuvent abîmer l'image.",
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, journaux et fichiers temporaires de cette installation. Vide : son dossier user ({}), pour '
+            'que chaque version et chaque PC garde ses propres shaders, où que soient les sauvegardes.',
         'Caches now: {}':
             'Caches actuellement : {}',
         'Camera':
@@ -7049,6 +7169,8 @@ WORLD = {
             'Sauvegardes et en ligne',
         'Saves backed up: {}':
             'Sauvegardes copiées : {}',
+        'Your achievements from there came along: {} new here.':
+            'Vos succès de là-bas ont suivi : {} nouveaux ici.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Sauvegardes importées. Vos personnages se trouvent dans le menu « Charger une partie » du jeu.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -7087,8 +7209,6 @@ WORLD = {
             'Réglages : {} diffèrent de la recommandation pour votre PC',
         'Setup':
             'Configuration',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, journaux et fichiers temporaires de ce PC. Vide : dans le dossier des sauvegardes, ou sur ce PC si le dossier des sauvegardes est dans un dossier cloud (OneDrive, Dropbox, Google Drive), pour que chaque PC garde ses propres shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Ombres des lumières dynamiques : activées à partir de « Au-dessus du minimum ».',
         'Show all ({})':
@@ -7848,6 +7968,22 @@ WORLD = {
             'Indietro',
         'Back up automatically before every start':
             'Backup automatico prima di ogni avvio',
+        'The {0} is in another installation of the port: {1}.':
+            "La {0} si trova in un'altra installazione del port: {1}.",
+        'A folder of another installation is in use':
+            "È in uso una cartella di un'altra installazione",
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            "La cartella delle mod o della cache nelle impostazioni del launcher si trova in un'altra cartella del "
+            'port (una versione precedente o di prova): le due installazioni la condividono. La cache degli shader '
+            "di un'altra versione può far crashare il gioco, e le sue mod valgono anche qui.",
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Fai clic sul pulsante qui sotto: questa installazione torna a usare le sue cartelle delle mod e della '
+            'cache. La cartella dei salvataggi resta, e con essa i tuoi personaggi e obiettivi.',
+        "Use this installation's own folders":
+            'Usa le cartelle di questa installazione',
         'Back up now':
             'Fai un backup ora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -7894,6 +8030,14 @@ WORLD = {
             'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
         'Cache folder':
             'Cartella della cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            "La cartella dei salvataggi è in un'altra installazione del port: questa tiene i suoi shader in una "
+            "cartella propria, perché gli shader di un'altra versione possono rovinare l'immagine.",
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shader, log e file temporanei di questa installazione. Vuoto: la sua cartella user ({}), così ogni '
+            'versione e ogni PC tiene i propri shader, ovunque siano i salvataggi.',
         'Caches now: {}':
             'Cache ora: {}',
         'Camera':
@@ -8642,6 +8786,8 @@ WORLD = {
             'Salvataggi e online',
         'Saves backed up: {}':
             'Backup dei salvataggi fatto: {}',
+        'Your achievements from there came along: {} new here.':
+            'Anche i tuoi obiettivi da lì sono stati portati: {} nuovi qui.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Salvataggi importati. I tuoi personaggi sono nel menu "Carica partita" del gioco.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -8680,8 +8826,6 @@ WORLD = {
             'Impostazioni: {} diverse da quelle consigliate per il tuo PC',
         'Setup':
             'Configurazione',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shader, log e file temporanei di questo PC. Vuoto: nella cartella dei salvataggi, oppure su questo PC se la cartella dei salvataggi è in una cartella cloud (OneDrive, Dropbox, Google Drive), così ogni PC conserva i propri shader.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Ombre delle luci dinamiche: attive da "Sopra il minimo".',
         'Show all ({})':
@@ -9440,6 +9584,22 @@ WORLD = {
             'Wstecz',
         'Back up automatically before every start':
             'Twórz kopię automatycznie przed każdym uruchomieniem',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} jest w innej instalacji portu: {1}.',
+        'A folder of another installation is in use':
+            'Używany jest folder innej instalacji',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Folder modów lub pamięci podręcznej z ustawień launchera leży w innym folderze portu (starszej wersji '
+            'lub wersji testowej): obie instalacje go współdzielą. Pamięć shaderów innej wersji może powodować '
+            'awarie gry, a jej mody działają też tutaj.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Kliknij przycisk poniżej: ta instalacja znów używa własnych folderów modów i pamięci podręcznej. '
+            'Folder zapisów zostaje, a z nim twoje postacie i osiągnięcia.',
+        "Use this installation's own folders":
+            'Używaj folderów tej instalacji',
         'Back up now':
             'Utwórz kopię teraz',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -9486,6 +9646,14 @@ WORLD = {
             'CUSA03173: Game of the Year Edition, z The Old Hunters.',
         'Cache folder':
             'Folder pamięci podręcznej',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Folder zapisów leży w innej instalacji portu: ta instalacja trzyma shadery we własnym folderze, bo '
+            'shadery innej wersji mogą zepsuć obraz.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shadery, logi i pliki tymczasowe tej instalacji. Puste: jej folder user ({}), aby każda wersja i każdy '
+            'PC miały własne shadery, niezależnie od tego, gdzie są zapisy.',
         'Caches now: {}':
             'Pamięć podręczna teraz: {}',
         'Camera':
@@ -10232,6 +10400,8 @@ WORLD = {
             'Zapisy i online',
         'Saves backed up: {}':
             'Zapisy skopiowane: {}',
+        'Your achievements from there came along: {} new here.':
+            'Twoje osiągnięcia stamtąd też zostały przeniesione: {} nowych tutaj.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Zapisy zaimportowane. Twoje postacie są w menu gry „Wczytaj grę”.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -10270,8 +10440,6 @@ WORLD = {
             'Ustawienia: niektóre ({}) odbiegają od zalecenia dla twojego PC',
         'Setup':
             'Konfiguracja',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shadery, logi i pliki tymczasowe tego PC. Puste: w folderze zapisów albo na tym PC, gdy folder zapisów leży w folderze w chmurze (OneDrive, Dropbox, Google Drive), aby każdy PC miał własne shadery.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Cienie dynamicznych świateł: włączone od „Powyżej minimum”.',
         'Show all ({})':
@@ -11028,6 +11196,22 @@ WORLD = {
             'Geri',
         'Back up automatically before every start':
             'Her başlatmadan önce otomatik yedekle',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}, portun başka bir kurulumunda: {1}.',
+        'A folder of another installation is in use':
+            'Başka bir kurulumun klasörü kullanılıyor',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Başlatıcı ayarlarındaki mod veya önbellek klasörü başka bir port klasöründe (daha eski bir sürüm veya '
+            'test sürümü): iki kurulum onu paylaşır. Başka bir sürümün gölgelendirici önbelleği oyunu çökertebilir '
+            've onun modları burada da geçerli olur.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Aşağıdaki düğmeye tıklayın: bu kurulum yeniden kendi mod ve önbellek klasörlerini kullanır. Kayıt '
+            'klasörü olduğu gibi kalır, onunla birlikte karakterleriniz ve başarımlarınız da.',
+        "Use this installation's own folders":
+            'Bu kurulumun klasörlerini kullan',
         'Back up now':
             'Şimdi yedekle',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -11074,6 +11258,14 @@ WORLD = {
             'CUSA03173: The Old Hunters’ı içeren Game of the Year Edition.',
         'Cache folder':
             'Önbellek klasörü',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Kayıt klasörün portun başka bir kurulumunda: bu kurulum gölgelendiricilerini kendi klasöründe tutar, '
+            'çünkü başka bir sürümün gölgelendiricileri görüntüyü bozabilir.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Bu kurulumun gölgelendiricileri, günlükleri ve geçici dosyaları. Boş: kurulumun user klasörü ({}); '
+            'böylece kayıtlar nerede olursa olsun her sürüm ve her PC kendi gölgelendiricilerini tutar.',
         'Caches now: {}':
             'Önbellekler şu an: {}',
         'Camera':
@@ -11821,6 +12013,8 @@ WORLD = {
             'Kayıtlar ve çevrim içi',
         'Saves backed up: {}':
             'Kayıtlar yedeklendi: {}',
+        'Your achievements from there came along: {} new here.':
+            'Oradaki başarımlarınız da geldi: burada {} yeni.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Kayıtlar içe aktarıldı. Karakterleriniz oyunun Load Game menüsünde.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -11859,8 +12053,6 @@ WORLD = {
             'Ayarlar: {} ayar bilgisayarınız için önerilenden farklı',
         'Setup':
             'Kurulum',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Bu bilgisayarın shader’ları, günlükleri ve geçici dosyaları. Boş: kayıt klasöründe; kayıt klasörü bir bulut klasöründeyse (OneDrive, Dropbox, Google Drive) bu bilgisayarda, böylece her bilgisayar kendi shader’larını tutar.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Dinamik ışık gölgeleri: "Minimum üstü" seviyesinden itibaren açık.',
         'Show all ({})':
@@ -12618,6 +12810,19 @@ WORLD = {
             '返回',
         'Back up automatically before every start':
             '每次启动前自动备份',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}位于移植版的另一个安装中：{1}。',
+        'A folder of another installation is in use':
+            '正在使用另一个安装的文件夹',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            '启动器设置中的模组或缓存文件夹位于另一个移植版文件夹（旧版本或测试版）中：两个安装共用它。另一版本的着色器缓存可能导致游戏崩溃，它的模组在这里也会生效。',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '点击下面的按钮：此安装重新使用它自己的模组和缓存文件夹。存档文件夹保持不变，你的角色和成就也随之保留。',
+        "Use this installation's own folders":
+            '使用此安装自己的文件夹',
         'Back up now':
             '立即备份',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -12664,6 +12869,12 @@ WORLD = {
             'CUSA03173：年度版，含“老猎人”DLC。',
         'Cache folder':
             '缓存文件夹',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            '你的存档文件夹位于端口的另一个安装中：此安装将着色器保存在自己的文件夹中，因为其他版本的着色器可能会破坏画面。',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            '此安装的着色器、日志和临时文件。留空：其 user 文件夹（{}），这样无论存档在哪里，每个版本和每台电脑都保留自己的着色器。',
         'Caches now: {}':
             '当前缓存位置：{}',
         'Camera':
@@ -13408,6 +13619,8 @@ WORLD = {
             '存档与在线',
         'Saves backed up: {}':
             '存档已备份：{}',
+        'Your achievements from there came along: {} new here.':
+            '那里的成就也一并带了过来：此处新增 {} 个。',
         "Saves imported. Your characters are in the game's Load Game menu.":
             '存档已导入。你的角色在游戏的“载入游戏”菜单中。',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -13446,8 +13659,6 @@ WORLD = {
             '设置：有 {} 项与你电脑的推荐设置不一致',
         'Setup':
             '初始设置',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            '本机的着色器、日志和临时文件。为空：放在存档文件夹中；若存档文件夹位于云同步文件夹（OneDrive、Dropbox、Google Drive）中，则放在本机，让每台电脑保留自己的着色器。',
         'Shadows of dynamic lights: on from "Above minimum".':
             '动态光源阴影：从“高于最低”档起开启。',
         'Show all ({})':
@@ -14200,6 +14411,19 @@ WORLD = {
             '戻る',
         'Back up automatically before every start':
             '起動のたびに自動でバックアップ',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}が移植版の別のインストールにあります：{1}。',
+        'A folder of another installation is in use':
+            '別のインストールのフォルダーが使われています',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'ランチャー設定のMODまたはキャッシュのフォルダーが、別の移植版フォルダー（以前のバージョンやテスト版）にあります。両方のインストールで共有されます。別バージョンのシェーダーキャッシュはゲームをクラッシュさせることがあり、そのMODもここで有効になります。',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '下のボタンをクリックしてください。このインストールが再び自分のMODフォルダーとキャッシュフォルダーを使います。セーブフォルダーはそのままなので、キャラクターとトロフィーもそのまま残ります。',
+        "Use this installation's own folders":
+            'このインストールのフォルダーを使う',
         'Back up now':
             '今すぐバックアップ',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -14246,6 +14470,12 @@ WORLD = {
             'CUSA03173：The Old Hunters を収録した Game of the Year Edition。',
         'Cache folder':
             'キャッシュフォルダー',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'セーブフォルダーはポートの別のインストール内にあります。このインストールはシェーダーを自分のフォルダーに保存します。別バージョンのシェーダーは画面を壊すことがあるためです。',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'このインストールのシェーダー、ログ、一時ファイル。空欄：その user フォルダー（{}）。セーブの場所に関係なく、バージョンごと・PCごとに専用のシェーダーを保持します。',
         'Caches now: {}':
             '現在のキャッシュ：{}',
         'Camera':
@@ -14990,6 +15220,8 @@ WORLD = {
             'セーブデータとオンライン',
         'Saves backed up: {}':
             'セーブデータをバックアップしました：{}',
+        'Your achievements from there came along: {} new here.':
+            'そちらのトロフィーも一緒に移されました：ここでは新たに {} 個。',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'セーブデータをインポートしました。キャラクターはゲームの「ロードゲーム」メニューにあります。',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -15028,8 +15260,6 @@ WORLD = {
             '設定：{} 項目がこの PC の推奨と異なります',
         'Setup':
             'セットアップ',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'この PC のシェーダー、ログ、一時ファイル。空欄：セーブフォルダー内。ただしセーブフォルダーがクラウドフォルダー（OneDrive、Dropbox、Google Drive）にある場合は、PC ごとに自分のシェーダーを持てるようこの PC 上に置きます。',
         'Shadows of dynamic lights: on from "Above minimum".':
             '動的ライトの影：「最低より上」からオン。',
         'Show all ({})':
@@ -15783,6 +16013,20 @@ WORLD = {
             '뒤로',
         'Back up automatically before every start':
             '시작할 때마다 자동 백업',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}가 포트의 다른 설치에 있습니다: {1}.',
+        'A folder of another installation is in use':
+            '다른 설치의 폴더를 사용 중입니다',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            '런처 설정의 모드 또는 캐시 폴더가 다른 포트 폴더(이전 버전이나 테스트 빌드)에 있어 두 설치가 함께 씁니다. 다른 버전의 셰이더 캐시는 게임을 충돌시킬 수 있고, 그 모드도 여기에 '
+            '적용됩니다.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '아래 버튼을 누르세요. 이 설치가 다시 자체 모드 폴더와 캐시 폴더를 사용합니다. 세이브 폴더는 그대로이므로 캐릭터와 업적도 그대로 남습니다.',
+        "Use this installation's own folders":
+            '이 설치의 폴더 사용',
         'Back up now':
             '지금 백업',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -15829,6 +16073,12 @@ WORLD = {
             'CUSA03173: The Old Hunters가 포함된 Game of the Year Edition.',
         'Cache folder':
             '캐시 폴더',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            '저장 폴더가 포트의 다른 설치 안에 있습니다. 이 설치는 셰이더를 자체 폴더에 보관합니다. 다른 버전의 셰이더가 화면을 망가뜨릴 수 있기 때문입니다.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            '이 설치의 셰이더, 로그, 임시 파일입니다. 비워 두면: 해당 설치의 user 폴더({})를 사용하여, 저장 위치와 상관없이 버전마다, PC마다 자체 셰이더를 유지합니다.',
         'Caches now: {}':
             '현재 캐시: {}',
         'Camera':
@@ -16574,6 +16824,8 @@ WORLD = {
             '세이브 및 온라인',
         'Saves backed up: {}':
             '세이브를 백업했습니다: {}',
+        'Your achievements from there came along: {} new here.':
+            '그곳의 업적도 함께 옮겨졌습니다: 여기에 새로 {}개.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             '세이브를 가져왔습니다. 캐릭터는 게임의 불러오기 메뉴에 있습니다.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -16612,8 +16864,6 @@ WORLD = {
             '설정: {}개가 PC 권장값과 다름',
         'Setup':
             '초기 설정',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            '이 PC의 셰이더, 로그, 임시 파일. 비워 두면: 세이브 폴더에 두며, 세이브 폴더가 클라우드 폴더(OneDrive, Dropbox, Google Drive)에 있으면 각 PC가 자신의 셰이더를 갖도록 이 PC에 둡니다.',
         'Shadows of dynamic lights: on from "Above minimum".':
             '동적 조명 그림자: "최소 이상"부터 켬.',
         'Show all ({})':

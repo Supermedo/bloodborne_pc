@@ -964,7 +964,13 @@ class SetupMixin:
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('Could not import the saves: {}').format(error))
             return
+        came = saves.bring_trophies(save, user)
+        if came and self.tracker.user_dir == user:
+            # earned before, not just now: shown on the Achievements page without the "You've earned a trophy" notice
+            self.trophies_changed(self.tracker.refresh_log() + self.tracker.award_platinum(), announce=False)
         done = _('Saves imported. Your characters are in the game\'s Load Game menu.')
+        if came:
+            done += '\n\n' + _('Your achievements from there came along: {} new here.').format(came)
         if archive:
             done += '\n\n' + _('Your previous saves: {}').format(archive)
         self.messagebox.showinfo('Bloodborne', done)
@@ -1711,9 +1717,8 @@ class SetupMixin:
                     _('Your characters, their backups and the trophies. Empty: {}.').format(L.DATA_DIR / 'user'),
                     on_change=self.refresh_status)
         self.folder(f, 'cache_dir', _('Cache folder'), _('Choose the cache folder'),
-                    _('Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when '
-                      'the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its '
-                      'own shaders.'))
+                    _('Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every '
+                      'version and every PC keeps its own shaders, wherever the saves are.').format(L.DATA_DIR / 'user'))
         where = self.tk.Label(f, text='', bg=L.PANEL, fg=theme.MUTED, font=(theme.BODY, 9), justify='left', anchor='w')
         where.grid(row=self.next_row(f), column=1, sticky='w', pady=(4, 2))
 
@@ -1724,6 +1729,9 @@ class SetupMixin:
                 text += '\n' + _('Your saves folder is in a cloud folder: the saves go with you, the shaders stay on '
                                   'this PC. Play on one PC at a time and let it finish syncing before you start on '
                                   'another one; in OneDrive, set the folder to "Always keep on this device".')
+            elif not settings['cache_dir'] and L.saves_in_other_installation(settings):
+                text += '\n' + _('Your saves folder is in another installation of the port: this one keeps its shaders '
+                                  'in its own folder, because another version\'s shaders can break the picture.')
             where.configure(text=text, wraplength=self.px(560))
         for key in ('user_dir', 'cache_dir'):
             self.var(key, 'app').trace_add('write', lambda *_a: self.root.after_idle(show_where))

@@ -116,6 +116,13 @@ TOPICS = {
         'OneDrive (Desktop and Documents often are synced) and Program Files lock or move files while the port '
         'writes them.',
         ['Move the whole port folder to a plain folder like C:\\Games\\BBPort and start Bloodborne.exe from there.']),
+    'other_install': (
+        'A folder of another installation is in use',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.',
+        ['Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+         'stays, and with it your characters and achievements.']),
     'vram': (
         'The graphics card\'s memory runs full',
         'Cards with 6 GB or less, or the log says ErrorOutOfDeviceMemory or "memory pressure": textures no '
@@ -175,11 +182,13 @@ TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'page_file': [('Open the memory settings', 'open_memory_settings')],
                  'antivirus': [('Open Windows Security', 'open_windows_security')],
                  'location': [('Open the port folder', 'open_port_folder')],
+                 'other_install': [("Use this installation's own folders", 'use_own_folders')],
                  'eboot_modified': [('Open the game folder', 'open_game_folder')],
                  'eboot_truncated': [('Open the game folder', 'open_game_folder')],
                  'update_only': [('Choose the game folder', 'choose_game_page')],
                  'save_lost': [('Open the backups', 'open_backups')],
                  'controller': [('Open the controller test', 'open_controller_test')]}
+TOPIC_ORDER += [key for key in TOPICS if key not in TOPIC_ORDER]  # topics added later: at the end
 
 # The game's and run.py's messages that name the cause of a failed start or crash.
 LOG_HINTS = [
@@ -197,6 +206,47 @@ LOG_HINTS = [
 def hints_in_log(text):
     """The topics whose messages the log has, in the order of LOG_HINTS."""
     return [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+
+
+# The folders of the launcher's settings that belong to an installation: (setting, its name on its page).
+OWN_FOLDERS = (('user_dir', ('Saves folder', 'Папка сохранений')), ('mods_dir', ('Mods folder', 'Папка модов')),
+               ('cache_dir', ('Cache folder',)))
+# The ones an installation must not share with another (Help's check and button): another version's mods apply here
+# too, and its shaders can break the picture. A shared saves folder is fine (the characters in every version, backed
+# up before every start): testers who set it back found their characters and achievements gone in both versions.
+SEPARATE_FOLDERS = ('mods_dir', 'cache_dir')
+
+
+def installation_of(path):
+    """The port installation folder `path` lies in (run.py beside bin\\bb-probe.exe or Bloodborne.exe), or None."""
+    try:
+        path = Path(path).resolve()
+    except (OSError, ValueError):
+        return None
+    for folder in (path, *path.parents):
+        if (folder / 'run.py').is_file() and ((folder / 'bin' / 'bb-probe.exe').is_file()
+                                              or (folder / 'Bloodborne.exe').is_file()):
+            return folder
+    return None
+
+
+def other_installations(settings, port_dir, data_dir):
+    """[(setting, its name, the other installation)] for the folders of the settings that lie in another
+    installation of the port. The launcher's settings are shared by every installation (%APPDATA%), so a
+    test build beside the old version takes its saves, shader cache and mods."""
+    own = set()
+    for folder in (port_dir, data_dir):
+        try:
+            own.add(Path(folder).resolve())
+        except (OSError, ValueError):
+            pass
+    found = []
+    for key, name in OWN_FOLDERS:
+        value = str(settings.get(key) or '').strip()
+        other = installation_of(value) if value else None
+        if other and other not in own:
+            found.append((key, name, other))
+    return found
 
 
 # ---- the checks ----------------------------------------------------------------------------------
@@ -500,12 +550,17 @@ class HelpMixin:
             child.destroy()
         self.state_line(self.help_list, 'info', _('Checking the game files…'), theme.CARD).pack(fill='x')
         get = lambda key, store: self.var(key, store).get()
+        settings = {key: get(key, 'app') for key in SEPARATE_FOLDERS}
         args = (get('game_dir', 'app'), get('mods_dir', 'app') or str(L.DATA_DIR / 'mods'), L.PORT_DIR,
                 get('output_res', 'ini'), self.app.get('eboot_check') or {})
 
         def work():
             try:
                 result = run_checks(*args)
+                elsewhere = other_installations(settings, L.PORT_DIR, L.DATA_DIR)
+                result = (result[0] + [('warn', 'other_install', _('The {0} is in another installation of the port: '
+                                                                   '{1}.').format(_(*name), folder))
+                                       for _key, name, folder in elsewhere], result[1])
             except Exception as error:  # a check must never take the launcher down
                 result = ([('warn', None, _('The check stopped: {}').format(error))], None)
             self.ui_calls.put(lambda: self.help_done(*result))
@@ -530,6 +585,16 @@ class HelpMixin:
     def open_memory_settings(self):
         import subprocess
         subprocess.Popen(['SystemPropertiesAdvanced.exe'])  # Advanced > Performance > Virtual memory
+
+    def use_own_folders(self):
+        """Help's button: the mods and cache folders that lie in another installation set back to this
+        installation's own (empty: the default). The saves folder stays (SEPARATE_FOLDERS)."""
+        settings = {key: self.var(key, 'app').get() for key in SEPARATE_FOLDERS}
+        for key, _name, _folder in other_installations(settings, L.PORT_DIR, L.DATA_DIR):
+            self.var(key, 'app').set('')
+        self.collect()
+        self.refresh_status()
+        self.help_check()
 
     def open_windows_security(self):
         try:

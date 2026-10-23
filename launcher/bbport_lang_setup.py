@@ -268,6 +268,8 @@ SETUP = {'de': {
         'Sie ersetzen die Spielstände dieses Ports ({}). Die werden vorher nach {} gesichert, es geht also nichts '
         'verloren.',
     'Could not import the saves: {}': 'Die Spielstände konnten nicht importiert werden: {}',
+    'Your achievements from there came along: {} new here.':
+        'Deine Erfolge von dort sind mitgekommen: {} neu hier.',
     "Saves imported. Your characters are in the game's Load Game menu.":
         'Spielstände importiert. Deine Charaktere findest du im Spiel unter „Spiel laden“.',
     'Your previous saves: {}': 'Deine bisherigen Spielstände: {}',

@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 import zipfile
@@ -96,6 +97,26 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in mine.parent.iterdir()), ['SPRJ0005', 'SPRJ0005.sce_sys'])
         saves.restore(archive, self.user)
         self.assertEqual(saves.SaveSet('', mine).names, ['Old'])
+
+    def test_achievements_come_along_from_another_installation(self):
+        """Testers brought their characters into a beta's own folder; the achievements stayed behind."""
+        old_user = self.root / 'BB.Other' / 'user'
+        other = saves.SaveSet('bbport (BB.Other)', make_save(old_user / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005'))
+        (old_user / 'trophies.log').write_text('14 100\n15 200\n', encoding='utf-8')
+        saves.import_set(other, self.user)
+        self.assertEqual(saves.bring_trophies(other, self.user), 2)
+        self.assertEqual((self.user / 'trophies.log').read_text(encoding='utf-8'), '14 100\n15 200\n')
+        self.assertEqual(saves.bring_trophies(other, self.user), 0)  # imported again: nothing twice
+        self.assertEqual((old_user / 'trophies.log').read_text(encoding='utf-8'), '14 100\n15 200\n')  # source as it was
+
+    def test_no_achievements_from_elsewhere_or_from_this_folder(self):
+        bbhost = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005'))
+        (self.root / 'data' / 'trophies.log').write_text('14 100\n', encoding='utf-8')
+        self.assertEqual(saves.bring_trophies(bbhost, self.user), 0)
+        mine = saves.SaveSet('', make_save(saves.target_dir(self.user)))
+        (self.user / 'trophies.log').write_text('14 100\n', encoding='utf-8')
+        self.assertEqual(saves.bring_trophies(mine, self.user), 0)
+        self.assertEqual((self.user / 'trophies.log').read_text(encoding='utf-8'), '14 100\n')
 
     def test_backups_never_overwrite_each_other(self):
         make_save(saves.target_dir(self.user))
@@ -193,6 +214,48 @@ class BackupTests(unittest.TestCase):
         added = saves.add_backup_file(copy, self.user)
         item = saves.Backup(added)
         self.assertEqual((item.reason, item.detail, item.names), ('file', 'from a friend', ['Nick', 'Nick']))
+
+
+class ImportWindowTests(unittest.TestCase):
+    """Saves > From other versions > Import, as the window does it (bbport_setup.SetupMixin.import_save)."""
+
+    def test_the_achievements_come_along_without_trophy_notices(self):
+        import bbport_launcher_win as L
+        import bbport_setup
+        import bbport_trophies as trophies
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / 'BB.Other' / 'run.py').parent.mkdir()
+        (root / 'BB.Other' / 'run.py').write_text('')
+        other_user, user = root / 'BB.Other' / 'user', root / 'beta' / 'user'
+        save = saves.SaveSet('bbport (BB.Other)', make_save(other_user / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005'))
+        (other_user / 'trophies.log').write_text('14 100\n15 200\n', encoding='utf-8')
+        said, changed = [], []
+
+        class Window(bbport_setup.SetupMixin):
+            process, save_found = None, None
+            tracker = trophies.Tracker(user)
+            messagebox = types.SimpleNamespace(askyesno=lambda title, text: True,
+                                               showinfo=lambda title, text: said.append(text),
+                                               showerror=lambda title, text: said.append(text))
+
+            def var(self, key, store):
+                return types.SimpleNamespace(get=lambda: {'user_dir': str(user), 'game_dir': ''}[key])
+
+            def trophies_changed(self, new, announce=True):
+                changed.append((new, announce))
+
+            def refresh_status(self):
+                pass
+
+            def refresh_saves(self, only_if_changed=False):
+                pass
+        with mock.patch.object(L, 'LANG', 'en'):
+            Window().import_save(save, lambda: None)
+        self.assertIn('Your achievements from there came along: 2 new here.', said[-1])
+        self.assertEqual(changed, [([14, 15], False)])  # on the page, without "You've earned a trophy"
+        self.assertEqual(Window.tracker.poll(), [])  # and not announced later by the 2-second poll
 
 
 if __name__ == '__main__':
