@@ -42,4 +42,9 @@ bool CapturesInput();
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text);
 
+/// Any thread: an amber banner at the top of the screen for ten seconds: `headline` in the
+/// highlight colour, `detail` below it in the normal one. Drawn by the present thread; replaces a
+/// banner still showing.
+void Warn(const std::string& headline, const std::string& detail);
+
 } // namespace BbOverlay
