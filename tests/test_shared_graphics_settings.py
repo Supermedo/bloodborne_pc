@@ -28,6 +28,15 @@ class SharedSettingsTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    def test_default_fsr411_backend_prefers_ready_provider(self):
+        rx6000 = {
+            'vendor_id': 0x1002,
+            'dx12': {'supported': False, 'reason': 'interop', 'detail': 'unavailable'},
+            'vk': {'supported': True, 'reason': 'ready', 'detail': ''},
+        }
+        with patch.object(launcher.bbport_fsr411, 'query', return_value=rx6000):
+            self.assertEqual(launcher.bbport_fsr411.default_backend(self.folder), 'vk')
+
     def test_migrate_legacy_profile_once_preserves_unrelated_lines(self):
         original = '# existing config\nupscaler=fsr411\nobject_motion=1\nsharpness=0.75\n'
         self.ini.write_text(original)
