@@ -24,9 +24,15 @@ Object motion vectors: off
 
 ## Frame rate
 
-- **FSR 4 at 4K on RDNA2: about 6 FPS.** The log shows
-  `FSR 4 v07 INT8 quality model, 2160 tier, output 3840x2160`. The INT8 model is tuned for
-  RDNA3; on an RX 6900 XT use **FSR 3.1** (`upscaler=fsr3` in `bbport.ini`).
+- **FSR 4 on RDNA2: about 6 FPS at 4K (RX 6900 XT), 18 at 1080p (RX 6700 XT).** The model
+  itself is not the cause: with `BB_FSR4_PROFILE=1` in Extra variables the log lists every pass,
+  and at 1080p only the two from `fsr4_shaders\opt` were slow (`model 11` 19.6 ms, `post`
+  26.2 ms of 47.9). AMD's Windows driver kept the per-index table copies glslang made in them
+  in scratch memory; passes rebuilt by `tools/fsr4_optimize.sh` since `single_tables`
+  (`tools/Fsr4SpirvCrossFixes.pm`) take 2.5 ms for the whole of FSR 4 there. With older files,
+  `BB_FSR4_OPT=0` loads the original passes (3.1 ms, but at 1080p output it brings back the
+  pass 11 race: a flickering strip at the left edge), or use **FSR 3.1** (`upscaler=fsr3` in
+  `bbport.ini`). The 4K case was not measured again.
 - The stability settings above cost some speed: the two-stage pipeline is the largest gain
   (20–30 %) when it works.
 - **Graphics cards with 4 GB.** Discrete GPUs with up to 4.5 GB get a low-VRAM profile, shown in

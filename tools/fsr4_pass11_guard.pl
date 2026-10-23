@@ -10,7 +10,8 @@
 # run in a strip at the left edge. Here they return first. The input size comes from the pass's
 # own neighbour bounds check.
 #
-# spirv-cross mistranslates the signed int8 unpacks; Fsr4SpirvCrossFixes.pm corrects them.
+# spirv-cross mistranslates the signed int8 unpacks and its const tables are copied at every
+# dynamic index; Fsr4SpirvCrossFixes.pm corrects both.
 use strict;
 use warnings;
 local $/;
@@ -22,6 +23,7 @@ use FindBin;
 use lib $FindBin::Bin;
 use Fsr4SpirvCrossFixes;
 $src = Fsr4SpirvCrossFixes::signed_unpack($src);
+$src = Fsr4SpirvCrossFixes::single_tables($src);
 my $guard = <<"GLSL";
 void main()
 {
