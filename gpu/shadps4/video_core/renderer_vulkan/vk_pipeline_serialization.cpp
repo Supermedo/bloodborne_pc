@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
+
 #include "common/serdes.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -9,6 +11,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/shader_build.h"
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
@@ -346,16 +349,29 @@ void PipelineCache::WarmUp() {
 
     Storage::DataBase::Instance().Open();
 
+    // bbport: the cache holds what one build's recompiler made, and the versions above were not
+    // raised with every change to it. Testers whose beta shared a cache folder with another
+    // build got that build's shaders: dark pictures and hundreds of "stale pipelines" in their
+    // logs, gone once the cache was cleared. The shader build, a fingerprint of the sources that
+    // decide the cache (gpu/CMakeLists.txt), marks the build that wrote it; another build's
+    // cache is rebuilt, never loaded.
+    const std::string_view build{BB_SHADER_BUILD};
+    const auto start_cache = [&] {
+        Storage::DataBase::Instance().FinishPreload();
+        std::vector<u8> profile_data(sizeof(profile));
+        std::memcpy(profile_data.data(), &profile, sizeof(profile));
+        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
+                                           std::move(profile_data));
+        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "build",
+                                           std::vector<u8>(build.begin(), build.end()));
+    };
+
     // Check if cache is compatible
     std::vector<u8> profile_data{};
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile", profile_data);
     if (profile_data.empty()) {
-        Storage::DataBase::Instance().FinishPreload();
-
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
-        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(profile_data));
+        std::printf("Pipeline cache: new, for shader build %s\n", BB_SHADER_BUILD);
+        start_cache();
         return;
     }
     if (profile_data.size() != sizeof(Shader::Profile)) {
@@ -372,11 +388,20 @@ void PipelineCache::WarmUp() {
         // Start a fresh cache for this build and GPU instead.
         LOG_WARNING(Render, "Pipeline cache isn't compatible with current system: rebuilding it");
         Storage::DataBase::Instance().Clear();
-        Storage::DataBase::Instance().FinishPreload();
-        profile_data.resize(sizeof(profile));
-        std::memcpy(profile_data.data(), &profile, sizeof(profile));
-        Storage::DataBase::Instance().Save(Storage::BlobType::ShaderProfile, "profile",
-                                           std::move(profile_data));
+        start_cache();
+        return;
+    }
+    std::vector<u8> build_data{};
+    Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "build", build_data);
+    const std::string cached_build(build_data.begin(), build_data.end());
+    if (cached_build != build) {
+        LOG_WARNING(Render,
+                    "Pipeline cache was written by another build ({}): rebuilding it for this one "
+                    "(shader build {})",
+                    cached_build.empty() ? "one without a shader build" : cached_build.substr(0, 32),
+                    build);
+        Storage::DataBase::Instance().Clear();
+        start_cache();
         return;
     }
 
@@ -412,6 +437,8 @@ void PipelineCache::WarmUp() {
         });
 
     LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
+    std::printf("Pipeline cache: %u of %u pipelines preloaded (shader build %s)\n", num_pipelines,
+                num_total_pipelines, BB_SHADER_BUILD);
     if (num_total_pipelines > num_pipelines) {
         LOG_WARNING(Render, "{} stale pipelines were found. Consider re-generating the cache",
                     num_total_pipelines - num_pipelines);
