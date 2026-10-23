@@ -1872,11 +1872,13 @@ class SetupMixin:
 
     def relaunch(self):
         """Saves and starts the launcher again (its language applies at start)."""
+        import os
         import subprocess
         import sys
         self.collect()
         command = [sys.executable] if L.FROZEN else [sys.executable, str(Path(L.__file__).resolve())]
-        subprocess.Popen(command, cwd=str(L.PORT_DIR))
+        # The new one waits until this one has closed: only one launcher window at a time (one_launcher).
+        subprocess.Popen(command + ['--after', str(os.getpid())], cwd=str(L.PORT_DIR))
         self.root.destroy()
 
     # ---- the setup guide ----------------------------------------------------------------------------

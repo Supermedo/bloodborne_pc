@@ -121,6 +121,54 @@ def run_role(argv):
     return 0
 
 
+# One launcher window at a time (one_launcher): every installation shares its settings, and two windows would
+# overwrite each other's and could start two games. A second start brings the open window to the front.
+ONE_LAUNCHER = 'Local\\bbport-launcher'
+TO_FRONT = 'Local\\bbport-launcher-front'
+
+
+def one_launcher(name=ONE_LAUNCHER, front=TO_FRONT):
+    """True for the first launcher window (it holds a named mutex while it runs); a second start asks that one to
+    come to the front (bring_to_front_on_request) and gets False."""
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateMutexW.restype = kernel.OpenEventW.restype = wintypes.HANDLE
+    global _ONE_LAUNCHER_HANDLE
+    _ONE_LAUNCHER_HANDLE = kernel.CreateMutexW(None, False, name)
+    if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+        return True
+    event = kernel.OpenEventW(0x0002, False, front)  # EVENT_MODIFY_STATE
+    if event:
+        kernel.SetEvent(wintypes.HANDLE(event))
+        kernel.CloseHandle(wintypes.HANDLE(event))
+    return False
+
+
+def bring_to_front_on_request(on_request, front=TO_FRONT):
+    """Calls on_request (from a helper thread) each time another start asks for the open window."""
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateEventW.restype = wintypes.HANDLE
+    event = kernel.CreateEventW(None, False, False, front)
+    if not event:
+        return None
+
+    def wait():
+        while kernel.WaitForSingleObject(wintypes.HANDLE(event), 0xFFFFFFFF) == 0:
+            on_request()
+    threading.Thread(target=wait, daemon=True).start()
+    return event
+
+
+def wait_for_exit(pid, seconds=15):
+    """--after PID: the launcher this one replaces (Apply restarts it) closes first, with its window."""
+    kernel = ctypes.windll.kernel32
+    handle = kernel.OpenProcess(0x00100000, False, int(pid))  # SYNCHRONIZE
+    if handle:
+        kernel.WaitForSingleObject(handle, seconds * 1000)
+        kernel.CloseHandle(handle)
+
+
 def run_command():
     """The command that starts run.py: this executable when frozen, else Python."""
     return [sys.executable, '--run'] if FROZEN else [sys.executable, str(PORT_DIR / 'run.py')]
@@ -4613,6 +4661,9 @@ def main():
     args = sys.argv[1:]
     if args and args[0] in ('--run', '--script'):
         sys.exit(run_role(args))
+    if args[:1] == ['--after'] and len(args) >= 2:
+        wait_for_exit(args[1])
+        args = args[2:]
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
     LANG = settings.get('ui_language') or windows_language()
     saves.WORDS.update({key: _(text) for key, text in saves.REASONS.items()})  # backup file names
@@ -4640,10 +4691,13 @@ def main():
         ctypes.windll.shcore.SetProcessDpiAwareness(1)  # sharp text on scaled displays
     except (AttributeError, OSError):
         pass
+    if not one_launcher():
+        sys.exit(0)  # the open launcher comes to the front
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
     launcher = Launcher(root, tk, ttk, filedialog, messagebox)
+    bring_to_front_on_request(lambda: launcher.ui_calls.put(launcher.bring_back))
     if page != 'play':
         launcher.show(page)
     root.mainloop()
