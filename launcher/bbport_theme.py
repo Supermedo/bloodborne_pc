@@ -31,6 +31,7 @@ HEAD = HEAD_BOLD = 'Georgia'
 BODY = 'Segoe UI'
 BODY_MEDIUM = BODY_SEMI = 'Segoe UI Semibold'
 ICONS = 'Segoe MDL2 Assets'
+LANGUAGE = ''
 
 # Segoe Fluent Icons (Windows 11) / Segoe MDL2 Assets (Windows 10) code points.
 ICON = {'play': '', 'graphics': '', 'display': '', 'game': '', 'cheats': '',
@@ -49,9 +50,9 @@ def blend(a, b, t):
     return '#' + ''.join(f'{round(x + (y - x) * t):02x}' for x, y in zip(one, two))
 
 
-def load_fonts(root):
+def load_fonts(root, language=''):
     """Registers the bundled fonts for this process only and picks the families Tk sees."""
-    global HEAD, HEAD_BOLD, BODY, BODY_MEDIUM, BODY_SEMI, ICONS
+    global HEAD, HEAD_BOLD, BODY, BODY_MEDIUM, BODY_SEMI, ICONS, LANGUAGE
     import tkinter.font as tkfont
     for path in sorted((ASSETS / 'fonts').glob('*.ttf')):
         try:
@@ -66,6 +67,11 @@ def load_fonts(root):
     BODY_MEDIUM = pick('Inter Medium', 'Inter', 'Segoe UI')
     BODY_SEMI = pick('Inter SemiBold', 'Inter', 'Segoe UI Semibold')
     ICONS = pick('Segoe Fluent Icons', 'Segoe MDL2 Assets')
+    LANGUAGE = language
+    if language == 'zh':
+        family = pick('Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC',
+                      'Source Han Sans SC', 'PingFang SC', 'WenQuanYi Micro Hei', BODY)
+        HEAD = HEAD_BOLD = BODY = BODY_MEDIUM = BODY_SEMI = family
 
 
 # ---- drawing --------------------------------------------------------------------------------
@@ -463,7 +469,7 @@ class Theme:
         s.map('Slot.TButton', foreground=[('disabled', TEXT), ('active', TEXT_STRONG)])
         s.configure('Listen.TButton', foreground=GOLD_LIGHT, padding=(px(6), px(4)), font=(BODY_MEDIUM, 9))
         s.map('Listen.TButton', foreground=[('disabled', GOLD_LIGHT)])
-        s.configure('Play.TButton', background=DEEP, foreground='#f4ece0', font=(HEAD_BOLD, 15),
+        s.configure('Play.TButton', background=DEEP, foreground='#f4ece0', font=(HEAD_BOLD, 11 if LANGUAGE == 'zh' else 15),
                     padding=(px(40), px(11)))
         s.map('Play.TButton', foreground=[('disabled', '#6d6360')])
 

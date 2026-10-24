@@ -107,6 +107,30 @@ The keyboard now works together with a connected controller instead of only with
 All of this is configurable in `input.ini` (shadPS4's input config syntax: a Bloodborne file
 made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.md](docs/INPUT.md).
 
+## Exit-save snapshots and Chinese menus
+
+On **Saves → Backups**, **Back up after every game exit** is optional and off by default.
+It waits for the native game process to finish, then stores the final save, including after
+a crash. There are no periodic copies while playing. Each exit has its own archive in
+`save_backups`, shown in the existing backup browser for restoring, renaming or exporting;
+exit archives are not pruned by the before-playing automatic-backup limit.
+
+Exit archives record the native PID, exit code and SHA-256 of their files. The archive is
+verified before publication and again before restoration. Legacy archives without a SHA-256
+manifest remain readable. A failed backup is logged and never changes the game's exit code.
+For direct `run.py` launches, set `BB_EXIT_BACKUP=1`. Killing the entire launcher/process
+tree or losing power cannot guarantee a final snapshot.
+
+Choosing **简体中文** for the launcher also selects Chinese for the Insert / L3+R3 menu,
+independently of the game's text language. Direct launches can set `BB_UI_LANGUAGE=zh`.
+The launcher prefers installed CJK fonts, and the native menu merges an installed system
+CJK font with its embedded font. No Microsoft font or game asset is redistributed. Without
+a usable system CJK font the native menu stays English and logs the reason.
+
+The `chinese-ui-test` CMake target checks translation fallback, format arguments and CJK
+font merging without a game dump or Vulkan device. Real glyph checks are explicitly skipped
+when the test machine has no installed CJK font.
+
 ## Playing online (beta)
 
 1. Register a shadNet account at [shadnet.shadps4.net](https://shadnet.shadps4.net).

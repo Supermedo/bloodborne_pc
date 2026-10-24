@@ -20,6 +20,7 @@ copied through a staging folder, after the current saves were packed into
 """
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -295,7 +296,7 @@ def find_in(root, depth=6):
 # apart in Explorer too. Backups from before (saves_<date>.zip) have no such file: 'old'.
 BACKUP_DIR = 'save_backups'
 BACKUP_META = 'bbport-backup.json'
-REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'import': 'Before an import',
+REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'exit': 'After playing', 'import': 'Before an import',
            'restore': 'Before a restore', 'file': 'From a file', 'old': 'Earlier backup'}
 WORDS = dict(REASONS)  # the words for file names; the launcher puts its translations here
 AUTO_KEEP = 10  # automatic backups kept; the player's own are never removed by the launcher
@@ -335,9 +336,7 @@ def write_backup(target, files, meta):
                 else:
                     zipped.write(source, member)
             zipped.writestr(BACKUP_META, json.dumps(meta, ensure_ascii=False, indent=1))
-        with zipfile.ZipFile(staging) as zipped:  # readable before anything relies on it
-            if zipped.testzip() is not None:
-                raise OSError(f'the backup {target} is damaged')
+        verify_backup(staging)  # CRC and optional SHA-256 before publishing the archive.
         os.replace(staging, target)
     finally:
         if staging.exists():
@@ -345,7 +344,7 @@ def write_backup(target, files, meta):
     return target
 
 
-def backup(user_dir, game_dir='', reason='manual', label='', detail=''):
+def backup(user_dir, game_dir='', reason='manual', label='', detail='', exit_info=None):
     """Packs this port's current save (and its metadata) into save_backups/; None without one."""
     current = target_dir(user_dir, game_dir)
     parts = [p for p in (current, current.with_name(SAVE_DIR + '.sce_sys')) if p.is_dir()]
@@ -359,7 +358,31 @@ def backup(user_dir, game_dir='', reason='manual', label='', detail=''):
     files = [(p.relative_to(root).as_posix(), p) for part in parts for p in sorted(part.rglob('*')) if p.is_file()]
     meta = {'version': 1, 'reason': reason, 'label': label, 'detail': detail,
             'created': created.isoformat(timespec='seconds'), 'characters': names}
+    if reason == 'exit':
+        meta['sha256'] = {member: hashlib.sha256(path.read_bytes()).hexdigest() for member, path in files}
+        for key in ('game_pid', 'exit_code'):
+            if exit_info and key in exit_info: meta[key] = int(exit_info[key])
     return write_backup(free_name(folder, backup_file_name(created, reason, label, detail, names)), files, meta)
+
+
+def verify_backup(path):
+    """Check an archive without extracting it; legacy archives need no SHA-256 manifest."""
+    try:
+        with zipfile.ZipFile(path) as zipped:
+            if zipped.testzip() is not None: raise OSError('the backup is damaged')
+            if BACKUP_META not in zipped.namelist(): return
+            meta = json.loads(zipped.read(BACKUP_META).decode('utf-8'))
+            if not isinstance(meta, dict): raise OSError('the backup metadata is not an object')
+            expected = meta.get('sha256')
+            if expected is None: return
+            members = {info.filename for info in zipped.infolist() if not info.is_dir() and info.filename != BACKUP_META}
+            if not isinstance(expected, dict) or set(expected) != members:
+                raise OSError('the backup SHA-256 manifest is incomplete')
+            for name, digest in expected.items():
+                if hashlib.sha256(zipped.read(name)).hexdigest() != digest:
+                    raise OSError('the backup SHA-256 does not match: ' + name)
+    except (zipfile.BadZipFile, ValueError, TypeError, KeyError, RuntimeError, NotImplementedError) as error:
+        raise OSError('the backup could not be verified: ' + str(error)) from error
 
 
 def archive_files(archive):
@@ -513,6 +536,7 @@ def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP):
 def add_backup_file(path, user_dir):
     """A backup zip from elsewhere (another PC, a friend's) into save_backups, as 'From a file' with
     its file name; only the game's files are taken. Returns the new path (OSError: not a save)."""
+    verify_backup(path)
     files = archive_files(path)
     title = DEFAULT_TITLE
     with zipfile.ZipFile(path) as zipped:
@@ -619,6 +643,7 @@ def import_set(save, user_dir, game_dir=''):
 def restore(archive, user_dir, game_dir=''):
     """Puts a backup from save_backups back; the current save is backed up first ('Before a
     restore'), which is returned. Only the game's own files are taken from the zip."""
+    verify_backup(archive)
     files = archive_files(archive)
     item = Backup(archive)
     user_dir = Path(user_dir)
@@ -675,6 +700,7 @@ def restore_character(archive, slot, user_dir, game_dir=''):
     other characters stay. Only for the same character in the same slot, and only when the profile
     is laid out as expected (OSError otherwise). The current saves are backed up first ('Before a
     restore'), which is returned."""
+    verify_backup(archive)
     files = archive_files(archive)
     if slot not in files['save']:
         raise OSError(f'the backup has no {slot}')

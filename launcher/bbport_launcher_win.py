@@ -132,6 +132,7 @@ def run_command():
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bbport_lang  # noqa: E402
+import bbport_lang_exit  # noqa: E402,F401
 import bbport_fg401  # noqa: E402
 import bbport_fsr411  # noqa: E402
 import bbport_character as character  # noqa: E402
@@ -145,6 +146,7 @@ import bbport_hardware as hardware  # noqa: E402
 import bbport_frame  # noqa: E402
 import bbport_display as display  # noqa: E402
 import bbport_saves as saves  # noqa: E402
+import bbport_exit_backup  # noqa: E402,F401 (bundled for run.py)
 import bbport_pad  # noqa: E402
 import bbport_help  # noqa: E402
 import bbport_search  # noqa: E402
@@ -283,6 +285,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 # window ('output', 'last' or 'custom'), the player's own size and the last one it had.
                 'game_monitor': '', 'window_size': 'output', 'window_custom': '1600x900', 'window_last': '',
                 'output_display': False,  # output resolution: the game monitor's own, set at every start
+                'exit_backup': False,
                 'auto_backup': True,  # the saves backed up before every start (bbport_saves.auto_backup)
                 'seen_version': '',  # the version whose news the Play page has shown
                 # Game tests (System & performance): the kind, the scenario, its options.
@@ -345,7 +348,7 @@ FPS_MODES = [('uncap', ('Unlocked (frame-time patch)', 'Без ограниче�
 PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (без разрывов)')),
                  ('Fifo', ('FIFO (VSync)',)), ('FifoRelaxed', ('FIFO Relaxed',)),
                  ('Immediate', ('Immediate (tearing)', 'Immediate (с разрывами)'))]
-LANGUAGES = [('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
+LANGUAGES = [('11', ('简体中文',)), ('10', ('繁體中文',)), ('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
              ('2', ('French', 'Французский')), ('3', ('Spanish', 'Испанский')), ('4', ('German', 'Немецкий')),
              ('5', ('Italian', 'Итальянский')), ('17', ('Português (Brasil)',))]
 VOICE_LANGUAGES = [('auto', ('As in the game',)), ('eng', ('English',)),
@@ -725,6 +728,8 @@ def game_environment(s, graphics=None):
     env['BB_PATCHES_DIR'] = s['patches_dir'] or str(DATA_DIR / 'patches')
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
+    env['BB_UI_LANGUAGE'] = s.get('ui_language') or windows_language()
+    env['BB_EXIT_BACKUP'] = '1' if s.get('exit_backup', False) else '0'
     env['BB_VOICE_LANGUAGE'] = s['voice_language']
     if str(s['player_name']).strip():
         env['BB_USER_NAME'] = str(s['player_name']).strip()
@@ -871,7 +876,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         root.geometry(f'{min(self.px(1180), free_w)}x{min(self.px(760), free_h)}')
         root.minsize(min(self.px(1000), free_w), min(self.px(680), free_h))
         self.compact = min(self.px(760), free_h) < self.px(740)  # a short screen: smaller banner and emblem
-        theme.load_fonts(root)
+        theme.load_fonts(root, LANG)
         self.theme = theme.Theme(root, self.dpi)
         self.set_icon()
         self.style()
@@ -1542,7 +1547,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
     def title_state(self):
         """The maximize button's glyph follows the window's state; Windows learns where the bar is."""
-        if not getattr(self, 'title_buttons', None):
+        if not getattr(self, 'title_buttons', None) or not self.title_buttons['maximize'].winfo_exists():
             return
         zoomed = self.root.state() == 'zoomed'
         glyph = self.TITLE_ICONS['restore' if zoomed else 'maximize']
