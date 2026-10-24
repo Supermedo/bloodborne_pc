@@ -500,6 +500,10 @@ void Menu() {
         }
     }
 
+    ImGui::SeparatorText("Cheats (live)");
+    Checkbox("Cheat: 20 Blood Vials and Quicksilver Bullets on each spawn", s.cheat_refill);
+    Hint("When you spawn (a save loaded, a lamp, a death) with fewer than 20 Blood Vials or Quicksilver Bullets, the carried ones are topped up to 20, as far as the game lets you carry them. Turned on in the middle of a level, it starts with the next spawn. Cheats change the game for co-op partners too.");
+
     ImGui::SeparatorText("Other");
     Checkbox("Show FPS counter", s.show_fps);
     Checkbox("Mute when the game is in the background", s.mute_unfocused);

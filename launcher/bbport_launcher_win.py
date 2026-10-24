@@ -219,6 +219,9 @@ CHEATS = [
     ('cheat_rally_no_decay', ('Rally never fades', 'Rally не угасает'), False),
     ('cheat_enemy_control', ('Control the targeted enemy (R3; L3 to go back; not with the free camera)',
                              'Управление выбранным врагом (R3; L3 — назад; не вместе со свободной камерой)'), False),
+    # Not a patch: a hook in the game's frame (gpu/shim/bbport_refill.cpp).
+    ('cheat_refill', ('Spawn with at least 20 Blood Vials and Quicksilver Bullets',
+                      'Не меньше 20 флаконов крови и ртутных пуль при появлении'), False),
 ]
 TWEAKS = [
     ('tweak_no_rally', ('No Rally (hits do not give health back)', 'Без Rally (удары не возвращают здоровье)'), False),

@@ -30,6 +30,7 @@
 #include "core/signals.h"
 #include "sdl_window.h"
 #include "bloodborne_cam.h"
+#include "bbport_refill.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern "C" {
@@ -290,6 +291,10 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
 
 extern "C" unsigned bbgpu_symbol_count(void) {
     return unsigned(g_symbols.size());
+}
+
+extern "C" void bbgpu_image_ready(unsigned char* image, uint64_t size) {
+    BbRefill::Install(image, size);
 }
 
 // Kernel service thread: runs boost::asio timers for equeue timer events.
