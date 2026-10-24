@@ -284,6 +284,8 @@ SETUP = {'de': {
     'Setting': 'Einstellung', 'Now': 'Jetzt', 'For your PC': 'Für deinen PC', 'Why': 'Warum',
     'Apply the settings for my PC': 'Einstellungen für meinen PC übernehmen', 'Undo': 'Rückgängig',
     'Adjust them automatically when the hardware changes': 'Automatisch anpassen, wenn sich die Hardware ändert',
+    'New installation: the graphics settings were made for this PC.':
+        'Neue Installation: Die Grafikeinstellungen wurden für diesen PC gewählt.',
     'New hardware detected: the graphics settings were adjusted to it.':
         'Neue Hardware erkannt: Die Grafikeinstellungen wurden angepasst.',
     'Settings: made for your PC': 'Einstellungen: passend für deinen PC',

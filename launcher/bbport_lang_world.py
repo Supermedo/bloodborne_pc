@@ -513,6 +513,8 @@ WORLD = {
             'Уже 16:9: картинка может выглядеть растянутой.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Нужны сохранения боссов из мода «{}» (Nexus Mods, бесплатно с учётной записью): скачайте «{}», распакуйте и выберите эту папку.',
+        'New installation: the graphics settings were made for this PC.':
+            'Новая установка: настройки графики подобраны для этого ПК.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Обнаружено новое оборудование: настройки графики подстроены под него.',
         'New in version {}: what has changed':
@@ -2010,6 +2012,8 @@ WORLD = {
             'أضيق من 16:9: قد تبدو الصورة ممطوطة.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'يحتاج إلى ملفات حفظ الزعماء من التعديل «{}» (Nexus Mods، مجانًا مع حساب): نزّل «{}» وفك ضغطه ثم اختر مجلده.',
+        'New installation: the graphics settings were made for this PC.':
+            'تثبيت جديد: تم اختيار إعدادات الرسومات لهذا الحاسوب.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'تم اكتشاف عتاد جديد: ضُبطت إعدادات الرسومات وفقًا له.',
         'New in version {}: what has changed':
@@ -3596,6 +3600,8 @@ WORLD = {
             'Más estrecho que 16:9: la imagen puede verse estirada.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Necesita las partidas de jefes del mod «{}» (Nexus Mods, gratis con una cuenta): descarga «{}», descomprímelo y elige su carpeta.',
+        'New installation: the graphics settings were made for this PC.':
+            'Instalación nueva: los ajustes gráficos se eligieron para este PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nuevo hardware detectado: los ajustes gráficos se han adaptado a él.',
         'New in version {}: what has changed':
@@ -5187,6 +5193,8 @@ WORLD = {
             'Mais estreito que 16:9: a imagem pode parecer esticada.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Precisa dos saves de chefes do mod “{}” (Nexus Mods, grátis com uma conta): baixe “{}”, descompacte e escolha a pasta.',
+        'New installation: the graphics settings were made for this PC.':
+            'Instalação nova: as configurações gráficas foram escolhidas para este PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Novo hardware detectado: as configurações de gráficos foram ajustadas a ele.',
         'New in version {}: what has changed':
@@ -6774,6 +6782,8 @@ WORLD = {
             "Plus étroit que 16:9 : l'image peut paraître étirée.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Nécessite les sauvegardes de boss du mod « {} » (Nexus Mods, gratuit avec un compte) : téléchargez « {} », décompressez-le, puis choisissez son dossier.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nouvelle installation : les réglages graphiques ont été choisis pour ce PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nouveau matériel détecté : les réglages graphiques ont été adaptés.',
         'New in version {}: what has changed':
@@ -8367,6 +8377,8 @@ WORLD = {
             "Più stretto di 16:9: l'immagine può sembrare allungata.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Servono i salvataggi dei boss della mod «{}» (Nexus Mods, gratis con un account): scarica «{}», estrailo e scegli la sua cartella.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nuova installazione: le impostazioni grafiche sono state scelte per questo PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nuovo hardware rilevato: le impostazioni grafiche sono state adattate.',
         'New in version {}: what has changed':
@@ -9958,6 +9970,8 @@ WORLD = {
             'Węższe niż 16:9: obraz może wyglądać na rozciągnięty.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Wymaga zapisów bossów z moda „{}” (Nexus Mods, za darmo z kontem): pobierz „{}”, rozpakuj, a potem wybierz jego folder.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nowa instalacja: ustawienia grafiki dobrano do tego komputera.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Wykryto nowy sprzęt: ustawienia grafiki zostały do niego dostosowane.',
         'New in version {}: what has changed':
@@ -11547,6 +11561,8 @@ WORLD = {
             "16:9'dan dar: görüntü gerilmiş görünebilir.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '“{}” modunun (Nexus Mods, hesapla ücretsiz) boss kayıtları gerekir: “{}” dosyasını indirin, arşivden çıkarın ve klasörünü seçin.',
+        'New installation: the graphics settings were made for this PC.':
+            'Yeni kurulum: grafik ayarları bu bilgisayara göre seçildi.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Yeni donanım algılandı: grafik ayarları buna göre uyarlandı.',
         'New in version {}: what has changed':
@@ -13134,6 +13150,8 @@ WORLD = {
             '比 16:9 更窄：画面可能看起来被拉伸。',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '需要模组 “{}”（Nexus Mods，有账号即可免费下载）中的 Boss 存档：下载 “{}”，解压，然后选择其文件夹。',
+        'New installation: the graphics settings were made for this PC.':
+            '新安装：已按此电脑选择图形设置。',
         'New hardware detected: the graphics settings were adjusted to it.':
             '检测到新硬件：图形设置已相应调整。',
         'New in version {}: what has changed':
@@ -14716,6 +14734,8 @@ WORLD = {
             '16:9 より縦長：映像が引き伸ばされて見えることがあります。',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'MOD「{}」（Nexus Mods、アカウントがあれば無料）のボス用セーブデータが必要です：「{}」をダウンロードして展開し、そのフォルダーを選択してください。',
+        'New installation: the graphics settings were made for this PC.':
+            '新しいインストール：グラフィック設定をこのPC向けにしました。',
         'New hardware detected: the graphics settings were adjusted to it.':
             '新しいハードウェアを検出しました：グラフィック設定をそれに合わせて調整しました。',
         'New in version {}: what has changed':
@@ -16300,6 +16320,8 @@ WORLD = {
             '16:9보다 좁음: 화면이 늘어나 보일 수 있습니다.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '“{}” 모드(Nexus Mods, 계정이 있으면 무료)의 보스 세이브가 필요합니다: “{}”를 다운로드해 압축을 풀고 그 폴더를 선택하세요.',
+        'New installation: the graphics settings were made for this PC.':
+            '새 설치: 그래픽 설정을 이 PC에 맞게 정했습니다.',
         'New hardware detected: the graphics settings were adjusted to it.':
             '새 하드웨어 감지됨: 그래픽 설정을 그에 맞게 조정했습니다.',
         'New in version {}: what has changed':

@@ -229,19 +229,23 @@ class SetupMixin:
     def auto_settings(self):
         """At start, once the PC is rated: new hardware (or display) with automatic settings on →
         the settings for it, with an Undo on System & performance. The first time (an installation
-        set up before this existed, or the guide skipped) only remembers the hardware."""
+        set up before this existed, or the guide skipped) only remembers the hardware. A new
+        bbport.ini (a new folder) always gets them: its values are only the defaults, FSR 4 and every
+        effect, which freeze Intel graphics and slow small cards down."""
         if not self.rating or not self.var('setup_done', 'app').get():
             return
         now = hardware.signature(self.gpu_line, self.cpu, self.ram, self.display_size())
         before = self.app.get('auto_hw', '')
-        if not before:
+        new_ini, self.ini_new = getattr(self, 'ini_new', False), False
+        if not before and not new_ini:
             self.app['auto_hw'] = now
             return
-        if now != before and self.var('auto_graphics', 'app').get():
+        if new_ini or (now != before and self.var('auto_graphics', 'app').get()):
             chosen = self.recommended()
             if chosen:
                 self.apply_profile(chosen[2])
-                self.auto_note = _('New hardware detected: the graphics settings were adjusted to it.')
+                self.auto_note = _('New installation: the graphics settings were made for this PC.') if new_ini else \
+                    _('New hardware detected: the graphics settings were adjusted to it.')
                 self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
 
     def profile_card(self, parent):

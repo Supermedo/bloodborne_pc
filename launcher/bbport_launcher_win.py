@@ -825,6 +825,9 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         if self.app.get('ui_mode') not in ('simple', 'expert'):
             # Set up with an earlier launcher: every page as before (expert). New: the simple view.
             self.app['ui_mode'] = 'expert' if saved.get('setup_done') or saved.get('game_dir') else 'simple'
+        # A folder without bbport.ini yet (a new installation, a test build beside the old one) gets the
+        # settings for this PC once it is rated (auto_settings), not the fixed defaults.
+        self.ini_new = not ini_path().exists()
         self.ini, self.ini_lines = load_ini(self.app)
         self.remap_ini_path = input_ini_path(ini_path())
         self.remap_bindings, self.remap_lines, self.remap_toggle_key, self.remap_reload_key, \
