@@ -151,6 +151,7 @@ import bbport_search  # noqa: E402
 import bbport_setup  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
 import bbport_theme as theme  # noqa: E402
+from bbport_trophy_icons import TrophyIcons  # noqa: E402
 from bbport_input_config import (STICK_OUTPUTS, OUTPUT_LABELS, ACTION_GROUPS, SLOTS, keysym_to_name,
                                   button_num_to_name, input_ini_path, load_input_ini, reserved_keys,
                                   save_input_ini, save_mouse_settings, wheel_to_name, MAX_COMBO,
@@ -347,7 +348,9 @@ PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (б�
                  ('Immediate', ('Immediate (tearing)', 'Immediate (с разрывами)'))]
 LANGUAGES = [('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
              ('2', ('French', 'Французский')), ('3', ('Spanish', 'Испанский')), ('4', ('German', 'Немецкий')),
-             ('5', ('Italian', 'Итальянский')), ('17', ('Português (Brasil)',))]
+             ('5', ('Italian', 'Итальянский')), ('9', ('Korean', '한국어')),
+             ('10', ('Traditional Chinese', '繁體中文')), ('11', ('Simplified Chinese', '简体中文')),
+             ('17', ('Português (Brasil)',))]
 VOICE_LANGUAGES = [('auto', ('As in the game',)), ('eng', ('English',)),
                    ('ptb', ('Português (Brasil)',)), ('ded', ('Deutsch',)),
                    ('esa', ('Español (América)',)), ('ese', ('Español (España)',)),
@@ -2534,8 +2537,37 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.trophy_body = self.ttk.Frame(f)
         self.trophy_body.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
 
-    def trophy_icon(self, parent, grade, earned, size, bg):
-        """A trophy cup in the colour of its grade (dim while locked), on a round plate."""
+    def trophy_icon(self, parent, grade, earned, size, bg, trophy_id=None):
+        """Game trophy artwork, or a grade cup for totals and missing artwork."""
+        if trophy_id in trophies.BY_ID:
+            game_dir = self.var('game_dir', 'app').get() or '.'
+            path = Path(game_dir) / 'sce_sys' / 'trophy' / 'trophy00.trp'
+            if not hasattr(self, 'trophy_art') or self.trophy_art.path != path:
+                self.trophy_art = TrophyIcons(game_dir)
+                self.trophy_images = {}
+                self.trophy_art_signature = None
+            data = self.trophy_art.get(trophy_id)
+            if self.trophy_art_signature != self.trophy_art.signature:
+                self.trophy_images.clear()
+                self.trophy_art_signature = self.trophy_art.signature
+            if data:
+                try:
+                    from io import BytesIO
+                    from PIL import Image, ImageEnhance, ImageTk
+                    key = (trophy_id, earned, size)
+                    if key not in self.trophy_images:
+                        with Image.open(BytesIO(data)) as source:
+                            image = source.convert('RGBA').resize((size, size), Image.Resampling.LANCZOS)
+                        if not earned:
+                            image = ImageEnhance.Brightness(image).enhance(0.4)
+                        self.trophy_images[key] = ImageTk.PhotoImage(image, master=parent)
+                    icon = self.tk.Label(parent, image=self.trophy_images[key], bg=bg, bd=0)
+                    icon.image = self.trophy_images[key]
+                    return icon
+                except ImportError:
+                    pass
+                except (OSError, ValueError, Image.DecompressionBombError):
+                    pass
         c = self.tk.Canvas(parent, width=size, height=size, bg=bg, highlightthickness=0, bd=0)
         color = TROPHY_COLORS.get(grade, MUTED) if earned else TROPHY_LOCKED
         p = lambda *xy: [v * size for v in xy]
@@ -2552,7 +2584,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def render_trophies(self):
         """Rebuilds the page when the unlocks or the filter changed."""
         unlocked = dict(self.tracker.unlocked)
-        state = (tuple(sorted(unlocked.items())), self.trophy_filter)
+        state = (tuple(sorted(unlocked.items())), self.trophy_filter, self.var('game_dir', 'app').get())
         if state == self.trophy_state:
             return
         self.trophy_state = state
@@ -2612,7 +2644,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             shown += len(items)
             head = tk.Frame(body, bg=PANEL)
             head.pack(fill='x', pady=(16, 8))
-            tk.Label(head, text=group, bg=PANEL, fg=GOLD, font=(theme.HEAD, 13)).pack(side='left')
+            tk.Label(head, text=_(group), bg=PANEL, fg=GOLD, font=(theme.HEAD, 13)).pack(side='left')
             tk.Label(head, text='{} / {}'.format(sum(1 for t in members if t[0] in unlocked), len(members)),
                      bg=PANEL, fg=MUTED, font=(theme.BODY, 9)).pack(side='left', padx=10, pady=(3, 0))
             for trophy in items:
@@ -2630,18 +2662,20 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         earned = when is not None
         card = self.ttk.Frame(parent, style='Card.TFrame', padding=2)
         card.pack(fill='x', pady=(0, 6))
-        self.trophy_icon(card, grade, earned, self.px(46), CARD).pack(side='left', padx=(12, 14), pady=10)
+        self.trophy_icon(card, grade, earned, self.px(46), CARD, trophy_id=_id).pack(
+            side='left', padx=(12, 14), pady=10)
         side = tk.Frame(card, bg=CARD)
         side.pack(side='right', padx=(12, 18))
         tk.Label(side, text=_(*GRADE_NAMES[grade]), bg=CARD, fg=TROPHY_COLORS[grade] if earned else MUTED,
                  font=(theme.BODY, 9, 'bold')).pack(anchor='e')
-        tk.Label(side, text=time.strftime('%d %b %Y', time.localtime(when)) if earned else _('Locked', 'Не получен'),
+        date_format = '%Y年%m月%d日' if LANG == 'zh' else '%d %b %Y'
+        tk.Label(side, text=time.strftime(date_format, time.localtime(when)) if earned else _('Locked', 'Не получен'),
                  bg=CARD, fg=MUTED, font=(theme.BODY, 9)).pack(anchor='e', pady=(2, 0))
         middle = tk.Frame(card, bg=CARD)
         middle.pack(side='left', fill='x', expand=True, pady=10)
-        tk.Label(middle, text=name, bg=CARD, fg=TEXT if earned else MUTED,
+        tk.Label(middle, text=_(name), bg=CARD, fg=TEXT if earned else MUTED,
                  font=(theme.BODY, 11, 'bold' if earned else 'normal')).pack(anchor='w')
-        tk.Label(middle, text=text, bg=CARD, fg=MUTED, font=(theme.BODY, 9), justify='left',
+        tk.Label(middle, text=_(text), bg=CARD, fg=MUTED, font=(theme.BODY, 9), justify='left',
                  wraplength=self.px(520)).pack(anchor='w', pady=(1, 0))
 
     def set_trophy_filter(self, name):
@@ -2678,14 +2712,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         _id, name, _text, grade, _group = trophies.BY_ID.get(
             trophy, (trophy, _('Trophy {}', 'Трофей {}').format(trophy), '', trophies.BRONZE, trophies.BASE))
         box = tk.Frame(self.content, bg=CARD, highlightthickness=1, highlightbackground=LINE, cursor='hand2')
-        icon = self.trophy_icon(box, grade, True, self.px(38), CARD)
+        icon = self.trophy_icon(box, grade, True, self.px(38), CARD, trophy_id=_id)
         icon.pack(side='left', padx=(12, 12), pady=10)
         words = tk.Frame(box, bg=CARD)
         words.pack(side='left', padx=(0, 20), pady=8)
         caption = tk.Label(words, text=_("You've earned a trophy.", 'Вы получили трофей.'), bg=CARD, fg=MUTED,
                            font=(theme.BODY, 9))
         caption.pack(anchor='w')
-        title = tk.Label(words, text=f'{name}', bg=CARD, fg=TEXT, font=(theme.BODY, 11, 'bold'))
+        title = tk.Label(words, text=_(name), bg=CARD, fg=TEXT, font=(theme.BODY, 11, 'bold'))
         title.pack(anchor='w')
         for widget in (box, icon, words, caption, title):
             widget.bind('<Button-1>', lambda _e: self.show('trophies'))
