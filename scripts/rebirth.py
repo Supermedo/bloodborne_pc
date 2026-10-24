@@ -66,7 +66,114 @@ TEXTS = {
               f'with Channel Blood Echoes.',
               f'Rebirth requires {REBIRTH_INSIGHT} Insight.',
               'Your attributes are already those of your origin.'),
+    'dandk': ('Genfødsel',
+              f'Bliv genfødt for {REBIRTH_INSIGHT} indsigt? Dine egenskaber og dit niveau vender tilbage til '
+              f'din oprindelses. Dine niveauer kan derefter genvindes uden blodekkoer, nu eller senere '
+              f'via »Kanalisér blodekkoer«.',
+              f'Genfødsel kræver {REBIRTH_INSIGHT} indsigt.',
+              'Dine egenskaber svarer allerede til din oprindelses.'),
+    'deude': ('Wiedergeburt',
+              f'Für {REBIRTH_INSIGHT} Einsicht wiedergeboren werden? Deine Attribute und deine Stufe werden '
+              f'auf die deiner Herkunft zurückgesetzt. Deine Stufen können danach ohne Blutechos wiedererlangt '
+              f'werden, jetzt oder später über „Blutechos kanalisieren“.',
+              f'Wiedergeburt erfordert {REBIRTH_INSIGHT} Einsicht.',
+              'Deine Attribute entsprechen bereits denen deiner Herkunft.'),
+    'finfi': ('Uudelleensyntymä',
+              f'Synny uudelleen {REBIRTH_INSIGHT} oivalluksella? Ominaisuutesi ja tasosi palautuvat alkuperäsi '
+              f'mukaisiksi. Tasosi voidaan tämän jälkeen palauttaa ilman verihäiveitä, nyt tai myöhemmin '
+              f'kohdasta ”Kanavoi verihäiveitä”.',
+              f'Uudelleensyntymä vaatii {REBIRTH_INSIGHT} oivallusta.',
+              'Ominaisuutesi vastaavat jo alkuperääsi.'),
+    'frafr': ('Renaissance',
+              f'Renaître pour {REBIRTH_INSIGHT} point(s) de Lucidité ? Vos attributs et votre niveau '
+              f'retourneront à ceux de votre origine. Vos niveaux pourront ensuite être regagnés sans échos '
+              f'du sang, maintenant ou plus tard via « Canaliser les échos du sang ».',
+              f'La renaissance requiert {REBIRTH_INSIGHT} point(s) de Lucidité.',
+              'Vos attributs correspondent déjà à ceux de votre origine.'),
+    'itait': ('Rinascita',
+              f'Vuoi rinascere per {REBIRTH_INSIGHT} punti intuizione? I tuoi attributi e il tuo livello '
+              f'torneranno a quelli della tua origine. I livelli potranno poi essere recuperati senza echi '
+              f'del sangue, ora o in seguito tramite «Incanala echi del sangue».',
+              f'La rinascita richiede {REBIRTH_INSIGHT} punti intuizione.',
+              'I tuoi attributi corrispondono già a quelli della tua origine.'),
+    'jpnjp': ('生まれ変わり',
+              f'啓蒙を {REBIRTH_INSIGHT} 消費して生まれ変わりますか？能力値とレベルが過去の状態に戻ります。'
+              f'消費したレベルは血の遺志を消費せずに再取得でき、今すぐ、または後から「血の遺志を力とする」で行えます。',
+              f'生まれ変わりには啓蒙が {REBIRTH_INSIGHT} 必要です。',
+              '能力値は既に過去の状態です。'),
+    'korkr': ('다시 태어나기',
+              f'계몽 {REBIRTH_INSIGHT}을(를) 소모하여 다시 태어나시겠습니까? 능력치와 레벨이 과거의 상태로 '
+              f'되돌아갑니다. 원래의 레벨은 피의 유지 없이 무료로 다시 올릴 수 있으며, 지금 바로 또는 '
+              f'나중에 「피의 유지를 깃들인다」를 통해 올릴 수 있습니다.',
+              f'다시 태어나려면 계몽이 {REBIRTH_INSIGHT} 필요합니다.',
+              '능력치가 이미 과거의 상태입니다.'),
+    'nldnl': ('Wedergeboorte',
+              f'Wedergeboren worden voor {REBIRTH_INSIGHT} inzicht? Je eigenschappen en niveau keren terug naar '
+              f'die van je afkomst. Je niveaus kunnen danach zonder bloedsporen worden herwonnen, nu of later '
+              f'via „Bloedsporen kanaliseren”.',
+              f'Wedergeboorte vereist {REBIRTH_INSIGHT} inzicht.',
+              'Je eigenschappen komen al overeen met die van je afkomst.'),
+    'norno': ('Gjenfødelse',
+              f'Bli gjenfødt for {REBIRTH_INSIGHT} innsikt? Dine egenskaper og nivå vender tilbake til din '
+              f'opprinnelses. Nivåene kan deretter gjenvinnes uten blodekko, nå eller senere via '
+              f'«Kanaliser blodekko».',
+              f'Gjenfødelse krever {REBIRTH_INSIGHT} innsikt.',
+              'Dine egenskaper tilsvarer allerede din opprinnelse.'),
+    'polpl': ('Odrodzenie',
+              f'Odrodzić się za {REBIRTH_INSIGHT} pkt. wglądu? Twoje atrybuty i poziom powrócą do stanu z Twojego '
+              f'pochodzenia. Poziomy można odzyskać bez tętnień krwi, teraz lub później poprzez '
+              f'«Przepływ tętnień krwi».',
+              f'Odrodzenie wymaga {REBIRTH_INSIGHT} pkt. wglądu.',
+              'Twoje atrybuty odpowiadają już Twojemu pochodzeniu.'),
+    'porbr': ('Renascimento',
+              f'Renascer por {REBIRTH_INSIGHT} de discernimento? Seus atributos e nível retornarão aos da sua '
+              f'origem. Seus níveis poderão ser recuperados sem ecos de sangue, agora ou mais tarde através de '
+              f'«Canalizar ecos de sangue».',
+              f'O renascimento requer {REBIRTH_INSIGHT} de discernimento.',
+              'Seus atributos já são os da sua origem.'),
+    'porpt': ('Renascimento',
+              f'Renascer por {REBIRTH_INSIGHT} de discernimento? Os teus atributos e nível regressarão aos da '
+              f'tua origem. Os teus níveis poderão ser recuperados sem ecos de sangue, agora ou mais tarde através de '
+              f'«Canalizar ecos de sangue».',
+              f'O renascimento requer {REBIRTH_INSIGHT} de discernimento.',
+              'Os teus atributos já são os da tua origem.'),
+    'rusru': ('Перерождение',
+              f'Переродиться за {REBIRTH_INSIGHT} озарений? Ваши характеристики и уровень вернутся к исходным '
+              f'для вашего происхождения. Ваши уровни можно будет вернуть без отголосков крови, сейчас или '
+              f'позже через «Распределить отголоски крови».',
+              f'Для перерождения требуется {REBIRTH_INSIGHT} озарений.',
+              'Ваши характеристики уже соответствуют вашему происхождению.'),
+    'spaes': ('Renacer',
+              f'¿Renacer por {REBIRTH_INSIGHT} de lucidez? Tus atributos y tu nivel volverán a los de tu origen. '
+              f'Podrás recuperar tus niveles sin ecos de sangre, ahora o más adelante mediante '
+              f'«Canalizar ecos de sangre».',
+              f'Renacer requiere {REBIRTH_INSIGHT} de lucidez.',
+              'Tus atributos ya corresponden a los de tu origen.'),
+    'swese': ('Återfödelse',
+              f'Återfödas för {REBIRTH_INSIGHT} insikt? Dina attribut och din nivå återgår till ditt ursprungs. '
+              f'Dina nivåer kan sedan återfås utan blodekon, nu eller senare via ”Kanalisera blodekon”.',
+              f'Återfödelse kräver {REBIRTH_INSIGHT} insikt.',
+              'Dina attribut motsvarar redan ditt ursprungs.'),
+    'turtr': ('Yeniden Doğuş',
+              f'{REBIRTH_INSIGHT} Sezgi karşılığında yeniden doğulsun mu? Nitelikleriniz ve seviyeniz kökeninize '
+              f'geri döner. Seviyeleriniz daha sonra Kan Yankıları harcamadan, şimdi veya daha sonra '
+              f'«Kan Yankıları\'ni Aktar» ile geri kazanılabilir.',
+              f'Yeniden doğuş için {REBIRTH_INSIGHT} Sezgi gerekir.',
+              'Nitelikleriniz zaten kökeninizle aynı.'),
+    'zhocn': ('重生',
+              f'是否消耗 {REBIRTH_INSIGHT} 点灵视重生？能力值与等级将回到出身时的状态。此后可无需血之回响'
+              f'重新提升等级，可立即提升，也可稍后通过“传导血之回响”提升。',
+              f'重生需要 {REBIRTH_INSIGHT} 点灵视。',
+              '能力值已处于出身时的状态。'),
+    'zhotw': ('重生',
+              f'是否消耗 {REBIRTH_INSIGHT} 點靈視重生？能力值與等級將回到出身時的狀態。此後可無需血之迴響'
+              f'重新提升等級，可立即提升，亦可稍後透過「導引血之迴響」提升。',
+              f'重生需要 {REBIRTH_INSIGHT} 點靈視。',
+              '能力值已處於出身時的狀態。'),
 }
+TEXTS['enggb'] = TEXTS['engus']
+TEXTS['spaar'] = TEXTS['spaes']
+TEXTS['japanese'] = TEXTS['jpnjp']
 
 
 def code_writes():

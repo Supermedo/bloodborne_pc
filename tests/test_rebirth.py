@@ -68,5 +68,25 @@ class TalkScriptTests(unittest.TestCase):
                 self.assertEqual(evaluators[read + 1], f'(reg0 == {rebirth.OPTION})')
 
 
+
+
+class TextTests(unittest.TestCase):
+    def test_texts_defined_for_all_supported_languages(self):
+        expected_languages = [
+            'engus', 'enggb', 'zhocn', 'zhotw', 'jpnjp', 'japanese', 'korkr',
+            'rusru', 'deude', 'frafr', 'itait', 'spaes', 'spaar', 'porbr', 'porpt',
+            'polpl', 'dandk', 'finfi', 'nldnl', 'norno', 'swese', 'turtr'
+        ]
+        for lang in expected_languages:
+            with self.subTest(language=lang):
+                self.assertIn(lang, rebirth.TEXTS)
+                entries = rebirth.TEXTS[lang]
+                self.assertEqual(len(entries), 4)
+                option, question, short, nothing = entries
+                self.assertTrue(all(isinstance(s, str) and len(s.strip()) > 0 for s in entries))
+                self.assertIn(str(rebirth.REBIRTH_INSIGHT), question)
+                self.assertIn(str(rebirth.REBIRTH_INSIGHT), short)
+
+
 if __name__ == '__main__':
     unittest.main()
