@@ -160,6 +160,9 @@ UI = {'de': {
         'Leere den Shader-Cache (Knopf unten). Der nächste Start ruckelt ein paar Minuten, während er neu gebaut wird.',
     'Still black: update the graphics driver and restart the PC.':
         'Immer noch schwarz: Aktualisiere den Grafiktreiber und starte den PC neu.',
+    'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+        'Bei schwarzem Bild oder kaputtem Bild nach einem Treiber-Update. Der nächste Start ruckelt ein paar '
+        'Minuten.',
     'Clear the shader cache': 'Shader-Cache leeren', 'Open the memory settings': 'Speicher-Einstellungen öffnen',
     'Open Windows Security': 'Windows-Sicherheit öffnen', 'Open the port folder': 'Port-Ordner öffnen',
     'Open the game folder': 'Spielordner öffnen', 'Choose the game folder': 'Spielordner wählen',

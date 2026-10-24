@@ -225,6 +225,9 @@ WORLD = {
             'Сначала выберите сохранение, с которого начинается этот сценарий.',
         'Choose…':
             'Выбрать…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'При чёрном экране или испорченной картинке после обновления драйвера. Следующий запуск несколько минут '
+            'будет подтормаживать.',
         'Clear the shader cache':
             'Очистить кэш шейдеров',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -1601,6 +1604,8 @@ WORLD = {
             'اختر أولًا ملف الحفظ الذي يبدأ منه هذا السيناريو.',
         'Choose…':
             'اختيار…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'عند ظهور شاشة سوداء أو صورة معطوبة بعد تحديث التعريف. سيتقطع التشغيل التالي لبضع دقائق.',
         'Clear the shader cache':
             'مسح كاش الشيدر',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -3185,6 +3190,9 @@ WORLD = {
             'Primero elige la partida desde la que empieza este escenario.',
         'Choose…':
             'Elegir…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Para una pantalla negra o una imagen rota tras actualizar el controlador. El próximo inicio tendrá '
+            'tirones unos minutos.',
         'Clear the shader cache':
             'Borrar la caché de shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -4776,6 +4784,9 @@ WORLD = {
             'Primeiro escolha o save a partir do qual este cenário começa.',
         'Choose…':
             'Escolher…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Para tela preta ou imagem quebrada após atualizar o driver. A próxima inicialização vai engasgar por '
+            'alguns minutos.',
         'Clear the shader cache':
             'Limpar o cache de shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -6363,6 +6374,9 @@ WORLD = {
             'Choisissez d’abord la sauvegarde de départ de ce scénario.',
         'Choose…':
             'Choisir…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            "En cas d'écran noir ou d'image cassée après une mise à jour du pilote. Le prochain démarrage saccadera "
+            'quelques minutes.',
         'Clear the shader cache':
             'Vider le cache des shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -7956,6 +7970,9 @@ WORLD = {
             'Scegli prima il salvataggio da cui parte questo scenario.',
         'Choose…':
             'Scegli…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            "Per uno schermo nero o un'immagine rovinata dopo un aggiornamento del driver. Il prossimo avvio "
+            'scatterà per qualche minuto.',
         'Clear the shader cache':
             'Svuota la cache degli shader',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -9548,6 +9565,9 @@ WORLD = {
             'Najpierw wybierz zapis, od którego startuje ten scenariusz.',
         'Choose…':
             'Wybierz…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Przy czarnym ekranie lub zepsutym obrazie po aktualizacji sterownika. Następne uruchomienie będzie '
+            'przez kilka minut przycinać.',
         'Clear the shader cache':
             'Wyczyść pamięć shaderów',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -11136,6 +11156,9 @@ WORLD = {
             'Önce bu senaryonun başlayacağı kaydı seçin.',
         'Choose…':
             'Seç…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Siyah ekran veya sürücü güncellemesinden sonra bozuk görüntü için. Sonraki açılış birkaç dakika '
+            'takılacaktır.',
         'Clear the shader cache':
             'Shader önbelleğini temizle',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -12726,6 +12749,8 @@ WORLD = {
             '请先选择此场景的起始存档。',
         'Choose…':
             '选择…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '用于黑屏，或更新驱动后画面异常。下次启动会卡顿几分钟。',
         'Clear the shader cache':
             '清除着色器缓存',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -14308,6 +14333,8 @@ WORLD = {
             '先に、このシナリオの開始に使うセーブデータを選択してください。',
         'Choose…':
             '選択…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '画面が真っ暗なとき、またはドライバー更新後に表示が崩れたときに。次回の起動は数分間カクつきます。',
         'Clear the shader cache':
             'シェーダーキャッシュを消去',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -15891,6 +15918,8 @@ WORLD = {
             '먼저 이 시나리오를 시작할 세이브를 선택하세요.',
         'Choose…':
             '선택…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '검은 화면이나 드라이버 업데이트 후 화면이 깨질 때 사용하세요. 다음 실행은 몇 분간 끊깁니다.',
         'Clear the shader cache':
             '셰이더 캐시 지우기',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':

@@ -2080,6 +2080,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fsr4_button = ttk.Button(holder, text=_('Download FSR 4 assets', 'Скачать ассеты FSR 4'),
                                       command=self.download_fsr4)
         self.fsr4_button.pack(side='left')
+        self.index_entry(self.fsr4_button, _('Download FSR 4 assets', 'Скачать ассеты FSR 4'), key='button:fsr4')
         self.fsr4_progress = ttk.Progressbar(holder, length=280, maximum=len(fsr4_files()))
         self.fsr4_progress.pack(side='left', padx=12)
         self.note(f, _("From FireBurn/Q2RTX on GitHub (built from AMD's MIT-licensed FidelityFX source), "
@@ -2097,6 +2098,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.fsr411_button = ttk.Button(holder, text=_('Download fsr4vk'),
                                         command=self.download_fsr411)
         self.fsr411_button.pack(side='left')
+        self.index_entry(self.fsr411_button, _('Download fsr4vk'), key='button:fsr4vk')
         self.fsr411_progress = ttk.Progressbar(holder, length=280, maximum=100)
         self.fsr411_progress.pack(side='left', padx=12)
         self.ttk.Button(holder, text=_('Recheck support'), command=self.recheck_fsr411).pack(side='left')
@@ -2235,6 +2237,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         holder = self.ttk.Frame(f)
         self.ttk.Button(holder, text=_('Respec a character…', 'Перераспределить характеристики…'),
                         command=self.open_respec).pack(side='left')
+        self.index_entry(holder, _('Respec a character…', 'Перераспределить характеристики…'), key='button:respec')
         self.row(f, '', holder,
                  _('Spread a character\'s attribute points again: same level, same Blood Echoes. '
                    'Changes the save while the game is closed; a copy of the saves is kept in '
@@ -3279,9 +3282,20 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             command=lambda: threading.Thread(target=self.check_update, args=(True,), daemon=True).start())
         self.updates_button.pack(side='left')
         self.index_entry(self.updates_button, _('Check for updates', 'Проверить обновления'), key='button:updates')
-        ttk.Button(holder, text=_('Other versions…', 'Другие версии…'), command=self.choose_version).pack(
-            side='left', padx=(6, 0))
+        button = ttk.Button(holder, text=_('Other versions…', 'Другие версии…'), command=self.choose_version)
+        button.pack(side='left', padx=(6, 0))
+        self.index_entry(button, _('Other versions…', 'Другие версии…'), key='button:versions')
         ttk.Label(holder, text=f'v{VERSION}', style='Muted.TLabel').pack(side='left', padx=10)
+        # The shader cache: here since the original launcher, and in Help's black screen topic.
+        holder = ttk.Frame(f)
+        holder.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(10, 0))
+        button = ttk.Button(holder, text=_('Clear the shader cache'), command=self.clear_cache)
+        button.pack(side='left')
+        hint = _('For a black screen, or a broken picture after a driver update. The next start stutters for a few '
+                 'minutes.')
+        ttk.Label(holder, text=hint, style='Muted.TLabel', wraplength=self.px(560), justify='left').pack(
+            side='left', padx=10)
+        self.index_entry(button, _('Clear the shader cache'), hint, key='button:shader_cache')
         self.section(f, _('Appearance'))  # the translucent window: Launcher customization > Launcher
         self.check(f, 'windows_title_bar', 'app', _("Windows' title bar instead of the launcher's own"),
                    _('Applies when the launcher opens again.', 'Применится при следующем открытии лаунчера.'))

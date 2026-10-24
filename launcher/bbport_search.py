@@ -71,7 +71,12 @@ WORDS = {
     'button:updates': 'update updates aktualisieren neue version',
     'button:report': 'bericht report support zip discord fehler',
     'button:benchmark': 'benchmark test messen route kathedrale cathedral fps tester',
-    'button:shader_cache': 'shader cache leeren loschen clear',
+    'button:shader_cache': 'shader cache leeren loschen clear schwarz schwarzer bildschirm black screen '
+                           'grafikfehler treiber driver',
+    'button:versions': 'version versionen andere altere alte downgrade upgrade zuruck installieren',
+    'button:respec': 'respec umverteilen neu verteilen attribute attributpunkte punkte stats skillung',
+    'button:fsr4': 'fsr4 fsr 4 herunterladen download dateien fehlen assets',
+    'button:fsr4vk': 'fsr4vk fsr 4.1 fsr411 herunterladen download reparieren vulkan',
     'online': 'online koop coop multiplayer freunde glocke beschworen invasion',
     'online_pool': 'server online shadnet hunters dream thd bbhost spielen mit play with',
     'mods_enabled': 'mods mod remaster texturen',
