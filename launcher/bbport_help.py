@@ -129,7 +129,8 @@ TOPICS = {
         '"device lost".',
         ['Update the driver: NVIDIA App, AMD Software (Adrenalin) or Intel Driver & Support Assistant.',
          'Restart the PC after installing it.',
-         'Overclocked graphics card or memory: try the standard clocks.']),
+         'Overclocked graphics card or memory: try the standard clocks.',
+         'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.']),
     'black_screen': (
         'Only a black screen',
         'The game starts but shows nothing, or the picture breaks after a driver update: its shader cache no longer '
@@ -191,6 +192,7 @@ LOG_HINTS = [
     (r'expected PS4 SELF', 'eboot_unreadable'),
     (r'ErrorOutOfDeviceMemory|Texture cache: memory pressure', 'vram'),
     (r'ErrorDeviceLost|device lost', 'driver'),
+    (r'Fault: .* at (?:amdvlk|amdxc|nvoglv|nvvk|nvwgf|igvk|igxe|igd)\w*\.dll', 'driver'),
 ]
 
 

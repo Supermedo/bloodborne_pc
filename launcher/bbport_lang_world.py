@@ -637,6 +637,8 @@ WORLD = {
             'Параметры',
         'Other servers (shadNet, SuperMedo) and every option: the Online play page. Offline needs nothing: untick it.':
             'Другие серверы (shadNet, SuperMedo) и все параметры — на странице «Онлайн-игра». Для офлайна ничего не нужно: просто снимите флажок.',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Закройте оверлеи, например MSI Afterburner и RivaTuner (RTSS): они встраиваются в графический драйвер.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Разогнанная видеокарта или память: попробуйте стандартные частоты.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -2150,6 +2152,8 @@ WORLD = {
             'إصدارات أخرى',
         'Other versions…':
             'إصدارات أخرى…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'أغلق التراكبات مثل MSI Afterburner وRivaTuner (RTSS): فهي تتدخل في تعريف الرسومات.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'بطاقة رسومات أو ذاكرة مرفوعة السرعة (كسر سرعة): جرّب السرعات القياسية.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -3737,6 +3741,8 @@ WORLD = {
             'Otras versiones',
         'Other versions…':
             'Otras versiones…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Cierra superposiciones como MSI Afterburner y RivaTuner (RTSS): se enganchan al controlador gráfico.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Tarjeta gráfica o memoria con overclock: prueba con las frecuencias de serie.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -5327,6 +5333,8 @@ WORLD = {
             'Outras versões',
         'Other versions…':
             'Outras versões…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Feche sobreposições como MSI Afterburner e RivaTuner (RTSS): elas se acoplam ao driver de vídeo.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Placa de vídeo ou memória com overclock: tente os clocks padrão.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -6915,6 +6923,9 @@ WORLD = {
             'Autres versions',
         'Other versions…':
             'Autres versions…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Fermez les overlays comme MSI Afterburner et RivaTuner (RTSS) : ils se greffent sur le pilote '
+            'graphique.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Carte graphique ou mémoire overclockée : essayez les fréquences d’origine.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -8508,6 +8519,8 @@ WORLD = {
             'Altre versioni',
         'Other versions…':
             'Altre versioni…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Chiudi gli overlay come MSI Afterburner e RivaTuner (RTSS): si agganciano al driver video.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Scheda video o memoria in overclock: prova le frequenze standard.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -10098,6 +10111,8 @@ WORLD = {
             'Inne wersje',
         'Other versions…':
             'Inne wersje…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Zamknij nakładki, takie jak MSI Afterburner i RivaTuner (RTSS): wpinają się w sterownik graficzny.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Podkręcona karta graficzna lub pamięć: spróbuj standardowych taktowań.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -11687,6 +11702,8 @@ WORLD = {
             'Diğer sürümler',
         'Other versions…':
             'Diğer sürümler…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner ve RivaTuner (RTSS) gibi katmanları kapatın: ekran kartı sürücüsüne müdahale ederler.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Hız aşırtılmış ekran kartı veya bellek: standart saat hızlarını deneyin.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -13274,6 +13291,8 @@ WORLD = {
             '其他版本',
         'Other versions…':
             '其他版本…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            '关闭 MSI Afterburner 和 RivaTuner（RTSS）等叠加层：它们会挂接到显卡驱动中。',
         'Overclocked graphics card or memory: try the standard clocks.':
             '显卡或内存超频：请尝试恢复默认频率。',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -14856,6 +14875,8 @@ WORLD = {
             'ほかのバージョン',
         'Other versions…':
             'ほかのバージョン…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner や RivaTuner（RTSS）などのオーバーレイを閉じてください。グラフィックドライバーに介入します。',
         'Overclocked graphics card or memory: try the standard clocks.':
             'グラフィックカードやメモリをオーバークロックしている場合：定格クロックで試してください。',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -16440,6 +16461,8 @@ WORLD = {
             '다른 버전',
         'Other versions…':
             '다른 버전…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner, RivaTuner(RTSS) 같은 오버레이를 닫으세요. 그래픽 드라이버에 끼어듭니다.',
         'Overclocked graphics card or memory: try the standard clocks.':
             '그래픽 카드나 메모리를 오버클럭했다면: 기본 클럭으로 되돌려 보세요.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':

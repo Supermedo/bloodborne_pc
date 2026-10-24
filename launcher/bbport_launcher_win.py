@@ -776,6 +776,10 @@ def game_environment(s, graphics=None):
     # Which build a server sees (shadNet's client version, The Hunter's Dream's client field).
     # The servers tell clients apart by this User-Agent: name/version (bbport/1.9.1).
     env.setdefault('BB_CLIENT_VERSION', f'bbport/{VERSION}')
+    # Started from Steam, the game gets Steam's Vulkan layers. Its shader pre-caching (Fossilize) cannot record
+    # the port's pipelines ("Fossilize ERROR: Cannot copy unknown pNext"), and a tester's AMD driver crashed
+    # right after; the port keeps its own pipeline cache. Steam's overlay stays.
+    env['DISABLE_VK_LAYER_VALVE_steam_fossilize_1'] = '1'
     env['PYTHONUNBUFFERED'] = '1'
     env['PYTHONIOENCODING'] = 'utf-8'
     return env

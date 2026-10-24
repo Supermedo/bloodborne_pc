@@ -179,6 +179,8 @@ HELP = {'de': {
     'Update the driver: NVIDIA App, AMD Software (Adrenalin) or Intel Driver & Support Assistant.':
         'Treiber aktualisieren: NVIDIA App, AMD Software (Adrenalin) oder Intel Driver & Support Assistant.',
     'Restart the PC after installing it.': 'Starte den PC nach der Installation neu.',
+    'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+        'Schließe Overlays wie MSI Afterburner und RivaTuner (RTSS): Sie greifen in den Grafiktreiber ein.',
     'Overclocked graphics card or memory: try the standard clocks.':
         'Übertaktete Grafikkarte oder Speicher: Probier die Standardtakte.',
     'Stutter in the first minutes': 'Ruckler in den ersten Minuten',
