@@ -697,13 +697,27 @@ int main(int argc, char **argv) {
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
-    protect(image, round_page(size), 0);
+    /* Each page goes straight to its final protection (a later segment wins, as before), never
+       through no access: another thread that already found the image (a mod DLL's memory
+       watcher) faulted when it read it between the two steps. */
+    size_t page_count = round_page(size) / page_size;
+    unsigned char *page_flags = calloc(page_count ? page_count : 1, 1);
+    if (!page_flags) fail("out of memory");
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {
-        protect(image + segments[i].address, round_page(segments[i].size), (unsigned)segments[i].flags);
+        size_t first = segments[i].address / page_size;
+        size_t end = (segments[i].address + round_page(segments[i].size) + page_size - 1) / page_size;
+        for (size_t p = first; p < end && p < page_count; ++p) page_flags[p] = (unsigned char)segments[i].flags;
         if ((segments[i].flags & 1) && entry >= segments[i].address && entry - segments[i].address < segments[i].size)
             executable_entry = 1;
     }
+    for (size_t p = 0; p < page_count;) {
+        size_t run = p;
+        while (run < page_count && page_flags[run] == page_flags[p]) ++run;
+        protect(image + p * page_size, (run - p) * page_size, page_flags[p]);
+        p = run;
+    }
+    free(page_flags);
     if (!executable_entry) fail("entry is not executable");
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", size, ns, nr);
     if (native_libc) {
