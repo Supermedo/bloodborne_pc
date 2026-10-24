@@ -347,7 +347,9 @@ PRESENT_MODES = [('Mailbox', ('Mailbox (low latency, no tearing)', 'Mailbox (б�
                  ('Immediate', ('Immediate (tearing)', 'Immediate (с разрывами)'))]
 LANGUAGES = [('1', ('English', 'Английский')), ('8', ('Russian', 'Русский')), ('0', ('Japanese', 'Японский')),
              ('2', ('French', 'Французский')), ('3', ('Spanish', 'Испанский')), ('4', ('German', 'Немецкий')),
-             ('5', ('Italian', 'Итальянский')), ('17', ('Português (Brasil)',))]
+             ('5', ('Italian', 'Итальянский')), ('10', ('Traditional Chinese (繁體中文)', 'Традиционный китайский (繁體中文)')),
+             ('11', ('Simplified Chinese (简体中文)', 'Упрощенный китайский (简体中文)')),
+             ('17', ('Português (Brasil)',))]
 VOICE_LANGUAGES = [('auto', ('As in the game',)), ('eng', ('English',)),
                    ('ptb', ('Português (Brasil)',)), ('ded', ('Deutsch',)),
                    ('esa', ('Español (América)',)), ('ese', ('Español (España)',)),
