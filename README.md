@@ -58,7 +58,8 @@ https://nativeretro.com/
 - **Field of view** from 30 to 90 degrees (the game has 43), for every camera of the game.
 - **Mute in the background:** optionally silent while the game window is not in focus; the
   mouse is released then too.
-- **Mods and third-party patches**, loaded without changing your game files.
+- **Mods and third-party patches**, loaded without changing your game files. The port's own menu rows and texts
+  are added to a mod's files ([for mod authors](docs/MODDING.md)).
 - **DLC** from your own dump (The Old Hunters on base-game dumps), with a DLC folder setting.
 - **Add to Steam** puts the game in your Steam library in one click.
 - **`Play Bloodborne.exe`** starts the game straight away with your saved settings (good for a

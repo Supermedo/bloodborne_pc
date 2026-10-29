@@ -29,8 +29,11 @@ class RunScriptTimeoutTests(unittest.TestCase):
 
     def test_the_game_view_with_the_ports_layers_has_a_time_limit(self):
         source = (ROOT / 'run.py').read_text(encoding='utf-8')
-        call = source[source.index("view = run_script('mods.py', *mod_args, '--layer'"):]
+        call = source[source.index("view = run_script('mods.py', *mod_args, *(arg for layer in layers"):]
         self.assertIn('timeout=60', call[:call.index(')\n')])
+        # and the mods' files the layers build on, read before them
+        call = source[source.index("if run_script('mods.py', *mod_args, '--sources', folder"):]
+        self.assertIn('timeout=60', call[:call.index(':\n')])
 
 
 if __name__ == '__main__':

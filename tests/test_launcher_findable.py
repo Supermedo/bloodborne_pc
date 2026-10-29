@@ -12,6 +12,7 @@ import bbport_search as search  # noqa: E402
 # The action (a launcher method) -> its search entry. An action players look for: on a page, findable.
 IMPORTANT = {
     'clear_cache': 'button:shader_cache',
+    'play_without_mods': 'button:without_mods',
     'save_report': 'button:report',
     'open_respec': 'button:respec',
     'choose_version': 'button:versions',

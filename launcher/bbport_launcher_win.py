@@ -244,6 +244,7 @@ import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts with The Hun
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
+import bbport_lang_mods  # noqa: E402,F401 (what mods change of the port's, Start once without mods)
 import bbport_lang_news  # noqa: E402,F401 (the What's new window)
 import bbport_lang_readouts  # noqa: E402,F401 (the FPS counter's lines)
 # Last of the texts: it builds bbport_lang's tables (table()) to add its own, so a module registering
@@ -260,6 +261,7 @@ import bbport_help  # noqa: E402
 import bbport_search  # noqa: E402
 import bbport_setup  # noqa: E402
 import bbport_news  # noqa: E402
+import bbport_mods  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
 import bbport_theme as theme  # noqa: E402
 import bbport_tls  # noqa: E402 (every HTTPS request: no expired certificates of the stores, Windows' trust)
@@ -2427,7 +2429,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk.Label(info, text=_('Ready check', 'Проверка'), style='Card.Section.TLabel').pack(anchor='w', pady=(0, px(8)))
         # One line per thing that matters; a line that is not fine leads to its fix with a click.
         self.checks, self.check_lines, self.check_targets = {}, {}, {}
-        for key in ('news', 'system', 'gpu', 'settings', 'game', 'saves', 'online', 'pool', 'cheats', 'fsr4'):
+        for key in ('news', 'system', 'gpu', 'settings', 'game', 'saves', 'online', 'pool', 'cheats', 'mods',
+                    'fsr4'):
             line = ttk.Frame(info, style='Inner.TFrame')
             line.pack(fill='x', pady=px(4))
             icon = tk.Label(line, text='', bg=CARD, fg=MUTED, font=(theme.ICONS, 11))
@@ -3316,6 +3319,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                     _('Empty: {}', 'Пусто: {}').format(DATA_DIR / 'mods'), on_change=self.refresh_lists)
         self.mods_frame = self.ttk.Frame(f)
         self.mods_frame.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(8, 0))
+        # A crash, a missing text, an odd menu: one start without any mod says whether a mod is the cause.
+        button = self.ttk.Button(f, text=_('Start once without mods'), command=self.play_without_mods)
+        button.grid(row=self.next_row(f), column=0, sticky='w', pady=(10, 0))
+        hint = _('Plays this one start with no mod loaded, to see whether one of them causes a problem. They stay '
+                 'on for the next start.')
+        self.ttk.Label(f, text=hint, style='Muted.TLabel', wraplength=self.px(620), justify='left').grid(
+            row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 0))
+        self.index_entry(button, _('Start once without mods'), hint, key='button:without_mods')
         self.section(f, _('Third-party patches', 'Сторонние патчи'))
         self.folder(f, 'patches_dir', _('Patches folder', 'Папка патчей'), _('Choose the patches folder', 'Выберите папку патчей'),
                     _('shadPS4/GoldHEN XML patch files for version 1.09. Empty: {}',
@@ -4410,6 +4421,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         cheats = [_(*title) for key, title, _on in CHEATS if self.var(key, 'ini').get()]
         self.check_line('cheats', ('⚠ ' + _('Cheats on: {}').format(', '.join(t.split(' (')[0] for t in cheats))
                                    if cheats else ''), lambda: self.show('cheats'))
+        # A mod whose file could not take one of the port's changes at the last start (run.py's mod report).
+        self.check_line('mods', bbport_mods.warning(bbport_mods.report(DATA_DIR),
+                                                    bbport_mods.enabled_mods(self.app, DATA_DIR)),
+                        lambda: self.show('mods'))
         news = self.var('setup_done', 'app').get() and self.app.get('seen_version') != VERSION_TEXT
         self.check_line('news', '• ' + _('New in version {}: what has changed').format(VERSION_TEXT) if news else '',
                         self.open_news)
@@ -4711,10 +4726,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             ttk.Label(self.mods_frame, text=_('No mods in {} yet.', 'В {} пока нет модов.').format(root),
                       style='Muted.TLabel').pack(anchor='w')
         self.mod_rows = []
+        on = [name for name in self.mod_order if old.get(name, name not in profile.get('disabled', []))]
+        # What each mod changes of the port's own files, and what the last start had to turn off (bbport_mods).
+        notes = bbport_mods.notes(root, self.mod_order, on, bbport_mods.report(DATA_DIR))
         for index, name in enumerate(self.mod_order):
             var = tk.BooleanVar(value=old.get(name, name not in profile.get('disabled', [])))
             self.mod_vars[name] = var
-            self.mod_rows.append(self.mod_row(index, name, var))
+            self.mod_rows.append(self.mod_row(index, name, var, notes.get(name, ())))
         if len(self.mod_order) > 1:
             ttk.Label(self.mods_frame, text=_('Drag a mod by its grip to change the order. Lower in the list loads '
                                               'later and wins conflicts.'),
@@ -4744,11 +4762,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         mods_dir = Path(self.var('mods_dir', 'app').get() or DATA_DIR / 'mods')
         patches_dir = Path(self.var('patches_dir', 'app').get() or DATA_DIR / 'patches')
         return (str(mods_dir), folder_entries(mods_dir), str(patches_dir), folder_entries(patches_dir),
-                tuple(self.mod_order), folder_entries(DATA_DIR, ('mods.json', 'patches.json')))
+                tuple(self.mod_order), folder_entries(DATA_DIR, ('mods.json', 'patches.json')),
+                folder_entries(DATA_DIR / 'out', ('mod-report.json',)))
 
-    def mod_row(self, index, name, var):
+    def mod_row(self, index, name, var, notes=()):
         """One mod: a grip to drag it by, its place, its switch and its name (a click on the name
-        switches it too)."""
+        switches it too), and under it `notes` (bbport_mods.notes: what it changes of the port's)."""
         tk, ttk, px = self.tk, self.ttk, self.px
         row = tk.Frame(self.mods_frame, bg=CARD, highlightthickness=1, highlightbackground=LINE)
         row.pack(fill='x', pady=(0, px(4)))
@@ -4764,6 +4783,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                   bg=CARD, fg=MUTED, font=(theme.BODY, 9), anchor='w', justify='left',
                                   wraplength=px(520)))
             hints[0].pack(side='bottom', fill='x', padx=(px(4), px(10)), pady=(0, px(6)))
+        for note in reversed(notes):  # packed from the bottom
+            hint = tk.Label(row, text=note, bg=CARD, fg=theme.AMBER if note.startswith('⚠') else MUTED,
+                            font=(theme.BODY, 9), anchor='w', justify='left', wraplength=px(520))
+            hint.pack(side='bottom', fill='x', padx=(px(4), px(10)), pady=(0, px(6) if not hints else 0))
+            hints.append(hint)
         label = tk.Label(row, text=name, bg=CARD, fg=TEXT, font=(theme.BODY, 10), anchor='w', cursor='hand2')
         label.pack(side='left', fill='x', expand=True, padx=(px(4), px(10)))
         for widget in (row, grip, label, *hints):
@@ -4771,6 +4795,17 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             widget.bind('<B1-Motion>', self.mod_drag_move)
             widget.bind('<ButtonRelease-1>', lambda _e, v=var, w=widget: self.mod_drag_end(v if w is label else None))
         return row
+
+    def play_without_mods(self):
+        """Start once without mods (the Mods page, or offered after a crash with mods on): this start loads
+        none; the switches and the order stay as they are."""
+        if self.process:
+            return
+        self.without_mods_once = True
+        self.show('play')
+        self.play()
+        if not self.process:  # it did not start (a question, a missing file): not kept for a later one
+            self.without_mods_once = False
 
     def mod_drag_start(self, event, index):
         self.mod_drag = {'from': index, 'y': event.y_root, 'to': None, 'line': None}
@@ -4977,8 +5012,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                                      'be used. Export the save with Apollo Save Tool on the PS4 '
                                                      'instead.') + '\n\n' + encrypted)
         self.auto_backup()
+        environment = game_environment(self.app, self.ini)
+        if getattr(self, 'without_mods_once', False):  # Start once without mods: this start only
+            self.without_mods_once = False
+            environment['BB_MODS_ENABLED'] = '0'
+            self.append(_('This start: without mods. They stay on for the next one.') + '\n')
         try:
-            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(self.app, self.ini),
+            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=environment,
                                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         except OSError as error:
@@ -5908,6 +5948,7 @@ class _ThisModule:
 
 bbport_setup.bind(_ThisModule())
 bbport_news.bind(_ThisModule())
+bbport_mods.bind(_ThisModule())
 bbport_help.bind(_ThisModule())
 bbport_search.bind(_ThisModule())
 bbport_pad.bind(_ThisModule())

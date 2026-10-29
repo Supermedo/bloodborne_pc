@@ -533,6 +533,139 @@ def writable_saves(user_dir):
     return cleared
 
 
+def read_mod_sources(mod_args, folder, env):
+    """{'files': {game path: mod}, 'mods': [...], 'taken': [...]} of the mods' files the port's layers
+    build on (mods.py --sources); with mods off, nothing; None when they could not be read (the layers
+    then go below the mods, as before)."""
+    shutil.rmtree(folder, ignore_errors=True)
+    if env.get('BB_MODS_ENABLED', '1') == '0':
+        return {'files': {}, 'mods': [], 'taken': []}
+    if run_script('mods.py', *mod_args, '--sources', folder, capture=True, optional=True, timeout=60) is None:
+        print("Mods: the mods' files could not be read; the port's menus and texts go below the mods")
+        return None
+    try:
+        found = json.loads((folder / 'sources.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return {'files': found.get('files', {}), 'mods': found.get('mods', []), 'taken': found.get('taken', [])}
+
+
+def make_text_layer(game, layer, quit, pc, sources, again=False):
+    """Quit to Desktop's and PC Settings' texts and menu rows (quit_menu.py) into `layer`; False when they
+    could not be written (the layer is then removed). again: made anew without a feature a mod turned off,
+    whose status the first run already reported."""
+    shutil.rmtree(layer, ignore_errors=True)
+    flags = ([] if quit else ['--no-quit']) + (['--pc'] if pc else [])
+    if run_script('quit_menu.py', game, '--out', layer, *flags, *sources, optional=True):
+        if again:
+            (Path(layer) / 'status.json').unlink(missing_ok=True)
+        return True
+    shutil.rmtree(layer, ignore_errors=True)
+    return False
+
+
+def make_hud_layer(game, layer, width, position, text_layer, sources):
+    """The ultrawide HUD layout (hud_layout.py) on Quit to Desktop's menus, then the mods', then the game's."""
+    shutil.rmtree(layer, ignore_errors=True)
+    if not run_script('hud_layout.py', game, '--out', layer, '--canvas-width', width, '--position', position,
+                      '--source', text_layer, *sources, optional=True):
+        shutil.rmtree(layer, ignore_errors=True)
+        print('HUD layout: its menu files could not be written; the HUD stays in the centre')
+
+
+def layer_failures(layers):
+    """{game path: why} of the mods' files the layers could not build on (their status.json)."""
+    failed = {}
+    for layer in layers:
+        try:
+            failed.update(json.loads((Path(layer) / 'status.json').read_text(encoding='utf-8')).get('failed', {}))
+        except (OSError, ValueError, AttributeError):
+            pass
+    return failed
+
+
+def port_files():
+    sys.path.insert(0, str(PORT / 'scripts'))
+    import port_files as table
+    return table
+
+
+def mod_report(from_mods, failed, failed_steps, active=None):
+    """{feature: {'state', 'mod', 'file', 'why'}} for the port's features this start uses (active: their
+    keys, None: all) whose files a mod brings (scripts/port_files.py): 'adapted' (the port's change is on
+    the mod's file, or it reads the mod's), 'partly' (the HUD layout leaves that menu as the mod made it)
+    or 'off' (the mod's file cannot take it: the feature is off for this start)."""
+    table = port_files()
+    files = (from_mods or {}).get('files', {})
+    why = {table.game_path(path): text for path, text in failed.items()}
+    report = {}
+    for feature in table.FEATURES:
+        if (active is not None and feature.key not in active) or not (feature.layer or feature.switch):
+            continue
+        touching = [(path, mod, how) for path, mod in sorted(files.items())
+                    for pattern, how in feature.files if table.matches(path, pattern)]
+        if not touching:
+            continue
+        broken = [(path, mod) for path, mod, how in touching if how != 'reads' and table.game_path(path) in why]
+        if feature.key in failed_steps:
+            path, mod, _how = next((t for t in touching if t[2] == 'edits'), touching[0])
+            entry = {'state': 'off', 'mod': mod, 'file': path, 'why': failed_steps[feature.key]}
+        elif broken:
+            path, mod = broken[0]
+            entry = {'state': 'partly' if feature.key == 'hud_layout' else 'off', 'mod': mod, 'file': path,
+                     'why': why[table.game_path(path)]}
+        else:
+            path, mod, how = touching[0]
+            entry = {'state': 'adapted', 'mod': mod, 'file': path, 'why': how}
+        report[feature.key] = entry
+    return report
+
+
+def without_layers(report):
+    """The report when the view is made without the port's layers: every feature with a layer is off."""
+    report = dict(report)
+    for feature in port_files().FEATURES:
+        if feature.layer:
+            report[feature.key] = {'state': 'off', 'mod': '', 'file': '', 'why': 'view'}
+    return report
+
+
+def switch_off(report, env):
+    """The eboot patches of the features that are off (patches.py): no menu row without its text."""
+    table = port_files()
+    for key, entry in report.items():
+        feature = table.BY_KEY.get(key)
+        if entry['state'] == 'off' and feature and feature.switch:
+            env[feature.switch] = '0'
+
+
+def mod_report_lines(report):
+    """The report in the log, one line per feature a mod's file touches."""
+    table = port_files()
+    lines = []
+    for key, entry in report.items():
+        title, mod, path = table.BY_KEY[key].title, entry['mod'], entry['file']
+        if entry['state'] == 'off':
+            lines.append(f"Mods: {mod}'s {path} cannot take {title}: it is off for this start "
+                         f"(turn the mod off to have it; {entry['why']})")
+        elif entry['state'] == 'partly':
+            lines.append(f"Mods: {mod}'s {path} keeps its own layout: {title} leaves that menu as it is")
+        elif entry['why'] == 'reads':
+            lines.append(f"Mods: {title} uses {mod}'s {path}")
+        else:
+            lines.append(f"Mods: {title} is added to {mod}'s {path}")
+    return lines
+
+
+def write_mod_report(out, report):
+    """out/mod-report.json for the launcher (its Mods and Play pages)."""
+    try:
+        (Path(out) / 'mod-report.json').write_text(json.dumps({'features': report}, indent=1, sort_keys=True),
+                                                   encoding='utf-8')
+    except OSError:
+        pass
+
+
 def main():
     args = sys.argv[1:]
     restarted = len(args) >= 2 and args[0] == '--after'
@@ -625,9 +758,21 @@ def main():
             print(f'Game files: eboot.bin is modified, not the clean 01.09 build: its '
                   f'{group_list(set(PATCH_GROUPS) - groups)} code differs, so those options are off; '
                   f'{group_list(groups)} work')
+    # The port's own layers (scripts/port_files.py) are built on the files this start loads: a mod's
+    # where one brings it (mods.py --sources), the game's otherwise, and go above the mods. A mod and the
+    # port then both keep what they change. Where a mod's file cannot take the port's change, that feature
+    # is off for the start (no menu row without its text) and out/mod-report.json says why (the launcher's
+    # Mods and Play pages show it).
+    mod_args = [game, '--out', out, '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
+                '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
+                '--enabled', env.get('BB_MODS_ENABLED', '1')]
+    mod_sources = out / 'mod_sources'
+    from_mods = read_mod_sources(mod_args, mod_sources, env)
+    sources = ['--source', mod_sources] if from_mods and from_mods['files'] else []
+    failed_steps = {}  # feature: why its step failed
+    active = set()  # the features this start uses
     # Quit to Desktop (bbport.ini quit_to_desktop, patches.py): the entries' names in the menu
-    # texts of every language and six-row title and System menus, also a layer below the mods
-    # (before the ultrawide one, which builds on its menu movies).
+    # texts of every language and six-row title and System menus.
     # PC Settings (bbport.ini pc_menu, patches.py, pc_menu.py) adds its line and page texts to
     # the same layer, and a seventh System menu row.
     text_layer = out / 'quit_text'
@@ -637,70 +782,96 @@ def main():
     if (quit_menu or pc_menu) and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
         # Optional: when its files cannot be written ("[WinError 5] Access is denied", an
         # antivirus or the folder's permissions), the game starts without it.
-        flags = ([] if quit_menu else ['--no-quit']) + (['--pc'] if pc_menu else [])
-        if not run_script('quit_menu.py', game, '--out', text_layer, *flags, optional=True):
-            shutil.rmtree(text_layer, ignore_errors=True)
+        active.update(key for key, on in (('quit_to_desktop', quit_menu), ('pc_menu', pc_menu)) if on)
+        if not make_text_layer(game, text_layer, quit_menu, pc_menu, sources):
             env['BB_QUIT_TO_DESKTOP'] = '0'  # patches.py: no menu entries without their texts
             env['BB_PC_MENU'] = '0'
+            failed_steps.update(quit_to_desktop='its menu texts could not be written',
+                                pc_menu='its menu texts could not be written')
             print('Quit to Desktop: its menu texts could not be written; the game starts without it')
     # Rebirth at the Doll (bbport.ini rebirth, patches.py): the Doll's talk script and its texts
-    # (on top of Quit to Desktop's, which edit the same menu text archives), a layer below the mods.
+    # (on top of Quit to Desktop's, which edit the same menu text archives).
     rebirth_layer = out / 'rebirth'
     shutil.rmtree(rebirth_layer, ignore_errors=True)
     if ini_value(config, 'rebirth') != '0' and (game_app_version(game) in (None, '01.09') or env.get('BB_FORCE_PATCHES')):
         weapons = out / 'rebirth-weapons.txt'  # what the equipped weapons need: kept by a rebirth
+        active.add('rebirth')
         env['BB_REBIRTH_WEAPONS'] = str(weapons)
-        if not run_script('rebirth.py', game, '--out', rebirth_layer, '--source', text_layer, '--weapons', weapons,
-                          optional=True):
+        if not run_script('rebirth.py', game, '--out', rebirth_layer, '--source', text_layer, *sources,
+                          '--weapons', weapons, optional=True):
             shutil.rmtree(rebirth_layer, ignore_errors=True)
             env['BB_REBIRTH'] = '0'  # patches.py: no eboot hooks without the Doll's script
+            failed_steps['rebirth'] = "the Doll's script could not be written"
             print("Rebirth: the Doll's script could not be written; the game starts without it")
     # The Discord status (src/runtime_discord.c): the game's own place, boss and level texts.
     if env.get('BB_DISCORD') != '0':
         names = out / 'discord-names.txt'
+        active.add('discord')
         if run_script('discord_names.py', game, '--out', names, '--language', env.get('BB_LANGUAGE', '1'),
-                      optional=True):
+                      *sources, optional=True):
             env['BB_DISCORD_NAMES'] = str(names)
     # Ultrawide outputs: the menu movies with full-screen backdrops widened and the HUD's corner
-    # groups toward the screen edges (bbport.ini hud_position, 0 centred .. 100 edges), a layer
-    # below the mods. Only with the resolution patches, which widen the camera and HUD canvas
+    # groups toward the screen edges (bbport.ini hud_position, 0 centred .. 100 edges).
+    # Only with the resolution patches, which widen the camera and HUD canvas
     # (patches.py hud_canvas): without them the widened menus showed stretched on a 16:9 game.
     hud_layer = out / 'hud_layout'
     shutil.rmtree(hud_layer, ignore_errors=True)
     canvas = hud_canvas(output_size(read_settings(Path(config))))
     if canvas != OUTPUT_SIZE and 'resolution' in groups:
         position = ini_value(config, 'hud_position') or '100'
-        if not run_script('hud_layout.py', game, '--out', hud_layer, '--canvas-width', canvas[0],
-                          '--position', max(0, min(100, int(position) if position.isdigit() else 100)) / 100,
-                          '--source', text_layer, optional=True):
-            shutil.rmtree(hud_layer, ignore_errors=True)
-            print('HUD layout: its menu files could not be written; the HUD stays in the centre')
+        position = max(0, min(100, int(position) if position.isdigit() else 100)) / 100
+        active.add('hud_layout')
+        make_hud_layer(game, hud_layer, canvas[0], position, text_layer, sources)
     # Field of view (bbport.ini fov, degrees; 43 is the game's): the camera table with every
-    # camera's field of view scaled, a layer below the mods. fov.py keeps it between starts
-    # while the setting and the game file are the same.
+    # camera's field of view scaled. fov.py keeps it between starts while the setting and the
+    # file it scales are the same.
     fov_layer = out / 'fov'
     fov = ini_value(config, 'fov')
     if fov and fov.isdigit() and int(fov) != 43:
-        if not run_script('fov.py', game, '--out', fov_layer, '--fov', fov, optional=True):
+        active.add('fov')
+        if not run_script('fov.py', game, '--out', fov_layer, '--fov', fov, *sources, optional=True):
             shutil.rmtree(fov_layer, ignore_errors=True)
+            failed_steps['fov'] = 'its camera table could not be written'
             print('Field of view: its camera table could not be written; the game keeps its own')
     else:
         shutil.rmtree(fov_layer, ignore_errors=True)
-    mod_args = [game, '--out', out, '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
-                '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
-                '--enabled', env.get('BB_MODS_ENABLED', '1')]
-    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', rebirth_layer, '--layer', hud_layer,
-                      '--layer', fov_layer, capture=True, optional=True, timeout=60)
+    layers = (text_layer, rebirth_layer, hud_layer, fov_layer)
+    report = mod_report(from_mods, layer_failures(layers), failed_steps, active)
+    for line in mod_report_lines(report):
+        print(line)
+    switch_off(report, env)
+    # A feature a mod turned off is taken out of its layer as well: rows grown for it would stay in the
+    # menus while the game's code no longer fills them (the System menu came out garbled). Quit to
+    # Desktop's layer is made again with what is left, the HUD layout on it again.
+    off = {key for key, entry in report.items() if entry['state'] == 'off'}
+    if 'rebirth' in off:
+        shutil.rmtree(rebirth_layer, ignore_errors=True)
+    if off & {'quit_to_desktop', 'pc_menu'}:
+        quit_menu = quit_menu and 'quit_to_desktop' not in off
+        pc_menu = pc_menu and 'pc_menu' not in off
+        if (quit_menu or pc_menu) and not make_text_layer(game, text_layer, quit_menu, pc_menu, sources, again=True):
+            env['BB_QUIT_TO_DESKTOP'] = env['BB_PC_MENU'] = '0'
+        elif not (quit_menu or pc_menu):
+            shutil.rmtree(text_layer, ignore_errors=True)
+        if 'hud_layout' in active:
+            make_hud_layer(game, hud_layer, canvas[0], position, text_layer, sources)
+    # Built on the mods' files, the layers go above them; when those could not be read, below them as
+    # before (the mods then win, as in 1.9.5).
+    place = '--top-layer' if from_mods is not None else '--layer'
+    view = run_script('mods.py', *mod_args, *(arg for layer in layers for arg in (place, layer)),
+                      capture=True, optional=True, timeout=60)
     if view is None:
         # The game view could not be made with the port's own layers (Quit to Desktop's texts,
         # the HUD layout); without them the game still starts, as it did before they existed.
         # Also when making it hangs (a player's game drive where it never finished, 1.9.4: the
-        # view takes about a second); the half-made view is removed at the next start.
+        # view takes about a second); the half-made view is removed at the next start. Every
+        # feature with a layer is off then (port_files): PC Settings' rows stayed without their texts.
         print('Mods: the game view could not be made; starting without Quit to Desktop and the '
               'HUD layout')
-        env['BB_QUIT_TO_DESKTOP'] = '0'
-        env['BB_REBIRTH'] = '0'
+        report = without_layers(report)
+        switch_off(report, env)
         view = run_script('mods.py', *mod_args, capture=True)
+    write_mod_report(out, report)
     game = Path(view.strip())
     mod_view = game if game.resolve() != original_game else None
     if system.name != 'sce_sys':
