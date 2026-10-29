@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_layout as swf  # noqa: E402  (SWF/GFX reading and writing)
+import port_files  # noqa: E402
 
 EBOOT_BASE = 0x400000
 # Image offsets (vaddr - EBOOT_BASE) in the 01.09 eboot.
@@ -584,17 +585,19 @@ def rebuild(data, edits, inserts, after=None):
     return out[:4] + struct.pack('<I', len(out)) + out[8:]
 
 
-def write_row_layer(game, out, quit=True, pc=False):
+def write_row_layer(game, out, quit=True, pc=False, sources=(), failed=None):
     """The title menu's sixth row (Quit to Desktop) and the System menu's rows: five, one more
-    for Quit to Desktop and three for PC Settings' lines, whose page the settings screen gets too."""
-    menu = game / 'dvdroot_ps4' / 'menu'
+    for Quit to Desktop and three for PC Settings' lines, whose page the settings screen gets too.
+    sources: folders with a mod's menu movies (mods.py --sources), grown instead of the game's; a
+    movie that cannot be grown is left out and named in `failed` {game path: why}."""
     target = out / 'dvdroot_ps4' / 'menu'
     target.mkdir(parents=True, exist_ok=True)
+    failed = {} if failed is None else failed
     system_rows = 5 + quit + 3 * pc
-    movies = ([(n, taller_title) for n in TITLE_MOVIES] if quit else []) + \
-        [(SYSTEM_MOVIE, lambda data: taller_list(data, rows_wanted=system_rows))]
+    movies = ([(n, taller_title) for n in TITLE_MOVIES] if quit else []) +         [(SYSTEM_MOVIE, lambda data: taller_list(data, rows_wanted=system_rows))]
     for name, grow in movies:
-        source = menu / name
+        relative = f'dvdroot_ps4/menu/{name}'
+        source = port_files.source(game, relative, *sources)
         if not source.is_file():
             continue
         data, grown = source.read_bytes(), False
@@ -603,6 +606,7 @@ def write_row_layer(game, out, quit=True, pc=False):
                 data, grown = taller, True
         except (ValueError, KeyError, IndexError, StopIteration, struct.error) as error:
             print(f'Quit to Desktop: {name}: {error}; the list keeps five rows', file=sys.stderr)
+            failed[relative] = str(error)
             continue
         if pc and name == SYSTEM_MOVIE:
             import pc_menu
@@ -610,26 +614,58 @@ def write_row_layer(game, out, quit=True, pc=False):
                 data, grown = pc_menu.pc_pages(data) or data, True
             except (ValueError, KeyError, IndexError, StopIteration, struct.error) as error:
                 print(f'PC Settings: {name}: {error}', file=sys.stderr)
+                failed[relative] = str(error)
+                continue
         if grown:
             (target / name).write_bytes(data)
     print(f'Quit to Desktop: title and System menus with six rows' if quit and not pc else
           f'Menus: System menu with {system_rows} rows')
+    return failed
 
 
-def write_text_layer(game, out, extra=None):
+def write_text_layer(game, out, extra=None, sources=(), failed=None):
+    """Every language's menu texts with the port's strings added. sources: folders with a mod's
+    menu.msgbnd.dcx (mods.py --sources), which get them instead of the game's; one that cannot take
+    them (not a menu text archive) is left out and named in `failed` {game path: why}, the mod's
+    texts staying as they are."""
     msg = game / 'dvdroot_ps4' / 'msg'
-    sources = [folder / 'menu.msgbnd.dcx' for folder in sorted(p for p in msg.iterdir() if p.is_dir())]
-    sources = [source for source in sources if source.is_file()]
+    failed = {} if failed is None else failed
+    languages = []
+    for folder in sorted(p for p in msg.iterdir() if p.is_dir()):
+        relative = f'dvdroot_ps4/msg/{folder.name}/menu.msgbnd.dcx'
+        source = port_files.source(game, relative, *sources)
+        if source.is_file():
+            languages.append((folder.name, relative, source))
 
-    def texts_for(source):
-        return menu_texts(source.read_bytes(), TEXTS.get(source.parent.name.casefold(), TEXTS['engus']), extra)
+    def texts_for(language):
+        name, relative, source = language
+        try:
+            return menu_texts(source.read_bytes(), TEXTS.get(name.casefold(), TEXTS['engus']), extra)
+        except (ValueError, KeyError, IndexError, struct.error, zlib.error) as error:
+            if not port_files.from_layer(source, game):
+                raise  # the game's own texts: as before, the step fails
+            return error
     written = 0
-    for archive, source in zip(in_parallel(texts_for, sources), sources):
-        target = out / 'dvdroot_ps4' / 'msg' / source.parent.name / source.name
+    for archive, (name, relative, _source) in zip(in_parallel(texts_for, languages), languages):
+        if isinstance(archive, Exception):
+            print(f"Quit to Desktop: {relative}: {archive}; that language keeps the mod's texts only",
+                  file=sys.stderr)
+            failed[relative] = str(archive)
+            continue
+        target = out / 'dvdroot_ps4' / 'msg' / name / 'menu.msgbnd.dcx'
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(archive)
         written += 1
     print(f'Quit to Desktop: menu texts for {written} languages')
+    return failed
+
+
+def write_status(out, failed):
+    """out/status.json: the game paths whose mod version could not take the port's change (run.py turns
+    the features that need them off). Beside dvdroot_ps4, so not part of the layer."""
+    import json
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'status.json').write_text(json.dumps({'failed': failed}, indent=1, sort_keys=True), encoding='utf-8')
 
 
 def main():
@@ -638,13 +674,16 @@ def main():
     p.add_argument('--out', type=Path, required=True, help='mod layer folder to write')
     p.add_argument('--no-quit', action='store_true', help='without the Quit to Desktop rows')
     p.add_argument('--pc', action='store_true', help='with the PC Settings texts and System row')
+    p.add_argument('--source', type=Path, action='append', default=[],
+                   help="a folder with mods' files to build on (mods.py --sources)")
     a = p.parse_args()
     extra = None
     if a.pc:
         import pc_menu
         extra = pc_menu.texts()
-    write_text_layer(a.game, a.out, extra)
-    write_row_layer(a.game, a.out, quit=not a.no_quit, pc=a.pc)
+    failed = write_text_layer(a.game, a.out, extra, a.source)
+    write_row_layer(a.game, a.out, quit=not a.no_quit, pc=a.pc, sources=a.source, failed=failed)
+    write_status(a.out, failed)
 
 
 if __name__ == '__main__':

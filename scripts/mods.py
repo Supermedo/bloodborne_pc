@@ -11,6 +11,8 @@ import stat
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 # Top-level folders of the game's dvdroot_ps4: a mod made of these is a dvdroot_ps4 itself.
 GAME_FOLDERS = {'action', 'chr', 'event', 'facegen', 'font', 'map', 'menu', 'movie', 'msg', 'mtd',
                 'obj', 'other', 'param', 'paramdef', 'parts', 'remo', 'script', 'sfx', 'shader',
@@ -291,6 +293,19 @@ def expand(directory):
         directory.mkdir(exist_ok=True)
 
 
+def winners(mods):
+    """({game path, case-folded: (mod, relative, source)} of the file each game path gets, the last mod
+    that has it winning; [(relative, earlier mod, later mod)] of every file a later mod takes over)."""
+    owners, taken = {}, []
+    for name, root in mods:
+        for relative, source in mod_files(root):
+            key = relative.as_posix().casefold()
+            if key in owners:
+                taken.append((relative, owners[key][0], name))
+            owners[key] = (name, relative, source)
+    return owners, taken
+
+
 def build_overlay(game, out, mods, beside_game=True):
     """beside_game: on another drive than the game, the view goes next to the game (hard links
     reach only one volume); False keeps it in `out` (files are then copied, folders linked)."""
@@ -343,6 +358,66 @@ def build_overlay(game, out, mods, beside_game=True):
         raise
 
 
+def mod_layers(game, mods_dir, config=None, enabled=True):
+    """[(name, folder)] of the mods a start loads, in order (the last one wins a file): shadPS4's
+    <game>-mods folder, then the mods folder's mods as mods.json orders and switches them."""
+    layers = []
+    if not enabled:
+        return layers
+    mods_dir = Path(mods_dir)
+    # shadPS4's loose overlay convention, beside the original game.
+    legacy = Path(str(Path(game).resolve()) + '-mods')
+    if legacy.is_dir():
+        layers.append((legacy.name, legacy))
+    # A directly selected loose overlay (a mods folder with a dvdroot_ps4 and no mod folders)
+    # is also accepted. Beside other mods a bare dvdroot_ps4 is one of them, with its switch
+    # and place in the order: as the whole overlay it left every other mod out.
+    loose = child(mods_dir, 'dvdroot_ps4')
+    names = selected(mods_dir, config)
+    if loose.is_dir() and set(discover(mods_dir)) <= {loose.name}:
+        if loose.name in names or not content_root(loose):
+            layers.append((mods_dir.name, mods_dir))
+    else:
+        for name in names:
+            layers.append((name, mods_dir / name))
+    return layers
+
+
+def write_sources(game, mods, folder):
+    """The mods' files the port's own layers build on (port_files: the menu texts and movies, the Doll's
+    script, the game parameters), linked into `folder` under the game's spelling of their paths, and
+    folder/sources.json {game path: mod}. The port then adds its changes to the mods' versions instead of
+    the game's, and its layers go above the mods (main --top-layer). sources.json also names the mods in
+    order and every file a later mod takes from an earlier one."""
+    import port_files  # noqa: E402
+    game, folder = Path(game).resolve(strict=True), Path(folder)
+    if folder.exists():
+        remove_overlay(folder)
+    folder.mkdir(parents=True)
+    owners, taken = winners(mods)
+    found = {}
+    for name, relative, source in owners.values():
+        if not port_files.watched(relative):
+            continue
+        original = port_files.find(game, relative)
+        spelled = original.relative_to(game) if original else relative
+        target = folder / spelled
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copy2(source, target)
+        found[Path(spelled).as_posix()] = name
+    report = {'files': found, 'mods': [name for name, _root in mods],
+              'taken': [[Path(relative).as_posix(), earlier, later] for relative, earlier, later in taken]}
+    (folder / 'sources.json').write_text(json.dumps(report, indent=1, sort_keys=True), encoding='utf-8')
+    for name in dict.fromkeys(found.values()):
+        paths = sorted(path for path, owner in found.items() if owner == name)
+        print(f'Mods: {name} has {len(paths)} of the files the port changes ({paths[0]}'
+              f'{" …" if len(paths) > 1 else ""}): the port builds on them', file=sys.stderr)
+    return folder
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game', type=Path)
@@ -353,24 +428,16 @@ def main():
     parser.add_argument('--layer', type=Path, action='append', default=[],
                         help="the port's own generated files (a dvdroot_ps4 inside), below the "
                              'mods and applied without them too (hud_layout.py)')
+    parser.add_argument('--top-layer', type=Path, action='append', default=[],
+                        help="the port's own generated files built on the mods' (--sources), above them")
+    parser.add_argument('--sources', type=Path,
+                        help="only write the mods' files the port's layers build on into this folder")
     args = parser.parse_args()
-    layers = [(layer.name, layer) for layer in args.layer if layer.is_dir()]
-    if args.enabled == '1':
-        # shadPS4's loose overlay convention, beside the original game.
-        legacy = Path(str(args.game.resolve()) + '-mods')
-        if legacy.is_dir():
-            layers.append((legacy.name, legacy))
-        # A directly selected loose overlay (a mods folder with a dvdroot_ps4 and no mod folders)
-        # is also accepted. Beside other mods a bare dvdroot_ps4 is one of them, with its switch
-        # and place in the order: as the whole overlay it left every other mod out.
-        loose = child(args.mods_dir, 'dvdroot_ps4')
-        names = selected(args.mods_dir, args.config)
-        if loose.is_dir() and set(discover(args.mods_dir)) <= {loose.name}:
-            if loose.name in names or not content_root(loose):
-                layers.append((args.mods_dir.name, args.mods_dir))
-        else:
-            for name in names:
-                layers.append((name, args.mods_dir / name))
+    mods = mod_layers(args.game, args.mods_dir, args.config, args.enabled == '1')
+    if args.sources:
+        print(write_sources(args.game, mods, args.sources))
+        return
+    layers = [(layer.name, layer) for layer in args.layer if layer.is_dir()] + mods +         [(layer.name, layer) for layer in args.top_layer if layer.is_dir()]
     try:
         print(build_overlay(args.game, args.out, layers))
     except OSError as error:

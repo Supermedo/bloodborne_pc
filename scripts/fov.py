@@ -8,7 +8,8 @@ LOCK_CAM_PARAM_ST as Dark Souls III's: each row is camDistTarget, rotRangeMinX,
 lockRotXShiftRatio, chrOrgOffset_Y, chrLockRangeMaxRadius, then camFovY, the vertical field of
 view in degrees, at +0x14. The normal camera has 43; a few areas set their own (48). Every row is
 scaled by fov / 43, so those keep their difference. The game reads the table at start: a change
-needs a restart. A mod that replaces gameparam.parambnd.dcx is layered above this one and wins.
+needs a restart. A mod that brings its own gameparam.parambnd.dcx gets its cameras scaled instead
+(--source, mods.py --sources); when its table is not one this reads, the field of view stays its own.
 """
 import argparse
 import hashlib
@@ -17,6 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import port_files  # noqa: E402
 from quit_menu import bnd4_files, pack_dcx, rebuild_bnd4, unpack_dcx  # noqa: E402
 
 GAME_FOV = 43.0     # camFovY of the game's normal camera
@@ -77,9 +79,11 @@ def main():
     p.add_argument('game', type=Path, help='game folder (with dvdroot_ps4)')
     p.add_argument('--out', type=Path, required=True, help='mod layer folder to write')
     p.add_argument('--fov', type=float, required=True, help=f'degrees (the game: {GAME_FOV:g})')
+    p.add_argument('--source', type=Path, action='append', default=[],
+                   help="a folder with mods' files to build on (mods.py --sources)")
     a = p.parse_args()
     fov = min(max(a.fov, FOV_RANGE[0]), FOV_RANGE[1])
-    source = a.game / ARCHIVE
+    source = port_files.source(a.game, ARCHIVE.as_posix(), *a.source)
     data = source.read_bytes()
     target = a.out / ARCHIVE
     # Repacking takes a few seconds: the layer is kept while the setting and the game file match.

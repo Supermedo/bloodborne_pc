@@ -15,6 +15,9 @@ import struct
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import port_files  # noqa: E402
+
 # (sprite id or None for the root timeline, instance name): -1 moves left, +1 right. The right
 # side of PlayerHUD moves with it first, hence 2.
 MOVES = {
@@ -361,26 +364,30 @@ def main():
     p.add_argument('--canvas-width', type=int, required=True, help='HUD canvas width (BB_UI_RES)')
     p.add_argument('--position', type=float, default=1.0, help='0 centred 16:9 .. 1 screen edges')
     p.add_argument('--source', type=Path, action='append', default=[],
-                   help='a mod layer whose menu movies replace the game ones (quit_menu.py)')
+                   help="a layer whose menu movies replace the game's (quit_menu.py's), then the mods' "
+                        'files (mods.py --sources): the first that has a movie wins')
     a = p.parse_args()
     margin = max(0.0, min(1.0, a.position)) * (a.canvas_width - STAGE_WIDTH) / 2
     menu = a.game / 'dvdroot_ps4' / 'menu'
     target = a.out / 'dvdroot_ps4' / 'menu'
     target.mkdir(parents=True, exist_ok=True)
-    written = 0
-    for source in sorted(menu.glob('*.gfx')):
-        for layer in a.source:
-            if (layer / 'dvdroot_ps4' / 'menu' / source.name).is_file():
-                source = layer / 'dvdroot_ps4' / 'menu' / source.name
+    written, failed = 0, {}
+    for original in sorted(menu.glob('*.gfx')):
+        relative = f'dvdroot_ps4/menu/{original.name}'
+        source = port_files.source(a.game, relative, *a.source)
         try:
             data = layout(source.read_bytes(), a.canvas_width,
-                          margin if source.name.casefold() == 'fe.gfx' else None)
+                          margin if original.name.casefold() == 'fe.gfx' else None)
         except (ValueError, IndexError, struct.error) as error:
-            print(f'HUD layout: {source.name}: {error}; left as it is', file=sys.stderr)
+            print(f'HUD layout: {original.name}: {error}; left as it is', file=sys.stderr)
+            if port_files.from_layer(source, a.game):
+                failed[relative] = str(error)
             continue
         if data:
-            (target / source.name).write_bytes(data)
+            (target / original.name).write_bytes(data)
             written += 1
+    import quit_menu
+    quit_menu.write_status(a.out, failed)
     print(f'HUD layout: corner groups {margin:.0f} px toward the edges, backdrops widened in '
           f'{written} menus (canvas {a.canvas_width})')
 

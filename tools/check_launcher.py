@@ -18,7 +18,7 @@ MODULES = ['test_launcher_completeness'] + sorted(p.stem for p in TESTS.glob('te
                                                   if p.stem != 'test_launcher_completeness') + [
     'test_input_defaults', 'test_object_motion_cache_launcher', 'test_shared_graphics_settings',
     'test_fsr411_launcher_backend', 'test_fg401_launcher', 'test_low_vram', 'test_respec', 'test_rebirth',
-    'test_vulkan_check', 'test_run_stale_views', 'test_package_files']  # missing ones are skipped
+    'test_port_files', 'test_vulkan_check', 'test_run_stale_views', 'test_package_files']  # missing ones are skipped
 WINDOW = {'test_launcher_completeness.LiveTests', 'test_launcher_search_live', 'test_launcher_window'}
 # Failures that are known and tracked elsewhere: test id (start) -> why. Empty while nothing is.
 KNOWN = {}

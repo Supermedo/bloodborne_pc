@@ -16,7 +16,8 @@ Three parts:
   price it shows ask the port ("bb:f" with the level) whether that level is free, and count 0
   Blood Echoes if so.
 `code_writes` gives the eboot patches; `main` writes the talk script and texts as a mod layer
-(the menu texts on top of --source, Quit to Desktop's layer, which edits the same archive).
+(the menu texts on top of --source, Quit to Desktop's layer, which edits the same archive, and the
+mods' files from mods.py --sources: their Doll script, texts and weapon table are the ones changed).
 """
 import argparse
 import struct
@@ -25,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import esd  # noqa: E402
+import port_files  # noqa: E402
 import quit_menu  # noqa: E402
 
 REBIRTH_INSIGHT = 5          # src/runtime_rebirth.c REBIRTH_INSIGHT
@@ -36,6 +38,7 @@ REQUEST, RESULT, NOTHING, CLOSED = 72100090, 72100091, 72100092, 72100093
 OPTION_TEXT, QUESTION_TEXT, SHORT_TEXT, NOTHING_TEXT = 15000170, 10010790, 10010791, 10010792  # free in FMG 30
 TALK_FMG = 30
 DOLL_SCRIPTS = 'm21_00_00_00.talkesdbnd.dcx'   # the Hunter's Dream: the Doll is t210304 and more
+DOLL_SCRIPTS_PATH = f'dvdroot_ps4/script/talk/{DOLL_SCRIPTS}'
 LEVEL_UP_TEXT = 15000100     # Channel Blood Echoes
 OPTION = 4                   # the talk list's result for Rebirth (1-3 are the Doll's own)
 
@@ -408,9 +411,18 @@ def doll_script(data):
     return esd.write(script)
 
 
+def layers(source):
+    """--source as a list: one folder (the tests, earlier callers) or several, the first that has a file
+    winning (port_files.source)."""
+    return [source] if isinstance(source, (str, Path)) else [p for p in (source or ()) if p]
+
+
 def write_layer(game, out, source=None):
-    dvd = Path(game) / 'dvdroot_ps4'
-    talk = dvd / 'script' / 'talk' / DOLL_SCRIPTS
+    """The Doll's talk scripts and every language's menu texts with Rebirth (source: Quit to Desktop's
+    layer and the mods' files to build on, first one first). A mod's Doll script without the Doll's
+    menu raises, as the game's would: the step fails and run.py leaves Rebirth off."""
+    relative = DOLL_SCRIPTS_PATH
+    talk = port_files.source(game, relative, *layers(source))
     archive = talk.read_bytes()
     bnd = quit_menu.unpack_dcx(archive)
     edited = {}
@@ -419,13 +431,16 @@ def write_layer(game, out, source=None):
         if script != bnd[o:o + n]:
             edited[file_id] = script
     if not edited:
-        raise ValueError("no Doll menu found in the Hunter's Dream scripts")
-    target = Path(out) / 'dvdroot_ps4' / 'script' / 'talk' / DOLL_SCRIPTS
+        raise ValueError("no Doll menu found in the Hunter's Dream scripts" +
+                         (f' of {talk}' if port_files.from_layer(talk, game) else ''))
+    target = Path(out) / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(quit_menu.pack_dcx(archive, quit_menu.rebuild_bnd4(bnd, edited)))
     print(f'Rebirth: Doll menus in {len(edited)} talk scripts')
-    written = write_texts(game, out, source)
-    print(f'Rebirth: the Doll\'s menu and texts for {written} languages')
+    failed = {}
+    written = write_texts(game, out, source, failed)
+    print(f"Rebirth: the Doll's menu and texts for {written} languages")
+    quit_menu.write_status(Path(out), failed)
 
 
 def menu_texts(archive, texts):
@@ -439,22 +454,32 @@ def menu_texts(archive, texts):
     return quit_menu.pack_dcx(archive, replaced)
 
 
-def write_texts(game, out, source=None):
-    """Every language's menu texts (those of the layer `source` where it has them) with Rebirth's
-    strings; returns how many languages. They are packed side by side (quit_menu.in_parallel)."""
+def write_texts(game, out, source=None, failed=None):
+    """Every language's menu texts (those of the layers `source` where they have them: Quit to Desktop's,
+    then a mod's) with Rebirth's strings; returns how many languages. They are packed side by side
+    (quit_menu.in_parallel). A mod's archive that cannot take them is left out and named in `failed`."""
+    failed = {} if failed is None else failed
     languages = []
     for folder in sorted(p for p in (Path(game) / 'dvdroot_ps4' / 'msg').iterdir() if p.is_dir()):
-        name = folder.name
-        layered = Path(source) / 'dvdroot_ps4' / 'msg' / name / 'menu.msgbnd.dcx' if source else None
-        path = layered if layered and layered.is_file() else folder / 'menu.msgbnd.dcx'
+        relative = f'dvdroot_ps4/msg/{folder.name}/menu.msgbnd.dcx'
+        path = port_files.source(game, relative, *layers(source))
         if path.is_file():
-            languages.append((name, path))
+            languages.append((folder.name, relative, path))
 
     def texts_for(language):
-        name, path = language
-        return menu_texts(path.read_bytes(), doll_texts(name))
+        name, _relative, path = language
+        try:
+            return menu_texts(path.read_bytes(), doll_texts(name))
+        except (ValueError, KeyError, IndexError, struct.error) as error:
+            if not port_files.from_layer(path, game):
+                raise
+            return error
     written = 0
-    for archive, (name, _path) in zip(quit_menu.in_parallel(texts_for, languages), languages):
+    for archive, (name, relative, _path) in zip(quit_menu.in_parallel(texts_for, languages), languages):
+        if isinstance(archive, Exception):
+            print(f"Rebirth: {relative}: {archive}; that language keeps the mod's texts only", file=sys.stderr)
+            failed[relative] = str(archive)
+            continue
         target = Path(out) / 'dvdroot_ps4' / 'msg' / name / 'menu.msgbnd.dcx'
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(archive)
@@ -471,10 +496,12 @@ WEAPON_PARAMS = 'EquipParamWeapon.param'
 REQUIREMENTS = 0xED
 
 
-def weapons(game):
-    """{weapon id: (Strength, Skill, Bloodtinge, Arcane)} of the weapons that need any."""
+def weapons(game, source=None):
+    """{weapon id: (Strength, Skill, Bloodtinge, Arcane)} of the weapons that need any, from a mod's
+    game parameters where one brings them (source: mods.py --sources): a balance mod's requirements are
+    the ones the game checks."""
     from fov import bnd4_name
-    bnd = quit_menu.unpack_dcx((Path(game) / GAME_PARAMS).read_bytes())
+    bnd = quit_menu.unpack_dcx(port_files.source(game, GAME_PARAMS.as_posix(), *layers(source)).read_bytes())
     for entry, offset, length, _file_id in quit_menu.bnd4_files(bnd):
         if bnd4_name(bnd, entry) != WEAPON_PARAMS:
             continue
@@ -492,9 +519,9 @@ def weapons(game):
     raise ValueError(f'{WEAPON_PARAMS} not found')
 
 
-def write_weapons(game, path):
+def write_weapons(game, path, source=None):
     """The table src/runtime_rebirth.c reads (BB_REBIRTH_WEAPONS): "id str skill blood arcane"."""
-    table = weapons(game)
+    table = weapons(game, source)
     Path(path).write_text(''.join(f'{row} {" ".join(map(str, needs))}\n' for row, needs in sorted(table.items())),
                           encoding='ascii')
     print(f'Rebirth: requirements of {len(table)} weapons')
@@ -504,13 +531,14 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('game', type=Path, help='game folder (with dvdroot_ps4)')
     p.add_argument('--out', type=Path, required=True, help='mod layer folder to write')
-    p.add_argument('--source', type=Path, help='a layer whose menu texts to build on')
+    p.add_argument('--source', type=Path, action='append', default=[],
+                   help="a layer to build on (Quit to Desktop's), then the mods' files (mods.py --sources)")
     p.add_argument('--weapons', type=Path, help="file for the weapons' requirements (src/runtime_rebirth.c)")
     a = p.parse_args()
     write_layer(a.game, a.out, a.source)
     if a.weapons:
         try:
-            write_weapons(a.game, a.weapons)
+            write_weapons(a.game, a.weapons, a.source)
         except (OSError, ValueError) as error:  # the rebirth then keeps no attribute for a weapon
             print(f"Rebirth: the weapons' requirements could not be read ({error})")
 
