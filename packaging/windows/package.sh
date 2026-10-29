@@ -56,9 +56,11 @@ cp launcher/bloodborne.ico launcher/bloodborne.png "$dest/launcher/"
 for exe in bb-probe.exe bb-gpu-capabilities.exe bb-fg401-capabilities.exe; do
     llvm-strip --strip-debug -o "$dest/bin/$exe" "out/$exe"
 done
-# Every DLL the executables load from the CLANG64 tree (SDL3, FFmpeg, Vulkan loader, ...).
+# Every DLL the executables load from the CLANG64 tree (SDL3, FFmpeg, ...). Not the Vulkan loader:
+# the game uses the one the graphics driver installs in System32, as every release so far. On a PC
+# with a graphics driver ldd finds that one; a build machine without one (CI) would ship CLANG64's.
 ldd "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" "$dest/bin/bb-fg401-capabilities.exe" |
-    awk '/\/clang64\/bin\// {print $3}' | sort -u | while read -r dll; do
+    awk '/\/clang64\/bin\// && !/vulkan-1\.dll/ {print $3}' | sort -u | while read -r dll; do
         cp -u "$dll" "$dest/bin/"
     done
 cp -r scripts patches "$dest/"
@@ -75,6 +77,8 @@ out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/
 # Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
 mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
+# The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
+cp packaging/windows/BB-Report-Tool.bat "$dest/"
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
 # (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
@@ -94,7 +98,7 @@ cp packaging/windows/licenses/*.txt "$dest/licenses/"
 cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
-cp docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
+cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"
@@ -111,6 +115,8 @@ for package in protobuf abseil-cpp openssl miniupnpc zlib; do
     if [[ -f $license ]]; then cp "$license" "$dest/licenses/$package-LICENSE.txt"; fi
 done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
+# The program files of this version (bbport-files.json): run.py and Help find mixed versions with it.
+out/pyenv/Scripts/python.exe scripts/package_files.py --write "$dest" "$(sed -n "s/^VERSION = '\(.*\)'$/\1/p" launcher/bbport_launcher_win.py)"
 mkdir -p dist
 # Publish this source archive alongside the Windows ZIP; SOURCE.txt names both the
 # companion archive and its original download. Keep it outside the playable folder.

@@ -2,6 +2,7 @@
 // bbport co-op: what shadPS4 0.20.0's network and NP libraries need from the rest of
 // shadPS4, implemented on top of the bbport runtime, and their registration.
 
+#include "core/libraries/net/net_kernel.h"
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -472,6 +473,9 @@ extern "C" void bbnet_register(void) {
         Libraries::Ssl2::RegisterLib(sym);
         return;
     }
+    // The P2P transport's hooks: without them its UDP port was never forwarded by UPnP (a guest
+    // could not connect to a host behind a router) and the router's public address went unused.
+    Libraries::Net::InstallSystemHooks();
     Libraries::Net::RegisterLib(sym);
     Libraries::NetCtl::RegisterLib(sym);
     Libraries::Http::RegisterLib(sym);

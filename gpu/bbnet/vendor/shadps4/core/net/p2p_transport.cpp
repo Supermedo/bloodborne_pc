@@ -170,6 +170,16 @@ void Transport::SetOutgoingLossForTesting(double probability) {
     loss_for_testing_ = probability;
 }
 
+void Transport::SetRelayServer(std::optional<Endpoint> relay_server) {
+    std::scoped_lock lock{mutex_};
+    relay_server_ = std::move(relay_server);
+}
+
+void Transport::UseRelayFor(u32 peer_addr) {
+    std::scoped_lock lock{mutex_};
+    relayed_peers_.insert(peer_addr);
+}
+
 std::shared_ptr<DatagramSocket> Transport::CreateDatagram() {
     return std::shared_ptr<DatagramSocket>(new DatagramSocket(shared_from_this()));
 }
@@ -260,6 +270,12 @@ void Transport::Reschedule(const Connection& connection) {
     }
 }
 
+// SuperMedo relay frames: "SMRL", kind, IPv4 address and port (network order), packet.
+constexpr u8 kRelayMagic[4] = {'S', 'M', 'R', 'L'};
+constexpr u8 kRelaySend = 0x02;    // to the server: the address is the destination
+constexpr u8 kRelayDeliver = 0x03; // from the server: the address is the source
+constexpr size_t kRelayHeaderSize = 11;
+
 Error Transport::SendPacket(std::span<const u8> packet, const Endpoint& to) {
     if (loss_for_testing_ > 0) {
         loss_rng_ ^= loss_rng_ << 13;
@@ -268,6 +284,20 @@ Error Transport::SendPacket(std::span<const u8> packet, const Endpoint& to) {
         if (static_cast<double>(loss_rng_ >> 11) / static_cast<double>(1ull << 53) <
             loss_for_testing_) {
             return Error::Ok;
+        }
+    }
+    if (relay_server_ && to.Family() == AF_INET) {
+        const auto* in = reinterpret_cast<const sockaddr_in*>(to.Sockaddr());
+        if (relayed_peers_.contains(in->sin_addr.s_addr)) {
+            std::vector<u8> framed(kRelayHeaderSize + packet.size());
+            std::memcpy(framed.data(), kRelayMagic, 4);
+            framed[4] = kRelaySend;
+            std::memcpy(framed.data() + 5, &in->sin_addr.s_addr, 4);
+            std::memcpy(framed.data() + 9, &in->sin_port, 2);
+            std::memcpy(framed.data() + kRelayHeaderSize, packet.data(), packet.size());
+            return Host::SendTo(socket_, framed.data(), framed.size(), 0,
+                                relay_server_->Sockaddr(), relay_server_->Length())
+                .error;
         }
     }
     const auto r =
@@ -307,6 +337,19 @@ u16 Transport::AllocateVport(bool stream) {
 
 void Transport::HandlePacket(std::span<const u8> packet, const Endpoint& from,
                              Clock::time_point now) {
+    if (relay_server_ && from == *relay_server_ && packet.size() > kRelayHeaderSize &&
+        std::memcmp(packet.data(), kRelayMagic, 4) == 0 && packet[4] == kRelayDeliver) {
+        sockaddr_in source{};
+        source.sin_family = AF_INET;
+        std::memcpy(&source.sin_addr.s_addr, packet.data() + 5, 4);
+        std::memcpy(&source.sin_port, packet.data() + 9, 2);
+        relayed_peers_.insert(source.sin_addr.s_addr); // answer the way it came
+        HandlePacket(packet.subspan(kRelayHeaderSize),
+                     Endpoint::FromSockaddr(reinterpret_cast<const sockaddr*>(&source),
+                                            sizeof(source)),
+                     now);
+        return;
+    }
     Codec::Decoded decoded = codec_->Decode(packet, from);
     switch (decoded.kind) {
     case Codec::Kind::Stream:

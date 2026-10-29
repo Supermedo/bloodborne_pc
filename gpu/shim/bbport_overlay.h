@@ -42,4 +42,15 @@ bool CapturesInput();
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text);
 
+/// Any thread: an amber banner at the top of the screen for ten seconds: `headline` in the
+/// highlight colour, a bar filled to `used_fraction` (0..1; negative draws no bar) and `detail`
+/// under it. Drawn by the present thread; replaces a banner still showing.
+void Warn(const std::string& headline, const std::string& detail, float used_fraction);
+
+/// Any thread: video memory in use, the limit it is compared against (0: no limit known), the
+/// collector's pressure and critical marks (0: none) and what the card can still give this
+/// process beyond that limit, all shown in the FPS counter. The collector calls it once per pass.
+void SetVramUsage(u64 used_bytes, u64 limit_bytes, u64 pressure_bytes, u64 critical_bytes,
+                  u64 card_free_bytes);
+
 } // namespace BbOverlay

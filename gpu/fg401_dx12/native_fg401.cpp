@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "native_fg401.h"
+#include "fg401_support.h"
 #include "dx12/ffx_api_dx12.h"
 #include "ffx_api.h"
 #include "ffx_api_loader.h"
@@ -264,10 +265,12 @@ struct NativeFg401::Impl {
         if (ffx.Query(nullptr, &versions.header) != FFX_API_RETURN_OK)
             throw std::runtime_error("AMD provider enumeration failed");
         uint64_t chosen{};
-        constexpr const char *requested = "4.0.1";
+        if (config.provider_version != Fg401Version && config.provider_version != Fg402Version)
+            throw std::runtime_error("Invalid ML-FG provider version");
+        const char *requested = Fg401VersionName(config.provider_version);
         for (size_t i = 0; i < count; ++i) {
             std::printf("AMD FG native: provider %s\n", names[i] ? names[i] : "null");
-            if (names[i] && std::strcmp(names[i], requested) == 0)
+            if (Fg401ProviderMatches(ids[i], config.provider_version))
                 chosen = ids[i];
         }
         if (!chosen)
@@ -292,8 +295,7 @@ struct NativeFg401::Impl {
             throw std::runtime_error("FG context creation returned " + std::to_string(rc));
         ffxQueryGetProviderVersion provider{};
         provider.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
-        if (ffx.Query(&context, &provider.header) || !provider.versionName ||
-            std::strcmp(provider.versionName, requested))
+        if (ffx.Query(&context, &provider.header) || !provider.versionName || provider.versionId != chosen)
             throw std::runtime_error("FG context selected an unexpected provider");
         std::printf("AMD FG native: ACTIVE %s, %ux%u output, %ux%u depth/motion\n",
                     provider.versionName, config.output_width, config.output_height,

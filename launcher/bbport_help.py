@@ -73,6 +73,14 @@ TOPICS = {
         'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
         'Bloodborne.',
         ['Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).']),
+    'program_files': (
+        'A program file of the game is not the original',
+        'eboot.bin or a file in sce_module was converted by another tool or comes from another release (the log '
+        'says "is not the original file"). The port reads them as they come from a dump of your own game.',
+        ['Put the base game and the 1.09 update into two new, empty folders again.',
+         'Copy everything from the update folder into the base game folder and replace the files.',
+         'Choose that folder in the launcher: eboot.bin is exactly 93,825,704 bytes, and sce_module comes from '
+         'the same dump.']),
     'version': (
         'The game is not version 1.09',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at '
@@ -91,6 +99,13 @@ TOPICS = {
         'Unpacking broke: some files have 0 bytes.',
         ['Put the base game and the 1.09 update into new, empty folders again, then copy the update into the '
          'base game again.']),
+    'mixed_versions': (
+        'Files of different versions are mixed',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").',
+        ['Download the whole package of the version you want to play.',
+         'Unpack all of it over this folder and replace the files, or into a new, empty folder.']),
     'page_file': (
         'Windows has too little memory for the start',
         'The game reserves about 6 GB at its start (10 GB at 1440p and 4K) in one block, from the RAM and the '
@@ -116,6 +131,13 @@ TOPICS = {
         'OneDrive (Desktop and Documents often are synced) and Program Files lock or move files while the port '
         'writes them.',
         ['Move the whole port folder to a plain folder like C:\\Games\\BBPort and start Bloodborne.exe from there.']),
+    'other_install': (
+        'A folder of another installation is in use',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.',
+        ['Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+         'stays, and with it your characters and achievements.']),
     'vram': (
         'The graphics card\'s memory runs full',
         'Cards with 6 GB or less, or the log says ErrorOutOfDeviceMemory or "memory pressure": textures no '
@@ -129,7 +151,8 @@ TOPICS = {
         '"device lost".',
         ['Update the driver: NVIDIA App, AMD Software (Adrenalin) or Intel Driver & Support Assistant.',
          'Restart the PC after installing it.',
-         'Overclocked graphics card or memory: try the standard clocks.']),
+         'Overclocked graphics card or memory: try the standard clocks.',
+         'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.']),
     'black_screen': (
         'Only a black screen',
         'The game starts but shows nothing, or the picture breaks after a driver update: its shader cache no longer '
@@ -162,41 +185,115 @@ TOPICS = {
          'Nothing lights up: connect the controller again (a cable is the surest), and close tools that take it '
          'over, like DS4Windows.',
          'Started from Steam: in the game\'s Steam properties, try Steam Input on or off.']),
+    'shadnet_rejected': (
+        'The shadNet server turned this port away',
+        "shadPS4's public shadNet server checks which program connects and doesn't accept this port's version at the "
+        'moment. The game then plays offline. Your account and your settings are fine.',
+        ['Online play: Play with SuperMedo Server, then Sign in with Discord.',
+         "Or your own server (Seamless co-op, a friend's): choose Own server there, with the address from the "
+         'person who runs it.']),
+    'steam_layout': (
+        'Steam turns the controller into a mouse and keyboard',
+        "With Steam open, its Desktop Layout sends mouse movement and key presses for a controller it manages, on "
+        'top of the controller itself: the camera turns on its own and buttons do two things. The port ignores '
+        'that mouse movement while the controller is used; the key presses it cannot tell apart.',
+        ['Steam: Settings > Controller > Desktop Layout: turn it off, or turn Steam Input off for your type of '
+         'controller.',
+         'Or add Bloodborne.exe to Steam (Add a Non-Steam Game), then its Properties > Controller > Disable Steam '
+         'Input.']),
     'smartscreen': (
         '"Windows protected your PC"',
         'Windows shows this for programs it does not know yet.',
         ['Click More info, then Run anyway.']),
 }
-TOPIC_ORDER = ['eboot_modified', 'eboot_truncated', 'eboot_unreadable', 'version', 'update_only', 'empty_files',
-               'page_file', 'antivirus', 'location', 'save_lost', 'controller', 'black_screen', 'vram', 'driver',
-               'shader_cache', 'smartscreen']
+TOPIC_ORDER = ['eboot_modified', 'eboot_truncated', 'eboot_unreadable', 'program_files', 'version', 'update_only',
+               'empty_files', 'page_file', 'antivirus', 'location', 'save_lost', 'controller', 'black_screen', 'vram',
+               'driver', 'shader_cache', 'smartscreen']
 # Buttons under a topic's steps: (text, launcher method). They do the step for the player.
 TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'page_file': [('Open the memory settings', 'open_memory_settings')],
                  'antivirus': [('Open Windows Security', 'open_windows_security')],
                  'location': [('Open the port folder', 'open_port_folder')],
+                 'other_install': [("Use this installation's own folders", 'use_own_folders')],
                  'eboot_modified': [('Open the game folder', 'open_game_folder')],
                  'eboot_truncated': [('Open the game folder', 'open_game_folder')],
                  'update_only': [('Choose the game folder', 'choose_game_page')],
                  'save_lost': [('Open the backups', 'open_backups')],
-                 'controller': [('Open the controller test', 'open_controller_test')]}
+                 'controller': [('Open the controller test', 'open_controller_test')],
+                 'shadnet_rejected': [('Open Online play', 'open_online_page')]}
+TOPIC_ORDER += [key for key in TOPICS if key not in TOPIC_ORDER]  # topics added later: at the end
 
 # The game's and run.py's messages that name the cause of a failed start or crash.
 LOG_HINTS = [
     (r'of guest memory|page file is too small|commit limit', 'page_file'),
-    (r'WinError (?:32|5)\b|PermissionError', 'antivirus'),
+    # also open()'s own words for it, and the game's program taken into an antivirus's quarantine (run.py)
+    (r'WinError (?:32|5)\b|PermissionError|Errno 13\b|bb-probe\.exe is missing', 'antivirus'),
     (r'out of bounds: 0x', 'eboot_truncated'),
     (r'gxshader\.shaderbnd\.dcx', 'update_only'),
+    (r'bad patch entry|Files: \d+ differ from the package', 'mixed_versions'),
     (r'not the 01\.09 build|Lance McDonald', 'eboot_modified'),
     (r'expected PS4 SELF', 'eboot_unreadable'),
+    (r'is not the original file', 'program_files'),
     (r'ErrorOutOfDeviceMemory|Texture cache: memory pressure', 'vram'),
     (r'ErrorDeviceLost|device lost', 'driver'),
+    (r"Server rejected this client|doesn't accept your shadPS4 build", 'shadnet_rejected'),
+    (r"Input: mouse motion from Steam's Desktop Layout", 'steam_layout'),
+    (r'Fault: .* at (?:amdvlk|amdxc|nvoglv|nvvk|nvwgf|igvk|igxe|igd)\w*\.dll', 'driver'),
 ]
+
+
+# Lines of a game that went on but worked differently than the player expects: (text in the line,
+# Help topic). The launcher says it once the game is closed (after_exit), with NOTICE_INTROS.
+GAME_NOTICES = [("doesn't accept your shadPS4 build", 'shadnet_rejected'),
+                ("Input: mouse motion from Steam's Desktop Layout", 'steam_layout')]
+NOTICE_INTROS = {'shadnet_rejected': 'Online play was off this time. Its log names the cause:',
+                 'steam_layout': "The controller's input was doubled this time. Its log names the cause:"}
 
 
 def hints_in_log(text):
     """The topics whose messages the log has, in the order of LOG_HINTS."""
     return [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+
+
+# The folders of the launcher's settings that belong to an installation: (setting, its name on its page).
+OWN_FOLDERS = (('user_dir', ('Saves folder', 'Папка сохранений')), ('mods_dir', ('Mods folder', 'Папка модов')),
+               ('cache_dir', ('Cache folder',)))
+# The ones an installation must not share with another (Help's check and button): another version's mods apply here
+# too, and its shaders can break the picture. A shared saves folder is fine (the characters in every version, backed
+# up before every start): testers who set it back found their characters and achievements gone in both versions.
+SEPARATE_FOLDERS = ('mods_dir', 'cache_dir')
+
+
+def installation_of(path):
+    """The port installation folder `path` lies in (run.py beside bin\\bb-probe.exe or Bloodborne.exe), or None."""
+    try:
+        path = Path(path).resolve()
+    except (OSError, ValueError):
+        return None
+    for folder in (path, *path.parents):
+        if (folder / 'run.py').is_file() and ((folder / 'bin' / 'bb-probe.exe').is_file()
+                                              or (folder / 'Bloodborne.exe').is_file()):
+            return folder
+    return None
+
+
+def other_installations(settings, port_dir, data_dir):
+    """[(setting, its name, the other installation)] for the folders of the settings that lie in another
+    installation of the port. The launcher's settings are shared by every installation (%APPDATA%), so a
+    test build beside the old version takes its saves, shader cache and mods."""
+    own = set()
+    for folder in (port_dir, data_dir):
+        try:
+            own.add(Path(folder).resolve())
+        except (OSError, ValueError):
+            pass
+    found = []
+    for key, name in OWN_FOLDERS:
+        value = str(settings.get(key) or '').strip()
+        other = installation_of(value) if value else None
+        if other and other not in own:
+            found.append((key, name, other))
+    return found
 
 
 # ---- the checks ----------------------------------------------------------------------------------
@@ -213,7 +310,8 @@ def eboot_state(folder):
         from patches import PATCH_GROUPS, eboot_bytes, matching_groups_of
         elf, _header, ph, _segments, _missing = parse_self(data)
     except ValueError as error:
-        if 'expected PS4 SELF' in str(error):  # another format (a converted ELF, another file)
+        # another format (another file, or an ELF that isn't the PS4's: a plain one is read)
+        if 'expected PS4 SELF' in str(error) or 'ELF' in str(error) or 'program headers' in str(error):
             return 'unreadable', len(data)
         return ('truncated' if 'out of bounds' in str(error) or len(data) < EBOOT_SIZE else 'unreadable'), len(data)
     except (ImportError, KeyError, IndexError, OSError):
@@ -310,9 +408,41 @@ def memory_problem(output_res, status=None):
     return (free, need, page_file_off) if free < need + 1 else None
 
 
+def system_problem(game_dir):
+    """Why a game folder with eboot.bin cannot start before the game itself says so (with a path inside the game
+    view): no sce_module, or no sce_sys with param.sfo, also not as a PKG tool's Sc0 (run.py maps that). None
+    when both are there."""
+    game = Path(game_dir or '.')
+    try:
+        from prepare import system_folder
+        system = system_folder(game)
+    except ImportError:
+        system = game / 'sce_sys'
+    missing = [name for name, there in (('sce_module', (game / 'sce_module').is_dir()),
+                                        ('sce_sys', (system / 'param.sfo').is_file())) if not there]
+    if not missing:
+        return None
+    return _('The game folder has no {}: the game was not unpacked completely. Unpack the base game into a new, '
+             'empty folder again and copy the 1.09 update over it.',
+             'В папке игры нет {}: игра распакована не полностью. Распакуйте базовую игру заново в новую пустую '
+             'папку и скопируйте поверх неё обновление 1.09.').format(' / '.join(missing))
+
+
 def location_problem(port_dir):
     text = str(port_dir).lower()
-    return 'location' if 'onedrive' in text or 'program files' in text else None
+    synced = getattr(L, 'synced_folder', None)  # OneDrive, Dropbox, Google Drive, iCloud, Nextcloud
+    return 'location' if 'onedrive' in text or 'program files' in text or (synced and synced(port_dir)) else None
+
+
+# The folders an archive program puts a file in that is opened from inside a zip or rar: WinRAR's Rar$EX…, 7-Zip's
+# 7zO…, Windows' own Temp1_<name>.zip (all in %TEMP%). Not %TEMP% as a whole: other folders there are no archive's.
+ARCHIVE_FOLDER = re.compile(r'[\\/](?:rar\$ex[^\\/]*|7zo[^\\/]*|temp\d+_[^\\/]*\.zip)(?:[\\/]|$)', re.I)
+
+
+def temporary_folder(port_dir):
+    """Whether the port runs from an archive program's folder (ARCHIVE_FOLDER): it is deleted when the archive
+    closes, the saves in it too."""
+    return ARCHIVE_FOLDER.search(os.path.abspath(str(port_dir))) is not None
 
 
 def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
@@ -331,7 +461,17 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
         state = cached.get('state') if cached and cached.get('key') == key else eboot_state(game)[0]
         eboot = {'key': key, 'state': state}
         size = number(stat.st_size)
-        checks.append({
+        values = {}
+        try:
+            from prepare import sfo
+            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
+        except (OSError, ValueError, ImportError):
+            pass
+        version = values.get('APP_VER')
+        # Another version's eboot.bin is not 1.09's anyway (the base game 1.00): the version line below
+        # says what to do, with the update's steps.
+        other_version = state == 'modified' and version and version != '01.09'
+        checks.append(None if other_version else {
             'clean': ('ok', None, _('eboot.bin is the clean 1.09 file ({} bytes).').format(size)),
             'lance': ('bad', 'eboot_modified', _('eboot.bin has Lance McDonald\'s 60 FPS patch built in: the game '
                                                  'crashes with it. Use the clean one.')),
@@ -341,13 +481,8 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
                           .format(size, number(EBOOT_SIZE))),
             'unreadable': ('bad', 'eboot_unreadable', _('eboot.bin cannot be read ({} bytes).').format(size)),
         }.get(state, ('bad', None, _('eboot.bin cannot be read.'))))
-        values = {}
-        try:
-            from prepare import sfo
-            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
-        except (OSError, ValueError, ImportError):
-            pass
-        version = values.get('APP_VER')
+        if checks[-1] is None:
+            checks.pop()
         if version and version != '01.09':
             checks.append(('warn', 'version', _('Game version {}: it needs the 1.09 update.').format(version)))
         scan = scan_game(game)
@@ -362,6 +497,9 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
         else:
             checks.append(('ok', None, _('The game folder is complete ({} files, {} GB).').format(
                 number(scan['files']), number(scan['bytes'] / 1024 ** 3, 1))))
+    problem = system_problem(game) if game and (game / 'eboot.bin').is_file() else None
+    if problem:
+        checks.append(('bad', None, problem))
     mods = mods_with_eboot(mods_dir)
     if mods:
         checks.append(('warn', 'eboot_modified', _('These mods bring their own eboot.bin: {}. Turn them off or '
@@ -375,9 +513,30 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
     elif status:
         checks.append(('ok', None, _('Memory for the start: {} GB free (RAM and page file), about {} GB '
                                      'needed.').format(number(status[0], 1), memory_needed(output_res))))
+    version, differ = files_check(port_dir)
+    if differ:
+        checks.append(('bad', 'mixed_versions', _('Files of different versions in this installation: {}.').format(files_text(differ))))
+    elif version:
+        checks.append(('ok', None, _("The port's files all belong to version {}.").format(version)))
     if location_problem(port_dir):
         checks.append(('warn', 'location', _('The port is in {}.').format(port_dir)))
     return checks, eboot
+
+
+def files_check(port_dir, quick=False):
+    """scripts/package_files.py's (version, [files that differ]) for this installation; (None, []) for a build
+    from the sources (no list)."""
+    if not port_dir:
+        return None, []
+    try:
+        from package_files import check
+    except ImportError:
+        return None, []
+    return check(port_dir, quick)
+
+
+def files_text(differ):
+    return ', '.join(name.replace('/', '\\') for name in differ[:3]) + (' …' if len(differ) > 3 else '')
 
 
 # ---- the Help page -------------------------------------------------------------------------------
@@ -399,6 +558,10 @@ class HelpMixin:
         self.help_list = tk.Frame(card, bg=theme.CARD)
         self.help_list.pack(fill='x', pady=(px(10), 0))
         self.link_row(f, _('Set everything up again, step by step.'), None, _('Repeat the setup'), self.open_setup)
+        # What's new again, whenever: the Play page's line goes once it was seen (bbport_news).
+        news = self.link_row(f, _('What changed in this version, and what to know.'), None, _("What's new", 'Что нового'),
+                             self.open_news)
+        self.index_entry(news, _("What's new", 'Что нового'), key='button:news')
 
         self.section(f, _('Problems and their fixes'))
         self.help_topics = {}
@@ -416,11 +579,14 @@ class HelpMixin:
         row.pack(anchor='w', pady=(px(10), 0))
         button = ttk.Button(row, text=_('Save a report'), style='Card.Accent.TButton', command=self.save_report)
         button.pack(side='left')
+        self.report_button = button
         self.index_entry(button, _('Save a report'), key='button:report')
         ttk.Button(row, text=_('Copy a summary'), style='Card.TButton', command=self.copy_diagnostics).pack(
             side='left', padx=(px(8), 0))
-        ttk.Button(row, text=_('Open the Discord'), style='Card.TButton',
-                   command=lambda: webbrowser.open(DISCORD)).pack(side='left', padx=(px(8), 0))
+        discord = ttk.Button(row, text=_('Open the Discord'), style='Card.TButton',
+                             command=lambda: webbrowser.open(DISCORD))
+        discord.pack(side='left', padx=(px(8), 0))
+        self.index_entry(discord, _('Open the Discord'), key='button:discord')
         more = tk.Frame(last, bg=theme.CARD)
         more.pack(anchor='w', pady=(px(8), 0))
         ttk.Button(more, text=_('Show the log'), style='Card.TButton', command=lambda: self.show('log')).pack(
@@ -476,6 +642,9 @@ class HelpMixin:
         card.toggle = toggle
         return card
 
+    def open_online_page(self):
+        self.show('online')
+
     def open_topic(self, key):
         """The Help page with that problem's steps open, scrolled to it."""
         self.show('help')
@@ -500,12 +669,17 @@ class HelpMixin:
             child.destroy()
         self.state_line(self.help_list, 'info', _('Checking the game files…'), theme.CARD).pack(fill='x')
         get = lambda key, store: self.var(key, store).get()
+        settings = {key: get(key, 'app') for key in SEPARATE_FOLDERS}
         args = (get('game_dir', 'app'), get('mods_dir', 'app') or str(L.DATA_DIR / 'mods'), L.PORT_DIR,
                 get('output_res', 'ini'), self.app.get('eboot_check') or {})
 
         def work():
             try:
                 result = run_checks(*args)
+                elsewhere = other_installations(settings, L.PORT_DIR, L.DATA_DIR)
+                result = (result[0] + [('warn', 'other_install', _('The {0} is in another installation of the port: '
+                                                                   '{1}.').format(_(*name), folder))
+                                       for _key, name, folder in elsewhere], result[1])
             except Exception as error:  # a check must never take the launcher down
                 result = ([('warn', None, _('The check stopped: {}').format(error))], None)
             self.ui_calls.put(lambda: self.help_done(*result))
@@ -516,6 +690,8 @@ class HelpMixin:
         self.help_button.configure(state='normal')
         if eboot:
             self.app['eboot_check'] = eboot
+        gpu = self.gpu_check()
+        checks = checks + ([gpu] if gpu else [])
         self.help_results = checks
         for child in self.help_list.winfo_children():
             child.destroy()
@@ -530,6 +706,16 @@ class HelpMixin:
     def open_memory_settings(self):
         import subprocess
         subprocess.Popen(['SystemPropertiesAdvanced.exe'])  # Advanced > Performance > Virtual memory
+
+    def use_own_folders(self):
+        """Help's button: the mods and cache folders that lie in another installation set back to this
+        installation's own (empty: the default). The saves folder stays (SEPARATE_FOLDERS)."""
+        settings = {key: self.var(key, 'app').get() for key in SEPARATE_FOLDERS}
+        for key, _name, _folder in other_installations(settings, L.PORT_DIR, L.DATA_DIR):
+            self.var(key, 'app').set('')
+        self.collect()
+        self.refresh_status()
+        self.help_check()
 
     def open_windows_security(self):
         try:
@@ -570,8 +756,52 @@ class HelpMixin:
                 'truncated': '✗ ' + _('eboot.bin is cut off: unpack the game again (Help)'),
                 'unreadable': '✗ ' + _('eboot.bin cannot be read (Help)')}.get(state)
 
+    def gpu_check(self):
+        """Help's line for the start check (scripts/vulkan_check.py): the card the game uses and its Vulkan,
+        or why the game would not start on it; None before it answered."""
+        verdict = getattr(self, 'vulkan', None)
+        if not verdict:
+            return None
+        if verdict.get('ok'):
+            device = verdict.get('device') or {}
+            return ('ok', None, _('Graphics card {0}: Vulkan {1} and everything else the port needs.').format(device.get('name', '?'), device.get('api', '?')))
+        return ('bad', 'driver', self.gpu_problem())
+
+    def gpu_problem(self):
+        """Why the game's renderer would not start on this PC, or None: scripts/vulkan_check.py asks the
+        graphics driver for what the renderer needs (a Vulkan 1.3 loader and card, its extensions and
+        features) on the card the game would use. No list of card names: the driver's own answer."""
+        verdict = getattr(self, 'vulkan', None) or {}
+        problem, device = verdict.get('problem'), verdict.get('device') or {}
+        if problem == 'loader':
+            return _('No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current '
+                     'driver for your graphics card.')
+        if problem == 'loader_version':
+            return _('The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install '
+                     'the current driver for your graphics card.').format(verdict.get('loader'))
+        if problem == 'devices':
+            return _('No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 '
+                     'or newer) with a current driver.')
+        if problem == 'device':
+            lacks = ', '.join(device.get('missing', []))  # its names in Vulkan's words: what to search for
+            return _('{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not '
+                     'help, the card is too old for the port.').format(device.get('name', '?'), lacks)
+        if problem == 'crashed':
+            return _('The graphics driver stopped while the launcher asked it about the card (code {}). Install the '
+                     'current driver for your graphics card.').format(verdict.get('code'))
+        return None
+
     def preflight(self):
         """Before PLAY: False when the start would fail for a reason the player can fix first."""
+        # A graphics card the port cannot run on: asked once per card (some play on one anyway).
+        verdict = getattr(self, 'vulkan', None) or {}
+        problem, card = self.gpu_problem(), (verdict.get('device') or {}).get('name') or verdict.get('problem')
+        if problem and self.app.get('gpu_warned') != card:
+            text = (problem + '\n\n' + _('The game will likely not start, or close right away.') + '\n\n' +
+                    _('Start anyway?'))
+            if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
+                return False
+            self.app['gpu_warned'] = card
         problem = memory_problem(self.var('output_res', 'ini').get())
         if problem:
             free, need, off = problem
@@ -583,29 +813,118 @@ class HelpMixin:
             if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
                 self.open_topic('page_file')
                 return False
+        # Program files of different versions: the game would stop at a black screen ("bad patch entry").
+        _version, differ = files_check(L.PORT_DIR if L else None, quick=True)
+        if differ:
+            text = (_('Files of different versions in this installation: {}.').format(files_text(differ)) + '\n\n' +
+                    _(TOPICS['mixed_versions'][1]) + '\n\n' + _('Start anyway?'))
+            if not self.messagebox.askyesno('Bloodborne', text, icon='warning'):
+                self.open_topic('mixed_versions')
+                return False
         return True
 
-    def after_exit(self, code):
-        """After the game ended with an error: the known causes its log names, with the fix."""
+    def after_exit(self, code, always=False):
+        """After the game ended with an error: the known causes its log names, with the fix. always: also
+        when it names none (the game started without the launcher's window, which has its output)."""
         if not code:
+            # Ended normally, but the game said something went wrong all along (GAME_NOTICES).
+            notices, self.game_notices = getattr(self, 'game_notices', []), []
+            for topic in notices[:1]:
+                title, why, _steps = TOPICS[topic]
+                if self.messagebox.askyesno('Bloodborne', _(NOTICE_INTROS[topic]) + '\n\n' + _(title) + '\n' +
+                                            _(why) + '\n\n' + _('Show the fix?')):
+                    self.open_topic(topic)
             return
+        # A Windows exception code the way helpers know it: 0xC0000005, not 3221225477.
+        shown = f'0x{code & 0xffffffff:08X}' if code < 0 or code > 255 else code
         try:
             log = Path(self.app.get('user_dir') or L.DATA_DIR / 'user') / 'last_run.log'
             text = log.read_text(encoding='utf-8', errors='replace')[-400_000:]
         except OSError:
-            return
+            text = ''
         topics = hints_in_log(text)
         if not topics:
+            if always:
+                self.messagebox.showinfo('Bloodborne', _('The game ended with an error (code {}). Help has the checks, '
+                                                         'and "Save a report" makes the zip to attach when you ask for '
+                                                         'help.').format(shown))
             return
         title, why, _steps = TOPICS[topics[0]]
         if self.messagebox.askyesno('Bloodborne', _('The game ended with an error (code {}). Its log names the '
-                                                    'cause:').format(code) + '\n\n' + _(title) + '\n' + _(why) +
+                                                    'cause:').format(shown) +'\n\n' + _(title) + '\n' + _(why) +
                                     '\n\n' + _('Show the fix?')):
             self.open_topic(topics[0])
 
-    def save_report(self):
+    def save_report(self, button=None, note=None):
+        """The BB Report Tool's zip, the one the Discord helpers ask for: run without its window into
+        <bbport>/reports, then shown selected in Explorer with its summary in the clipboard for the #help
+        post. Without the tool (a build from the sources): the launcher's own zip on the desktop. `button` and
+        `note`: where it was asked for (Help's, or the Report button beside Play and the status line). The tool
+        gets this port folder and the log this launcher wrote (<saves folder>/last_run.log): on its own it took
+        the newest log of any installation it found."""
+        import subprocess
+        import time
+        button, note = button or self.report_button, note or self.report_note
+        tool = report_tool()
+        if not tool:
+            return self.save_own_report(note)
+        self.collect()  # the tool reads the settings from the files
+        folder = L.DATA_DIR / 'reports'
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            note.configure(text=_('Could not save it: {}').format(error), fg=theme.BLOOD_LIGHT)
+            return
+        button.state(['disabled'])
+        note.configure(text=_('Collecting the report… (up to a minute)'), fg=theme.MUTED)
+        # BBTOOL_*: the port, its settings, version and log, and the folder for the zip; it asks nothing then.
+        env = {**os.environ, 'BBTOOL': str(tool), 'BBTOOL_PORT': str(L.PORT_DIR),
+               'BBTOOL_SETTINGS': str(L.CONFIG_FILE), 'BBTOOL_VERSION': L.VERSION_TEXT, 'BBTOOL_OUT': str(folder),
+               'BBTOOL_LOG': str(L.saves_folder(self.app) / 'last_run.log')}
+        started = time.time()
+
+        def work():
+            error = None
+            try:
+                subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                                'Invoke-Expression ([IO.File]::ReadAllText($env:BBTOOL))'], env=env,
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=300, creationflags=L.NO_WINDOW)
+            except (OSError, subprocess.TimeoutExpired) as failure:
+                error = failure
+            made = sorted((p for p in folder.glob('BB-Report-*.zip') if p.stat().st_mtime >= started - 2),
+                          key=lambda p: p.stat().st_mtime)
+            self.ui_calls.put(lambda: self.report_done(made[-1] if made else None, error, button, note))
+        threading.Thread(target=work, daemon=True).start()
+
+    def report_done(self, archive, error=None, button=None, note=None):
+        """The report is there (or not): Explorer with it selected, its summary in the clipboard."""
+        import subprocess
+        import zipfile
+        button, note = button or self.report_button, note or self.report_note
+        button.state(['!disabled'])
+        if archive is None:
+            why = error or _('The BB Report Tool made no zip.')
+            note.configure(text=_('Could not save it: {}').format(why), fg=theme.BLOOD_LIGHT)
+            return
+        text = _('Saved: {}').format(archive)
+        try:
+            with zipfile.ZipFile(archive) as z:
+                summary = z.read('report.txt').decode('utf-8-sig', errors='replace').strip()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(summary)
+            text += '\n' + _('Its summary is in the clipboard: paste it into your #help post, then attach the zip.')
+        except (OSError, KeyError, zipfile.BadZipFile):
+            pass
+        note.configure(text=text, fg=theme.GOLD_LIGHT)
+        try:
+            subprocess.Popen(['explorer', '/select,', str(archive)])
+        except OSError:
+            pass
+
+    def save_own_report(self, note=None):
         """A zip on the desktop for asking for help: the log, the settings without passwords, this PC
         and the checks."""
+        note = note or self.report_note
         import json
         import platform
         import time
@@ -625,9 +944,17 @@ class HelpMixin:
                 for name in ('last_run.log',):
                     if (user / name).is_file():
                         z.write(user / name, name)
-            self.report_note.configure(text=_('Saved: {}').format(target), fg=theme.GOLD_LIGHT)
+            note.configure(text=_('Saved: {}').format(target), fg=theme.GOLD_LIGHT)
         except OSError as error:
-            self.report_note.configure(text=_('Could not save it: {}').format(error), fg=theme.BLOOD_LIGHT)
+            note.configure(text=_('Could not save it: {}').format(error), fg=theme.BLOOD_LIGHT)
+
+
+def report_tool():
+    """BB-Report-Tool.bat beside Bloodborne.exe (packaging/windows in the sources), or None."""
+    for path in (L.PORT_DIR / 'BB-Report-Tool.bat', L.PORT_DIR / 'packaging' / 'windows' / 'BB-Report-Tool.bat'):
+        if path.is_file():
+            return path
+    return None
 
 
 SECRET = re.compile(r'password|token|secret|npid|online_id|user$', re.I)

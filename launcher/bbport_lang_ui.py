@@ -160,6 +160,9 @@ UI = {'de': {
         'Leere den Shader-Cache (Knopf unten). Der nächste Start ruckelt ein paar Minuten, während er neu gebaut wird.',
     'Still black: update the graphics driver and restart the PC.':
         'Immer noch schwarz: Aktualisiere den Grafiktreiber und starte den PC neu.',
+    'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+        'Bei schwarzem Bild oder kaputtem Bild nach einem Treiber-Update. Der nächste Start ruckelt ein paar '
+        'Minuten.',
     'Clear the shader cache': 'Shader-Cache leeren', 'Open the memory settings': 'Speicher-Einstellungen öffnen',
     'Open Windows Security': 'Windows-Sicherheit öffnen', 'Open the port folder': 'Port-Ordner öffnen',
     'Open the game folder': 'Spielordner öffnen', 'Choose the game folder': 'Spielordner wählen',
@@ -279,7 +282,7 @@ UI = {'de': {
     'Movement and camera': 'Bewegung und Kamera', 'Move forward': 'Vorwärts', 'Move back': 'Rückwärts',
     'Move left': 'Links', 'Move right': 'Rechts', 'Walk (hold)': 'Gehen (halten)',
     'Dodge / dash (hold); back in menus (Circle)': 'Ausweichen / Sprinten (halten); zurück in Menüs (Kreis)',
-    'Jump while dashing (L3)': 'Springen beim Sprinten (L3)', 'Lock on / reset camera (R3)': 'Anvisieren / Kamera zurücksetzen (R3)',
+    'Left stick click (L3)': 'Linken Stick drücken (L3)', 'Lock on / reset camera (R3)': 'Anvisieren / Kamera zurücksetzen (R3)',
     'Camera up': 'Kamera hoch', 'Camera down': 'Kamera runter', 'Camera left': 'Kamera links', 'Camera right': 'Kamera rechts',
     'Combat': 'Kampf', 'Attack (R1)': 'Angriff (R1)', 'Strong attack (R2)': 'Starker Angriff (R2)',
     'Transform weapon (L1)': 'Waffe verwandeln (L1)', 'Firearm (L2)': 'Schusswaffe (L2)', 'Items and menus': 'Gegenstände und Menüs',
@@ -438,6 +441,8 @@ UI = {'de': {
         'Vor einem Import',
     'Before a restore':
         'Vor dem Zurückholen',
+    'Before a respec':
+        'Vor einer Umverteilung',
     'From a file':
         'Aus einer Datei',
     'Earlier backup':
@@ -454,6 +459,22 @@ UI = {'de': {
         'Platz {}',
     'saved {}':
         'gespeichert {}',
+    'The {0} is in another installation of the port: {1}.':
+        'Der {0} liegt in einer anderen Installation des Ports: {1}.',
+    'A folder of another installation is in use':
+        'Ein Ordner einer anderen Installation wird benutzt',
+    "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a test "
+    "build): both installations share it. Another version's shader cache can crash the game, and its mods apply "
+    'here too.':
+        'Der Mod- oder Cache-Ordner aus den Launcher-Einstellungen liegt in einem anderen Port-Ordner (einer '
+        'älteren Version oder einer Testversion): Beide Installationen teilen ihn. Der Shader-Cache einer anderen '
+        'Version kann das Spiel abstürzen lassen, und ihre Mods gelten auch hier.',
+    'Click the button below: this installation uses its own mods and cache folders again. The saves folder stays, '
+    'and with it your characters and achievements.':
+        'Klick auf den Button unten: Diese Installation benutzt wieder ihren eigenen Mod- und Cache-Ordner. Der '
+        'Spielstandordner bleibt, und mit ihm deine Charaktere und Erfolge.',
+    "Use this installation's own folders":
+        'Eigene Ordner dieser Installation verwenden',
     'Back up now':
         'Jetzt sichern',
     'Back up automatically before every start':
@@ -564,8 +585,14 @@ UI = {'de': {
         'Cache-Ordner',
     'Choose the cache folder':
         'Cache-Ordner wählen',
-    'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-        'Shader, Protokolle und temporäre Dateien dieses PCs. Leer: im Spielstandordner, oder auf diesem PC, wenn der Spielstandordner in einem Cloud-Ordner liegt (OneDrive, Dropbox, Google Drive), damit jeder PC seine eigenen Shader behält.',
+    'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+    "because another version's shaders can break the picture.":
+        'Dein Spielstandordner liegt in einer anderen Installation des Ports: Diese hier legt ihre Shader in '
+        'ihren eigenen Ordner, denn Shader einer anderen Version können das Bild kaputt machen.',
+    'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+    'every PC keeps its own shaders, wherever the saves are.':
+        'Shader, Protokolle und temporäre Dateien dieser Installation. Leer: ihr user-Ordner ({}), damit jede '
+        'Version und jeder PC eigene Shader behält, egal wo die Spielstände liegen.',
     'Caches now: {}':
         'Caches jetzt: {}',
     'Your saves folder is in a cloud folder: the saves go with you, the shaders stay on this PC. Play on one PC at a time and let it finish syncing before you start on another one; in OneDrive, set the folder to "Always keep on this device".':

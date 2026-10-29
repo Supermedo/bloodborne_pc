@@ -15,8 +15,9 @@ current HP refills at a lamp). The file holds two copies of the block and the ga
 file (backup0000) another; every copy of the character is rewritten.
 
 No attribute goes below the lowest any origin starts with (FLOORS), so a respec cannot make a
-character stronger than a fresh one of the same level could be. A copy of the save folder is
-made before the write, outside savedata (<user folder>/respec-backups/<time>/SPRJ0005)."""
+character stronger than a fresh one of the same level could be. The launcher puts the save in
+its backups first (Saves, "Before a respec"); without one, a copy of the save folder is made
+before the write, outside savedata (<user folder>/respec-backups/<time>/SPRJ0005)."""
 import array
 import shutil
 import struct
@@ -98,8 +99,9 @@ def check(old, new):
                          f'(now {sum(new.values())}), so the level stays the same')
 
 
-def respec(folder, slot, new, now=None):
-    """Writes `new` attributes for the character in `slot`. Returns the backup folder."""
+def respec(folder, slot, new, now=None, copy=True):
+    """Writes `new` attributes for the character in `slot`. Returns the backup folder (copy=False: the
+    caller made a backup, None)."""
     folder = Path(folder)
     path = folder / f'userdata{slot:04d}'
     data = bytearray(path.read_bytes())
@@ -110,8 +112,8 @@ def respec(folder, slot, new, now=None):
     check(old['attributes'], new)
     # <user>/savedata/<user id>/<title>/SPRJ0005 -> <user>/respec-backups/<time>/SPRJ0005
     stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(now))
-    backup = folder.parents[3] / 'respec-backups' / stamp / folder.name
-    if not backup.exists():
+    backup = folder.parents[3] / 'respec-backups' / stamp / folder.name if copy else None
+    if backup and not backup.exists():
         shutil.copytree(folder, backup)
 
     def rewrite(data, blocks):

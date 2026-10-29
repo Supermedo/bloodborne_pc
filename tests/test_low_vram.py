@@ -22,10 +22,11 @@ class LowVramTests(unittest.TestCase):
             tool.chmod(0o755)
         return tool
 
-    def test_discrete_cards_up_to_4_5_gb(self):
+    def test_discrete_cards_up_to_6_gb(self):
         with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(run.low_vram_mb({}, self.caps(temp, '4096 1')), 4096)
-            self.assertEqual(run.low_vram_mb({}, self.caps(temp, '6144 1')), 0)
+            self.assertEqual(run.low_vram_mb({}, self.caps(temp, '6144 1')), 6144)
+            self.assertEqual(run.low_vram_mb({}, self.caps(temp, '8192 1')), 0)
             # Integrated GPUs follow the driver's budget already.
             self.assertEqual(run.low_vram_mb({}, self.caps(temp, '512 0')), 0)
 

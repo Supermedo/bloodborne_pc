@@ -18,6 +18,7 @@ struct TransportHooks {
     u16 (*configured_port)() = nullptr;
     u32 (*advertised_addr)() = nullptr;
     bool (*ensure_transport)() = nullptr;
+    u32 (*local_addr)() = nullptr;
 };
 void SetTransportHooks(const TransportHooks& hooks);
 
@@ -29,6 +30,9 @@ bool TransportIsReady();
 u16 ConfiguredPort();
 u32 AdvertisedAddr();
 bool EnsureTransport();
+// The LAN address sent in STUN pings (network order). shadNet hands it to players behind the
+// same public IP, since most routers don't loop packets for their own public IP back inside.
+u32 LocalAddr();
 
 using PeerResolver = bool (*)(std::string_view online_id, u32* out_addr, u16* out_port);
 void SetPeerResolver(PeerResolver fn);

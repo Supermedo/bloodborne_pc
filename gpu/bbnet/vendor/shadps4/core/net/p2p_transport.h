@@ -11,6 +11,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <thread>
 
 #include "core/net/p2p_tcp.h"
@@ -206,6 +208,12 @@ public:
 
     void SetOutgoingLossForTesting(double probability);
 
+    // SuperMedo relay: packets for a relayed peer address go to the shadNet server, which
+    // forwards them over the mapping the peer's STUN pings keep open. For routers that
+    // block a direct connection. No relay server = off.
+    void SetRelayServer(std::optional<Endpoint> relay_server);
+    void UseRelayFor(u32 peer_addr); // IPv4, network order
+
 private:
     friend class DatagramSocket;
     friend class StreamSocket;
@@ -245,6 +253,8 @@ private:
     u64 iss_state_;
     double loss_for_testing_ = 0.0;
     u64 loss_rng_ = 0x9e3779b97f4a7c15ull;
+    std::optional<Endpoint> relay_server_;
+    std::set<u32> relayed_peers_; // IPv4, network order
 
     std::thread thread_;
     std::atomic<bool> stop_{false};

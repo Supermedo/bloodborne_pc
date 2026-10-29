@@ -336,6 +336,30 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                 (header->type3.count.Value() - 2) * sizeof(u32));
 }
 
+// bbport: an occlusion counter dump (EventWrite ZPASS_DONE, PixelPipeStatDump), the value it
+// writes to every render backend's slot. Written at once on the command thread, a dump overtook
+// the guest's WriteData/DmaData before it, which run in order on the recording thread: those
+// could land on the results after it, the query never completed, and its object stayed in a
+// list the game copies into a 256 KiB heap every frame. The list grew ~17 objects a second until
+// that heap ran out after ~28 minutes (memcpy to NULL at guest 0x21d5b45). In order now,
+// like WriteData (BbToggle::ZpassInOrder set: at once, as before).
+struct ZpassDump {
+    u64 address;
+    u64 value;
+    u32 pairs;
+};
+
+void RunZpassDump(Vulkan::Rasterizer& rasterizer, const u8* data) {
+    ZpassDump dump;
+    std::memcpy(&dump, data, sizeof(dump));
+    // Copies deferred to the recording thread precede writes the guest sees.
+    rasterizer.WaitHostCopies();
+    auto* results = reinterpret_cast<u64*>(dump.address);
+    for (u32 i = 0; i < dump.pairs; ++i, results += 2) {
+        *results = dump.value;
+    }
+}
+
 void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto& event_eos = *reinterpret_cast<const PM4CmdEventWriteEos*>(data);
     // Copies deferred to the recording thread precede writes the guest sees.
@@ -1133,11 +1157,22 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (event->event_type.Value() == EventType::PixelPipeStatDump) {
                         static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
                         static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
-                        u64* results = event->Address<u64*>();
-                        for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
-                            *results = pixel_counter | OcclusionCounterValidMask;
-                        }
+                        const ZpassDump dump{event->Address<u64>(),
+                                             pixel_counter | OcclusionCounterValidMask,
+                                             static_cast<u32>(num_counter_pairs)};
                         pixel_counter += OcclusionCounterStep;
+                        if (rasterizer && !BbToggle::Disabled(BbToggle::ZpassInOrder)) {
+                            if (rasterizer->RunInOrder(&RunZpassDump, &dump, sizeof(dump),
+                                                       BbToggle::PipelinedMemoryWrites)) {
+                                rasterizer->NotePendingGpuWrite(dump.address,
+                                                                dump.pairs * 2 * sizeof(u64));
+                            }
+                        } else {
+                            u64* results = event->Address<u64*>();
+                            for (u32 i = 0; i < dump.pairs; ++i, results += 2) {
+                                *results = dump.value;
+                            }
+                        }
                     }
                 }
                 break;

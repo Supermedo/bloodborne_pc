@@ -78,6 +78,12 @@ void InstallKernelIntegration() {
         .release = [](s32 fd) { FDTable::Instance()->DeleteHandle(fd); },
     });
     SetKernelErrnoHook([](int orbis_errno) { *Libraries::Kernel::__Error() = orbis_errno; });
+    InstallSystemHooks();
+}
+
+// bbport: the system hooks alone (online state, P2P port, UPnP forwarding of it, public address):
+// bbport has its own kernel and file handles, so only these are installed (bbnet_glue).
+void InstallSystemHooks() {
     SetSystemHooks({
         .is_online = [] { return EmulatorSettings.IsConnectedToNetwork(); },
         .mac_address =

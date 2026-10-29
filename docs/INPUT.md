@@ -95,7 +95,7 @@ layout, after Ryan Sousa's keyboard and mouse fork:
 | Transform / firearm (L1 / L2) | Right click / Shift + right click or Left Ctrl |
 | Interact, confirm (Cross) | E / Enter |
 | Quick item (Square) / blood vial (Triangle) | R / F |
-| Lock on (R3) / jump (L3) | Q or wheel click / C |
+| Lock on (R3) / left stick click (L3) | Q or wheel click / C |
 | Items (d-pad up/down) | ↑ ↓ or wheel |
 | Weapons (d-pad left/right) | ← → or Shift + wheel |
 | Game menu / gestures / key items | Tab or Esc / G / Backspace |

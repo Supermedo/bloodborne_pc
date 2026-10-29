@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 spec = importlib.util.spec_from_file_location('bbmods', ROOT / 'scripts/mods.py')
 mods = importlib.util.module_from_spec(spec)
@@ -32,6 +33,34 @@ class ModTests(unittest.TestCase):
         folder.mkdir(parents=True, exist_ok=True)
         (folder / file).write_bytes(contents)
         return root
+
+    def test_a_mod_on_another_drive_is_copied_once(self):
+        # Hard links from the mods folder fail (another drive than the view): a 1.9.4 player's
+        # texture mod was copied whole into every view, 400 GB in out. Now: copied once, then linked.
+        a = self.mod('A', b'big texture')
+        real_link = os.link
+
+        def link(source, destination):
+            if Path(source).resolve().is_relative_to(self.moddir.resolve()):
+                raise OSError(18, 'Not the same device')
+            return real_link(source, destination)
+        out = self.root / 'out'
+        with unittest.mock.patch.object(mods.os, 'link', link):
+            first = mods.build_overlay(self.game, out, [('A', a)])
+            self.assertEqual(mods.COPIES['made'], 1)
+            mods.remove_overlay(first, self.game)
+            second = mods.build_overlay(self.game, out, [('A', a)])
+            self.assertEqual(mods.COPIES['made'], 0)  # the copy is linked, not made again
+            self.assertEqual((second / 'dvdroot_ps4' / 'chr' / 'a.dcx').read_bytes(), b'big texture')
+            copies = out / mods.COPY_FOLDER
+            self.assertEqual(len(list(copies.iterdir())), 1)
+            mods.remove_overlay(second, self.game)
+            # The mod turned off and another on: the old copy goes.
+            b = self.mod('B', b'other', 'b.dcx')
+            third = mods.build_overlay(self.game, out, [('B', b)])
+            self.assertEqual([p.read_bytes() for p in copies.iterdir()], [b'other'])
+            mods.remove_overlay(third, self.game)
+        self.assertEqual((self.assets / 'a.dcx').read_bytes(), b'original')
 
     def test_merge_replacement_new_file_and_directory_listing(self):
         a = self.mod('A')
@@ -108,6 +137,60 @@ class ModTests(unittest.TestCase):
                 '--out', str(self.root / 'out'), '--mods-dir', str(self.moddir), '--enabled', enabled],
                 capture_output=True, text=True, check=True)
             self.assertEqual((Path(result.stdout.strip()) / 'dvdroot_ps4/chr/a.dcx').read_bytes(), expected)
+
+    def run_mods(self, profile=None):
+        """The game view mods.py builds, as the launcher starts it (profile: mods.json)."""
+        command = [sys.executable, str(ROOT / 'scripts/mods.py'), str(self.game),
+                   '--out', str(self.root / 'out'), '--mods-dir', str(self.moddir)]
+        if profile is not None:
+            config = self.root / 'mods.json'
+            config.write_text(json.dumps(profile))
+            command += ['--config', str(config)]
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        return Path(result.stdout.strip())
+
+    def test_bare_dvdroot_ps4_is_one_mod_among_the_others(self):
+        # A player's mods folder (Discord help): three mods in folders of their own and one
+        # extracted bare as mods/dvdroot_ps4, which used to be the only one loaded.
+        files = {'Backstep iframes': ['dvdroot_ps4/action/chr/c0000.hks'],
+                 'default layout': ['dvdroot_ps4/menu/hud.drb.dcx', 'dvdroot_ps4/msg/engus/menu.msgbnd.dcx'],
+                 'Tomb Prospector Concept Cape': ['dvdroot_ps4/parts/am_m_1000.partsbnd.dcx'],
+                 'dvdroot_ps4': ['map/m21_00_00_00/m21_00_00_00.msb.dcx', 'msg/engus/menu.msgbnd.dcx']}
+        game_path = lambda path: path if path.startswith('dvdroot_ps4/') else f'dvdroot_ps4/{path}'
+        for name, paths in files.items():
+            for path in paths:
+                for target, contents in [(self.moddir / name / path, name), (self.game / game_path(path), 'original')]:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(contents)
+        self.assertEqual(mods.discover(self.moddir),
+                         ['Backstep iframes', 'default layout', 'dvdroot_ps4', 'Tomb Prospector Concept Cape'])
+        # map/ and msg/ go under the game's dvdroot_ps4 once, without a second one.
+        self.assertEqual(sorted(p.as_posix() for p, _s in mods.mod_files(self.moddir / 'dvdroot_ps4')),
+                         ['dvdroot_ps4/map/m21_00_00_00/m21_00_00_00.msb.dcx', 'dvdroot_ps4/msg/engus/menu.msgbnd.dcx'])
+        shared = 'dvdroot_ps4/msg/engus/menu.msgbnd.dcx'
+        for profile, winner in [(None, 'dvdroot_ps4'),  # alphabetical: dvdroot_ps4 loads last
+                                ({'order': ['dvdroot_ps4', 'default layout']}, 'default layout'),
+                                ({'disabled': ['dvdroot_ps4']}, 'default layout')]:
+            with self.subTest(profile=profile):
+                view = self.run_mods(profile)
+                bare_on = 'dvdroot_ps4' not in (profile or {}).get('disabled', [])
+                for name, paths in files.items():
+                    for path in paths:
+                        if game_path(path) != shared:
+                            expected = name if bare_on or name != 'dvdroot_ps4' else 'original'
+                            self.assertEqual((view / game_path(path)).read_text(), expected, path)
+                self.assertEqual((view / shared).read_text(), winner)
+                self.assertFalse((view / 'dvdroot_ps4/dvdroot_ps4').exists())
+
+    def test_mods_folder_with_only_a_dvdroot_ps4_is_one_overlay(self):
+        bare = self.moddir / 'dvdroot_ps4/chr/a.dcx'
+        bare.parent.mkdir(parents=True)
+        bare.write_bytes(b'bare')
+        (self.moddir / 'Junk/stuff').mkdir(parents=True)  # not a mod: still the overlay alone
+        self.assertEqual((self.run_mods() / 'dvdroot_ps4/chr/a.dcx').read_bytes(), b'bare')
+        # Its switch in the launcher's list is respected too.
+        view = self.run_mods({'disabled': ['dvdroot_ps4']})
+        self.assertEqual((view / 'dvdroot_ps4/chr/a.dcx').read_bytes(), b'original')
 
     def test_app0_wrapped_mod_discovered(self):
         self.moddir.mkdir()

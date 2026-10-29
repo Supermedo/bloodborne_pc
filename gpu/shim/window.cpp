@@ -1,4 +1,5 @@
 // bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,22 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
     }
+    // BB_FULLSCREEN=1: fullscreen at the desktop's display mode (borderless). BB_WINDOW_MODE=
+    // fullscreen makes it exclusive: the window takes the display mode itself (RafaelHGOliveira,
+    // PR #68). Windowed or borderless otherwise.
+    const char* fullscreen = std::getenv("BB_FULLSCREEN");
+    const char* mode = std::getenv("BB_WINDOW_MODE");
+    const bool exclusive = mode && !std::strcmp(mode, "fullscreen");
+    const bool full = exclusive || (mode ? !std::strcmp(mode, "borderless") : fullscreen && fullscreen[0] == '1');
+    // A window larger than the screen's free area (taskbar excluded) is made smaller, keeping
+    // its aspect: the title bar stays reachable.
+    SDL_Rect usable{};
+    if (!full && width_ > 0 && height_ > 0 && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) &&
+        usable.w > 0 && usable.h > 0) {
+        const double fit = std::min({1.0, double(usable.w) / width_, double(usable.h - 40) / height_});
+        width_ = std::max(640, int(width_ * fit));
+        height_ = std::max(360, int(height_ * fit));
+    }
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED);
@@ -53,12 +70,21 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
-    const char* fullscreen = std::getenv("BB_FULLSCREEN");
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, fullscreen && fullscreen[0] == '1');
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, full);
     base_title = title;
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
+    if (exclusive) {
+        // A window in fullscreen state is borderless until it is given a display mode.
+        const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window));
+        if (desktop && SDL_SetWindowFullscreenMode(window, desktop)) {
+            std::printf("Window: exclusive fullscreen, %dx%d @ %.0f Hz\n", desktop->w, desktop->h,
+                        double(desktop->refresh_rate));
+        } else {
+            std::printf("Window: exclusive fullscreen unavailable, borderless instead: %s\n", SDL_GetError());
+        }
+    }
 
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
@@ -66,6 +92,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     if (driver && !std::strcmp(driver, "windows")) {
         window_info.type = WindowSystemType::Windows;
         window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+        on_hdr_display = SDL_GetBooleanProperty(wp, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
     } else
 #endif
     if (driver && !std::strcmp(driver, "x11")) {
@@ -84,6 +111,9 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    if (on_hdr_display) {
+        std::printf("Display: HDR on in Windows\n");
+    }
     BbMouse::Start();
 }
 
@@ -128,6 +158,11 @@ bool WindowSDL::PollEvents() {
         BbOverlay::UpdateTextInput(window);
     }
     SDL_Event event;
+    bool pad_used = false, mouse_used = false; // the cursor follows them too (UpdateCursor)
+    // Mouse input counts once the batch is read, and only when no controller was in use during it:
+    // a mapping program moves the mouse while a stick is pushed, and its events can come before
+    // the controller's in the same batch.
+    bool mouse_seen = false, pad_busy = pads.InUse(), pad_turning = pads.SticksPushed(BbPadUse::Turning);
     while (SDL_PollEvent(&event)) {
         // Button prompts follow the device that was used last: a key, a click, the wheel or a
         // real mouse movement, or a controller button or a stick or trigger pushed past half.
@@ -137,15 +172,33 @@ bool WindowSDL::PollEvents() {
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_WHEEL:
-            BbPrompts::OnInput(BbPrompts::Keyboard);
+            mouse_seen = true;
             break;
         case SDL_EVENT_MOUSE_MOTION:
             if (std::abs(event.motion.xrel) + std::abs(event.motion.yrel) >= 3.0f) {
-                BbPrompts::OnInput(BbPrompts::Keyboard);
+                mouse_seen = true;
+                // Without a mouse device (SDL id 0: SendInput) while a stick turns: a mapping
+                // program's. Said once; the launcher explains it after the game (bbport_help).
+                static bool said;
+                if (!said && event.motion.which == 0 && pad_turning) {
+                    said = true;
+                    std::printf("Input: mouse motion from Steam's Desktop Layout (or another program) while the "
+                                "controller is used: ignored. Its key presses still reach the game: turn Steam "
+                                "Input off for this game or the Desktop Layout off in Steam's controller settings\n");
+                }
             }
             break;
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             BbPrompts::OnInput(PadDevice(event.gbutton.which));
+            pad_used = true;
+            pads.Button(event.gbutton.which, event.gbutton.button, true);
+            pad_busy = true;
+            break;
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            pads.Button(event.gbutton.which, event.gbutton.button, false);
+            break;
+        case SDL_EVENT_GAMEPAD_REMOVED:
+            pads.Removed(event.gdevice.which);
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
             // The game starts with the controller's prompts.
@@ -154,7 +207,13 @@ bool WindowSDL::PollEvents() {
             BbPrompts::OnControllerConnected(PadDevice(event.gdevice.which));
             break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-            if (std::abs(int(event.gaxis.value)) > 16000) BbPrompts::OnInput(PadDevice(event.gaxis.which));
+            if (std::abs(int(event.gaxis.value)) > 16000) {
+                BbPrompts::OnInput(PadDevice(event.gaxis.which));
+                pad_used = true;
+            }
+            pads.Axis(event.gaxis.which, event.gaxis.axis, event.gaxis.value);
+            pad_busy = pad_busy || pads.InUse();
+            pad_turning = pad_turning || pads.SticksPushed(BbPadUse::Turning);
             break;
         default:
             break;
@@ -193,16 +252,19 @@ bool WindowSDL::PollEvents() {
             // also reach the stick -- except while locked on, where a flick switches targets.
             const Core::BloodborneCam& cam = Core::BloodborneCam::Instance();
             const bool motion_to_stick = !cam.IsEnabled() || cam.IsLockedOn();
-            if (event.type == SDL_EVENT_MOUSE_MOTION && motion_to_stick) {
+            // A mapping program's movement and clicks while the controller is in use are the
+            // controller's: they would turn the camera a second time and press its buttons twice.
+            if (event.type == SDL_EVENT_MOUSE_MOTION && motion_to_stick && !pad_turning) {
                 std::scoped_lock lock{mouse_mutex};
                 mouse.dx += event.motion.xrel;
                 mouse.dy += event.motion.yrel;
-            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            } else if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !pad_busy) ||
+                       event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                 std::scoped_lock lock{mouse_mutex};
                 const uint32_t mask = SDL_BUTTON_MASK(event.button.button);
                 if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) mouse.buttons |= mask;
                 else mouse.buttons &= ~mask;
-            } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            } else if (event.type == SDL_EVENT_MOUSE_WHEEL && !pad_busy) {
                 const uint64_t expiry = SDL_GetTicks() + kWheelPulseMs;
                 if (event.wheel.y > 0) g_wheel_expiry_ms[0] = expiry; // WHEEL_UP
                 else if (event.wheel.y < 0) g_wheel_expiry_ms[1] = expiry; // WHEEL_DOWN
@@ -249,6 +311,12 @@ bool WindowSDL::PollEvents() {
             height = h;
             break;
         }
+#ifdef _WIN32
+        // HDR switched in Windows (Win+Alt+B) or the window moved to another display.
+        case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+            on_hdr_display = event.window.data1 != 0;
+            break;
+#endif
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             is_open = false;
@@ -257,10 +325,16 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+    BbMouse::SetPadInUse(pad_turning || pads.SticksPushed(BbPadUse::Turning));
+    if (mouse_seen && !pad_busy) { // a real mouse, not one a mapping program moves with the stick
+        BbPrompts::OnInput(BbPrompts::Keyboard);
+        mouse_used = true;
+    }
     // MOU-004: re-evaluated every PollEvents (not only on the events that could change it),
     // because the menu can also close from the render thread (bbport_overlay.cpp's "Close"
     // button sets menu_open there, not through an SDL event here).
     UpdateMouseCapture();
+    UpdateCursor(pad_used, mouse_used);
     BbPrompts::Apply();
     UpdateMouseCamera();
     return is_open;
@@ -300,6 +374,7 @@ void WindowSDL::UpdateMouseCapture() {
     // it back, so that side is made explicit here (SDL_ShowCursor is a no-op if already shown).
     if (!wants) {
         SDL_ShowCursor();
+        cursor_hidden = false;
     }
     {
         // MOU-005/MOU-007: leaving capture drops whatever motion/buttons/wheel accumulated so
@@ -312,6 +387,22 @@ void WindowSDL::UpdateMouseCapture() {
     }
     if (!wants) {
         g_wheel_expiry_ms.fill(0);
+    }
+}
+
+void WindowSDL::UpdateCursor(bool pad_used, bool mouse_used) {
+    // Playing with the controller, the cursor stood in the middle of the game until it was moved
+    // away by hand (a player's request: hide it as other games do). It hides on controller input
+    // and comes back with the mouse; while the mouse is captured, relative mode hides it anyway.
+    if (mouse_captured_last) {
+        return;
+    }
+    if (mouse_used && cursor_hidden) {
+        SDL_ShowCursor();
+        cursor_hidden = false;
+    } else if (pad_used && !mouse_used && !cursor_hidden) {
+        SDL_HideCursor();
+        cursor_hidden = true;
     }
 }
 

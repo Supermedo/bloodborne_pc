@@ -65,7 +65,7 @@ bool SendMatching2StunPing(const ContextObject& ctx) {
     Matching2StunPing ping{};
     ping.cmd = 0x01;
     std::memcpy(ping.online_id, ctx.online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH);
-    ping.local_ip = NpSignaling::Transport::AdvertisedAddr();
+    ping.local_ip = NpSignaling::Transport::LocalAddr();
 
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);

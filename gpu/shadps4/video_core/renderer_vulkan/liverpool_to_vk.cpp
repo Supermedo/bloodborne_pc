@@ -6,6 +6,7 @@
 #include "video_core/amdgpu/pixel_format.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 
+#include <atomic>
 #include <magic_enum/magic_enum.hpp>
 
 #define INVALID_NUMBER_FORMAT_COMBO                                                                \
@@ -785,11 +786,30 @@ vk::Format TrySurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat
 }
 
 vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat num_format) {
-    vk::Format result = surface_format_table[GetSurfaceFormatTableIndex(data_format, num_format)];
-    bool found =
-        result != vk::Format::eUndefined || data_format == AmdGpu::DataFormat::FormatInvalid;
-    ASSERT_MSG(found, "Unknown data_format={} and num_format={}", static_cast<u32>(data_format),
-               static_cast<u32>(num_format));
+    const auto index = GetSurfaceFormatTableIndex(data_format, num_format);
+    vk::Format result = surface_format_table[index];
+    if (result != vk::Format::eUndefined || data_format == AmdGpu::DataFormat::FormatInvalid) {
+        return result;
+    }
+    // bbport: a combination the GPU has no format for (32_32_32_32 Snorm on a 4 GB RX 570, after a
+    // stall under VRAM pressure) is a stale descriptor, not a real texture. Same-size formats keep
+    // the image's layout; stopping the game was the old answer.
+    static std::array<std::atomic_bool, std::tuple_size_v<decltype(surface_format_table)>>
+        logged{};
+    for (const auto fallback : {AmdGpu::NumberFormat::Uint, AmdGpu::NumberFormat::Unorm,
+                                AmdGpu::NumberFormat::Float}) {
+        result = surface_format_table[GetSurfaceFormatTableIndex(data_format, fallback)];
+        if (result != vk::Format::eUndefined) {
+            break;
+        }
+    }
+    if (!logged[index].exchange(true)) {
+        LOG_ERROR(Render_Vulkan, "Unknown data_format={} and num_format={}, using {}",
+                  static_cast<u32>(data_format), static_cast<u32>(num_format),
+                  vk::to_string(result));
+    }
+    ASSERT_MSG(result != vk::Format::eUndefined, "Unknown data_format={} and num_format={}",
+               static_cast<u32>(data_format), static_cast<u32>(num_format));
     return result;
 }
 

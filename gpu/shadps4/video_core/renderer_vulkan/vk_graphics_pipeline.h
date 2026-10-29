@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <boost/container/static_vector.hpp>
 #include <xxhash.h>
 
@@ -91,8 +93,16 @@ public:
                      std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
                      std::optional<const Shader::Gcn::FetchShaderData> fetch_shader,
                      std::span<const vk::ShaderModule> modules, SerializationSupport& sdata,
-                     bool preloading);
+                     bool preloading, bool deferred = false);
     ~GraphicsPipeline();
+
+    /// bbport: a deferred pipeline is set up on the GPU thread (everything that reads guest
+    /// state) and built by the driver later, on any thread (BuildDeferred). Until then it is
+    /// not built and not used.
+    void BuildDeferred();
+    [[nodiscard]] bool IsBuilt() const noexcept {
+        return built.load(std::memory_order_acquire);
+    }
 
     const std::optional<const Shader::Gcn::FetchShaderData>& GetFetchShader() const noexcept {
         return fetch_shader;
@@ -111,10 +121,21 @@ public:
 
 private:
     void BuildDescSetLayout(bool preloading);
+    /// The driver's part: reads only the key, the stage modules and `sdata`.
+    void Build(vk::PipelineCache pipeline_cache, const SerializationSupport& sdata,
+               bool clip_discard);
 
 private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
+    std::array<vk::ShaderModule, MaxShaderStages> stage_modules{};
+    struct DeferredBuild {
+        vk::PipelineCache pipeline_cache;
+        SerializationSupport sdata;
+        bool clip_discard;
+    };
+    std::unique_ptr<DeferredBuild> deferred_build;
+    std::atomic<bool> built{true};
 };
 
 struct ClipDistanceShaderKey {

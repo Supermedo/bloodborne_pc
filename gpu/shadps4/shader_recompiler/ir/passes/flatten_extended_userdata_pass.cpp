@@ -4,6 +4,7 @@
 #include "bbport_toggles.h"
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <boost/container/flat_map.hpp>
 #include <queue>
 #include <xbyak/xbyak.h>
@@ -108,68 +109,45 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
         return false;
     }
 
-    // bbport: upstream walks on one thread. With several, a thread that faulted on the mov
-    // found the xor another thread had just written and the ASSERT below stopped the game
-    // ("SrtWalkerSignalHandler: Assertion Failed!", code 23 while loading an area). One
-    // patcher at a time; an instruction already patched is simply run again.
-    static std::mutex patch_mutex;
-    std::scoped_lock patch_lock{patch_mutex};
-
-    // Patch instruction to zero register
+    // bbport: upstream rewrote the faulting load into `xor reg, reg` for good. A table pointer
+    // that is null in one draw is not in the next: from then on the walker read zero for that
+    // shader's resources in every draw, and the area lost its textures and vertex tables until
+    // the game was restarted (Ebrietas: 2068 loads rewritten across 37 shaders, the map gone,
+    // 120 -> 45 FPS). Null pointers are now caught by the walker itself (PushPtr); a load that
+    // still faults reads zero for this one run: the register is set and the load skipped.
     ZydisDecodedInstruction instruction;
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
     ZyanStatus status = Common::Decoder::Instance()->decodeInstruction(instruction, operands,
                                                                        const_cast<void*>(code), 15);
-    if (ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_XOR &&
-        operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-        operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-        operands[0].reg.value == operands[1].reg.value) {
-        return true; // bbport: patched by another thread meanwhile
-    }
-
     ASSERT(ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
            operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
            operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY);
-
-    size_t len = instruction.length;
-    const size_t patch_size = 3;
-    u8* code_patch = const_cast<u8*>(reinterpret_cast<const u8*>(code));
-    u8 patch[patch_size];
 
     // We can only encounter rdi or r10d as the first operand in a
     // fault memory access for SRT walker.
     switch (operands[0].reg.value) {
     case ZYDIS_REGISTER_RDI:
-        // mov rdi, [rdi + (off_dw << 2)] -> xor rdi, rdi
-        patch[0] = 0x48;
-        patch[1] = 0x31;
-        patch[2] = 0xFF;
+        // mov rdi, [rdi + (off_dw << 2)]: the masked pointer is zero, its subtree reads zero
+        Common::SetGpr(context, Common::Gpr::Rdi, 0);
         break;
     case ZYDIS_REGISTER_R10D:
-        // mov r10d, [rdi + (off_dw << 2)] -> xor r10d, r10d
-        patch[0] = 0x45;
-        patch[1] = 0x31;
-        patch[2] = 0xD2;
+        // mov r10d, [rdi + (off_dw << 2)]
+        Common::SetGpr(context, Common::Gpr::R10, 0);
         break;
     default:
-        UNREACHABLE_MSG("Unsupported register for SRT walker patch");
+        UNREACHABLE_MSG("Unsupported register for SRT walker fault");
         return false;
     }
+    Common::IncrementRip(context, instruction.length);
 
-    // bbport: other threads may be running this code. Written from the end, every state in
-    // between is a load into the same register or a register move into it: nops over the
-    // displacement, then the ModRM byte (mov reg, reg), the REX prefix, the xor opcode last.
-    // (A 3-byte copy in any order could leave `xor [rdi + disp], rdi`: a store.)
-    for (size_t i = len; i-- > patch_size;) {
-        __atomic_store_n(&code_patch[i], u8{0x90}, __ATOMIC_RELEASE);
+    // Once per load, as the patch was.
+    static std::mutex reported_mutex;
+    static std::unordered_set<const void*> reported;
+    std::scoped_lock reported_lock{reported_mutex};
+    if (reported.insert(code).second) {
+        LOG_WARNING(Render_Recompiler, "SRT walker read a bad pointer at {}, fault address {}: "
+                    "zero for this draw", code, fault_address);
     }
-    for (const size_t i : {size_t{2}, size_t{0}, size_t{1}}) {
-        __atomic_store_n(&code_patch[i], patch[i], __ATOMIC_RELEASE);
-    }
-
-    LOG_WARNING(Render_Recompiler, "Patched SRT walker at {}, fault address {}", code,
-                fault_address);
-
     return true;
 }
 
@@ -619,7 +597,8 @@ static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& p
     }
 }
 
-static inline bool PushPtr(Xbyak::CodeGenerator& c, PassInfo& pass_info, const IR::Value& off_dw) {
+static inline bool PushPtr(Xbyak::CodeGenerator& c, PassInfo& pass_info, const IR::Value& off_dw,
+                           Xbyak::Label& null_ptr) {
     c.push(rdi);
     if (off_dw.IsImmediate()) {
         c.mov(rdi, ptr[rdi + (off_dw.U32() << 2)]);
@@ -631,6 +610,9 @@ static inline bool PushPtr(Xbyak::CodeGenerator& c, PassInfo& pass_info, const I
     }
     c.mov(r10, 0xFFFFFFFFFFFFULL);
     c.and_(rdi, r10);
+    // bbport: a table the game left null in this draw: its subtree reads zero (VisitPointer),
+    // without a fault and without changing the walker for the next draw.
+    c.jz(null_ptr, Xbyak::CodeGenerator::T_NEAR);
     return true;
 }
 
@@ -646,12 +628,15 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
         return;
     }
 
-    if (!PushPtr(c, pass_info, off_dw)) {
+    Xbyak::Label null_ptr, pop_ptr;
+    if (!PushPtr(c, pass_info, off_dw, null_ptr)) {
         LOG_ERROR(Render_Recompiler, "Failed to compute offset for SRT walker");
         return;
     }
     PassInfo::PtrUserList* use_list = pass_info.GetUsesAsPointer(subtree);
     ASSERT(use_list);
+    // The subtree's words are the ones assigned from here on, children included.
+    const u32 first_dw = pass_info.dst_off_dw;
 
     // First copy all the src data from this tree level
     // That way, all data that was contiguous in the guest SRT is also contiguous in the
@@ -683,6 +668,18 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
         }
     }
 
+    // bbport: the null pointer's way: zero the subtree's words (rep stosd: rdi, ecx, eax; rdi
+    // is restored below, the others are scratch in the walker's ABI).
+    c.jmp(pop_ptr, Xbyak::CodeGenerator::T_NEAR);
+    c.L(null_ptr);
+    if (const u32 count = pass_info.dst_off_dw - first_dw; count != 0) {
+        c.lea(rdi, ptr[rsi + (first_dw << 2)]);
+        c.mov(ecx, count);
+        c.xor_(eax, eax);
+        c.rep();
+        c.stosd();
+    }
+    c.L(pop_ptr);
     PopPtr(c);
 }
 

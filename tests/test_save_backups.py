@@ -36,5 +36,28 @@ class SaveBackupTests(unittest.TestCase):
             self.assertIsNone(run.backup_saves(user))
 
 
+class WritableSaveTests(unittest.TestCase):
+    def test_read_only_save_files_are_made_writable(self):
+        import os
+        import stat
+        with tempfile.TemporaryDirectory() as temp:
+            user = Path(temp)
+            self.assertEqual(run.writable_saves(user), 0)  # no saves yet
+            save = user / 'savedata/1/CUSA00207/SPRJ0005'
+            meta = save.with_name('SPRJ0005.sce_sys')
+            for folder in (save, meta):
+                folder.mkdir(parents=True)
+            for path in (save / 'userdata0000', save / 'userdata0010', meta / 'param.bin'):
+                path.write_bytes(b'save')
+            os.chmod(save / 'userdata0000', stat.S_IREAD)
+            os.chmod(meta / 'param.bin', stat.S_IREAD)
+            self.assertEqual(run.writable_saves(user), 2)
+            for path in (save / 'userdata0000', meta / 'param.bin'):
+                self.assertTrue(os.stat(path).st_mode & stat.S_IWRITE)
+                path.write_bytes(b'saved again')  # the game can replace it now
+            self.assertEqual((save / 'userdata0010').read_bytes(), b'save')  # contents untouched
+            self.assertEqual(run.writable_saves(user), 0)
+
+
 if __name__ == '__main__':
     unittest.main()

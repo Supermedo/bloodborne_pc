@@ -268,6 +268,8 @@ SETUP = {'de': {
         'Sie ersetzen die Spielstände dieses Ports ({}). Die werden vorher nach {} gesichert, es geht also nichts '
         'verloren.',
     'Could not import the saves: {}': 'Die Spielstände konnten nicht importiert werden: {}',
+    'Your achievements from there came along: {} new here.':
+        'Deine Erfolge von dort sind mitgekommen: {} neu hier.',
     "Saves imported. Your characters are in the game's Load Game menu.":
         'Spielstände importiert. Deine Charaktere findest du im Spiel unter „Spiel laden“.',
     'Your previous saves: {}': 'Deine bisherigen Spielstände: {}',
@@ -284,8 +286,13 @@ SETUP = {'de': {
     'Setting': 'Einstellung', 'Now': 'Jetzt', 'For your PC': 'Für deinen PC', 'Why': 'Warum',
     'Apply the settings for my PC': 'Einstellungen für meinen PC übernehmen', 'Undo': 'Rückgängig',
     'Adjust them automatically when the hardware changes': 'Automatisch anpassen, wenn sich die Hardware ändert',
+    'New installation: the graphics settings were made for this PC.':
+        'Neue Installation: Die Grafikeinstellungen wurden für diesen PC gewählt.',
     'New hardware detected: the graphics settings were adjusted to it.':
         'Neue Hardware erkannt: Die Grafikeinstellungen wurden angepasst.',
+    'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+        'Neue Hardware erkannt. Deine eigenen Grafikeinstellungen bleiben; die passenden dafür findest du unter '
+        'Bild & Leistung.',
     'Settings: made for your PC': 'Einstellungen: passend für deinen PC',
     'Settings: adjusted to your new hardware (Undo on System & performance)':
         'Einstellungen: an deine neue Hardware angepasst (Rückgängig unter System & Leistung)',

@@ -36,6 +36,19 @@ int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
+/* PC Settings in the game's System menu (gpu/shim/bbport_pc_menu.cpp, scripts/pc_menu.py): the
+ * game image, then its System menu's request for the line ("bb:o"); `list` points at the menu's
+ * line list, which the call may replace. */
+void bbgpu_pc_menu_set_image(unsigned char *base);
+/* After the patches, while the code is still writable: the PC page's name table. */
+void bbgpu_pc_menu_prepare(unsigned char *base);
+int bbgpu_pc_menu_add_line(void *list);
+int bbgpu_pc_menu_hide(void *movie);
+/* The settings pages' Defaults button (Restart Game on the PC page): its texts ("bb:l" name and
+ * help, "bb:r" question) and its Yes ("bb:y", 1 when the port took it). */
+int bbgpu_pc_menu_button_text(void *page);
+int bbgpu_pc_menu_question(void *page);
+int bbgpu_pc_menu_yes(void *page);
 /* 1 while the game should be silent: bbport.ini mute_unfocused is on and the window does not
  * have focus. Safe from any thread (the audio ports read it for every buffer). */
 int bbgpu_audio_muted(void);

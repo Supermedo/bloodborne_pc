@@ -7,17 +7,20 @@ from pathlib import Path
 REASONS = {'ready', 'windows11', 'rx9000', 'files', 'runtime', 'vulkan',
            'adapter', 'interop', 'dx12', 'provider', 'check'}
 
-def query(port, env=None):
+def query(port, env=None, version='4.0.1'):
+    if version not in ('4.0.1', '4.0.2'):
+        raise ValueError('unsupported ML-FG version')
     exe = Path(port)/'bin/bb-fg401-capabilities.exe'
     if not exe.is_file():
         exe = Path(port)/'out/bb-fg401-capabilities.exe'
     if not exe.is_file():
         return dict(supported=False, reason='files', detail='bb-fg401-capabilities.exe')
     try:
-        result = subprocess.run([str(exe)], cwd=port, env=env, capture_output=True,
+        command = [str(exe)] + (['--provider', version] if version != '4.0.1' else [])
+        result = subprocess.run(command, cwd=port, env=env, capture_output=True,
             text=True, timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         data = json.loads(result.stdout)
-        if result.returncode or not isinstance(data, dict) or data.get('provider') != '4.0.1':
+        if result.returncode or not isinstance(data, dict) or data.get('provider') != version:
             raise ValueError('invalid probe response')
         if data.get('supported') is True:
             return dict(supported=True, reason='ready', detail='')
@@ -30,7 +33,22 @@ def query(port, env=None):
     except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
         return dict(supported=False, reason='check', detail='')
 
-def message(status, translate, hdr=False, selected=False):
+def query_versions(port, env=None):
+    return {key: query(port, env, version) for key, version in
+            (('fsr401', '4.0.1'), ('fsr402', '4.0.2'))}
+
+def status_for(statuses, selection):
+    if statuses is None:
+        return None
+    key = selection if selection in ('fsr401', 'fsr402') else 'fsr401'
+    # Keep callers of the original single-version query compatible.
+    if 'supported' in statuses:
+        return statuses if key == 'fsr401' else dict(supported=False, reason='provider', detail='4.0.2')
+    return statuses[key]
+
+def message(status, translate, hdr=False, selected=False, version='4.0.1'):
+    original_translate = translate
+    translate = lambda key: original_translate(key.replace('4.0.1', version))
     if status is None:
         return translate('ML-FG 4.0.1: checking support…')
     if status.get('supported'):
@@ -143,3 +161,7 @@ TEXTS = {
     'HDR 출력 중에는 ML-FG가 일시 중지됩니다.'),
 }
 TRANSLATIONS = {lang: dict(zip(KEYS, texts, strict=True)) for lang, texts in TEXTS.items()}
+# Version-only variants retain the existing concise translations in all 13 languages.
+for translations in TRANSLATIONS.values():
+    translations.update({key.replace('4.0.1', '4.0.2'): value.replace('4.0.1', '4.0.2')
+                         for key, value in list(translations.items()) if '4.0.1' in key})

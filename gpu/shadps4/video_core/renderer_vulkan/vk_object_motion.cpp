@@ -70,6 +70,8 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     const auto props = instance.GetPhysicalDevice().getProperties();
     const char* forced = std::getenv("BB_OBJECT_MOTION");
     if (props.vendorID == 0x1002 && props.deviceID < 0x7440 && !(forced && forced[0] == '1')) {
+        BbSettings::Get().object_motion_unavailable = "Not available on RX 6000 and older Radeon cards: "
+                                                       "they lose the device with it.";
         std::printf("Object motion: off on this AMD GPU (RX 6000 and older lose the device with it; "
                     "BB_OBJECT_MOTION=1 turns it on)\n");
         return;
@@ -85,6 +87,8 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     }
     if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu && vram < (6ull << 30) - (256ull << 20) &&
         !(forced && forced[0] == '1')) {
+        BbSettings::Get().object_motion_unavailable = "Not available under 6 GB of video memory: "
+                                                       "textures need it more.";
         std::printf("Object motion: off with %llu MiB of VRAM (under 6 GB the memory goes to "
                     "textures; BB_OBJECT_MOTION=1 turns it on)\n",
                     (unsigned long long)(vram >> 20));

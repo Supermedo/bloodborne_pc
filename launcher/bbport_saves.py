@@ -16,7 +16,8 @@ This port reads one folder only: <saves folder>/savedata/1/<the dump's INSTALL_D
 TITLE_ID>/SPRJ0005, so a save is copied there whatever its folder was called. The game's files are
 copied through a staging folder, after the current saves were packed into
 <saves folder>/save_backups/; nothing is written to the source. Folders beside the save in
-<save title>/ count as saves to the game, so nothing else is ever put there.
+<save title>/ count as saves to the game, so nothing else is ever put there. The achievements of a bbport
+saves folder (its trophies.log) come along with its characters: added to this one's, never removed.
 """
 import datetime
 import glob
@@ -26,10 +27,12 @@ import os
 import re
 import shutil
 import struct
+import time
 import zipfile
 from pathlib import Path
 
 import bbport_character as character
+import bbport_trophies as trophies
 
 SAVE_DIR = 'SPRJ0005'
 DEFAULT_TITLE = 'CUSA00207'  # what the Game of the Year Edition (CUSA03173) and the EU base game use
@@ -47,8 +50,8 @@ SKIP = {'dvdroot_ps4', 'sce_module', 'cache', 'shader', 'shader_cache', 'fsr4_sh
 def save_title(game_dir):
     """The title the dump's saves go under (INSTALL_DIR_SAVEDATA, else TITLE_ID), as bbport does."""
     try:
-        from prepare import sfo
-        values = sfo((Path(game_dir) / 'sce_sys' / 'param.sfo').read_bytes())
+        from prepare import sfo, system_folder
+        values = sfo((system_folder(game_dir) / 'param.sfo').read_bytes())
         title = str(values.get('INSTALL_DIR_SAVEDATA') or values.get('TITLE_ID') or '').strip()
         if re.fullmatch(r'[A-Z]{4}\d{5}', title):
             return title
@@ -288,6 +291,61 @@ def find_in(root, depth=6):
     return found, encrypted
 
 
+# ---- put where the game does not read it ---------------------------------------------------------------
+# Copies of this port's own saves in its saves folder (the backups, a respec's copy, an import's staging):
+# never taken for a save the player put in the wrong place.
+OWN_COPIES = {'save_backups', 'save-backups', 'respec-backups', 'save_import', 'savedata.benchmark-backup'}
+
+
+def misplaced(user_dir, game_dir=''):
+    """([SaveSet], [encrypted]) while this port's own save folder has no complete save: the complete saves
+    elsewhere in the saves folder, where the game does not read them (another title's folder, shadPS4's
+    savedata/1000, a folder level too many or too few), and a PS4's encrypted ones (sdimg_ files or folders)."""
+    user, target = Path(user_dir), target_dir(user_dir, game_dir)
+    try:
+        if SaveSet('', target).complete:
+            return [], []
+    except OSError:
+        pass
+    here = os.path.normcase(os.path.abspath(target))
+    found, encrypted, level = [], [], [user]
+    for _ in range(7):
+        following = []
+        for folder in level:
+            try:
+                children = list(folder.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                name = child.name.lower()
+                if name.startswith('sdimg_'):
+                    encrypted.append(child)
+                elif not child.is_dir() or name in SKIP or name in OWN_COPIES or name.endswith('.sce_sys'):
+                    continue
+                elif is_save_folder(child):
+                    try:
+                        save = SaveSet(label_for(child), child)
+                    except OSError:
+                        continue
+                    if save.complete and os.path.normcase(os.path.abspath(child)) != here:
+                        found.append(save)
+                else:
+                    following.append(child)
+        level = following[:4000]
+    return found, encrypted
+
+
+def adopt_misplaced(user_dir, game_dir=''):
+    """Before a start: the one complete save in the saves folder where the game does not read it, copied to
+    where it does (import_set: what is there backed up first, the found save left where it is). Returns (the
+    save copied or None, the encrypted ones seen); with several found none is copied (which is the player's?)."""
+    found, encrypted = misplaced(user_dir, game_dir)
+    if len(found) != 1:
+        return None, encrypted
+    import_set(found[0], user_dir, game_dir)
+    return found[0], encrypted
+
+
 # ---- copying ---------------------------------------------------------------------------------------
 # ---- backups ---------------------------------------------------------------------------------------
 # <saves folder>/save_backups/*.zip, each with the game's files as this port keeps them and
@@ -296,8 +354,9 @@ def find_in(root, depth=6):
 # apart in Explorer too. Backups from before (saves_<date>.zip) have no such file: 'old'.
 BACKUP_DIR = 'save_backups'
 BACKUP_META = 'bbport-backup.json'
-REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'exit': 'After playing', 'import': 'Before an import',
-           'restore': 'Before a restore', 'file': 'From a file', 'old': 'Earlier backup'}
+REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'exit': 'After playing',
+           'import': 'Before an import', 'restore': 'Before a restore', 'respec': 'Before a respec',
+           'file': 'From a file', 'old': 'Earlier backup'}
 WORDS = dict(REASONS)  # the words for file names; the launcher puts its translations here
 AUTO_KEEP = 10  # automatic backups kept; the player's own are never removed by the launcher
 META_FILES = {'param.bin', 'icon0.png'}
@@ -514,13 +573,20 @@ def latest_change(user_dir, game_dir=''):
         return 0
 
 
-def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP):
+def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP, notes=None):
     """Before a start: a backup when the save changed since the newest backup; the oldest automatic
-    ones beyond `keep` go. Returns the new backup or None."""
+    ones beyond `keep` go. Returns the new backup or None. A backup dated more than a day ahead was made
+    while the PC's clock was wrong: it is not taken for the newest (it stopped every automatic backup
+    until its date), and `notes` gets a line for the log."""
     changed = latest_change(user_dir, game_dir)
     if not changed:
         return None
-    existing = backups(user_dir)
+    ahead = time.time() + 86400
+    existing = [b for b in backups(user_dir) if b.created.timestamp() <= ahead]
+    future = len(backups(user_dir)) - len(existing)
+    if future and notes is not None:
+        notes.append(f'Saves: {future} backup(s) dated in the future (the PC\'s clock was wrong when they were '
+                     'made) are not taken for the newest')
     if existing and existing[0].created.timestamp() >= int(changed):
         return None  # nothing played since
     made = backup(user_dir, game_dir, reason='auto')
@@ -592,6 +658,21 @@ def param_from_sfo(path):
     return data if len(data) == 1328 else None
 
 
+LOCK_TRIES, LOCK_WAIT = 4, 0.6
+
+
+def retried(action, *args):
+    """An antivirus that scans a file the moment it is read or written holds it briefly ([WinError 32],
+    [WinError 5], [Errno 13]: PermissionError): the step is tried again over about two seconds first."""
+    for attempt in range(1, LOCK_TRIES + 1):
+        try:
+            return action(*args)
+        except PermissionError:
+            if attempt == LOCK_TRIES:
+                raise
+            time.sleep(LOCK_WAIT)
+
+
 def import_set(save, user_dir, game_dir=''):
     """Copies `save` over this port's save (after a backup) and returns the backup's path."""
     if not save.complete:
@@ -605,7 +686,7 @@ def import_set(save, user_dir, game_dir=''):
     try:
         for path in save.files:
             copy = staging / path.name
-            shutil.copyfile(path, copy)
+            retried(shutil.copyfile, path, copy)
             os.chmod(copy, 0o666)
             if copy.stat().st_size != path.stat().st_size:
                 raise OSError(f'{path.name} was not copied completely')
@@ -613,9 +694,9 @@ def import_set(save, user_dir, game_dir=''):
         for old in target.iterdir():
             if old.is_file() and SAVE_FILES.match(old.name):
                 os.chmod(old, 0o666)
-                old.unlink()
+                retried(old.unlink)
         for copy in staging.iterdir():
-            os.replace(copy, target / copy.name)
+            retried(os.replace, copy, target / copy.name)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     meta = target.with_name(SAVE_DIR + '.sce_sys')
@@ -638,6 +719,23 @@ def import_set(save, user_dir, game_dir=''):
                 shutil.copyfile(folder / 'icon0.png', meta / 'icon0.png')
                 break
     return archive
+
+
+def bring_trophies(save, user_dir):
+    """The achievements of the saves folder `save` lies in (another installation's trophies.log) added to this
+    one's, so a character brought over keeps them; how many were new here. Saves from elsewhere (shadPS4,
+    bbhost, a backup) have none."""
+    parts = [part.lower() for part in save.folder.parts]
+    if 'savedata' not in parts:
+        return 0
+    root = Path(*save.folder.parts[:len(parts) - 1 - parts[::-1].index('savedata')])
+    source, target = root / trophies.LOG_NAME, Path(user_dir) / trophies.LOG_NAME
+    try:
+        if not source.is_file() or source.resolve() == target.resolve():
+            return 0
+    except OSError:
+        return 0
+    return trophies.merge_log(source, target)
 
 
 def restore(archive, user_dir, game_dir=''):
@@ -667,12 +765,12 @@ def restore(archive, user_dir, game_dir=''):
         for old in target.iterdir():
             if old.is_file() and SAVE_FILES.match(old.name):
                 os.chmod(old, 0o666)
-                old.unlink()
+                retried(old.unlink)
         for copy in (staging / 'save').iterdir():
-            os.replace(copy, target / copy.name)
+            retried(os.replace, copy, target / copy.name)
         meta.mkdir(exist_ok=True)  # the game's metadata writes fail silently without it
         for copy in (staging / 'meta').iterdir():
-            os.replace(copy, meta / copy.name)
+            retried(os.replace, copy, meta / copy.name)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return before

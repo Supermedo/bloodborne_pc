@@ -31,6 +31,42 @@ void* GetRip(void* ctx) {
 #endif
 }
 
+void IncrementRip(void* ctx, u64 length) {
+#if defined(_WIN32)
+    ((EXCEPTION_POINTERS*)ctx)->ContextRecord->Rip += length;
+#elif defined(__APPLE__) && defined(ARCH_X86_64)
+    ((ucontext_t*)ctx)->uc_mcontext->__ss.__rip += length;
+#elif defined(__APPLE__) && defined(ARCH_ARM64)
+    ((ucontext_t*)ctx)->uc_mcontext->__ss.__pc += length;
+#elif defined(__FreeBSD__)
+    ((ucontext_t*)ctx)->uc_mcontext.mc_rip += length;
+#elif defined(ARCH_X86_64)
+    ((ucontext_t*)ctx)->uc_mcontext.gregs[REG_RIP] += length;
+#else
+#error "Unsupported architecture"
+#endif
+}
+
+void SetGpr(void* ctx, Gpr reg, u64 value) {
+#if defined(_WIN32)
+    auto* regs = ((EXCEPTION_POINTERS*)ctx)->ContextRecord;
+    (reg == Gpr::Rdi ? regs->Rdi : regs->R10) = value;
+#elif defined(__APPLE__) && defined(ARCH_X86_64)
+    auto& regs = ((ucontext_t*)ctx)->uc_mcontext->__ss;
+    (reg == Gpr::Rdi ? regs.__rdi : regs.__r10) = value;
+#elif defined(__APPLE__) && defined(ARCH_ARM64)
+    // No x86 registers (and no SRT walker) here.
+    (void)ctx, (void)reg, (void)value;
+#elif defined(__FreeBSD__)
+    auto& regs = ((ucontext_t*)ctx)->uc_mcontext;
+    (reg == Gpr::Rdi ? regs.mc_rdi : regs.mc_r10) = value;
+#elif defined(ARCH_X86_64)
+    ((ucontext_t*)ctx)->uc_mcontext.gregs[reg == Gpr::Rdi ? REG_RDI : REG_R10] = value;
+#else
+#error "Unsupported architecture"
+#endif
+}
+
 bool IsWriteError(void* ctx) {
 #if defined(_WIN32)
     return ((EXCEPTION_POINTERS*)ctx)->ExceptionRecord->ExceptionInformation[0] == 1;

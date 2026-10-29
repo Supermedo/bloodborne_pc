@@ -34,9 +34,28 @@ def unpack(fmt, data, offset):
     return struct.unpack(fmt, span(data, offset, struct.calcsize(fmt)))
 
 
+def parse_elf(data):
+    """Read a plain ELF (some dumpers omit the PS4 SELF wrapper)."""
+    header = unpack('<16sHHIQQQIHHHHHH', data, 0)
+    if header[0][:7] != b'\x7fELF\x02\x01\x01' or header[2] != 62:
+        raise ValueError("expected little-endian x86-64 ELF")
+    if header[9] != 56 or not 0 < header[10] < 256:
+        raise ValueError("unsupported program headers")
+    ph = [dict(zip(('type', 'flags', 'offset', 'vaddr', 'paddr', 'filesz', 'memsz', 'align'),
+                   unpack('<IIQQQQQQ', data, header[5] + i * 56)))
+          for i in range(header[10])]
+    end = max(header[5] + header[10] * 56,
+              max(p['offset'] + p['filesz'] for p in ph))
+    if end > 512 * 1024 * 1024:
+        raise ValueError("probe image exceeds 512 MiB limit")
+    return bytearray(span(data, 0, end)), header, ph, [], []
+
+
 def parse_self(data):
+    if span(data, 0, 4) == b'\x7fELF':
+        return parse_elf(data)
     if span(data, 0, 4) != b'O\x15=\x1d':
-        raise ValueError("expected PS4 SELF")
+        raise ValueError("expected PS4 SELF or ELF")
     count, = unpack('<H', data, 24)
     base = 32 + count * 32
     header = unpack('<16sHHIQQQIHHHHHH', data, base)
@@ -80,6 +99,16 @@ def parse_self(data):
     return elf, header, ph, segments, missing
 
 
+def system_folder(game):
+    """The dump's sce_sys folder (param.sfo). PKG tools such as PkgEditor name it Sc0, inside the game folder or
+    beside it (Image0 and Sc0 side by side); run.py maps that to sce_sys in the game view."""
+    game = Path(game)
+    for folder in (game / 'sce_sys', game / 'Sc0', game.parent / 'Sc0'):
+        if (folder / 'param.sfo').is_file():
+            return folder
+    return game / 'sce_sys'
+
+
 def sfo(data):
     magic, version, keys, values, count = unpack('<4sIIII', data, 0)
     if magic != b'\0PSF':
@@ -99,17 +128,47 @@ def nid(name):
     return base64.b64encode(digest).decode().rstrip('=').replace('/', '-')
 
 
+# A PS4 program's tables by the program header type or dynamic entry that points at them: named when one
+# is missing (a file another tool converted, or one from another release), where prepare used to fail
+# with the entry's number alone ("prepare failed: 1627390005").
+TABLES = {2: 'dynamic section', 0x61000000: 'library data', 0x61000035: 'string table', 0x61000037: 'string table',
+          0x61000039: 'symbol table', 0x6100003f: 'symbol table', 0x61000029: 'relocation table',
+          0x6100002d: 'relocation table', 0x6100002f: 'jump table', 0x61000031: 'jump table'}
+
+
+def not_original(name, key):
+    return ValueError(f'{name} is not the original file: its {TABLES.get(key, hex(key))} is missing '
+                      '(converted by another tool, or from another release)')
+
+
+def segment(ph, kind, name):
+    """The program header of that type, or why the file cannot be used."""
+    found = next((p for p in ph if p['type'] == kind), None)
+    if found is None:
+        raise not_original(name, kind)
+    return found
+
+
+def entries(tags, start, size, name):
+    """A table's offset and size from the dynamic section, or why the file cannot be used."""
+    for key in (start, size):
+        if key not in tags:
+            raise not_original(name, key)
+    return tags[start], tags[size]
+
+
 def inspect_libc(path):
     """Prove that this dump's _init_env is exactly RET; never assume it."""
+    name = f'{path.parent.name}/{path.name}'
     source = path.read_bytes()
     elf, header, ph, _, missing = parse_self(source)
-    dynamic = next(p for p in ph if p['type'] == 2)
+    dynamic = segment(ph, 2, name)
     tags = dict(unpack('<QQ', elf, pos) for pos in
                 range(dynamic['offset'], dynamic['offset'] + dynamic['filesz'], 16))
-    lib = next(p for p in ph if p['type'] == 0x61000000)
+    lib = segment(ph, 0x61000000, name)
     blob = span(elf, lib['offset'], lib['filesz'])
-    strings = span(blob, tags[0x61000035], tags[0x61000037])
-    syms = span(blob, tags[0x61000039], tags[0x6100003f])
+    strings = span(blob, *entries(tags, 0x61000035, 0x61000037, name))
+    syms = span(blob, *entries(tags, 0x61000039, 0x6100003f, name))
     evidence = {'sha256': hashlib.sha256(source).hexdigest(), 'init_env_is_ret': False}
     for pos in range(0, len(syms), 24):
         name, info, other, section, value, size = unpack('<IBBHQQ', syms, pos)
@@ -145,7 +204,7 @@ def prepare(game, out):
         if p['filesz'] > p['memsz']:
             raise ValueError('segment file size exceeds memory size')
         image[p['vaddr']:p['vaddr'] + p['filesz']] = span(elf, p['offset'], p['filesz'])
-    dp = next(p for p in ph if p['type'] == 2)
+    dp = segment(ph, 2, 'eboot.bin')
     dyn = []
     for pos in range(dp['offset'], dp['offset'] + dp['filesz'], 16):
         tag, value = unpack('<QQ', elf, pos)
@@ -153,13 +212,13 @@ def prepare(game, out):
             break
         dyn.append((tag, value))
     tags = dict(dyn)
-    lib = next(p for p in ph if p['type'] == 0x61000000)
+    lib = segment(ph, 0x61000000, 'eboot.bin')
     blob = span(elf, lib['offset'], lib['filesz'])
-    strings = span(blob, tags[0x61000035], tags[0x61000037])
+    strings = span(blob, *entries(tags, 0x61000035, 0x61000037, 'eboot.bin'))
     def string(off):
         span(strings, off, 1)
         return strings[off:strings.index(0, off)].decode('ascii')
-    syms = span(blob, tags[0x61000039], tags[0x6100003f])
+    syms = span(blob, *entries(tags, 0x61000039, 0x6100003f, 'eboot.bin'))
     if len(syms) % 24:
         raise ValueError('bad symbol table size')
     symbols = []
@@ -168,7 +227,7 @@ def prepare(game, out):
         symbols.append(dict(name=string(name), type=info & 15, section=shndx, value=value, size=sz))
     relocs, counts, imports = [], collections.Counter(), {}
     for offset_tag, size_tag in ((0x61000029, 0x6100002d), (0x6100002f, 0x61000031)):
-        table = span(blob, tags[offset_tag], tags[size_tag])
+        table = span(blob, *entries(tags, offset_tag, size_tag, 'eboot.bin'))
         if len(table) % 24:
             raise ValueError('bad relocation table size')
         for pos in range(0, len(table), 24):
@@ -232,12 +291,8 @@ def prepare(game, out):
         f.write(image)
     (out / 'eboot.elf').write_bytes(elf)
     (out / 'entry.bin').write_bytes(image[:1024])
-    resources = collections.Counter()
-    total_bytes = 0
-    for path in (game / 'dvdroot_ps4').rglob('*'):
-        if path.is_file():
-            resources[path.relative_to(game / 'dvdroot_ps4').parts[0]] += 1
-            total_bytes += path.stat().st_size
+    # No count of the game's resource files here: walking dvdroot_ps4 (about 29,000 files) took
+    # 5.5 s of every game start, and nothing read the numbers.
     report = dict(source_sha256=hashlib.sha256(source).hexdigest(), source_bytes=len(source),
                   sfo=sfo((game / 'sce_sys/param.sfo').read_bytes()), entry=hex(header[4]),
                   image_bytes=size, program_headers=ph, self_segments=segments,
@@ -246,7 +301,6 @@ def prepare(game, out):
                   import_name_hints={name: known[name.split('#')[0]] for name in names if name.split('#')[0] in known},
                   libc_evidence=libc_evidence,
                   bundled_modules=sorted(p.name for p in (game / 'sce_module').iterdir()),
-                  resources=dict(resources), resource_bytes=total_bytes,
                   status='Prepared only; execution and Vulkan are tested separately.')
     (out / 'analysis.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n',
                                        encoding='utf-8')

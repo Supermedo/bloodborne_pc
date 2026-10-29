@@ -1,5 +1,5 @@
 # Bloodborne for Windows
-<a href="https://trendshift.io/repositories/286547?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-286547" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/286547/daily?language=C%2B%2B" alt="Supermedo%2Fbloodborne_pc | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/306163?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-306163" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/306163/daily?language=C%2B%2B" alt="Supermedo%2Funcharted_pc | Trendshift" width="250" height="55"/></a>
 
 **Bloodborne running natively on Windows 10 and 11, by [Supermedo](https://github.com/Supermedo) Mohammed Albarghouthi.**
 
@@ -98,7 +98,9 @@ dump, also dump your add-ons: each is a folder named like `SPEXPANSIONDLC03` wit
 it as **DLC folder** on **Game & effects**, or copy them to `user\addcont\<title id>\` (the
 layout shadPS4 and bbport use).
 
-In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu.
+In the game, **Insert** (or **L3+R3** on a controller) opens the settings menu. The game's own
+**System** menu also has **PC Graphics**, **PC Effects** and **PC Options**: the main settings on
+the game's settings screen (bbport.ini `pc_menu=0` removes them).
 Keyboard: WASD move, arrows camera, Space Cross, Left Shift Circle, E Square, V Triangle,
 1/3 L1/R1, R/F L2/R2, Z L3, Q/C R3 (lock-on), I/K/J/L d-pad, Enter Options, Tab / Backspace
 left / right touchpad half. Xbox controllers: Back + d-pad left / right clicks the left / right
@@ -211,5 +213,9 @@ artwork.
 
 ## License
 
-GNU GPL v2 or later ([LICENSE](LICENSE)). Third-party components keep their own licenses
-(see `licenses\` in the download).
+The port's own code is GNU GPL v2 or later ([LICENSE](LICENSE)). Some parts are GPL v3 or later:
+The Hunter's Dream online code (`gpu/bbnet/thd/`, from droogie's bbhost) and the FSR 4.1 launcher files
+(`launcher/bbport_fsr41*.py`, `launcher/bbport_fsr412.py`, `launcher/bbport_driver_runtime.py`). The
+program built from them together is therefore distributed under the GNU GPL v3 or later
+(`licenses\GPL-3.0-bbhost-online-code.txt` in the download). Third-party components keep their own
+licenses (see `licenses\` in the download).

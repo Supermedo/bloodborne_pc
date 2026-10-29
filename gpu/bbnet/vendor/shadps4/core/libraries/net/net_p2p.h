@@ -23,6 +23,10 @@ bool P2PTransportIsReady();
 u16 GetP2PConfiguredPort(); // host order
 u16 GetP2PBoundPort();      // host order, 0 when not running
 u32 GetP2PAdvertisedAddr(); // Network order, 0 if unknown.
+// SuperMedo relay through the shadNet server (network order, 0 = none), and the peers
+// whose packets go through it.
+void SetP2PRelayServer(u32 addr, u16 port);
+void UseP2PRelayFor(u32 peer_addr);
 u16 GetP2PAdvertisedPort();
 int P2PSignalingSendTo(const void* data, u32 len, u32 dest_addr, u16 dest_port);
 int P2PSignalingRecvFrom(void* buf, u32 len, u32* from_addr, u16* from_port);

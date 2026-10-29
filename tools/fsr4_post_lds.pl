@@ -10,7 +10,8 @@
 # from shared memory would become a 16-bit store, which rounds differently), so the result is
 # bit-exact with the original pass.
 #
-# spirv-cross mistranslates the signed int8 unpacks; Fsr4SpirvCrossFixes.pm corrects them.
+# spirv-cross mistranslates the signed int8 unpacks and its const tables are copied at every
+# dynamic index; Fsr4SpirvCrossFixes.pm corrects both.
 use strict;
 use warnings;
 local $/;
@@ -22,6 +23,7 @@ use FindBin;
 use lib $FindBin::Bin;
 use Fsr4SpirvCrossFixes;
 $src = Fsr4SpirvCrossFixes::signed_unpack($src);
+$src = Fsr4SpirvCrossFixes::single_tables($src);
 
 my %slot = (rw_recurrent_0 => ['bb_rec', 'vec4'], rw_history_color => ['bb_hist', 'vec4'],
             rw_mlsr_output_color => ['bb_out', 'vec4']);

@@ -22,6 +22,7 @@ namespace {
 std::thread g_thread;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_active{false};
+std::atomic<bool> g_pad_in_use{false};
 
 #ifdef _WIN32
 HANDLE g_stopEvent = nullptr;
@@ -29,7 +30,7 @@ HANDLE g_timer = nullptr;
 #endif
 
 void Sample() {
-    if (g_active.load(std::memory_order_acquire)) {
+    if (g_active.load(std::memory_order_acquire) && !g_pad_in_use.load(std::memory_order_acquire)) {
         float xrel = 0.0f;
         float yrel = 0.0f;
         SDL_GetRelativeMouseState(&xrel, &yrel);
@@ -37,7 +38,7 @@ void Sample() {
             Core::BloodborneCam::Instance().OnMouseMotion(xrel, yrel);
         }
     } else {
-        // Gated pumps must not bank motion for a later sample.
+        // Gated pumps (and a mapping program's motion) must not bank motion for a later sample.
         SDL_GetRelativeMouseState(nullptr, nullptr);
     }
 }
@@ -123,6 +124,10 @@ void Stop() {
 
 void SetActive(bool active) {
     g_active.store(active, std::memory_order_release);
+}
+
+void SetPadInUse(bool in_use) {
+    g_pad_in_use.store(in_use, std::memory_order_release);
 }
 
 } // namespace BbMouse

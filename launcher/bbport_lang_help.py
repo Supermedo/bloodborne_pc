@@ -14,7 +14,34 @@ HELP = {'de': {
     'inside (Game & language).':
         'Keine eboot.bin im Spielordner: Wähle den Ordner, in dem eboot.bin, sce_sys und dvdroot_ps4 direkt liegen '
         '(Spiel & Sprache).',
-    'Check again': 'Erneut prüfen', 'Start anyway?': 'Trotzdem starten?', 'Show the fix?': 'Lösung anzeigen?',
+    'Check again': 'Erneut prüfen', 'Start anyway?': 'Trotzdem starten?',
+    'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) with a '
+    'current driver.':
+        'Es wurde keine Grafikkarte mit Vulkan 1.3 gefunden. Der Port braucht eine (GTX 1050 Ti, GTX 1650, RX 570 '
+        'oder neuer) mit aktuellem Treiber.',
+    'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+    'graphics card.':
+        'Es wurde kein funktionierender Vulkan-Treiber gefunden (vulkan-1.dll fehlt oder ist defekt). Installiere '
+        'den aktuellen Treiber deiner Grafikkarte.',
+    'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current driver '
+    'for your graphics card.':
+        'Die Vulkan-Dateien des Grafiktreibers sind zu alt ({} statt der 1.3, die der Port braucht). Installiere den '
+        'aktuellen Treiber deiner Grafikkarte.',
+    '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card is '
+    'too old for the port.':
+        '{0} kann den Port nicht ausführen: Dem Grafiktreiber fehlt {1}. Aktualisiere ihn; hilft das nicht, ist '
+        'die Karte zu alt für den Port.',
+    'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current driver '
+    'for your graphics card.':
+        'Der Grafiktreiber ist abgestürzt, als der Launcher ihn nach der Karte gefragt hat (Code {}). Installiere '
+        'den aktuellen Treiber deiner Grafikkarte.',
+    'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+        'Grafikkarte {0}: Vulkan {1} und alles andere, was der Port braucht.',
+    '✗ The graphics card cannot run the port: see Help':
+        '✗ Die Grafikkarte kann den Port nicht ausführen: siehe Hilfe',
+    'The game will likely not start, or close right away.':
+        'Das Spiel startet dann wahrscheinlich nicht oder schließt sich sofort.',
+    'Show the fix?': 'Lösung anzeigen?',
     'eboot.bin cannot be read.': 'eboot.bin kann nicht gelesen werden.',
     'Checking the game files…': 'Prüfe die Spieldateien…', 'How to fix': 'So behebst du es',
     'These mods bring their own eboot.bin: {}. Turn them off or remove that file from them.':
@@ -26,6 +53,13 @@ HELP = {'de': {
         'Frag im Hilfe-Forum des Community-Discords. Speichere einen Bericht und häng ihn an: Er enthält das Log, '
         'deine Einstellungen und die Daten dieses PCs (keine Passwörter), so sieht ein Helfer die Ursache sofort.',
     'Save a report': 'Bericht speichern', 'Open the Discord': 'Discord öffnen',
+    'Collecting the report… (up to a minute)':
+        'Der Bericht wird erstellt … (bis zu einer Minute)',
+    'The BB Report Tool made no zip.':
+        'Das BB Report Tool hat keine ZIP-Datei erstellt.',
+    'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+        'Die Zusammenfassung ist in der Zwischenablage: Füge sie in deinen #help-Beitrag ein und hänge dann die '
+        'ZIP-Datei an.',
     'eboot.bin has a 60 FPS patch built in: the game crashes with it (Help)':
         'In eboot.bin ist ein 60-FPS-Patch eingebaut: Das Spiel stürzt damit ab (Hilfe)',
     'eboot.bin is not the clean 1.09 one: 30 FPS, no effect options (Help)':
@@ -45,6 +79,22 @@ HELP = {'de': {
         'Speicher für den Start: {} GB frei (RAM und Auslagerungsdatei), etwa {} GB nötig.',
     'Saved: {}': 'Gespeichert: {}', 'Empty files in the game folder, for example {}.':
         'Leere Dateien im Spielordner, zum Beispiel {}.',
+    'Files of different versions are mixed':
+        'Dateien verschiedener Versionen sind gemischt',
+    "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a test "
+    'build was unpacked over an older version or only part of a package was copied. The game then stops at the '
+    'start with a black screen (the log says "bad patch entry").':
+        'Das Programm des Ports (bin\\bb-probe.exe) und seine Skripte stammen aus verschiedenen Versionen, zum '
+        'Beispiel wenn eine Testversion über eine ältere Version entpackt oder nur ein Teil eines Pakets kopiert '
+        'wurde. Das Spiel bleibt dann beim Start mit schwarzem Bild stehen (im Log steht „bad patch entry“).',
+    'Download the whole package of the version you want to play.':
+        'Lade das ganze Paket der Version herunter, die du spielen willst.',
+    'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+        'Entpacke alles über diesen Ordner und ersetze die Dateien, oder in einen neuen, leeren Ordner.',
+    'Files of different versions in this installation: {}.':
+        'Dateien verschiedener Versionen in dieser Installation: {}.',
+    "The port's files all belong to version {}.":
+        'Die Dateien des Ports gehören alle zu Version {}.',
     'The game folder is complete ({} files, {} GB).': 'Der Spielordner ist vollständig ({} Dateien, {} GB).',
     'The page file is off. ': 'Die Auslagerungsdatei ist aus. ', 'Could not save it: {}': 'Speichern fehlgeschlagen: {}',
     'eboot.bin is the clean 1.09 file ({} bytes).': 'eboot.bin ist die saubere 1.09-Datei ({} Bytes).',
@@ -58,6 +108,10 @@ HELP = {'de': {
     'close at once (code 3).':
         'Windows hat gerade nur {} GB für Programme frei; das Spiel reserviert beim Start etwa {} GB und würde '
         'sofort schließen (Code 3).',
+    'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+    'when you ask for help.':
+        'Das Spiel endete mit einem Fehler (Code {}). Die Hilfe hat die Prüfungen, und „Bericht speichern“ '
+        'erstellt die ZIP-Datei, die du anhängst, wenn du um Hilfe bittest.',
     'The game ended with an error (code {}). Its log names the cause:':
         'Das Spiel endete mit einem Fehler (Code {}). Sein Log nennt die Ursache:',
     # the problems
@@ -179,6 +233,8 @@ HELP = {'de': {
     'Update the driver: NVIDIA App, AMD Software (Adrenalin) or Intel Driver & Support Assistant.':
         'Treiber aktualisieren: NVIDIA App, AMD Software (Adrenalin) oder Intel Driver & Support Assistant.',
     'Restart the PC after installing it.': 'Starte den PC nach der Installation neu.',
+    'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+        'Schließe Overlays wie MSI Afterburner und RivaTuner (RTSS): Sie greifen in den Grafiktreiber ein.',
     'Overclocked graphics card or memory: try the standard clocks.':
         'Übertaktete Grafikkarte oder Speicher: Probier die Standardtakte.',
     'Stutter in the first minutes': 'Ruckler in den ersten Minuten',

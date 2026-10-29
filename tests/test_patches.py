@@ -1,19 +1,21 @@
 from paths import ROOT
 import os
+import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from patches import (EBOOT_BASE, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
+from patches import (EBOOT_BASE, FIXES, FPS_PRESETS, OUTPUT_SIZE, RESOLUTION_TEMPLATE, SCENE_HEIGHT,
                      SCENE_WIDTH, UI_HEIGHT, UI_WIDTH, compile_patches,
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
                      compile_external, eboot_bytes, eboot_matches_patches, patch_fingerprint,
-                     patch_sites, PATCH_GROUPS, image_groups, matching_groups)
+                     patch_sites, PATCH_GROUPS, image_groups, matching_groups, game_app_version, eboot_is_109)
 
 XML = ROOT / 'patches/Bloodborne.xml'
 SEGMENTS = [(0, 0x6000000)]
@@ -133,6 +135,14 @@ class DebugPatchTests(unittest.TestCase):
             (font / 'DbgFont14h.tpf').write_bytes(b'test')
             validate_patch_requirements(names, game)
 
+    def test_fixes_raise_the_frame_heaps_without_touching_other_patches(self):
+        writes = compile_patches(XML, FIXES, '01.09', SEGMENTS)
+        self.assertEqual(writes, [(0x2195c0a, b'\x00\x00\x10\x00'), (0x2195c47, b'\x00\x00\x10\x00')])
+        others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
+        for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):
+            for fix, value in writes:
+                self.assertFalse(offset < fix + len(value) and fix < offset + len(data), hex(offset))
+
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
             validate_patch_requirements(['Enemy Control', 'Restore Debug Camera'], Path('.'))
@@ -177,6 +187,24 @@ class ExternalPatchTests(unittest.TestCase):
 
     def test_built_in_file_is_not_external(self):
         self.assertEqual(external_patches(XML.parent), [])
+
+    def test_a_copy_of_the_ports_file_is_not_external(self):
+        # Another installation's patches folder (the launcher's settings are shared): its
+        # Bloodborne.xml's isEnabled flags (the ultrawide template among them) were all applied.
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / 'patches'
+            copy.mkdir()
+            shutil.copy(XML, copy / 'Bloodborne.xml')
+            self.assertEqual(external_patches(copy), [])
+            # Also beside another installation's program, by its name alone.
+            plain = Path(directory) / 'old-port'
+            (plain / 'patches').mkdir(parents=True)
+            (plain / 'run.py').write_text('')
+            (plain / 'patches' / 'Bloodborne.xml').write_text(EXTERNAL)
+            self.assertEqual(external_patches(plain / 'patches'), [])
+            # A player's file of patches stays external.
+            (copy / 'extra.xml').write_text(EXTERNAL)
+            self.assertEqual(len(external_patches(copy)), 3)
 
 
 FINGERPRINTED = """<?xml version="1.0"?>
@@ -306,6 +334,72 @@ class PatchGroupTests(unittest.TestCase):
         self.assertIn('ultrawide 5120x1440', result.stdout)
         blob = (self.dir / 'patches.bin').read_bytes()
         self.assertGreater(struct.unpack_from('<Q', blob, 16)[0], 0)
+
+    def test_an_external_resolution_patch_does_not_mix_with_the_ports(self):
+        # A player's shadPS4 Bloodborne.xml with Kyo's 21:9 2560x1080 patch on, output 2560x1440:
+        # both were applied over the same code and the picture was cut off (reported on 1.9.5 beta 2).
+        (self.dir / 'eboot.elf').write_bytes(self.clean)
+        text = XML.read_text(encoding='utf-8')
+        start = text.index('<Metadata Title="Bloodborne" Name="Resolution Patch 2560x1080 (21:9)"')
+        block = text[start:text.index('</Metadata>', start) + len('</Metadata>')]
+        patches = self.dir / 'patches'
+        patches.mkdir()
+        (patches / 'Bloodborne.xml').write_text(f'<?xml version="1.0"?>\n<Patch>\n{block}\n</Patch>\n', encoding='utf-8')
+        config = self.dir / 'patches.json'
+        config.write_text('{"enabled": ["Bloodborne.xml/Resolution Patch 2560x1080 (21:9)"], "disabled": []}')
+        settings = self.dir / 'bbport.ini'
+        settings.write_text('output_res=2560x1440\nupscaler=fsr4\npreset=1\nquit_to_desktop=0\nrebirth=0\n')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/patches.py'), '--out', str(self.dir),
+                                 '--fps', '60', '--settings', str(settings), '--game-dir', str(self.dir),
+                                 '--render-res', '1706x960', '--output-res', '2560x1440',
+                                 '--patches-dir', str(patches), '--patches-config', str(config)],
+                                capture_output=True, text=True, env={**os.environ, 'BB_FORCE_PATCHES': ''})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Resolution Patch 2560x1080 (21:9) skipped: the port sets the resolution', result.stdout)
+        self.assertIn('Patches: scene 1706x960', result.stdout)
+
+
+def param_sfo(app_ver):
+    """param.sfo with the single string entry APP_VER."""
+    key, value = b'APP_VER\0', app_ver.encode() + b'\0'
+    keys, values = 20 + 16, 20 + 16 + len(key)
+    return (struct.pack('<4sIIII', b'\0PSF', 0x101, keys, values, 1)
+            + struct.pack('<HHIII', 0, 0x204, len(value), len(value), 0) + key + value)
+
+
+class GameVersionTests(unittest.TestCase):
+    def game(self, app_ver, eboot=True):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        game = Path(directory.name)
+        (game / 'sce_sys').mkdir()
+        (game / 'sce_sys/param.sfo').write_bytes(param_sfo(app_ver))
+        if eboot:
+            (game / 'eboot.bin').write_bytes(b'eboot')
+        return game
+
+    def test_goty_dump_with_the_109_code_is_109(self):
+        # Game of the Year discs say APP_VER 01.00 over the 1.09 executable.
+        with mock.patch('patches.eboot_is_109', return_value=True):
+            self.assertEqual(game_app_version(self.game('01.00')), '01.09')
+
+    def test_other_code_keeps_the_app_ver(self):
+        with mock.patch('patches.eboot_is_109', return_value=False):
+            self.assertEqual(game_app_version(self.game('01.00')), '01.00')
+
+    def test_missing_eboot_keeps_the_app_ver(self):
+        with mock.patch('patches.eboot_is_109') as check:
+            self.assertEqual(game_app_version(self.game('01.00', eboot=False)), '01.00')
+        check.assert_not_called()
+
+    def test_109_app_ver_skips_the_fingerprint(self):
+        with mock.patch('patches.eboot_is_109') as check:
+            self.assertEqual(game_app_version(self.game('01.09')), '01.09')
+        check.assert_not_called()
+
+    def test_unreadable_eboot_is_not_109(self):
+        game = self.game('01.00')
+        self.assertFalse(eboot_is_109(str(game / 'eboot.bin')))
 
 
 if __name__ == '__main__':

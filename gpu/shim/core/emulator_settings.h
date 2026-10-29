@@ -27,9 +27,18 @@ public:
     u32 GetInternalScreenHeight() { static const auto value = u32(Number("BB_INTERNAL_HEIGHT", 1080)); return value; }
     std::string GetPresentMode() { const char* v = std::getenv("BB_PRESENT_MODE"); return v ? v : "Mailbox"; }
     int GetRcasAttenuation() { static const auto value = int(Number("BB_RCAS_ATTENUATION", 250)); return value; }
-    // bbport: Relaxed by default: without readbacks FaceGen reads stale GPU-written vertices
-    // (vertex explosions); in Hunter's Nightmare it costs no measurable frame rate.
-    u32 GetReadbacksMode() { static const auto value = u32(Number("BB_READBACKS", GpuReadbacksMode::Relaxed)); return value; }
+    // Relaxed by default: FaceGen GPU-writes the face, and the next upload must see those
+    // vertices. BB_READBACKS=0 (launcher Off) used to skip that copy and explode the hunter's
+    // face; Off is treated as Relaxed. BB_READBACKS=2 is Precise (read-protects every GPU page;
+    // can flicker cloth).
+    u32 GetReadbacksMode() {
+        static const auto value = []() -> u32 {
+            const long mode = Number("BB_READBACKS", GpuReadbacksMode::Relaxed);
+            return mode == GpuReadbacksMode::Disabled ? u32(GpuReadbacksMode::Relaxed)
+                                                      : u32(mode);
+        }();
+        return value;
+    }
     // bbport: BB_VBLANK_HZ=0 (uncapped presets): vblank runs at 480 Hz so a finished frame is
     // shown within ~2 ms instead of waiting for the next display-rate vblank (below the display
     // rate frames alternated 10/20 ms at 100 Hz: judder), and GetFrameLimit() caps the rate at
@@ -42,12 +51,28 @@ public:
         }();
         return value;
     }
+    /// bbport: BB_VRR=1, variable refresh rate (G-Sync, FreeSync): V-Sync (FIFO), whose images
+    /// a VRR display shows as they come, and a frame cap a little below the refresh rate so the
+    /// game stays in the display's range (at the refresh rate itself V-Sync queues frames).
+    bool IsVrr() { static const auto value = Flag("BB_VRR", false); return value; }
+    /// The highest frame rate with VRR: 3 FPS or 2.5% below the refresh rate, at most 120.
+    u32 GetVrrLimit() {
+        const u32 hz = BbDisplayRefreshHz();
+        return std::min<u32>(120, hz - std::max<u32>(3, hz / 40));
+    }
     /// Frames per second the present thread lets through; 0 = no limit. BB_FPS_LIMIT overrides.
     u32 GetFrameLimit() {
-        static const u32 value = [] {
+        static const u32 value = [this] {
             const long limit = Number("BB_FPS_LIMIT", -1);
-            if (limit >= 0) return u32(limit);
-            return Number("BB_VBLANK_HZ", 60) > 0 ? 0u : std::min<u32>(BbDisplayRefreshHz(), 120);
+            u32 value = limit >= 0 ? u32(limit)
+                        : Number("BB_VBLANK_HZ", 60) > 0
+                            ? 0u
+                            : std::min<u32>(BbDisplayRefreshHz(), 120);
+            // VRR: uncapped (BB_VBLANK_HZ=0) frame rates stay below the refresh rate.
+            if (IsVrr() && Number("BB_VBLANK_HZ", 60) <= 0 && (value == 0 || value > GetVrrLimit())) {
+                value = GetVrrLimit();
+            }
+            return value;
         }();
         return value;
     }
@@ -56,6 +81,9 @@ public:
     bool IsDumpShaders() { static const auto value = Flag("BB_DUMP_SHADERS", false); return value; }
     bool IsFsrEnabled() { static const auto value = Flag("BB_FSR1", false); return value; }
     bool IsHdrAllowed() { static const auto value = Flag("BB_HDR", false); return value; }
+    // bbport: gamma 2.2 for the SDR picture when Windows runs the display in HDR (post_process.frag).
+    bool IsHdrGammaEnabled() { static const auto value = Flag("BB_HDR_GAMMA", true); return value; }
+    bool IsInlineFetchShader() { return false; }
     bool IsNullGPU() { static const auto value = Flag("BB_NULL_GPU", false); return value; }
     bool IsPatchShaders() { return false; }
     bool IsPipelineCacheArchived() { return false; }

@@ -145,6 +145,36 @@ add_custom_target(host_shaders DEPENDS ${SHADER_HEADERS})
 file(GLOB_RECURSE VIDEO_CORE CONFIGURE_DEPENDS shadps4/video_core/*.cpp)
 file(GLOB_RECURSE RECOMPILER CONFIGURE_DEPENDS shadps4/shader_recompiler/*.cpp)
 list(FILTER VIDEO_CORE EXCLUDE REGEX "renderdoc\\.cpp$")
+
+# bbport: the shader build, a fingerprint of the sources that decide what the pipeline cache
+# holds (the recompiler, the registers it reads, the pipeline keys and their serialization).
+# The cache keeps it and is rebuilt when another build wrote it (vk_pipeline_serialization.cpp).
+# Line ends do not count, so a checkout with CRLF gives the same build as one with LF.
+file(GLOB_RECURSE BB_SHADER_BUILD_SOURCES CONFIGURE_DEPENDS
+    shadps4/shader_recompiler/*
+    shadps4/video_core/amdgpu/regs*.h shadps4/video_core/amdgpu/pixel_format.h
+    shadps4/video_core/amdgpu/resource.h
+    shadps4/video_core/renderer_vulkan/vk_pipeline_*.cpp shadps4/video_core/renderer_vulkan/vk_pipeline_*.h
+    shadps4/video_core/renderer_vulkan/vk_graphics_pipeline.*
+    shadps4/video_core/renderer_vulkan/vk_compute_pipeline.*
+    shadps4/video_core/renderer_vulkan/vk_shader_util.*
+    shadps4/common/serdes.h)
+list(SORT BB_SHADER_BUILD_SOURCES)
+set(BB_SHADER_BUILD_HASHES "")
+foreach(source IN LISTS BB_SHADER_BUILD_SOURCES)
+    file(READ "${source}" content)
+    string(REPLACE "\r" "" content "${content}")
+    file(RELATIVE_PATH name "${CMAKE_CURRENT_SOURCE_DIR}" "${source}")
+    string(SHA256 hash "${name}\n${content}")
+    string(APPEND BB_SHADER_BUILD_HASHES "${hash}\n")
+endforeach()
+string(SHA256 BB_SHADER_BUILD "${BB_SHADER_BUILD_HASHES}")
+string(SUBSTRING "${BB_SHADER_BUILD}" 0 16 BB_SHADER_BUILD)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BB_SHADER_BUILD_SOURCES})
+file(CONFIGURE OUTPUT "${SHADER_INCLUDE}/video_core/shader_build.h"
+    CONTENT "#pragma once\n#define BB_SHADER_BUILD \"@BB_SHADER_BUILD@\"\n" @ONLY)
+list(LENGTH BB_SHADER_BUILD_SOURCES count)
+message(STATUS "Shader build ${BB_SHADER_BUILD} (from ${count} sources)")
 set(COMMON
     shadps4/common/decoder.cpp shadps4/common/error.cpp
     shadps4/common/io_file.cpp shadps4/common/native_clock.cpp shadps4/common/number_utils.cpp
@@ -272,6 +302,9 @@ if (WIN32)
     set_target_properties(atrac9 PROPERTIES C_STANDARD 99 INTERPROCEDURAL_OPTIMIZATION OFF)
     add_executable(bb-probe ../src/probe.c ${BB_RUNTIME} ../src/compat_win.c ../src/vulkan_smoke.c
         ../packaging/windows/bb-probe.rc)
+    # The overlay's GPU usage comes from Windows' GPU Engine counters (pdh), the CPU name from the
+    # registry (advapi32).
+    target_link_libraries(bbgpu INTERFACE pdh advapi32)
     set_target_properties(bb-probe PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
     target_compile_options(bb-probe PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Werror>)
     # Clang 23 added -Wunused-but-set-global (on with -Wall): the runtime keeps a few
@@ -339,6 +372,9 @@ target_link_libraries(motion-shader-test PRIVATE bbgpu)
 add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
 target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(ui-composition-test PRIVATE ..)
+add_executable(ui-composition-sharp-test EXCLUDE_FROM_ALL ../tests/test_ui_composition_sharp.cpp)
+target_compile_options(ui-composition-sharp-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(ui-composition-sharp-test PRIVATE ..)
 
 if (WIN32)
     add_executable(scene-resolution-test EXCLUDE_FROM_ALL ../tests/test_scene_resolution.cpp
@@ -372,6 +408,30 @@ target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
 target_link_libraries(camera-motion-test PRIVATE bbgpu)
 add_dependencies(camera-motion-test host_shaders)
 
+# bbport: the generated SRT walker with tables that change between draws (null and bad pointers):
+# ninja -C out/gpu srt-walker-test, then run it. No GPU.
+add_executable(srt-walker-test EXCLUDE_FROM_ALL ../tests/test_srt_walker.cpp ../tests/test_gpu_runtime_stubs.cpp)
+target_include_directories(srt-walker-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
+target_compile_options(srt-walker-test PRIVATE -UNDEBUG -fPIC)
+set_source_files_properties(../tests/test_srt_walker.cpp PROPERTIES
+    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
+target_link_libraries(srt-walker-test PRIVATE bbgpu)
+if (WIN32)
+    target_link_libraries(srt-walker-test PRIVATE onecore)
+endif()
+
+# bbport: which mouse input is the controller's (a mapping program's): ninja -C out/gpu pad-use-test,
+# then run it. No SDL, no GPU.
+add_executable(pad-use-test EXCLUDE_FROM_ALL ../tests/test_pad_use.cpp)
+target_include_directories(pad-use-test PRIVATE shim)
+target_compile_options(pad-use-test PRIVATE -UNDEBUG)
+
+# bbport: when the video memory banner comes up: ninja -C out/gpu vram-warning-test, then run it.
+# No GPU.
+add_executable(vram-warning-test EXCLUDE_FROM_ALL ../tests/test_vram_warning.cpp)
+target_include_directories(vram-warning-test PRIVATE shim)
+target_compile_options(vram-warning-test PRIVATE -UNDEBUG)
+
 # bbport: keyboard and mouse button prompt icons: ninja -C out/gpu prompt-icons-test, then run it
 # (with a folder argument it writes each icon drawn and encoded, for viewing).
 add_executable(prompt-icons-test EXCLUDE_FROM_ALL ../tests/test_prompt_icons.cpp shim/bbport_prompt_icons.cpp)
@@ -392,6 +452,15 @@ target_include_directories(shared-graphics-test PRIVATE shim)
 target_compile_options(shared-graphics-test PRIVATE -UNDEBUG)
 
 if (WIN32)
+    add_library(fsr-driver-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_fixture.cpp)
+    target_include_directories(fsr-driver-fixture PRIVATE fsr411_dx12 fsr411_dx12/sdk/api/include)
+    add_library(fsr-driver-invalid-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_invalid.c)
+    target_link_options(fsr-driver-invalid-fixture PRIVATE -nostdlib -Wl,--entry,DllMain)
+    add_executable(fsr-driver-test EXCLUDE_FROM_ALL ../tests/test_fsr_driver.cpp)
+    target_include_directories(fsr-driver-test PRIVATE shim fsr411_dx12 fsr411_dx12/sdk/api/include)
+    target_compile_options(fsr-driver-test PRIVATE -UNDEBUG)
+    target_link_libraries(fsr-driver-test PRIVATE bcrypt)
+    add_dependencies(fsr-driver-test fsr-driver-fixture fsr-driver-invalid-fixture)
     add_executable(shared-graphics-overlay-test EXCLUDE_FROM_ALL ../tests/test_shared_graphics_overlay.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(shared-graphics-overlay-test PRIVATE .. ../src shim shadps4
@@ -431,3 +500,16 @@ target_compile_definitions(chinese-ui-test PRIVATE IMGUI_DISABLE_SSE)
 if (WIN32)
     target_link_libraries(chinese-ui-test PRIVATE user32 gdi32 imm32)
 endif()
+
+# Normalize dependency include paths for the Windows driver integration.
+foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)
+  get_target_property(includes ${dependency} INTERFACE_INCLUDE_DIRECTORIES)
+  if(includes)
+    set(normalized)
+    foreach(directory IN LISTS includes)
+      file(REAL_PATH "${directory}" canonical)
+      list(APPEND normalized "${canonical}")
+    endforeach()
+    set_property(TARGET ${dependency} PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${normalized}")
+  endif()
+endforeach()

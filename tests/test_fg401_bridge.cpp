@@ -33,6 +33,9 @@ int main(int argc, char **argv) {
         }
         if (argc >= 4)
             count = std::stoi(argv[3]);
+        const int selected = argc >= 5 && std::string(argv[4]) == "4.0.2"
+                                 ? BbSettings::FrameGenFsr402 : BbSettings::FrameGenFsr401;
+        const bool switch_versions = argc >= 6 && std::string(argv[5]) == "switch";
         if (!rw || !rh || !ow || !oh || ow > 3840 || oh > 2160 || rw > ow || rh > oh || count < 1 ||
             count > 2000)
             throw std::runtime_error("Invalid test dimensions/count");
@@ -52,15 +55,16 @@ int main(int argc, char **argv) {
             }
         }
         auto &settings = BbSettings::Get();
-        settings.frame_gen = BbSettings::FrameGenFsr401;
+        BbSettings::SelectFrameGen(selected);
         FrameGenerator provider_check(instance, scheduler);
         if (std::getenv("BB_CHECK_UNSUPPORTED")) {
-            if (settings.fg401_supported || settings.frame_gen != BbSettings::FrameGenFsr3)
+            if (settings.MlFgSupported(selected) || settings.frame_gen != selected ||
+                settings.ActiveFrameGen() != BbSettings::FrameGenFsr3)
                 throw std::runtime_error("Unavailable provider did not fall back to FSR 3.1");
             std::puts("PASS unavailable ML provider falls back to FSR 3.1 before generation");
             return 0;
         }
-        if (!settings.fg401_supported || provider_check.WantedCount() != 1)
+        if (!settings.MlFgSupported(selected) || provider_check.WantedCount() != 1)
             throw std::runtime_error("Supported ML provider selection failed");
         settings.frame_gen = BbSettings::FrameGenFsr3;
         if (provider_check.WantedCount() != 1)
@@ -68,14 +72,14 @@ int main(int argc, char **argv) {
         settings.frame_gen = BbSettings::FrameGenOff;
         if (provider_check.WantedCount() != 0)
             throw std::runtime_error("FG off does not disable generation");
-        settings.frame_gen = BbSettings::FrameGenFsr401;
-        settings.fg401_supported = false;
+        BbSettings::SelectFrameGen(selected);
+        BbSettings::ConfigureFg401Support(false, "Test unavailable", selected);
         auto empty_command = scheduler.CommandBuffer();
         provider_check.Generate(empty_command, {}, {}, {}, {}, {}, 0, 0, {});
-        if (settings.frame_gen != BbSettings::FrameGenFsr3)
+        if (settings.frame_gen != selected || settings.ActiveFrameGen() != BbSettings::FrameGenFsr3)
             throw std::runtime_error("Manual unsupported ML selection bypasses renderer guard");
-        settings.fg401_supported = true;
-        settings.frame_gen = BbSettings::FrameGenOff;
+        BbSettings::ConfigureFg401Support(true, nullptr, selected);
+        BbSettings::SelectFrameGen(selected);
         std::puts("PASS renderer ML/FSR3/off choices and unsupported runtime fallback");
 
         const bool overlap = std::getenv("BB_FG401_CHECK_OVERLAP") != nullptr;
@@ -145,6 +149,11 @@ int main(int argc, char **argv) {
         size_t different = 0;
         std::vector<uint8_t> previous(cp * 4);
         for (int frame = 0; frame < count + 16; ++frame) {
+            if (switch_versions && (frame == 16 || frame == 32 || frame == 48)) {
+                BbSettings::SelectFrameGen(frame == 32 ? BbSettings::FrameGenFsr401
+                                                       : BbSettings::FrameGenFsr402);
+                std::printf("CHECK provider switch: %s\n", BbSettings::FrameGenName(settings.frame_gen));
+            }
             auto cmd = scheduler.CommandBuffer();
             if (frame == 0 || moving) {
                 for (u32 y = 0; y < oh; ++y)

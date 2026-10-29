@@ -5,6 +5,7 @@ image places eboot vaddr 0 at image offset 0. Only literal writes are supported
 (bytes, bytes16/32/64, float32/64, utf8, utf16); pattern ("mask") patches are rejected.
 """
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -16,6 +17,10 @@ from pathlib import Path
 EBOOT_BASE=0x400000
 # BB_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
 FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++'],'uncap':['Uncap FPS++']}
+# Fixes applied with every preset. The game's two per-frame render heaps (256 KiB each,
+# mov edx,0x40000 at guest offsets 0x2195c09/0x2195c46) run out in a busy frame; the pool at
+# 0xe45560 then returns NULL and the caller copies into it (memcpy at guest offset 0x21d5b40).
+FIXES=['Larger Frame Heaps']
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
@@ -63,12 +68,34 @@ MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LO
 
 
 def game_app_version(game):
-    """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read."""
+    """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read.
+    Game of the Year discs (CUSA03173) ship the 1.09 code with APP_VER 01.00: a game whose
+    eboot.bin has the 1.09 patch fingerprint is 01.09 whatever its param.sfo says."""
     try:
-        from prepare import sfo
-        return sfo((Path(game) / 'sce_sys/param.sfo').read_bytes()).get('APP_VER')
+        from prepare import sfo, system_folder
+        version=sfo((system_folder(game) / 'param.sfo').read_bytes()).get('APP_VER')
     except (OSError, ValueError, ImportError):
         return None
+    if version!='01.09':
+        eboot=Path(game).resolve()/'eboot.bin'
+        try:
+            stat=eboot.stat()
+        except OSError:
+            return version
+        # Keyed on size and time too: the launcher stays open while eboot.bin is replaced.
+        if eboot_is_109(str(eboot),stat.st_size,stat.st_mtime_ns):
+            return '01.09'
+    return version
+
+
+@functools.lru_cache(maxsize=None)
+def eboot_is_109(path,_size=None,_mtime=None):
+    try:
+        from prepare import parse_self
+        elf=bytes(parse_self(Path(path).read_bytes())[0])
+        return patch_fingerprint(elf,BUILTIN_XML,'01.09')==PATCH_FINGERPRINTS['01.09']
+    except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error, ET.ParseError, ImportError):
+        return False
 
 
 DEBUG_MENU='Restore Debug Menu (READ NOTES)'
@@ -112,6 +139,7 @@ UI_HEIGHT=0x0235855D-EBOOT_BASE
 
 
 def read_settings(path):
+    path = Path(path)
     # Path.read_text() defaults to the process locale; bbport.ini may contain
     # UTF-8 outside that encoding. Match the Windows launcher (encoding='utf-8').
     settings={}
@@ -159,8 +187,10 @@ def scaled_sizes(settings):
     # A scene of exactly the UI coordinate space's size (1920x1080 at 4K Performance, the
     # ultrawide HUD canvas at 2560x1080 or 3840x1080 native) is indistinguishable from it: the
     # port's UI composition recognizes UI draws by that size (HUD gauges came out too long).
-    canvas=hud_canvas(out)
-    if render==canvas: render=(canvas[0]-4,canvas[1]-2)
+    # With Sharp UI the UI viewport (the output's size) and the 1920x1080 stage inside it count as
+    # UI too: Native AA (scene at the output size) and 4K Performance (1920x1080) keep clear of them.
+    for size in sorted({hud_canvas(out),ui_viewport(out,settings)}):
+        if render==size: render=(size[0]-4,size[1]-2)
     return render,out
 
 
@@ -192,6 +222,20 @@ def hud_canvas(output):
     w,h=output
     if w*OUTPUT_SIZE[1]<=h*OUTPUT_SIZE[0]: return OUTPUT_SIZE
     return (round(OUTPUT_SIZE[1]*w/h/2)*2,OUTPUT_SIZE[1])
+
+
+def ui_viewport(output,settings=None):
+    """The game's UI movie viewport for an output, in pixels: the HUD canvas (hud_canvas), or with
+    Sharp UI (bbport.ini sharp_ui=1) the output's own size, so Scaleform draws its text, shapes and
+    pictures for the output's pixels instead of for 1080 lines stretched afterwards (from Awaken's
+    Lantern Engine, BB_SHARP_UI). The 1920x1080 stage is shown whole inside it, scaled up. Up to 16:9
+    and taller screens: an ultrawide output keeps its widened 1080-high canvas. Even sizes, at most
+    8192; never below 1920x1080. The port gets it as BB_UI_RES (run.py, UiComposition)."""
+    canvas=hud_canvas(output)
+    if (settings or {}).get('sharp_ui','0')!='1' or canvas!=OUTPUT_SIZE: return canvas
+    k=min(output[0]/canvas[0],output[1]/canvas[1])
+    if k<=1: return canvas
+    return (min(8192,round(canvas[0]*k/2)*2),min(8192,round(canvas[1]*k/2)*2))
 
 
 def ultrawide_writes(xml,output,app_version,segments):
@@ -368,6 +412,22 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
                 'CUSA03179','CUSA03173','CUSA03014','CUSA03023'}
 
 
+# Patches only the port's own file has (patches/Bloodborne.xml of any version since 1.8).
+PORT_ONLY_PATCHES={"Live map (The Hunter's Dream)",'Larger Frame Heaps'}
+
+
+def port_patch_file(path, root):
+    """A copy of the port's own Bloodborne.xml: one with patches only the port has, or one in another
+    installation's patches folder (beside its run.py or bin/bb-probe.exe). Its isEnabled flags are the
+    port's templates and defaults (the ultrawide template among them), not the player's choice: read
+    as an external file, all of them were applied over the port's own patches (a 1440p output got
+    the 21:9 template, the picture cut off)."""
+    if any(meta.get('Name') in PORT_ONLY_PATCHES for meta in root.iter('Metadata')):
+        return True
+    port=Path(path).resolve().parent.parent
+    return Path(path).name.lower()=='bloodborne.xml' and ((port/'run.py').is_file() or (port/'bin'/'bb-probe.exe').is_file())
+
+
 def external_patches(directory, app_version='01.09', exclude=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'):
     """[(key, file, metadata)] of eboot patches for this version in directory/*.xml.
     key is "<file name>/<patch name>" (the launcher's selection, patches.json)."""
@@ -381,6 +441,10 @@ def external_patches(directory, app_version='01.09', exclude=Path(__file__).reso
             root=ET.parse(path).getroot()
         except ET.ParseError as error:
             print(f'Patches: {path.name}: {error}',file=sys.stderr)
+            continue
+        if port_patch_file(path,root):
+            print(f"Patches: {path} is a copy of the port's own patch file (another installation's "
+                  'patches folder?): not used as external patches')
             continue
         ids={e.text.strip() for e in root.iter('ID') if e.text}
         if ids and not ids&BLOODBORNE_IDS: continue
@@ -479,8 +543,8 @@ def main():
               f'{group_list(set(PATCH_GROUPS)-groups)} code differs; only the {group_list(groups)} patches apply')
     fps_names=FPS_PRESETS[a.fps] if 'fps' in groups else []
     names=list(fps_names)
-    if whole:  # other patches' code is not fingerprinted
-        names+=[n.strip() for n in a.extra.split(';') if n.strip()]
+    if whole:  # the fixes' and other patches' code is not fingerprinted
+        names+=FIXES+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names and GROUP_OF.get(n) in groups]
     try:
         validate_patch_requirements(names,a.game_dir)
@@ -499,12 +563,14 @@ def main():
     # (UiComposition::NativeViewport), so it is rasterized at the output resolution. Ultrawide
     # outputs widen those coordinates (hud_canvas; run.py passes the same size as BB_UI_RES).
     output=tuple(int(v) for v in a.output_res.lower().split('x')) if a.output_res else OUTPUT_SIZE
-    ui=hud_canvas(output)
+    ui=ui_viewport(output,read_settings(a.settings))
     if size:
         writes+=resolution_writes(a.xml,size,a.app_version,segments,ui)
-        if ui!=OUTPUT_SIZE:
+        if hud_canvas(output)!=OUTPUT_SIZE:
             writes+=ultrawide_writes(a.xml,output,a.app_version,segments)
             names.append(f'ultrawide {output[0]}x{output[1]} (HUD {ui[0]}x{ui[1]})')
+        elif ui!=OUTPUT_SIZE:
+            names.append(f'Sharp UI {ui[0]}x{ui[1]}')
         if size[0]*size[1]>OUTPUT_SIZE[0]*OUTPUT_SIZE[1]:
             writes+=compile_patches(a.xml,[HEAP_PATCH],a.app_version,segments)
             names.append(HEAP_PATCH)
@@ -521,6 +587,17 @@ def main():
             names.append('Quit to Desktop')
         except ValueError as error:
             print(f'Patches: {error}; Quit to Desktop skipped')
+    if read_settings(a.settings).get('pc_menu','1')!='0' and os.environ.get('BB_PC_MENU')!='0':
+        # PC Settings in the System menu (pc_menu.py; its texts are in Quit to Desktop's layer).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import pc_menu
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            pc_menu.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=pc_menu.code_writes()
+            names.append('PC Settings')
+        except ValueError as error:
+            print(f'Patches: {error}; PC Settings skipped')
     if read_settings(a.settings).get('rebirth','1')!='0' and os.environ.get('BB_REBIRTH')!='0':
         # Rebirth at the Doll (rebirth.py; the talk script and texts are a mod layer).
         sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -533,13 +610,95 @@ def main():
             names.append('Rebirth')
         except ValueError as error:
             print(f'Patches: {error}; Rebirth skipped')
+    cloth_time_on=False
+    if os.environ.get('BB_CLOTH_TIME')!='0':
+        # A steady time step for the cloth (cloth_time.py: a stutter is no kick to capes and dresses).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import cloth_time
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            cloth_time.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=cloth_time.code_writes()
+            names.append('Steady cloth time')
+            cloth_time_on=True
+        except ValueError as error:
+            print(f'Patches: {error}; steady cloth time skipped')
+    # Cloth as on PS4 steps with the steady time (cloth.py reads it): only with that one.
+    if cloth_time_on and read_settings(a.settings).get('steady_cloth','1')!='0' and os.environ.get('BB_STEADY_CLOTH')!='0':
+        # Cloth as at 30 FPS at any frame rate (cloth.py: time-corrected Verlet, damping and bend
+        # stiffness per second as at 30 FPS, the PS4's).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import cloth
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            cloth.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=cloth.code_writes()
+            names.append('Steady cloth')
+        except ValueError as error:
+            print(f'Patches: {error}; steady cloth skipped')
+    if os.environ.get('BB_FOLIAGE_TIME')!='0':
+        # Plants sway with the frame's time (foliage_time.py: the steady time of cloth_time.py, not a
+        # step a frame: no faster sway at high frame rates, no jolts when frame times swing).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import foliage_time
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            foliage_time.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=foliage_time.code_writes()
+            names.append('Plant sway time')
+        except ValueError as error:
+            print(f'Patches: {error}; plant sway time skipped')
+    if os.environ.get('BB_AIR_DRAG')!='0':
+        # Jumps as at 30 FPS at any frame rate (air_drag.py: the air drag per second of 30 FPS).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import air_drag
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            air_drag.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=air_drag.code_writes()
+            names.append('Jumps as at 30 FPS')
+        except ValueError as error:
+            print(f'Patches: {error}; jumps as at 30 FPS skipped')
+    if ('Uncap FPS++' in names or '90 FPS++' in names) and os.environ.get('BB_EFFECT_TIME')!='0':
+        # Effects in whole 1/60 s steps (effect_time.py): updated more than 60 times a second, with
+        # steps below 1/60, particles pile up (Ebrietas' fight down to 45 FPS uncapped, 30 at 90 FPS++).
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import effect_time
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            effect_time.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=effect_time.code_writes(measured='Uncap FPS++' in names)
+            names.append('Effects in 1/60 s steps')
+        except ValueError as error:
+            print(f'Patches: {error}; effect time skipped')
+    if os.environ.get('BB_CRASH_GUARDS')!='0':
+        # Crash guards (crash_guards.py): the game's own unchecked pointers that crashed players.
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        import crash_guards
+        elf=(a.out/'eboot.elf').read_bytes()
+        try:
+            crash_guards.check_original(lambda start,end: eboot_bytes(elf,start,end))
+            writes+=crash_guards.code_writes()
+            names.append('Crash guards')
+        except ValueError as error:
+            print(f'Patches: {error}; crash guards skipped')
     if a.patches_dir and whole:
         # After the built-in ones: an external patch of the same bytes wins.
         selected=external_selection(external_patches(a.patches_dir,a.app_version,a.xml),a.patches_config)
         fps_ranges=[(offset,offset+len(data)) for offset,data in writes[:fps_count]]
+        # The resolution code (the template's sites, whatever size): the port sets it from the output
+        # resolution and lays out its UI and upscaler for that size. An external resolution patch
+        # over it mixed two sizes (a 21:9 2560x1080 patch on a 1440p output: the picture cut off).
+        res_ranges=[(offset,offset+len(data)) for offset,data in
+                    resolution_writes(a.xml,OUTPUT_SIZE,a.app_version,segments)] if 'resolution' in groups else []
         external=[]
         for item in selected:
             ours=compile_external([item],segments)
+            if res_ranges and any(start<offset+len(data) and offset<end
+                                  for offset,data in ours for start,end in res_ranges):
+                print(f'Patches: external {item[0]} skipped: the port sets the resolution itself '
+                      "(the launcher's Output resolution, ultrawide sizes included)")
+                continue
             # An FPS patch of its own (e.g. "60FPS (no deltatime)", at 60 FPS++'s addresses with
             # other values) replaces the built-in preset whole: applied over it, the two mixed.
             if fps_count and any(start<offset+len(data) and offset<end

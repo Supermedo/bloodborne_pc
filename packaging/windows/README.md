@@ -36,6 +36,8 @@ Both modes also write `dist/fsr4vk-v0.4.3-amdfix-src.zip`. Publish this
 corresponding-source archive alongside `dist/bbport-windows.zip`.
 
 `run.py` is the Windows `run.sh` (same variables; works from a plain Windows Python too).
+The FSR 4.1 integration initializes installed-driver discovery for the GUI,
+`--run` and direct `run.py` starts; see [FSR 4.1 on Windows](../../docs/FSR41_WINDOWS.md).
 The package freezes the launcher with PyInstaller (a private venv in `out/pyenv`, from a
 python.org Python) into `Bloodborne.exe`, which also runs `run.py` (`--run`), the preparation
 scripts (`--script`) and the game without the window (`--play`): players need no Python.

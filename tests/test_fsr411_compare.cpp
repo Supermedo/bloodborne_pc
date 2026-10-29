@@ -18,6 +18,8 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_fsr4vk.h"
 #include "video_core/renderer_vulkan/vk_fsr411_native.h"
+#include "video_core/renderer_vulkan/vk_fsr412_driver.h"
+#include "bbport_settings.h"
 #include "video_core/texture_cache/image.h"
 #include <vk_mem_alloc.h>
 
@@ -25,9 +27,20 @@ using namespace Vulkan;
 extern "C" void runtime_restart() { std::abort(); }
 static uint16_t Half(float f) { return std::bit_cast<uint16_t>(static_cast<_Float16>(f)); }
 int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     try {
-        const bool async = argc > 1 && std::string_view(argv[1]) == "async";
+        const bool driver_vk=argc>1&&std::string_view(argv[1])=="driver-vk";
+        const bool driver_dx=argc>1&&std::string_view(argv[1])=="driver-dx";
+        BbSettings::Get().upscaler=driver_vk||driver_dx?BbSettings::UpscalerFsr412:BbSettings::UpscalerFsr411;
+        const bool async = driver_dx || (argc > 1 && std::string_view(argv[1]) == "async");
         const bool native = async || (argc > 1 && std::string_view(argv[1]) == "dx12");
+        // Use the actual game router for repeated overlay-style live method changes.
+        const bool overlay_pending = std::getenv("BB_TEST_LIVE_METHOD") != nullptr;
+        const bool reject_method = std::getenv("BB_TEST_METHOD_UNAVAILABLE") != nullptr;
+        const bool fail_method = std::getenv("BB_TEST_METHOD_FAILURE") != nullptr;
+        auto& settings = BbSettings::Get();
+        settings.fsr411_backend = native ? BbSettings::Fsr411Dx12 : BbSettings::Fsr411Vulkan;
+        settings.startup_fsr411_backend = settings.fsr411_backend;
         u32 rw = 1280, rh = 720, ow = 1920, oh = 1080;
         if (argc > 3) { std::sscanf(argv[2], "%ux%u", &rw, &rh); std::sscanf(argv[3], "%ux%u", &ow, &oh); }
         const bool hdr = argc < 5 || std::string_view(argv[4]) != "ldr";
@@ -43,6 +56,9 @@ int main(int argc, char** argv) {
         const bool vary_motion = std::getenv("BB_FSR411_VARY_MOTION") != nullptr;
         const bool switch_preset = std::getenv("BB_FSR411_SWITCH_PRESET") != nullptr;
         Instance instance(0, false);
+        if (std::getenv("BB_TEST_NO_FG_INTEROP") &&
+            (instance.IsFg401InteropSupported() || !instance.IsFsr411NativeSupported() || !instance.IsFsr411AsyncSupported()))
+            throw std::runtime_error("expected DX12 upscaling interop without ML-FG interop");
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetInstance());
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetDevice());
         const auto device = instance.GetDevice();
@@ -223,6 +239,14 @@ int main(int argc, char** argv) {
         frame.sharpness = .5f;
         Fsr4Vk fsr_vk(instance, scheduler);
         Fsr411Native fsr_dx(instance, scheduler);
+        Fsr412Driver fsr_driver(instance,scheduler);
+        Fsr4Upscaler production(instance, scheduler);
+        if (overlay_pending && (reject_method || fail_method)) {
+            // Simulate stale readiness after a driver-file failure, or a disabled method.
+            settings.fsr41_backend_supported[driver_vk || driver_dx][native ? 0 : 1] = fail_method;
+        }
+        unsigned live_changes = 0;
+        int last_method = -1;
         auto query = Check(device.createQueryPoolUnique({.queryType = vk::QueryType::eTimestamp, .queryCount = 2}));
         const float period = instance.GetPhysicalDevice().getProperties().limits.timestampPeriod;
         std::vector<double> gpu_times, wall_times;
@@ -280,8 +304,23 @@ int main(int argc, char** argv) {
                 frame.cmdbuf.resetQueryPool(*query, 0, 2);
                 frame.cmdbuf.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, *query, 0);
             }
-            const bool ok = native ? fsr_dx.Record(frame, async) : fsr_vk.Record(frame);
-            if (!ok) throw std::runtime_error(native ? fsr_dx.Error() : fsr_vk.Problem());
+            if (overlay_pending)
+                settings.fsr411_backend = int(native) ^ ((i / 8) & 1);
+            const bool ok = overlay_pending ? production.Record(frame) : driver_vk ? fsr_driver.Record(frame) : native ? fsr_dx.Record(frame, async) : fsr_vk.Record(frame);
+            if (!ok) throw std::runtime_error(overlay_pending ? production.Problem() : driver_vk ? fsr_driver.Error() : native ? fsr_dx.Error() : fsr_vk.Problem());
+            if (overlay_pending) {
+                if (production.Fatal()) throw std::runtime_error("successful method retained a fatal fallback flag");
+                const int expected = reject_method || fail_method ? int(native) : settings.fsr411_backend.load();
+                if (settings.ActiveFsr411Backend() != expected)
+                    throw std::runtime_error("live method report does not match the requested/retained provider");
+                if ((frame.output.image == vk::Image(images[3])) != (expected == BbSettings::Fsr411Vulkan))
+                    throw std::runtime_error("live method did not produce the expected Vulkan/DX12 output image");
+                if (expected != last_method) { ++live_changes; last_method = expected; }
+                if (settings.upscaler != (driver_vk || driver_dx ? BbSettings::UpscalerFsr412 : BbSettings::UpscalerFsr411))
+                    throw std::runtime_error("live method changed the upscaler selection");
+                if ((reject_method || fail_method) && ((i / 8) & 1) && !settings.fsr4_method_problem)
+                    throw std::runtime_error("failed method did not report that the previous provider was retained");
+            }
             final_output = frame.output.image;
             const auto access =
                 vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
@@ -337,8 +376,10 @@ int main(int argc, char** argv) {
                     vk::ClearColorValue{std::array<float, 4>{.1f, .8f, .3f, 1.f}},
                     writable.subresourceRange);
             }
-            if (native && i != count + 15)
-                fsr_dx.ReleaseOutput(frame.cmdbuf);
+            if (i != count + 15) {
+                if (overlay_pending) production.ReleaseOutput(frame.cmdbuf);
+                else if (native) fsr_dx.ReleaseOutput(frame.cmdbuf);
+            }
             if (!pipeline)
                 frame.cmdbuf.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, *query, 1);
             if (pipeline) {
@@ -364,8 +405,8 @@ int main(int argc, char** argv) {
         auto post_read = read;
         post_read.bufferOffset = size_t(ow) * oh * 8;
         cmd.copyImageToBuffer(vk::Image(consumed), vk::ImageLayout::eGeneral, staging, post_read);
-        if (native)
-            fsr_dx.ReleaseOutput(cmd);
+        if (overlay_pending) production.ReleaseOutput(cmd);
+        else if (native) fsr_dx.ReleaseOutput(cmd);
         scheduler.Finish();
         vmaInvalidateAllocation(instance.GetAllocator(), allocation, 0, VK_WHOLE_SIZE);
         float lo = INFINITY, hi = -INFINITY; size_t invalid = 0;
@@ -381,13 +422,18 @@ int main(int argc, char** argv) {
             post_hash *= 1099511628211ull;
         }
         std::printf("POST_OUTPUT hash=%016llx\n", (unsigned long long)post_hash);
+        if (overlay_pending) {
+            if (!reject_method && !fail_method && live_changes < 4)
+                throw std::runtime_error("expected repeated live provider changes");
+            std::printf("PASS: live overlay methods; changes=%u retained=%d rollback=%d\n", live_changes, reject_method, fail_method);
+        }
         for (size_t i = 0; i < size_t(ow) * oh; ++i) for (size_t c = 0; c < 3; ++c) {
             float value = float(halves[i * 4 + c]);
             invalid += !std::isfinite(value); lo = std::min(lo, value); hi = std::max(hi, value);
         }
         const auto mean = [](const auto& values) { return std::accumulate(values.begin(), values.end(), 0.) / values.size(); };
         std::printf("RESULT backend=%s render=%ux%u output=%ux%u color=%s frames=%d wall_ms=%.4f gpu_ms=%.4f min=%.6f max=%.6f nonfinite=%zu\n",
-                    native ? (async ? "async" : "dx12") : "fsr4vk", rw,rh,ow,oh,hdr ? "hdr" : "ldr",count,mean(wall_times),gpu_times.empty() ? 0 : mean(gpu_times),lo,hi,invalid);
+                    driver_vk ? "412-vulkan" : driver_dx ? "412-dx12" : native ? (async ? "411-dx12-async" : "411-dx12") : "411-fsr4vk", rw,rh,ow,oh,hdr ? "hdr" : "ldr",count,mean(wall_times),gpu_times.empty() ? 0 : mean(gpu_times),lo,hi,invalid);
         if (const char* dump = std::getenv("BB_FSR411_BENCH_DUMP")) {
             std::ofstream file(dump, std::ios::binary); file.write(reinterpret_cast<const char*>(data), size_t(ow) * oh * 8);
             std::ofstream post(std::string(dump) + ".post.rgba8", std::ios::binary);

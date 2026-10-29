@@ -49,6 +49,8 @@ struct P2PState {
     std::shared_ptr<P2P::Keyring> keyring = std::make_shared<P2P::Keyring>();
     u16 configured_port = 3658; // host order
     u32 advertised_addr = 0;    // network order
+    u32 relay_addr = 0;         // network order
+    u16 relay_port = 0;         // network order
     std::chrono::steady_clock::time_point retry_after{};
     std::pair<u16, Error> last_failure{0, Error::Ok};
 };
@@ -78,6 +80,18 @@ void LogBroadcast(std::span<const u8> packet, const P2P::Endpoint& from) {
                 "P2P broadcast packet received (layout assumed; please report this line): "
                 "from {}:{}, {} bytes: {}{}",
                 address, from.Port(), packet.size(), hex, packet.size() > shown ? " ..." : "");
+}
+
+std::optional<P2P::Endpoint> RelayEndpoint(const P2PState& state) {
+    if (state.relay_addr == 0 || state.relay_port == 0) {
+        return std::nullopt;
+    }
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = state.relay_addr;
+    server.sin_port = state.relay_port;
+    return P2P::Endpoint::FromSockaddr(reinterpret_cast<const sockaddr*>(&server),
+                                       sizeof(server));
 }
 
 constexpr u16 P2PPortFallbacks = 16;
@@ -114,6 +128,7 @@ u16 StartLocked(P2PState& state, u16 udp_port, bool allow_fallback) {
     }
     state.last_failure = {0, Error::Ok};
     const u16 port = transport->BoundPort();
+    transport->SetRelayServer(RelayEndpoint(state));
     state.transport = transport;
     Core::Net::SetP2PTransport(AF_INET, std::move(transport));
     if (udp_port != 0 && port != udp_port) {
@@ -280,6 +295,22 @@ u32 GetP2PAdvertisedAddr() {
     }
     const auto hooks = GetSystemHooks();
     return hooks.public_addr ? hooks.public_addr() : 0;
+}
+
+void SetP2PRelayServer(u32 addr, u16 port) {
+    auto& state = P2PStateInstance();
+    std::scoped_lock lock{state.mutex};
+    state.relay_addr = addr;
+    state.relay_port = port;
+    if (state.transport) {
+        state.transport->SetRelayServer(RelayEndpoint(state));
+    }
+}
+
+void UseP2PRelayFor(u32 peer_addr) {
+    if (const auto transport = RunningTransport()) {
+        transport->UseRelayFor(peer_addr);
+    }
 }
 
 u16 GetP2PAdvertisedPort() {

@@ -78,6 +78,27 @@ class RespecTests(unittest.TestCase):
             respec.respec(self.folder, 10, START)  # userdata0010: the system data
         self.assertFalse((self.user / 'respec-backups').exists())  # nothing written
 
+    def test_the_saves_from_before_in_the_backups(self):
+        """The launcher's way: a backup on the Saves page ("Before a respec"), no respec-backups folder."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'launcher'))
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import bbport_saves as saves
+        if saves.target_dir(self.user, '') != self.folder:
+            self.folder.rename(saves.target_dir(self.user, ''))
+            self.folder = saves.target_dir(self.user, '')
+        made = saves.backup(self.user, '', reason='respec', detail='Hunter')
+        new = {**START, 'vitality': 15, 'strength': 10, 'bloodtinge': 7}
+        self.assertIsNone(respec.respec(self.folder, 0, new, copy=False))
+        self.assertFalse((self.user / 'respec-backups').exists())
+        found = saves.backups(self.user)
+        self.assertEqual([(b.path, b.reason) for b in found], [(made, 'respec')])
+        self.assertIn('Before a respec', made.name)
+        import zipfile
+        with zipfile.ZipFile(made) as zipped:
+            before = next(zipped.read(n) for n in zipped.namelist() if n.endswith('/userdata0000'))
+        self.assertEqual(respec.read_block(before, respec.find_blocks(before)[0])['attributes'], START)
+
 
 if __name__ == '__main__':
     unittest.main()

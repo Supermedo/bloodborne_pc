@@ -59,12 +59,24 @@ def level_color(level):
     return (theme.BLOOD_LIGHT, theme.BLOOD_LIGHT, theme.AMBER, theme.TEXT, theme.GOLD_LIGHT, theme.GOLD_LIGHT)[level]
 
 
+def same_setting(a, b):
+    """A setting's value against another (b) the way the launcher shows them: numbers to two
+    decimals, flags on or off, the rest as text."""
+    if isinstance(b, float):
+        try:
+            return abs(float(a) - b) < 0.005
+        except (TypeError, ValueError):
+            return False
+    return bool(a) == b if isinstance(b, bool) else str(a) == str(b)
+
+
 class SetupMixin:
     """Hardware rating, the System page and the setup guide, mixed into the Launcher."""
 
     # ---- hardware ------------------------------------------------------------------------------
     def init_hardware(self):
         self.gpu_line, self.cpu, self.ram, self.rating, self.guide = '', None, 0, None, None
+        self.cpu_instructions = None  # hardware.instructions(), with the processor (detect_gpu)
         self.hw_ready = False
         self.rating_views = []  # callables redrawing what shows the rating
 
@@ -149,6 +161,7 @@ class SetupMixin:
         """{key: (title, options or kind)} of the settings the profile sets, for showing them."""
         flags = {key: title for key, title, _on in L.EFFECTS}
         return {'output_res': (_('Output resolution'), L.OUTPUTS), 'upscaler': (_('Upscaler', 'Апскейлер'), L.UPSCALERS),
+                'fsr411_backend': (_('FSR 4.1 backend'), L.FSR411_BACKENDS),
                 'preset': (_('Quality preset'), L.PRESETS), 'fps_mode': (_('Frame rate', 'Частота кадров'), L.FPS_MODES),
                 'frame_cap': (_('Frame cap (unlocked mode)'), L.FRAME_CAPS),
                 'effect_game_aa': (_(*flags['effect_game_aa']), 'flag'),
@@ -186,8 +199,18 @@ class SetupMixin:
         available = hardware.outputs(*self.display_size())
         res = res if res in available else hardware.recommended_class(self.rating, available)
         output = available.get(res, '1920x1080')
-        return res, output, hardware.profile(self.rating, res, output, self.current_settings(),
-                                             self.var('goal', 'app').get())
+        entries = hardware.profile(self.rating, res, output, self.current_settings(),
+                                   self.var('goal', 'app').get())
+        capabilities = getattr(self, 'fsr411_support', None)
+        states = L.bbport_fsr41.method_statuses(L.PORT_DIR, L.DATA_DIR, capabilities,
+            L.fetch_fsr4vk, L.bbport_fsr411.environment(L.PORT_DIR, self.app))
+        route = L.bbport_fsr41.preferred_route(states)
+        if route is not None:
+            version, backend, title, _role = L.bbport_fsr41.ROUTES[route]
+            entries = [(store, key, version if key == 'upscaler' else value, why)
+                       for store, key, value, why in entries]
+            entries.append(('ini', 'fsr411_backend', backend, _('FSR 4.1 Settings') + ': ' + title))
+        return res, output, entries
 
     def differences(self):
         """[(key, current, recommended, why)] where the settings differ from the recommendation."""
@@ -195,17 +218,18 @@ class SetupMixin:
         if not chosen:
             return []
         now = self.current_settings()
-        same = lambda a, b: (abs(float(a) - float(b)) < 0.005 if isinstance(b, float) else
-                             bool(a) == b if isinstance(b, bool) else str(a) == str(b))
         return [(key, now.get(key), value, why) for _store, key, value, why in chosen[2]
-                if not same(now.get(key), value)]
+                if not same_setting(now.get(key), value)]
 
     def apply_profile(self, entries, remember_undo=True):
         if remember_undo:
             now = self.current_settings()
             self.app['auto_undo'] = {key: now.get(key) for _s, key, _v, _w in entries}
         self.apply_settings({(store, key): value for store, key, value, _why in entries})
-        self.app['auto_hw'] = hardware.signature(self.gpu_line, self.cpu, self.ram, self.display_size())
+        # The settings as the profile left them: one that differs at a later start was changed by
+        # hand (here or in the game's menu, which writes bbport.ini), and automatic settings keep it.
+        self.app['auto_applied'] = self.current_settings()
+        self.remember_hardware(hardware.signature(self.gpu_line, self.cpu, self.ram))
         for view in list(self.rating_views):
             try:
                 view()
@@ -219,6 +243,7 @@ class SetupMixin:
             if value is not None:
                 self.var(key, store).set(value)
         self.app['auto_undo'] = {}
+        self.app['auto_applied'] = {}  # the player's own settings again, not a profile's
         self.refresh_status()
         for view in list(self.rating_views):
             try:
@@ -226,23 +251,74 @@ class SetupMixin:
             except self.tk.TclError:
                 self.rating_views.remove(view)
 
+    def remember_hardware(self, signature):
+        """The hardware the graphics settings are for now (auto_hw), its graphics card added to those
+        this PC has shown (auto_gpus): a laptop or a PC with two cards can show either one at a
+        start, and a card seen before is no new hardware (hardware.new_hardware)."""
+        if not signature:
+            return  # not detected this time: the hardware remembered before stays
+        self.app['auto_hw'] = signature
+        card = signature.split('|')[0]
+        cards = [c for c in self.app.get('auto_gpus') or [] if c != card]
+        self.app['auto_gpus'] = (cards + [card])[-6:]
+
+    def own_changes(self, entries):
+        """The keys of a profile's entries that the player changed since a profile was last applied (in
+        the launcher or in the game's menu). All of them when nothing says what was applied: a profile
+        of an earlier version, one taken back with Undo, or none yet."""
+        applied, now = self.app.get('auto_applied') or {}, self.current_settings()
+        return [key for _store, key, _value, _why in entries
+                if key not in applied or not same_setting(now.get(key), applied[key])]
+
     def auto_settings(self):
-        """At start, once the PC is rated: new hardware (or display) with automatic settings on →
-        the settings for it, with an Undo on System & performance. The first time (an installation
-        set up before this existed, or the guide skipped) only remembers the hardware."""
+        """At start, once the PC is rated: new hardware with automatic settings on → the settings for
+        it, with an Undo on Picture & performance. The first time (an installation set up before this
+        existed, or the guide skipped) only remembers the hardware.
+
+        Only real new hardware counts (hardware.new_hardware): 1.9.3 and 1.9.4 also counted the
+        display and whichever card a laptop showed, and set the player's settings back at every start
+        where those differed. And never over the player's own settings: when one of the profile's
+        settings was changed by hand since it was applied, all of them stay; the status line says so
+        once, and the Play page shows what differs from the settings for the new hardware, with Apply
+        on Picture & performance. A new bbport.ini (a new folder) always gets them: its values are only
+        the defaults, FSR 4 and every effect, which freeze Intel graphics and slow small cards down."""
         if not self.rating or not self.var('setup_done', 'app').get():
             return
-        now = hardware.signature(self.gpu_line, self.cpu, self.ram, self.display_size())
-        before = self.app.get('auto_hw', '')
-        if not before:
-            self.app['auto_hw'] = now
-            return
-        if now != before and self.var('auto_graphics', 'app').get():
+        new_ini, self.ini_new = getattr(self, 'ini_new', False), False
+        if new_ini:
             chosen = self.recommended()
             if chosen:
-                self.apply_profile(chosen[2])
-                self.auto_note = _('New hardware detected: the graphics settings were adjusted to it.')
+                self.apply_profile(chosen[2])  # remembers the hardware as well
+                self.auto_note = _('New installation: the graphics settings were made for this PC.')
                 self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
+            return
+        now = hardware.signature(self.gpu_line, self.cpu, self.ram)
+        if not now:
+            return  # the card or the processor was not detected this time: nothing to compare
+        before = hardware.stored_signature(self.app.get('auto_hw', ''))
+        if not before:
+            self.remember_hardware(now)
+            return
+        self.remember_hardware(before)  # 1.9.3's and 1.9.4's had the display: written without it
+        integrated = hardware.parse_gpu_line(self.gpu_line)[1]
+        if not hardware.new_hardware(before, now, self.app['auto_gpus'], integrated):
+            return
+        if not self.var('auto_graphics', 'app').get():
+            return
+        chosen = self.recommended()
+        if not chosen:
+            return
+        if self.own_changes(chosen[2]):
+            self.remember_hardware(now)  # said once; what differs stays on the Play page
+            self.status.configure(text=_('New hardware detected. Your own graphics settings were kept; the '
+                                         'ones for it are on Picture & performance.',
+                                         'Обнаружено новое оборудование. Ваши собственные настройки графики '
+                                         'сохранены; подходящие для него — на странице «Изображение и FPS».'),
+                                  fg=theme.GOLD_LIGHT)
+            return
+        self.apply_profile(chosen[2])
+        self.auto_note = _('New hardware detected: the graphics settings were adjusted to it.')
+        self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
 
     def profile_card(self, parent):
         """System & performance: the settings for this PC next to the current ones, Apply, Undo and
@@ -947,7 +1023,7 @@ class SetupMixin:
         return sorted(usable, key=lambda s: -s.modified)
 
     def import_save(self, save, refresh):
-        if self.process:
+        if self.game_running():
             self.messagebox.showinfo('Bloodborne', _('Close the game first; it writes its saves while it runs.'))
             return
         user, here = self.save_user_dir(), self.save_target()
@@ -964,7 +1040,13 @@ class SetupMixin:
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('Could not import the saves: {}').format(error))
             return
+        came = saves.bring_trophies(save, user)
+        if came and self.tracker.user_dir == user:
+            # earned before, not just now: shown on the Achievements page without the "You've earned a trophy" notice
+            self.trophies_changed(self.tracker.refresh_log() + self.tracker.award_platinum(), announce=False)
         done = _('Saves imported. Your characters are in the game\'s Load Game menu.')
+        if came:
+            done += '\n\n' + _('Your achievements from there came along: {} new here.').format(came)
         if archive:
             done += '\n\n' + _('Your previous saves: {}').format(archive)
         self.messagebox.showinfo('Bloodborne', done)
@@ -975,8 +1057,9 @@ class SetupMixin:
 
     # ---- the save manager (Saves page) -----------------------------------------------------------
     def game_running(self):
-        """The game runs (from here, a shortcut or Steam): it writes its saves while it runs."""
-        return bool(self.process) or bool(bench.game_pids())
+        """The game runs or is being prepared (from here, a shortcut, Steam or the in-game restart): it writes its
+        saves while it runs."""
+        return bool(self.process) or L.game_underway()
 
     def refresh_saves(self, only_if_changed=False):
         """The characters and the backups drawn anew (on a page change only when the files changed)."""
@@ -1641,6 +1724,9 @@ class SetupMixin:
         self.section(f, _('Screen'))
         self.check(f, 'fullscreen', 'app', _('Fullscreen', 'Полноэкранный режим'),
                    _('Recommended: the game gets the display to itself (smoother, and 4K downsampling works).'))
+        self.check(f, 'exclusive_fullscreen', 'app', _('Exclusive fullscreen'),
+                   _('Fullscreen takes the display over instead of covering the desktop: frames can arrive more evenly, '
+                     'but switching to another window takes a moment. Only with Fullscreen on.'))
         self.row(f, _('Monitor'), self.choice(f, 'game_monitor', 'app', L.monitor_options(self.app.get('game_monitor'))),
                  _('Where the game opens, in a window and in fullscreen.'))
         self.row(f, _('Resolution'), self.output_choice(f),
@@ -1718,9 +1804,8 @@ class SetupMixin:
                     _('Your characters, their backups and the trophies. Empty: {}.').format(L.DATA_DIR / 'user'),
                     on_change=self.refresh_status)
         self.folder(f, 'cache_dir', _('Cache folder'), _('Choose the cache folder'),
-                    _('Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when '
-                      'the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its '
-                      'own shaders.'))
+                    _('Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every '
+                      'version and every PC keeps its own shaders, wherever the saves are.').format(L.DATA_DIR / 'user'))
         where = self.tk.Label(f, text='', bg=L.PANEL, fg=theme.MUTED, font=(theme.BODY, 9), justify='left', anchor='w')
         where.grid(row=self.next_row(f), column=1, sticky='w', pady=(4, 2))
 
@@ -1731,6 +1816,9 @@ class SetupMixin:
                 text += '\n' + _('Your saves folder is in a cloud folder: the saves go with you, the shaders stay on '
                                   'this PC. Play on one PC at a time and let it finish syncing before you start on '
                                   'another one; in OneDrive, set the folder to "Always keep on this device".')
+            elif not settings['cache_dir'] and L.saves_in_other_installation(settings):
+                text += '\n' + _('Your saves folder is in another installation of the port: this one keeps its shaders '
+                                  'in its own folder, because another version\'s shaders can break the picture.')
             where.configure(text=text, wraplength=self.px(560))
         for key in ('user_dir', 'cache_dir'):
             self.var(key, 'app').trace_add('write', lambda *_a: self.root.after_idle(show_where))
@@ -1800,9 +1888,20 @@ class SetupMixin:
         self.rating_views.append(draw_requirements)
 
         self.section(f, _('Hard limits'))
-        for text in hardware.HARD_LIMITS:
-            self.state_line(f, 'warn', _(text), L.PANEL, wrap=760).grid(
-                row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=px(3))
+        limits = tk.Frame(f, bg=L.PANEL)
+        limits.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
+
+        def draw_limits():  # this processor's instructions first, when CPUID could be read; the rules below them
+            for child in limits.winfo_children():
+                child.destroy()
+            found = hardware.instruction_lines(getattr(self, 'cpu_instructions', None), _)
+            for state, text in found:
+                self.state_line(limits, state, text, L.PANEL, wrap=760).pack(fill='x', pady=px(3))
+            for text in hardware.HARD_LIMITS:
+                self.state_line(limits, 'info' if found else 'warn', _(text), L.PANEL, wrap=760).pack(
+                    fill='x', pady=px(3))
+        draw_limits()
+        self.rating_views.append(draw_limits)
         self.section(f, _('Driver notes'))
         drivers = tk.Frame(f, bg=L.PANEL)
         drivers.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
@@ -1879,20 +1978,26 @@ class SetupMixin:
 
     def relaunch(self):
         """Saves and starts the launcher again (its language applies at start)."""
+        import os
         import subprocess
         import sys
+        guide = getattr(self, 'guide', None)
+        if guide and not guide.closed:  # the setup comes back where it was, in the new language
+            self.app['setup_resume'] = {'step': guide.step, 'origin': guide.origin.get()}
         self.collect()
         command = [sys.executable] if L.FROZEN else [sys.executable, str(Path(L.__file__).resolve())]
-        subprocess.Popen(command, cwd=str(L.PORT_DIR))
+        # The new one waits until this one has closed: only one launcher window at a time (one_launcher).
+        subprocess.Popen(command + ['--after', str(os.getpid())], cwd=str(L.PORT_DIR))
         self.root.destroy()
 
     # ---- the setup guide ----------------------------------------------------------------------------
     def maybe_open_setup(self):
         """At start: the guide for a new installation. A launcher set up before the guide existed
-        (saved settings and a game folder) counts as set up."""
+        (saved settings and a game folder) counts as set up; one restarted by its language change does not."""
         if self.var('setup_done', 'app').get():
             return
-        if L.CONFIG_FILE.exists() and L.game_info(self.var('game_dir', 'app').get()):
+        if not self.app.get('setup_resume') and L.CONFIG_FILE.exists() and \
+                L.game_info(self.var('game_dir', 'app').get()):
             self.var('setup_done', 'app').set(True)
             return
         self.open_setup()
@@ -1906,8 +2011,8 @@ class SetupMixin:
 def game_values(folder):
     """param.sfo of a dump as a dict ({} when unreadable)."""
     try:
-        from prepare import sfo
-        return sfo((Path(folder) / 'sce_sys' / 'param.sfo').read_bytes())
+        from prepare import sfo, system_folder
+        return sfo((system_folder(folder) / 'param.sfo').read_bytes())
     except (OSError, ValueError, ImportError):
         return {}
 
@@ -1954,7 +2059,9 @@ def game_checks(folder):
     else:
         checks.append(('warn', _('Version {}: the game runs at 30 FPS only. Copy everything from the 1.09 update '
                                  'into this folder and replace the files.').format(version)))
-    missing = [name for name in ('sce_module', 'sce_sys', 'dvdroot_ps4') if not (folder / name).is_dir()]
+    # A PKG tool's Sc0 serves as sce_sys (run.py maps it): game_values found its param.sfo.
+    missing = [name for name in ('sce_module', 'sce_sys', 'dvdroot_ps4') if not (folder / name).is_dir()
+               and not (name == 'sce_sys' and values)]
     if missing:
         checks.append(('bad', _('Missing: {}. Unpack the base game completely into this folder.').format(
             ', '.join(missing))))
@@ -1986,7 +2093,8 @@ class SetupGuide:
         self.frame_gen = tk.BooleanVar(value=False)
         self.fullscreen_offered = False  # the picture step turns fullscreen on once (its default)
         self.online_offered = False  # the online step turns online play on once (its default)
-        self.origin = tk.StringVar(value='new')  # where the player comes from (step I)
+        resume = app.app.pop('setup_resume', None) or {}  # after the launcher's language changed (relaunch)
+        self.origin = tk.StringVar(value=resume.get('origin') or 'new')  # where the player comes from (step I)
         self.mode = tk.StringVar(value=app.app.get('ui_mode') or 'simple')  # the launcher's view (step V)
         # Repeated from Help: the player's own choices (online, fullscreen, key bindings) are only
         # changed when they say so; the first setup sets the defaults.
@@ -2050,7 +2158,7 @@ class SetupGuide:
         root.bind_all('<Return>', lambda _e: self.next())
         root.bind_all('<Escape>', lambda _e: self.back())
         self.wave_until = 0.0
-        self.show(0)
+        self.show(min(int(resume.get('step') or 0), len(STEPS) - 1))
 
     # -- frame --
     def wheel(self, event):
@@ -2204,7 +2312,7 @@ class SetupGuide:
             app.expert_var.set(self.mode.get() == 'expert')
             app.apply_mode()
         if app.rating and not app.app.get('auto_hw'):  # skipped: the hardware as it is now, nothing changed
-            app.app['auto_hw'] = hardware.signature(app.gpu_line, app.cpu, app.ram, app.display_size())
+            app.remember_hardware(hardware.signature(app.gpu_line, app.cpu, app.ram))
         try:
             app.collect()
         except Exception:  # the launcher must never stay hidden behind the guide
@@ -2508,18 +2616,59 @@ class SetupGuide:
         played.pack_options = {'fill': 'x', 'pady': (0, px(14))}
         if origin != 'new':
             played.pack(fill='x', pady=(0, px(14)))
-        if not self.online_offered and self.first:  # on by default (The Hunter's Dream), once
+        if not self.online_offered and self.first:  # on by default (SuperMedo Server), once
             self.online_offered = True
             app.var('online', 'app').set(True)
-            if L.HUNTERS_DREAM_POOL:
-                app.var('online_pool', 'app').set('huntersdream')
+            app.var('online_pool', 'app').set('supermedo')
         online = self.card(body)
         played.pack_options['before'] = online.master  # found later: above the online card
         self.heading(online, _('Play with others'))
         ttk.Checkbutton(online, text=_('Play online: messages, bloodstains, summons and co-op'),
                         variable=app.var('online', 'app'), style='Card.TCheckbutton').pack(anchor='w')
         pool = app.var('online_pool', 'app')
-        if L.HUNTERS_DREAM_POOL and pool.get() == 'huntersdream':
+        if pool.get() == 'supermedo':
+            # Its Discord sign-in here: online on without an account stayed offline without a word.
+            tk.Label(online, text=_('With SuperMedo Server. Sign in once with Discord (free): your account is '
+                                    'made for you.'), bg=theme.CARD, fg=theme.TEXT_SOFT, font=(theme.BODY, 9),
+                     justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
+            status = tk.Label(online, text='', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10))
+            status.pack(anchor='w', pady=(px(8), 0))
+            row = tk.Frame(online, bg=theme.CARD)
+            row.pack(anchor='w', pady=(px(8), 0))
+            npid, password = app.var('supermedo_npid', 'app'), app.var('supermedo_pass', 'app')
+
+            def show_supermedo():
+                if status.winfo_exists():
+                    signed = npid.get().strip() and password.get()
+                    status.configure(text=_('Signed in as {}').format(npid.get().strip()) if signed else
+                                     _('Not signed in yet'), fg=theme.GOLD_LIGHT if signed else theme.AMBER)
+                    button.configure(text=_('Sign in again') if signed else _('Sign in with Discord'),
+                                     style='Card.TButton' if signed else 'Card.Accent.TButton')
+
+            def sign_in_supermedo():
+                status.configure(text=_('Starting the sign-in…'), fg=theme.MUTED)
+
+                def on_page(page):
+                    import webbrowser
+                    webbrowser.open(page)
+                    app.ui_calls.put(lambda: status.configure(
+                        text=_('Sign in with Discord in the page that opened, then come back here.'), fg=theme.TEXT))
+
+                def work():
+                    try:
+                        name, secret = L.discord_sign_in(L.COMMUNITY_SERVER, on_page)
+                    except (OSError, ValueError, KeyError) as error:
+                        app.ui_calls.put(lambda e=error: status.configure(
+                            text=_('Sign-in failed: {}').format(e), fg=theme.BLOOD_LIGHT))
+                        return
+                    app.ui_calls.put(lambda: (npid.set(name), password.set(secret), show_supermedo(), app.collect()))
+                import threading
+                threading.Thread(target=work, daemon=True).start()
+            button = ttk.Button(row, text=_('Sign in with Discord'), style='Card.Accent.TButton',
+                                command=sign_in_supermedo)
+            button.pack(side='left')
+            show_supermedo()
+        elif L.HUNTERS_DREAM_POOL and pool.get() == 'huntersdream':
             tk.Label(online, text=_("With The Hunter's Dream, together with bbhost players. It needs a free sign-in "
                                     'with Discord, once.'), bg=theme.CARD, fg=theme.TEXT_SOFT, font=(theme.BODY, 9),
                      justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
@@ -2539,7 +2688,6 @@ class SetupGuide:
 
             def sign_in():
                 status.configure(text=_('Starting the sign-in…'), fg=theme.MUTED)
-                game = app.var('online_community', 'app').get()
 
                 def on_code(page, text):
                     app.ui_calls.put(lambda: (status.configure(
@@ -2550,7 +2698,7 @@ class SetupGuide:
 
                 def work():
                     try:
-                        name, token = L.thd_sign_in(game, on_code)
+                        name, token = L.thd_sign_in(on_code)
                     except (OSError, ValueError) as error:
                         app.ui_calls.put(lambda e=error: status.configure(
                             text=_('Sign-in failed: {}').format(e), fg=theme.BLOOD_LIGHT))
@@ -2562,8 +2710,10 @@ class SetupGuide:
             button = ttk.Button(row, text=_('Sign in with Discord'), style='Card.Accent.TButton', command=sign_in)
             button.pack(side='left')
             show()
-        tk.Label(online, text=_('A shadNet server instead, and every option: the Online play page. Offline needs '
-                                'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
+        tk.Label(online, text=_("The Hunter's Dream (the previous server), your own server, and every option: the "
+                                'Online play page. Offline needs nothing: untick it.') if L.HUNTERS_DREAM_POOL else
+                 _('A shadNet server instead, and every option: the Online play page. Offline needs '
+                   'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
                  justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(10), 0))
 
     # -- V: ready --
@@ -2580,8 +2730,9 @@ class SetupGuide:
         preset = dict(L.PRESETS).get(get('preset', 'ini'), ('',))[0].split(' (')[0]
         fps = dict(L.FPS_MODES).get(get('fps_mode', 'app'), ('?',))
         goal = app.goal_name(get('goal', 'app'))
-        online = (_('On, signed in as {}').format(get('thd_online_id', 'app')) if get('online', 'app') and
-                  get('thd_token', 'app') else _('On, sign-in still missing') if get('online', 'app') else _('Off'))
+        account = app.account_name()
+        online = (_('On, signed in as {}').format(account) if get('online', 'app') and account else
+                  _('On, sign-in still missing') if get('online', 'app') else _('Off'))
         rows = [(theme.ICON['folder'], _('Game'), (_('{} · version {}').format(get('game_dir', 'app'), info[1])
                                                    if info else _('not set')), None),
                 (theme.ICON['display'], _('Picture'), '  ·  '.join(
@@ -2589,7 +2740,7 @@ class SetupGuide:
                      upscaler + (f' {preset}' if get('upscaler', 'ini') not in ('off', 'taa') else ''),
                      _(*fps), _('Fullscreen', 'Полный экран') if get('fullscreen', 'app') else _('Window')]), None),
                 (theme.ICON['online'], _('Online'), online, theme.AMBER if get('online', 'app') and not
-                 get('thd_token', 'app') and get('online_pool', 'app') == 'huntersdream' else None)]
+                 account else None)]
         expected = app.expectation()
         if expected:
             rows.append((theme.ICON['system'], _('Expected'), after_colon(expected[0]), expected[1]))

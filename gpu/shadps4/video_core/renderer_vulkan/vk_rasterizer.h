@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -143,6 +145,9 @@ public:
 
     u64 Flush();
     void Finish();
+    /// bbport: BB_EARLY_SUBMIT=1: the frame's work goes to the GPU in parts while it is
+    /// recorded, so the GPU starts drawing before the frame is complete (less latency).
+    void MaybeSubmitEarly();
     void OnSubmit();
 
     PipelineCache& GetPipelineCache() {
@@ -167,6 +172,10 @@ private:
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
+    /// target_scale for the current draw of a pass into the upscaler's output-size images (ui_pass):
+    /// with Sharp UI recomputed for every draw, also those the render state memo continues the pass
+    /// with, since the game's UI pass sets a viewport per picture.
+    void UpdateUiTransform();
     /// bbport: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
     /// dispatches end it).
@@ -336,6 +345,12 @@ private:
     std::unique_ptr<TemporalUpscaler> upscaler; // bbport: FSR (docs/upscaler.md)
     std::array<float, 2> draw_jitter{};         ///< viewport offset of the current draw, pixels
     std::array<float, 2> target_scale{1.0f, 1.0f}; ///< pass drawn into the upscaler's output-size images
+    struct UiPass {
+        bool active = false;    ///< the current pass is redirected into the output-size images
+        bool native_ui = false; ///< the upscaler's redirect draws the native UI
+        std::pair<u32, u32> guest{1, 1};
+        std::pair<u32, u32> output{1, 1};
+    } ui_pass; ///< what UpdateUiTransform scales from
     const bool host_markers_enabled;
     const bool guest_markers_enabled;
 
@@ -518,6 +533,8 @@ private:
     /// Submissions (prepared draws) kept alive until stage B reaches the position.
     std::deque<std::pair<u64, std::shared_ptr<const void>>> pipe_keepalive;
     std::unique_ptr<DrawPipe> draw_pipe;
+    u32 draws_since_submit = 0;
+    std::chrono::steady_clock::time_point last_submit{};
 };
 
 } // namespace Vulkan

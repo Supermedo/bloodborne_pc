@@ -2,6 +2,12 @@
 #include <cassert>
 #include <cstdio>
 int main() {
+    assert(Fg401ProviderMatches(0xf600000001000001ull, Fg401Version));
+    assert(Fg401ProviderMatches(0xf600000081000002ull, Fg402Version));
+    assert(!Fg401ProviderMatches(0xf600000081000002ull, Fg401Version));
+    assert(!Fg401ProviderMatches(0xf600000001000001ull, Fg402Version));
+    assert(!Fg401ProviderMatches(0xf5a5ca1e81000002ull, Fg402Version));
+    assert(!Fg401ProviderMatches(0xf600000000c01006ull, Fg401Version));
     assert(IsRx9000(0x1002, "AMD Radeon RX 9070"));
     assert(IsRx9000(0x1002, "AMD Radeon RX 9070 XT"));
     assert(IsRx9000(0x1002, "AMD Radeon RX 9060 XT"));

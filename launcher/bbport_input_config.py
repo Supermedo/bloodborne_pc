@@ -9,7 +9,10 @@ save_input_ini keeps controller lines untouched; the Controller section edits on
 button per button action through load_controller_bindings/save_controller_bindings (below).
 """
 import os
+import sys
 from pathlib import Path
+
+import bbport_textfile as textfile
 
 # Keyboard-only outputs the remap page edits. (action key in the .ini, Tk display order).
 BUTTON_OUTPUTS = ['cross', 'circle', 'square', 'triangle', 'l1', 'r1', 'l2', 'r2', 'l3', 'r3',
@@ -54,7 +57,7 @@ ACTION_GROUPS = [
         ('leftjoystick_halfmode', ('Walk (hold)', 'Шаг (удерживать)')),
         ('circle', ('Dodge / dash (hold); back in menus (Circle)',
                     'Уклонение / бег (удерживать); назад в меню (Круг)')),
-        ('l3', ('Jump while dashing (L3)', 'Прыжок во время бега (L3)')),
+        ('l3', ('Left stick click (L3)', 'Нажатие левого стика (L3)')),
         ('r3', ('Lock on / reset camera (R3)', 'Захват цели / сброс камеры (R3)')),
         ('axis_right_y_minus', ('Camera up', 'Камера вверх')),
         ('axis_right_y_plus', ('Camera down', 'Камера вниз')),
@@ -252,15 +255,67 @@ def keysym_to_name(keysym):
 # Windows delivers wheel scroll separately via <MouseWheel>/event.delta, so there is no clash on
 # this platform). Requires a reasonably current Tcl/Tk (8.6.12+, which is what Python 3.10+'s
 # official Windows installers bundle); an older frozen interpreter would simply never fire a
-# <ButtonPress> for the side buttons, same as if the button didn't exist.
+# <ButtonPress> for the side buttons, same as if the button didn't exist. 8/9 are the X11 (and
+# newer Tk) numbers for the same two buttons.
 TK_BUTTON_NUM_TO_NAME = {1: 'leftbutton', 2: 'middlebutton', 3: 'rightbutton',
-                          4: 'sidebuttonback', 5: 'sidebuttonforward'}
+                          4: 'sidebuttonback', 5: 'sidebuttonforward',
+                          8: 'sidebuttonback', 9: 'sidebuttonforward'}
 
 
 def button_num_to_name(num):
     """Tk's event.num from a <ButtonPress> -> our mouse button name, or None for a button number
     Tk reports that bbport has no name for."""
     return TK_BUTTON_NUM_TO_NAME.get(num)
+
+
+# Win32 virtual-key codes of the mouse buttons Tk does not reliably turn into <ButtonPress>
+# events (it depends on the Tcl/Tk build, and mouse drivers can interfere): the wheel click and
+# the two side buttons. The Controls page polls them with GetAsyncKeyState while it waits for an
+# input, next to the Tk events, so they can always be bound.
+WIN_POLLED_MOUSE_BUTTONS = {0x04: 'middlebutton',        # VK_MBUTTON
+                             0x05: 'sidebuttonback',      # VK_XBUTTON1
+                             0x06: 'sidebuttonforward'}   # VK_XBUTTON2
+
+
+class MouseButtonPoller:
+    """Reports the wheel click / side buttons by polling `get_key_state(vk)` (Win32's
+    GetAsyncKeyState: the high bit 0x8000 is set while the button is down). A button already
+    held when the poller is made is not reported until it has been let go and pressed again,
+    so the click that opened the capture never binds itself."""
+
+    def __init__(self, get_key_state, buttons=None):
+        self._get = get_key_state
+        self._buttons = dict(WIN_POLLED_MOUSE_BUTTONS if buttons is None else buttons)
+        self._down = {vk: self._is_down(vk) for vk in self._buttons}
+
+    def _is_down(self, vk):
+        return bool(self._get(vk) & 0x8000)
+
+    def poll(self):
+        """The name of a button that went from up to down since the last poll, or None. State is
+        refreshed for every button on every call, whether or not one is reported."""
+        pressed = None
+        for vk, name in self._buttons.items():
+            down = self._is_down(vk)
+            if down and not self._down[vk] and pressed is None:
+                pressed = name
+            self._down[vk] = down
+        return pressed
+
+
+def windows_mouse_poller():
+    """A MouseButtonPoller on the real GetAsyncKeyState, or None where there is none (not
+    Windows) or it cannot be loaded."""
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+        get_key_state = ctypes.windll.user32.GetAsyncKeyState
+        get_key_state.argtypes = [ctypes.c_int]
+        get_key_state.restype = ctypes.c_short
+    except (AttributeError, OSError, ImportError):
+        return None
+    return MouseButtonPoller(get_key_state)
 
 
 def wheel_to_name(delta, horizontal=False):
@@ -501,11 +556,20 @@ def load_input_ini(path):
     mouse look" checkbox does in save_input_ini.
     """
     try:
-        lines = Path(path).read_text(encoding='utf-8').splitlines()
+        text, clean = textfile.read(path)
+        lines = text.splitlines()
     except FileNotFoundError:
-        lines = DEFAULT_INPUT_INI.splitlines()
+        lines, clean = DEFAULT_INPUT_INI.splitlines(), True
     except OSError:
-        lines = []
+        lines, clean = [], True
+    if not clean:  # saved in another encoding by an editor: rewritten as UTF-8, the old file kept as .bad
+        bad = textfile.keep_bad(path)
+        try:
+            textfile.write(path, '\n'.join(lines) + '\n')
+            textfile.REPAIRS.append(f'Controls: {path} was not UTF-8; rewritten as UTF-8, '
+                                    f'the old file is {bad.name if bad else "not kept"}')
+        except OSError:
+            pass
     return read_input_lines(lines)
 
 
@@ -586,7 +650,7 @@ def save_input_ini(path, bindings, lines):
         if output not in written and bindings.get(output):
             values = bindings[output]
             out.extend(f'{output} = {format_binding(v)}' for v in (values if isinstance(values, list) else [values]))
-    Path(path).write_text('\n'.join(out) + '\n', encoding='utf-8')
+    textfile.write(path, '\n'.join(out) + '\n')
 
 
 def save_mouse_settings(path, settings, lines):
@@ -635,7 +699,7 @@ def save_mouse_settings(path, settings, lines):
     for key in MOUSE_SIMPLE_LINES:
         if key not in written_simple and settings[key] != MOUSE_SETTINGS_DEFAULTS[key]:
             out.append(_mouse_simple_line(key, settings[key]))
-    Path(path).write_text('\n'.join(out) + '\n', encoding='utf-8')
+    textfile.write(path, '\n'.join(out) + '\n')
 
 
 def _mouse_simple_line(key, value):
@@ -729,7 +793,7 @@ def save_controller_bindings(path, controller, lines):
            if o in controller and o not in written and controller[o]]
     at = last_controller if last_controller is not None else len(out)
     out[at:at] = new
-    Path(path).write_text('\n'.join(out) + '\n', encoding='utf-8')
+    textfile.write(path, '\n'.join(out) + '\n')
 
 
 def controller_conflicts(controller):

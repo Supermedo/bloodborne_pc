@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
+#include <functional>
 #include <magic_enum/magic_enum.hpp>
 #include "bbport_copy.h"
 #include "bbport_toggles.h"
@@ -29,6 +30,15 @@ namespace VideoCore {
 
 static constexpr size_t GDS_BUFFER_SIZE = 64_KB;
 static constexpr size_t STREAM_BUFFER_SIZE = 128_MB;
+// bbport: game memory backing comes from slabs of this size; its use is tracked per 2 MiB chunk.
+static constexpr u64 SLAB_SIZE = 32_MB;
+static constexpr u64 CHUNK_BITS = 21;
+static constexpr u64 CHUNK_SIZE = u64{1} << CHUNK_BITS;
+// BB_ARENA_DEBUG=1: every release, unbind and freed slab in the log.
+static const bool arena_debug = [] {
+    const char* env = std::getenv("BB_ARENA_DEBUG");
+    return env && env[0] == '1';
+}();
 
 static constexpr auto ARENA_USAGE =
     vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
@@ -123,8 +133,21 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         if (result == vk::Result::eSuccess) {
             reserve_memory = memory;
             reserve_size = size;
+            Slab slab{.memory = memory, .vram = true, .reserve = true,
+                      .pieces = static_cast<u32>(size >> block_shift)};
+            for (u32 piece = slab.pieces; piece-- > 0;) {
+                slab.free.push_back(piece);
+            }
+            slab_of[static_cast<VkDeviceMemory>(memory)] = static_cast<u32>(slabs.size());
+            slabs.push_back(std::move(slab));
         }
     }
+    ASSERT_MSG(block_shift <= CHUNK_BITS, "Sparse block size {} is over 2 MiB", block_size);
+    chunk_used.assign(u64{1} << (ADDRESS_SPACE_BITS - CHUNK_BITS), 0);
+    chunk_flags.assign(chunk_used.size(), 0);
+    arena_start_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
 
     const u64 bda_pagetable_size =
         (blocks_per_arena_page * num_arena_pages) * sizeof(vk::DeviceAddress);
@@ -365,6 +388,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const u64 first_block = device_addr >> block_shift;
     const u64 last_block = (device_addr + size - 1) >> block_shift;
     const auto* arena = GetArena(first_block, last_block);
+    NoteChunkUse(device_addr, size); // first: a release making room for it leaves it alone
     EnsureResident(arena, first_block, last_block);
     const u64 uploaded_before = BbStats::buffer_upload_bytes.load(std::memory_order_relaxed);
     SynchronizeMemory(arena, device_addr, size, is_written, is_texel_buffer);
@@ -456,6 +480,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     }
 
     LOG_WARNING(Render, "Migrating arena");
+    const std::size_t binds_before = pending_binds.size();
 
     const u64 first_addr = first_arena ? first_arena->cpu_addr : (first_page << arena_page_bits);
     const u64 first_size = first_arena ? first_arena->size_bytes : arena_page_size;
@@ -473,10 +498,22 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
             .resourceOffset = (start - base_block) << block_shift,
             .size = (end - start) << block_shift,
             .memory = backing.memory,
-            .memoryOffset = backing.offset + ((start - backing.start) << block_shift),
+            .memoryOffset = (backing.offset + (start - backing.start)) << block_shift,
         });
     });
 
+    // bbport: the old arena keeps its binds (the shaders' page table still points into it): the
+    // slabs behind them are never freed, a released piece is only taken again.
+    for (auto& slab : slabs) {
+        if (slab.memory) {
+            slab.pinned = true;
+        }
+    }
+    std::printf("Game memory: arena at %#llx migrated (%llu MiB): %zu ranges bound again; %zu releases "
+                "not unbound yet, %zu pending bind lists before\n",
+                static_cast<unsigned long long>(first_addr), static_cast<unsigned long long>(total_size >> 20),
+                bind->binds.size(), unbinds.size(), binds_before);
+    std::fflush(stdout);
     u64 base_page = first_addr >> arena_page_bits;
     for (u32 page = 0; page < (first_size >> arena_page_bits); ++page) {
         address_space[base_page + page] = new_arena;
@@ -501,97 +538,50 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
     BbStats::Timer timer{BbStats::t_resident};
 
-    vk::MemoryAllocateInfo alloc_info = {
-        .allocationSize = resident_blocks << block_shift,
-        .memoryTypeIndex = arena_memory_type_index,
-    };
-    // BB_ARENA_LIMIT_MB=N: VRAM counts as full once N MiB are backed here (tests the reserve).
-    static const u64 arena_limit = [] {
-        const char* env = std::getenv("BB_ARENA_LIMIT_MB");
-        return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
-    }();
-    static u64 arena_allocated = 0;
-    vk::Result alloc_result = vk::Result::eErrorOutOfDeviceMemory;
-    vk::DeviceMemory device_memory{};
-    if (!arena_limit || arena_allocated + alloc_info.allocationSize <= arena_limit) {
-        std::tie(alloc_result, device_memory) = instance.GetDevice().allocateMemory(alloc_info);
-        if (alloc_result == vk::Result::eSuccess) {
-            arena_allocated += alloc_info.allocationSize;
-        }
-    }
-    u64 memory_base{}; ///< the backing's offset in `device_memory` (non-zero in the reserve)
-    if (alloc_result == vk::Result::eErrorOutOfDeviceMemory) {
-        // bbport: VRAM full. The guest memory the GPU uses is backed here and only grows as areas
-        // load; on 4-8 GB cards it ran out ("ErrorOutOfDeviceMemory" stopped the game). Another
-        // memory type the arena accepts, outside VRAM (system memory the GPU reaches), is slower
-        // but keeps the game going.
-        const auto& props = instance.GetMemoryProperties();
-        const u32 vram_heap = props.memoryTypes[arena_memory_type_index].heapIndex;
-        for (u32 i = 0; i < props.memoryTypeCount && alloc_result != vk::Result::eSuccess; ++i) {
-            if (((arena_memory_type_bits >> i) & 1) == 0 || props.memoryTypes[i].heapIndex == vram_heap) {
-                continue;
-            }
-            alloc_info.memoryTypeIndex = i;
-            std::tie(alloc_result, device_memory) = instance.GetDevice().allocateMemory(alloc_info);
-        }
-        if (alloc_result == vk::Result::eSuccess) {
-            Vulkan::NoteOverBudget("buffer");
-        } else if (reserve_memory && reserve_size - reserve_used >= alloc_info.allocationSize) {
-            // The reserve kept at start for this (no other memory type on NVIDIA).
-            device_memory = reserve_memory;
-            memory_base = reserve_used;
-            const u64 quarter_before = reserve_used * 4 / reserve_size;
-            reserve_used += alloc_info.allocationSize;
-            alloc_result = vk::Result::eSuccess;
-            if (memory_base == 0 || reserve_used * 4 / reserve_size != quarter_before) {
-                std::printf("GPU: video memory full: game memory from its reserve (%llu of %llu "
-                            "MiB used)\n",
-                            static_cast<unsigned long long>(reserve_used >> 20),
-                            static_cast<unsigned long long>(reserve_size >> 20));
-                std::fflush(stdout);
-            }
-        } else {
-            std::printf("GPU: video memory full: no room for %llu MiB of game memory (only VRAM "
-                        "can hold it on this GPU). A lower output resolution or upscaler preset "
-                        "needs less.\n",
-                        static_cast<unsigned long long>(alloc_info.allocationSize >> 20));
-            std::fflush(stdout);
-        }
-    }
-    device_memory = Vulkan::Check(vk::ResultValue<vk::DeviceMemory>{alloc_result, device_memory});
-    arena_backed += alloc_info.allocationSize;
-
     boost::container::small_vector<vk::BufferCopy, 8> copies;
     const auto staging =
         staging_pool.Request(resident_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
 
-    u64 memory_offset{memory_base};
     ArenaBinds* binds = BindsForArena(arena);
     auto* bda_addrs = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
     u64 offset = staging.offset;
     for (const auto& range : bind_ranges) {
-        Backing backing;
-        backing.start = range.start;
-        backing.end = range.end;
-        backing.memory = device_memory;
-        backing.offset = memory_offset;
-        resident_ranges.Add(backing);
-
-        LOG_INFO(Render, "Making range start={}, end={} resident", backing.start, backing.end);
-
-        const auto& bind = binds->binds.emplace_back(vk::SparseMemoryBind{
-            .resourceOffset = (range.start << block_shift) - arena->cpu_addr,
-            .size = (range.end - range.start) << block_shift,
-            .memory = device_memory,
-            .memoryOffset = memory_offset,
-        });
-        memory_offset += bind.size;
-
-        for (u32 block = 0; block < bind.size; block += block_size) {
-            *(bda_addrs++) = arena->BufferDeviceAddress() + bind.resourceOffset + block;
+        // bbport: pieces of the slabs, in runs as long as they lie next to each other
+        for (u64 block = range.start; block < range.end;) {
+            const auto run = TakeRun(range.end - block);
+            if (!run) {
+                std::printf("GPU: video memory full: no room for %llu MiB of game memory (only VRAM "
+                            "can hold it on this GPU). A lower output resolution or upscaler preset "
+                            "needs less.\n",
+                            static_cast<unsigned long long>((range.end - block) << block_shift >> 20));
+                std::fflush(stdout);
+                Vulkan::Check(vk::Result::eErrorOutOfDeviceMemory);
+                return;
+            }
+            const Slab& slab = slabs[run->slab];
+            Backing backing;
+            backing.start = block;
+            backing.end = block + run->count;
+            backing.memory = slab.memory;
+            backing.offset = run->index;
+            resident_ranges.Add(backing);
+            CancelUnbinds(arena, block, block + run->count);
+            binds->binds.emplace_back(vk::SparseMemoryBind{
+                .resourceOffset = (block << block_shift) - arena->cpu_addr,
+                .size = u64{run->count} << block_shift,
+                .memory = slab.memory,
+                .memoryOffset = backing.offset << block_shift,
+            });
+            arena_backed += u64{run->count} << block_shift;
+            block += run->count;
         }
-        const u64 copy_size = (backing.end - backing.start) * sizeof(vk::DeviceAddress);
-        copies.emplace_back(offset, backing.start * sizeof(vk::DeviceAddress), copy_size);
+        LOG_INFO(Render, "Making range start={}, end={} resident", range.start, range.end);
+
+        for (u64 block = range.start; block < range.end; ++block) {
+            *(bda_addrs++) = arena->BufferDeviceAddress() + (block << block_shift) - arena->cpu_addr;
+        }
+        const u64 copy_size = (range.end - range.start) * sizeof(vk::DeviceAddress);
+        copies.emplace_back(offset, range.start * sizeof(vk::DeviceAddress), copy_size);
         offset += copy_size;
     }
 
@@ -760,20 +750,414 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
     return true;
 }
 
+void BufferCache::NoteChunkUse(VAddr device_addr, u64 size) {
+    const u64 last = std::min<u64>((device_addr + size - 1) >> CHUNK_BITS, chunk_used.size() - 1);
+    for (u64 chunk = device_addr >> CHUNK_BITS; chunk <= last; ++chunk) {
+        chunk_used[chunk] = arena_now;
+        if (chunk_flags[chunk] & CHUNK_RELEASED) {
+            chunk_flags[chunk] &= ~CHUNK_RELEASED;
+            ++refetched_chunks;
+        }
+    }
+}
+
+void BufferCache::KeepFaultedRange(VAddr device_addr, u64 size) {
+    const u64 last = std::min<u64>((device_addr + size - 1) >> CHUNK_BITS, chunk_used.size() - 1);
+    for (u64 chunk = device_addr >> CHUNK_BITS; chunk <= last; ++chunk) {
+        if (!(chunk_flags[chunk] & CHUNK_FAULTED)) {
+            chunk_flags[chunk] |= CHUNK_FAULTED;
+            ++faulted_chunks;
+        }
+    }
+}
+
+std::optional<u32> BufferCache::NewSlab(u32 type_index, bool vram) {
+    const auto [result, memory] = instance.GetDevice().allocateMemory(vk::MemoryAllocateInfo{
+        .allocationSize = SLAB_SIZE,
+        .memoryTypeIndex = type_index,
+    });
+    if (result != vk::Result::eSuccess) {
+        return std::nullopt;
+    }
+    Slab slab{.memory = memory, .vram = vram, .pieces = static_cast<u32>(SLAB_SIZE >> block_shift)};
+    for (u32 piece = slab.pieces; piece-- > 0;) {
+        slab.free.push_back(piece);
+    }
+    u32 index = static_cast<u32>(slabs.size());
+    for (u32 i = 0; i < slabs.size(); ++i) {
+        if (!slabs[i].memory) {
+            index = i;
+            break;
+        }
+    }
+    if (index == slabs.size()) {
+        slabs.push_back(std::move(slab));
+    } else {
+        slabs[index] = std::move(slab);
+    }
+    slab_of[static_cast<VkDeviceMemory>(memory)] = index;
+    (vram ? vram_slab_bytes : system_slab_bytes) += SLAB_SIZE;
+    return index;
+}
+
+std::optional<BufferCache::Run> BufferCache::TakeRun(u64 count) {
+    if (!released.empty()) {
+        PutBackReleased();
+    }
+    const auto take = [&](u32 index) {
+        Slab& slab = slabs[index];
+        const u32 first = slab.free.back();
+        slab.free.pop_back();
+        u32 n = 1;
+        while (n < count && !slab.free.empty() && slab.free.back() == first + n) {
+            slab.free.pop_back();
+            ++n;
+        }
+        slab.used += n;
+        if (slab.reserve) {
+            reserve_used += u64{n} << block_shift;
+        }
+        return Run{index, first, n};
+    };
+    const auto find = [&](bool vram, bool reserve) -> std::optional<u32> {
+        for (u32 i = 0; i < slabs.size(); ++i) {
+            const Slab& slab = slabs[i];
+            if (slab.memory && slab.vram == vram && slab.reserve == reserve && !slab.free.empty()) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    };
+    if (const auto slab = find(true, false)) {
+        return take(*slab);
+    }
+    // BB_ARENA_LIMIT_MB=N: VRAM counts as full once N MiB of slabs are in it (tests the fallbacks).
+    static const u64 arena_limit = [] {
+        const char* env = std::getenv("BB_ARENA_LIMIT_MB");
+        return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
+    }();
+    if (arena_now >= vram_full_until && (!arena_limit || vram_slab_bytes + SLAB_SIZE <= arena_limit)) {
+        if (const auto slab = NewSlab(arena_memory_type_index, true)) {
+            return take(*slab);
+        }
+        // VRAM full: game memory no binding used for a while makes room for the next requests.
+        vram_full_until = arena_now + 5;
+        ReleaseIdleChunks(2 * SLAB_SIZE, 10);
+    }
+    // bbport: VRAM full. The guest memory the GPU uses is backed here; on 4-8 GB cards it ran
+    // out ("ErrorOutOfDeviceMemory" stopped the game). Another memory type the arena accepts,
+    // outside VRAM (system memory the GPU reaches), is slower but keeps the game going.
+    if (const auto slab = find(false, false)) {
+        return take(*slab);
+    }
+    const auto& props = instance.GetMemoryProperties();
+    const u32 vram_heap = props.memoryTypes[arena_memory_type_index].heapIndex;
+    for (u32 type = 0; type < props.memoryTypeCount; ++type) {
+        if (((arena_memory_type_bits >> type) & 1) == 0 || props.memoryTypes[type].heapIndex == vram_heap) {
+            continue;
+        }
+        if (const auto slab = NewSlab(type, false)) {
+            Vulkan::NoteOverBudget("buffer");
+            return take(*slab);
+        }
+    }
+    // The reserve kept at start for this (no other memory type on NVIDIA).
+    if (const auto slab = find(true, true)) {
+        const u64 quarter_before = reserve_used * 4 / reserve_size;
+        const bool first_use = reserve_used == 0;
+        const Run run = take(*slab);
+        if (first_use || reserve_used * 4 / reserve_size != quarter_before) {
+            std::printf("GPU: video memory full: game memory from its reserve (%llu of %llu MiB used)\n",
+                        static_cast<unsigned long long>(reserve_used >> 20),
+                        static_cast<unsigned long long>(reserve_size >> 20));
+            std::fflush(stdout);
+        }
+        return run;
+    }
+    return std::nullopt;
+}
+
+void BufferCache::PutBackReleased() {
+    bool returned = false;
+    while (!released.empty() && scheduler.IsFree(released.front().tick)) {
+        const Released& item = released.front();
+        Slab& slab = slabs[item.slab];
+        for (u32 i = 0; i < item.count; ++i) {
+            slab.free.push_back(item.piece + i);
+        }
+        slab.used -= item.count;
+        if (slab.reserve) {
+            reserve_used -= u64{item.count} << block_shift;
+        }
+        released.pop_front();
+        returned = true;
+    }
+    if (!returned) {
+        return;
+    }
+    // Slabs without pieces in use go back to the driver; one in VRAM stays for the next area.
+    bool spare_vram_slab = false;
+    for (Slab& slab : slabs) {
+        if (!slab.memory) {
+            continue;
+        }
+        std::ranges::sort(slab.free, std::greater<>{}); // the lowest is taken first
+        if (slab.reserve || slab.pinned || slab.used != 0) {
+            continue;
+        }
+        if (slab.vram && !spare_vram_slab) {
+            spare_vram_slab = true;
+            continue;
+        }
+        if (arena_debug) {
+            std::printf("Game memory: slab %zu freed (%s)\n", static_cast<std::size_t>(&slab - slabs.data()),
+                        slab.vram ? "VRAM" : "system memory");
+            std::fflush(stdout);
+        }
+        instance.GetDevice().freeMemory(slab.memory);
+        slab_of.erase(static_cast<VkDeviceMemory>(slab.memory));
+        (slab.vram ? vram_slab_bytes : system_slab_bytes) -= SLAB_SIZE;
+        slab.memory = vk::DeviceMemory{};
+        slab.free.clear();
+        slab.free.shrink_to_fit();
+    }
+}
+
+u64 BufferCache::ReleaseChunk(u64 chunk) {
+    const u64 chunk_blocks = CHUNK_SIZE >> block_shift;
+    const u64 first = chunk * chunk_blocks;
+    const u64 end = first + chunk_blocks;
+    boost::container::small_vector<Backing, 8> parts;
+    resident_ranges.ForEachInRange(first, end, [&](const Backing& backing) {
+        const u64 start = std::max(first, backing.start);
+        const u64 stop = std::min(end, backing.end);
+        if (start < stop) {
+            parts.push_back(backing.SubRange(start, stop));
+        }
+    });
+    if (parts.empty()) {
+        return 0;
+    }
+    const Buffer* arena = address_space[first >> blocks_per_arena_page_shift];
+    const u64 tick = scheduler.CurrentTick();
+    u64 bytes = 0;
+    for (const auto& part : parts) {
+        const u64 blocks = part.end - part.start;
+        // The shaders' page table now, the memory once the GPU is past this (FlushUnbinds): a
+        // shader reading it in between faults and binds it again.
+        runtime.FillBuffer(bda_pagetable_buffer.get(), part.start * sizeof(vk::DeviceAddress),
+                           blocks * sizeof(vk::DeviceAddress), 0u);
+        unbinds.push_back({
+            .arena = arena,
+            .start = part.start,
+            .end = part.end,
+            .slab = slab_of.at(static_cast<VkDeviceMemory>(part.memory)),
+            .piece = static_cast<u32>(part.offset),
+            .clear_tick = tick,
+        });
+        // Uploaded again from the game's memory when it is bound again.
+        memory_tracker->MarkRegionAsCpuModified(part.start << block_shift, blocks << block_shift);
+        bytes += blocks << block_shift;
+    }
+    resident_ranges.Subtract(first, end);
+    arena_backed -= bytes;
+    released_bytes += bytes;
+    ++released_chunks;
+    chunk_flags[chunk] |= CHUNK_RELEASED;
+    if (arena_debug) {
+        std::printf("Game memory: released chunk %#llx (%zu parts, %llu KiB) of arena %p at tick %llu\n",
+                    static_cast<unsigned long long>(chunk << CHUNK_BITS), parts.size(),
+                    static_cast<unsigned long long>(bytes >> 10), static_cast<const void*>(arena),
+                    static_cast<unsigned long long>(tick));
+        std::fflush(stdout);
+    }
+    return bytes;
+}
+
+void BufferCache::FlushUnbinds() {
+    if (unbinds.empty()) {
+        return;
+    }
+    // Called while submitting: the submission signals the tick before the current one.
+    const u64 tick = scheduler.CurrentTick() - 1;
+    std::erase_if(unbinds, [&](const Unbind& unbind) {
+        if (!scheduler.IsFree(unbind.clear_tick)) {
+            return false;
+        }
+        BindsForArena(unbind.arena)->binds.push_back(vk::SparseMemoryBind{
+            .resourceOffset = (unbind.start << block_shift) - unbind.arena->cpu_addr,
+            .size = (unbind.end - unbind.start) << block_shift,
+            .memory = vk::DeviceMemory{},
+            .memoryOffset = 0,
+        });
+        released.push_back({tick, unbind.slab, unbind.piece, static_cast<u32>(unbind.end - unbind.start)});
+        if (arena_debug) {
+            std::printf("Game memory: unbind %#llx-%#llx of arena %p with submission %llu\n",
+                        static_cast<unsigned long long>(unbind.start << block_shift),
+                        static_cast<unsigned long long>(unbind.end << block_shift),
+                        static_cast<const void*>(unbind.arena), static_cast<unsigned long long>(tick));
+            std::fflush(stdout);
+        }
+        return true;
+    });
+}
+
+void BufferCache::CancelUnbinds(const Buffer* arena, u64 start, u64 end) {
+    if (unbinds.empty()) [[likely]] {
+        return;
+    }
+    // The new bind replaces their pieces there: taken again once the GPU is past it.
+    const u64 tick = scheduler.CurrentTick();
+    for (std::size_t i = 0; i < unbinds.size();) {
+        const Unbind unbind = unbinds[i];
+        if (unbind.arena != arena || unbind.end <= start || end <= unbind.start) {
+            ++i;
+            continue;
+        }
+        const u64 a = std::max(start, unbind.start);
+        const u64 b = std::min(end, unbind.end);
+        released.push_back({tick, unbind.slab, unbind.piece + static_cast<u32>(a - unbind.start),
+                            static_cast<u32>(b - a)});
+        if (arena_debug) {
+            std::printf("Game memory: bound again before its unbind: %#llx-%#llx of arena %p\n",
+                        static_cast<unsigned long long>(a << block_shift),
+                        static_cast<unsigned long long>(b << block_shift), static_cast<const void*>(arena));
+            std::fflush(stdout);
+        }
+        Unbind head = unbind;
+        head.end = a;
+        Unbind tail = unbind;
+        tail.start = b;
+        tail.piece += static_cast<u32>(b - unbind.start);
+        if (head.start < head.end) {
+            unbinds[i++] = head;
+            if (tail.start < tail.end) {
+                unbinds.insert(unbinds.begin() + i++, tail);
+            }
+        } else if (tail.start < tail.end) {
+            unbinds[i++] = tail;
+        } else {
+            unbinds.erase(unbinds.begin() + i);
+        }
+    }
+}
+
+u64 BufferCache::ReleaseIdleChunks(u64 wanted, u32 idle_seconds) {
+    if (BbToggle::Disabled(BbToggle::ArenaRelease) || resident_ranges.Empty()) {
+        return 0;
+    }
+    const u64 chunk_shift = CHUNK_BITS - block_shift;
+    std::vector<std::pair<u32, u64>> idle; // last use, chunk
+    u64 previous = ~u64{0};
+    for (const auto& backing : resident_ranges) {
+        for (u64 chunk = backing.start >> chunk_shift; chunk <= (backing.end - 1) >> chunk_shift;
+             ++chunk) {
+            if (chunk == previous) {
+                continue;
+            }
+            previous = chunk;
+            if (arena_now - chunk_used[chunk] < idle_seconds || (chunk_flags[chunk] & CHUNK_FAULTED)) {
+                continue;
+            }
+            // GPU-written data lives only here: it stays.
+            const VAddr address = chunk << CHUNK_BITS;
+            if (gpu_modified_ranges.Intersects(address, CHUNK_SIZE) ||
+                memory_tracker->IsRegionGpuModified(address, CHUNK_SIZE)) {
+                continue;
+            }
+            idle.emplace_back(chunk_used[chunk], chunk);
+        }
+    }
+    std::ranges::sort(idle);
+    u64 bytes = 0;
+    for (const auto& [used, chunk] : idle) {
+        if (bytes >= wanted) {
+            break;
+        }
+        bytes += ReleaseChunk(chunk);
+    }
+    return bytes;
+}
+
+void BufferCache::ReportArena(bool force) {
+    if (!force && (arena_now - arena_last_report < 60 || (!released_chunks && !system_slab_bytes))) {
+        return;
+    }
+    arena_last_report = arena_now;
+    u32 live = 0;
+    for (const auto& slab : slabs) {
+        live += slab.memory ? 1 : 0;
+    }
+    std::printf("Game memory: %llu MiB bound (slabs: %llu MiB in VRAM, %llu MiB in system memory, "
+                "reserve %llu of %llu MiB used), %u slabs; released %llu MiB in %llu chunks so far, "
+                "%llu of them needed again; %llu MiB kept (read by shaders directly)\n",
+                static_cast<unsigned long long>(arena_backed >> 20),
+                static_cast<unsigned long long>(vram_slab_bytes >> 20),
+                static_cast<unsigned long long>(system_slab_bytes >> 20),
+                static_cast<unsigned long long>(reserve_used >> 20),
+                static_cast<unsigned long long>(reserve_size >> 20), live,
+                static_cast<unsigned long long>(released_bytes >> 20),
+                static_cast<unsigned long long>(released_chunks),
+                static_cast<unsigned long long>(refetched_chunks),
+                static_cast<unsigned long long>((faulted_chunks * CHUNK_SIZE) >> 20));
+    std::fflush(stdout);
+}
+
+void BufferCache::RunArenaCollector() {
+    const u64 now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count();
+    arena_now = static_cast<u32>((now_ns - arena_start_ns) / 1'000'000'000ull);
+    if (!released.empty()) {
+        PutBackReleased();
+    }
+    if (arena_now == arena_last_collect) {
+        return;
+    }
+    arena_last_collect = arena_now;
+    // BB_ARENA_TARGET_MB=N: released down to N MiB bound on any GPU (tests); else when VRAM in
+    // use passes 85% of the driver's budget.
+    static const u64 target = [] {
+        const char* env = std::getenv("BB_ARENA_TARGET_MB");
+        return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
+    }();
+    static const u32 idle_seconds = [] {
+        const char* env = std::getenv("BB_ARENA_IDLE_SECONDS");
+        return env ? static_cast<u32>(std::strtoul(env, nullptr, 10)) : 60u;
+    }();
+    u64 wanted = 0;
+    if (target) {
+        wanted = arena_backed > target ? arena_backed - target : 0;
+    } else if (instance.CanReportMemoryUsage()) {
+        const u64 budget = instance.GetDeviceMemoryBudgetNow();
+        const u64 used = instance.GetDeviceMemoryUsage();
+        const u64 mark = budget / 100 * 85;
+        if (budget && used > mark) {
+            wanted = std::max<u64>(used - mark, SLAB_SIZE);
+        }
+    }
+    if (wanted) {
+        ReleaseIdleChunks(wanted, idle_seconds);
+    }
+    ReportArena(false);
+}
+
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
+    FlushUnbinds();
     if (pending_binds.empty()) {
         return;
     }
 
     std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
     buffer_binds.reserve(pending_binds.size());
-
+    std::size_t total = 0;
     for (const auto& binds : pending_binds) {
         buffer_binds.emplace_back(vk::SparseBufferMemoryBindInfo{
             .buffer = binds.arena->Handle(),
             .bindCount = static_cast<u32>(binds.binds.size()),
             .pBinds = binds.binds.data(),
         });
+        total += binds.binds.size();
     }
 
     const u64 signal_tick = memory_semaphore.NextTick();
@@ -798,6 +1182,15 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         instance.ReportDeviceLost("sparse binding");
     }
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+    // bbport: a bind that failed never signals: the submission waiting for it (and the game) would
+    // stop without a word.
+    if (submit_result != vk::Result::eSuccess) {
+        std::printf("GPU: game memory binding %s: %zu binds in %zu buffers\n",
+                    vk::to_string(submit_result).c_str(), total, buffer_binds.size());
+        std::fflush(stdout);
+    }
+    ASSERT_MSG(submit_result == vk::Result::eSuccess, "Game memory binding failed: {}",
+               vk::to_string(submit_result));
 
     pending_binds.clear();
 }

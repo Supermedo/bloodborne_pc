@@ -52,6 +52,11 @@ bool EnsureTransport() {
     return g_transport.ensure_transport ? g_transport.ensure_transport() : TransportIsReady();
 }
 
+u32 LocalAddr() {
+    const u32 addr = g_transport.local_addr ? g_transport.local_addr() : 0;
+    return addr != 0 ? addr : AdvertisedAddr();
+}
+
 void SetPeerResolver(PeerResolver fn) {
     g_peer_resolver = fn;
 }

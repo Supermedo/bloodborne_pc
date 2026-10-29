@@ -6,6 +6,10 @@
 #include "bbport_copy.h"
 
 #include <deque>
+#include <optional>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 
 #include "common/interval_set.h"
@@ -106,8 +110,8 @@ public:
     /// Processes the fault buffer.
     void ProcessFaultBuffer();
 
-    /// bbport: memory backing guest memory for the GPU (never freed), the reserve kept for it,
-    /// and the part of the reserve used (for the memory report).
+    /// bbport: memory backing guest memory for the GPU, the reserve kept for it, and the part
+    /// of the reserve used (for the memory report).
     [[nodiscard]] u64 ArenaBackedBytes() const { return arena_backed; }
     [[nodiscard]] u64 ArenaReserveBytes() const { return reserve_size; }
     [[nodiscard]] u64 ArenaReserveUsedBytes() const { return reserve_used; }
@@ -117,6 +121,66 @@ public:
 
     /// Commits pending sparse buffer memory binds. Must be called before every scheduler submit.
     void SubmitPendingArenaBinds(Vulkan::SubmitInfo& info);
+
+    /// bbport: after every submission: puts back pieces of game memory the GPU is past, and once
+    /// a second, when VRAM runs short (or BB_ARENA_TARGET_MB is exceeded), releases game memory
+    /// no binding has used for BB_ARENA_IDLE_SECONDS (60). It came back with every area, never
+    /// released: 4 GB cards ran out after a few area changes (ErrorOutOfDeviceMemory).
+    void RunArenaCollector();
+
+    /// bbport: a shader read this range through its page table (it faulted). Such reads are not
+    /// seen here, so its game memory is not released again.
+    void KeepFaultedRange(VAddr device_addr, u64 size);
+
+private:
+    /// bbport: game memory backing comes in pieces of one block from slabs, so a released piece
+    /// is taken again and a slab without pieces in use goes back to the driver.
+    struct Slab {
+        vk::DeviceMemory memory{};
+        bool vram{};    ///< in the VRAM heap (else system memory the GPU reaches)
+        bool reserve{}; ///< the reserve kept at start: taken last, never freed
+        bool pinned{};  ///< alive at an arena migration: the old arena still binds its pieces
+        u32 pieces{};   ///< pieces in the slab
+        u32 used{};     ///< pieces bound, or released but not yet put back
+        std::vector<u32> free; ///< pieces to take, sorted so the lowest is taken first
+    };
+    struct Run {
+        u32 slab;
+        u32 index;
+        u32 count;
+    };
+    struct Released {
+        u64 tick; ///< the submission that unbinds them: taken again once the GPU is past it
+        u32 slab;
+        u32 piece;
+        u32 count;
+    };
+    struct Unbind {
+        const Buffer* arena;
+        u64 start; ///< blocks
+        u64 end;
+        u32 slab; ///< the slab and piece backing `start`
+        u32 piece;
+        u64 clear_tick; ///< the submission clearing their page table entries
+    };
+    static constexpr u8 CHUNK_RELEASED = 1;
+    static constexpr u8 CHUNK_FAULTED = 2;
+
+    /// Up to `count` contiguous pieces: free ones in VRAM, a new VRAM slab, system memory the
+    /// GPU reaches, the reserve; std::nullopt when none is left.
+    std::optional<Run> TakeRun(u64 count);
+    std::optional<u32> NewSlab(u32 type_index, bool vram);
+    void PutBackReleased();
+    /// Releases the backing of chunks no binding used for `idle_seconds`, oldest first, until
+    /// `wanted` bytes are released; returns the bytes.
+    u64 ReleaseIdleChunks(u64 wanted, u32 idle_seconds);
+    u64 ReleaseChunk(u64 chunk);
+    /// Unbinds released chunks whose page table entries the GPU has cleared (at submission).
+    void FlushUnbinds();
+    /// A range is bound again before its release was unbound: that unbind is dropped.
+    void CancelUnbinds(const Buffer* arena, u64 start, u64 end);
+    void NoteChunkUse(VAddr device_addr, u64 size);
+    void ReportArena(bool force);
 
 private:
     struct ArenaBinds {
@@ -183,6 +247,9 @@ private:
 
     struct Backing : public Interval {
         vk::DeviceMemory memory;
+        /// bbport: in blocks, like start and end: SubRange and CanMergeWith add block counts to it
+        /// (in bytes, a range split by a release pointed one piece too early and two ranges
+        /// shared pieces).
         u64 offset;
         constexpr bool CanMergeWith(const Backing& other) const noexcept {
             return memory == other.memory && offset + (end - start) == other.offset;
@@ -200,6 +267,23 @@ private:
     u64 reserve_size{};
     u64 reserve_used{};
     u64 arena_backed{};
+    /// bbport: the slabs (a freed one keeps its place with a null memory), each memory's slab,
+    /// pieces unbound but maybe still in use by work in flight, and released ranges not yet
+    /// unbound (their page table entries are cleared first).
+    std::vector<Slab> slabs;
+    std::unordered_map<VkDeviceMemory, u32> slab_of;
+    std::deque<Released> released;
+    std::vector<Unbind> unbinds;
+    /// Seconds since start of the last binding of each 2 MiB chunk, and CHUNK_* flags.
+    std::vector<u32> chunk_used;
+    std::vector<u8> chunk_flags;
+    u32 arena_now{};
+    u32 arena_last_collect{};
+    u32 arena_last_report{};
+    u32 vram_full_until{}; ///< no new VRAM slab is tried before this second (one just failed)
+    u64 vram_slab_bytes{}, system_slab_bytes{};
+    u64 released_bytes{}, released_chunks{}, refetched_chunks{}, faulted_chunks{};
+    u64 arena_start_ns{};
     u32 block_size{};
     u32 block_shift{};
     u32 blocks_per_arena_page{};

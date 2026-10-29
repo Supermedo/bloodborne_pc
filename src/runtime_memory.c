@@ -135,11 +135,84 @@ static void region_insert(size_t at, HostRegion r) {
 static void region_erase(size_t at, size_t n) {
     memmove(regions+at,regions+at+n,(region_count-at-n)*sizeof(*regions)); region_count-=n;
 }
+/* What already holds part of the PS4 range (a DLL, often one an antivirus or overlay injects,
+ * or its memory): printed when the range cannot be reserved. */
+static void report_range_users(void) {
+    int shown=0;
+    for (uintptr_t at=USER_MIN; at<USER_MAX && shown<16;) {
+        MEMORY_BASIC_INFORMATION mi;
+        if (!VirtualQuery((void *)at,&mi,sizeof(mi)) || !mi.RegionSize) break;
+        const uintptr_t end=(uintptr_t)mi.BaseAddress+mi.RegionSize;
+        if (mi.State!=MEM_FREE) {
+            char name[MAX_PATH]="";
+            if (mi.Type==MEM_IMAGE) GetModuleFileNameA((HMODULE)mi.AllocationBase,name,sizeof(name));
+            fprintf(stderr,"Runtime: in the PS4 range: %p, %" PRIu64 " KiB, %s%s%s\n",mi.BaseAddress,
+                    (uint64_t)mi.RegionSize/1024,mi.Type==MEM_IMAGE ? "module " : mi.Type==MEM_MAPPED ? "mapped file" : "memory",
+                    name,mi.State==MEM_RESERVE ? " (reserved)" : "");
+            ++shown;
+        }
+        at=end;
+    }
+}
+/* Something took part of the range before main() (DLLs load first): this program starts again
+ * suspended, the range is reserved in the new process before any DLL is in it, and that
+ * process takes over (runtime_memory_reserve adopts the reservation). Returns only on failure. */
+static int restarted; /* this is the restarted process: never once more */
+static void restart_with_range(void) {
+    if (restarted) return;
+    SetEnvironmentVariableA("BB_RANGE_RESERVED","1");
+    STARTUPINFOW si={.cb=sizeof(si),.dwFlags=STARTF_USESTDHANDLES,.hStdInput=GetStdHandle(STD_INPUT_HANDLE),
+                     .hStdOutput=GetStdHandle(STD_OUTPUT_HANDLE),.hStdError=GetStdHandle(STD_ERROR_HANDLE)};
+    PROCESS_INFORMATION pi;
+    wchar_t *line=_wcsdup(GetCommandLineW());
+    const BOOL started=line && CreateProcessW(NULL,line,NULL,NULL,TRUE,CREATE_SUSPENDED,NULL,NULL,&si,&pi);
+    free(line);
+    SetEnvironmentVariableA("BB_RANGE_RESERVED",NULL);
+    if (!started) return;
+    if (!VirtualAlloc2(pi.hProcess,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0)) {
+        fprintf(stderr,"Runtime: the restarted game could not reserve the PS4 range either (error %lu)\n",GetLastError());
+        TerminateProcess(pi.hProcess,21);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        return;
+    }
+    /* The new process ends with this one (the launcher's Stop, run.py ending). */
+    HANDLE job=CreateJobObjectA(NULL,NULL);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits={0};
+    limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (job && SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limits,sizeof(limits)))
+        AssignProcessToJobObject(job,pi.hProcess);
+    fprintf(stderr,"Runtime: the PS4 range is taken in this process; the game starts again with it reserved first\n");
+    fflush(stderr);
+    ResumeThread(pi.hThread);
+    WaitForSingleObject(pi.hProcess,INFINITE);
+    DWORD code=21;
+    GetExitCodeProcess(pi.hProcess,&code);
+    ExitProcess(code);
+}
 /* The guest range is reserved before anything else can be placed there (runtime_start). */
 void runtime_memory_reserve(void) {
     if (region_count) return;
-    if (!VirtualAlloc2(NULL,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0))
+    const char *reserved=getenv("BB_RANGE_RESERVED");
+    if (reserved && reserved[0]=='1') {
+        restarted=1;
+        /* Restarted: the first process reserved it here before this one ran (restart_with_range).
+         * Not passed on to a later start (the in-game restart). */
+        _putenv("BB_RANGE_RESERVED=");
+        MEMORY_BASIC_INFORMATION mi;
+        if (VirtualQuery((void *)USER_MIN,&mi,sizeof(mi)) && mi.State==MEM_RESERVE &&
+            (uintptr_t)mi.AllocationBase==USER_MIN && mi.RegionSize==USER_MAX-USER_MIN) {
+            printf("Runtime: the PS4 range was reserved before the program's DLLs loaded\n");
+            region_insert(0,(HostRegion){USER_MIN,USER_MAX,0,0});
+            return;
+        }
+    }
+    if (!VirtualAlloc2(NULL,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0)) {
+        const DWORD error=GetLastError();
+        report_range_users();
+        restart_with_range();
+        SetLastError(error);
         win_fail("reserving the PS4 address range (link with --disable-high-entropy-va)",USER_MIN,USER_MAX-USER_MIN);
+    }
     region_insert(0,(HostRegion){USER_MIN,USER_MAX,0,0});
 }
 /* Guest memory committed only as the game maps it: the whole pool did not fit Windows' commit

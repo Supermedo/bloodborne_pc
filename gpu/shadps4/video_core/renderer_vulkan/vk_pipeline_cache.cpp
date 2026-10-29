@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <fstream>
 #include <mutex>
 #include <ranges>
 #include <string>
@@ -13,6 +16,8 @@
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
+#include "common/polyfill_thread.h"
+#include "common/thread.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
@@ -277,6 +282,46 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
     return info;
 }
 
+struct PipelineCache::BuildWorkers {
+    std::mutex mutex;
+    std::condition_variable_any cv;
+    std::deque<GraphicsPipeline*> queue;
+    std::vector<std::jthread> threads;
+
+    explicit BuildWorkers(std::atomic<u32>& done) {
+        // A few cores: the game's own threads and the GPU thread keep the rest.
+        const u32 count = std::clamp(std::thread::hardware_concurrency() / 4, 1u, 4u);
+        for (u32 i = 0; i < count; ++i) {
+            threads.emplace_back([this, &done](std::stop_token token) {
+                Common::SetCurrentThreadName("bbport:PipelineBuild");
+                while (true) {
+                    GraphicsPipeline* pipeline;
+                    {
+                        std::unique_lock lock{mutex};
+                        Common::CondvarWait(cv, lock, token, [this] { return !queue.empty(); });
+                        if (token.stop_requested()) {
+                            return;
+                        }
+                        pipeline = queue.front();
+                        queue.pop_front();
+                    }
+                    pipeline->BuildDeferred();
+                    done.fetch_add(1, std::memory_order_release);
+                }
+            });
+        }
+        std::printf("Pipelines: built in the background on %u threads\n", count);
+    }
+
+    void Submit(GraphicsPipeline* pipeline) {
+        {
+            std::scoped_lock lock{mutex};
+            queue.push_back(pipeline);
+        }
+        cv.notify_one();
+    }
+};
+
 PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              AmdGpu::Liverpool* liverpool_, u32 sparse_page_shift)
     : instance{instance_}, scheduler{scheduler_}, liverpool{liverpool_},
@@ -345,15 +390,159 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
     };
+    // bbport: the driver cache before WarmUp: the preload builds its pipelines through it. It
+    // used to be made after the preload, which so built every cached pipeline without one.
+    if (EmulatorSettings.IsPipelineCacheEnabled()) {
+        Storage::DataBase::Instance().Open();
+    }
+    CreateDriverCache();
     WarmUp();
+}
 
-    auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
+namespace {
+bool AsyncPipelines() {
+    static const bool value = [] {
+        const char* env = std::getenv("BB_ASYNC_PIPELINES");
+        return env && env[0] == '1' && !EmulatorSettings.IsShaderCollect();
+    }();
+    return value;
+}
+
+// A pipeline the draw can use now: built (not still in the background) and valid.
+const GraphicsPipeline* Usable(const GraphicsPipeline* pipeline) {
+    return pipeline && pipeline->IsBuilt() && pipeline->IsValid() ? pipeline : nullptr;
+}
+} // namespace
+
+void PipelineCache::FinishAsyncBuilds() {
+    async_seen = async_done.load(std::memory_order_acquire);
+    std::erase_if(async_builds, [this](AsyncBuild& build) {
+        if (!build.pipeline->IsBuilt()) {
+            return false;
+        }
+        if (build.pipeline->IsValid()) {
+            RegisterPipelineData(build.key, build.hash, build.sdata);
+            ++num_new_pipelines;
+            ++driver_cache_changes;
+        } else {
+            // As for one built at once: kept empty, skipped, not compiled again.
+            graphics_pipelines[build.key].reset();
+        }
+        return true;
+    });
+}
+
+PipelineCache::~PipelineCache() {
+    build_workers.reset();       // waits for a build in progress
+    driver_cache_saver = {}; // stops and joins it
+    if (!driver_cache_file.empty() && driver_cache_changes.load() != 0) {
+        SaveDriverCache();
+    }
+}
+
+void PipelineCache::CreateDriverCache() {
+    std::vector<u8> data;
+    auto& storage = Storage::DataBase::Instance();
+    if (storage.IsOpened()) {
+        driver_cache_file = storage.DriverCachePath();
+        std::ifstream file{driver_cache_file, std::ios::binary | std::ios::ate};
+        if (file) {
+            data.resize(static_cast<size_t>(file.tellg()));
+            file.seekg(0);
+            if (!file.read(reinterpret_cast<char*>(data.data()), std::streamsize(data.size()))) {
+                data.clear();
+            }
+        }
+    }
+
+    // The driver checks the header as well; one from another GPU or driver is not offered.
+    struct Header {
+        u32 size;
+        u32 version;
+        u32 vendor_id;
+        u32 device_id;
+        std::array<u8, VK_UUID_SIZE> uuid;
+    } header{};
+    const auto props = instance.GetPhysicalDevice().getProperties();
+    if (data.size() > sizeof(header)) {
+        std::memcpy(&header, data.data(), sizeof(header));
+    }
+    const bool usable =
+        data.size() > sizeof(header) && header.version == VK_PIPELINE_CACHE_HEADER_VERSION_ONE &&
+        header.vendor_id == props.vendorID && header.device_id == props.deviceID &&
+        std::memcmp(header.uuid.data(), props.pipelineCacheUUID.data(), VK_UUID_SIZE) == 0;
+    if (!usable && !data.empty()) {
+        std::printf("Driver pipeline cache: made by another GPU or driver, starting a new one\n");
+        data.clear();
+    }
+
+    const auto device = instance.GetDevice();
+    auto [cache_result, cache] = device.createPipelineCacheUnique({
+        .initialDataSize = data.size(),
+        .pInitialData = data.data(),
+    });
+    if (cache_result != vk::Result::eSuccess && !data.empty()) {
+        LOG_WARNING(Render_Vulkan, "The driver refused the saved pipeline cache ({}): new one",
+                    vk::to_string(cache_result));
+        data.clear();
+        auto retry = device.createPipelineCacheUnique({});
+        cache_result = retry.result;
+        cache = std::move(retry.value);
+    }
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);
+    if (driver_cache_file.empty()) {
+        return;
+    }
+    std::printf("Driver pipeline cache: %s (%zu KiB)\n", data.empty() ? "new" : "loaded",
+                data.size() >> 10);
+
+    // Saved while the game runs (it is usually ended, not shut down): every 20 seconds when
+    // pipelines were made since.
+    driver_cache_saver = std::jthread{[this](std::stop_token token) {
+        Common::SetCurrentThreadName("bbport:DriverPipelineCache");
+        u32 seconds = 0;
+        while (!token.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (++seconds >= 20 && driver_cache_changes.load(std::memory_order_relaxed) != 0) {
+                seconds = 0;
+                SaveDriverCache();
+            }
+        }
+    }};
 }
 
-PipelineCache::~PipelineCache() = default;
+void PipelineCache::SaveDriverCache() {
+    std::scoped_lock lock{driver_cache_mutex};
+    const u32 changes = driver_cache_changes.exchange(0);
+    auto [result, data] = instance.GetDevice().getPipelineCacheData(*pipeline_cache);
+    if (result != vk::Result::eSuccess || data.empty()) {
+        LOG_WARNING(Render_Vulkan, "Could not read the driver pipeline cache: {}",
+                    vk::to_string(result));
+        driver_cache_changes += changes;
+        return;
+    }
+    // Written beside and then renamed: a game ended while writing keeps the previous file.
+    auto temp = driver_cache_file;
+    temp += ".new";
+    {
+        std::ofstream file{temp, std::ios::binary | std::ios::trunc};
+        file.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+        if (!file) {
+            LOG_WARNING(Render_Vulkan, "Could not write {}", temp.string());
+            return;
+        }
+    }
+    std::error_code error;
+    std::filesystem::rename(temp, driver_cache_file, error);
+    if (error) {
+        LOG_WARNING(Render_Vulkan, "Could not save the driver pipeline cache: {}", error.message());
+        std::filesystem::remove(temp, error);
+        return;
+    }
+    LOG_INFO(Render_Vulkan, "Driver pipeline cache saved ({} KiB)", data.size() >> 10);
+}
 
 // bbport: shader/pipeline compile time on the GPU thread, reported by BB_FRAME_STATS.
 std::atomic<u64> g_bb_compile_ns;
@@ -408,12 +597,15 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
         }
     }
     const auto it = graphics_pipelines.find(prepared.key);
-    return it != graphics_pipelines.end() ? it->second.get() : nullptr;
+    return it != graphics_pipelines.end() ? Usable(it->second.get()) : nullptr;
 }
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectParams params,
                                                            const PreparedDraw* prepared) {
     used_prepared = nullptr;
+    if (!async_builds.empty() && async_done.load(std::memory_order_acquire) != async_seen) {
+        FinishAsyncBuilds();
+    }
     if (prepared) {
         if (const auto* pipeline = TryPreparedPipeline(*prepared)) {
             used_prepared = prepared;
@@ -431,9 +623,19 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         CompileTimer timer;
 
         GraphicsPipeline::SerializationSupport sdata{};
+        const bool async = AsyncPipelines();
         it.value() = std::make_unique<GraphicsPipeline>(
             instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
+            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false, async);
+        if (async) {
+            if (!build_workers) {
+                build_workers = std::make_unique<BuildWorkers>(async_done);
+            }
+            async_builds.push_back({sel.graphics_key, pipeline_hash, sdata, it.value().get()});
+            build_workers->Submit(it.value().get());
+            sel.fetch_shader.reset();
+            return nullptr;
+        }
         // bbport: the driver could not create it. An empty entry keeps the key from being
         // compiled again on every draw; it is not saved, so the next start does not load it.
         if (!it.value()->IsValid()) {
@@ -444,6 +646,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
 
         RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
+        ++driver_cache_changes;
 
         if (EmulatorSettings.IsShaderCollect()) {
             for (auto stage = 0; stage < MaxShaderStages; ++stage) {
@@ -455,7 +658,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         }
         sel.fetch_shader.reset();
     }
-    return it->second.get();
+    return Usable(it->second.get());
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {
@@ -479,6 +682,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
         }
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
+        ++driver_cache_changes;
 
         if (EmulatorSettings.IsShaderCollect()) {
             auto& m = sel.modules[0];

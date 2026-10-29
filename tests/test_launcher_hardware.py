@@ -64,6 +64,20 @@ class TableTests(unittest.TestCase):
             cpu = hardware.cpu_from_name(name)
             self.assertEqual((cpu.score, cpu.laptop, cpu.label), (score, laptop, label), name)
 
+    def test_the_hard_limits_follow_the_processors_instructions(self):
+        def cpu(avx=True, bmi1=True, movbe=True, lzcnt=True):
+            def cpuid(leaf, _subleaf=0):
+                return {0: (0x16, 0, 0, 0), 0x80000000: (0x80000008, 0, 0, 0),
+                        1: (0, 0, (avx << 28) | (avx << 27) | (movbe << 22), 0), 7: (0, bmi1 << 3, 0, 0),
+                        0x80000001: (0, 0, lzcnt << 5, 0)}.get(leaf, (0, 0, 0, 0))
+            return hardware.instruction_lines(hardware.instructions(cpuid))
+        self.assertEqual(cpu()[0][0], 'ok')
+        self.assertEqual(cpu(bmi1=False, movbe=False, lzcnt=False)[0], (
+            'warn', 'Your processor lacks BMI1, MOVBE, LZCNT: the port translates them (compatibility mode), so '
+                    'expect bugs.'))
+        self.assertEqual(cpu(avx=False)[0][0], 'bad')
+        self.assertEqual(hardware.instruction_lines(None), [])
+
     def test_the_laptops_dedicated_card_wins(self):
         lines = ['AMD Radeon(TM) Graphics, integrated, 512 MiB', 'NVIDIA GeForce RTX 4060 Laptop GPU, discrete, 8188 MiB']
         self.assertEqual(hardware.best_gpu_line(lines), lines[1])
@@ -82,6 +96,74 @@ class RatingTests(unittest.TestCase):
         self.assertEqual((low.tier_label, low.limit), ('Minimum', 'gpu'))
         self.assertEqual(rate('amd-rx-9070-xt', 'AMD FX(tm)-8350 Eight-Core Processor', 32).tier, 0)
         self.assertEqual(rate('amd-rx-9070-xt', 'AMD Ryzen 7 5800X 8-Core Processor', 8).limit, 'ram')
+
+
+def rate_detected(vulkan_name, vram, cpu, ram):
+    """The rating the launcher shows for what it detects: the card's Vulkan name and memory."""
+    return hardware.assess(hardware.match_gpu(vulkan_name, vram), hardware.cpu_from_name(cpu), ram)
+
+
+class PlayersPcTests(unittest.TestCase):
+    """PCs that run the game, rated "This PC can't run the port." since 1.9.3: under 12 GB of RAM and
+    under 4 GB of video memory counted as unsupported. Both are below the minimum; only no Vulkan 1.3,
+    a card far too slow or a processor without AVX stop the port."""
+
+    def assertRunsBelowTheMinimum(self, r, limit):
+        self.assertEqual((r.tier, r.tier_label, r.limit), (1, 'Below minimum', limit))
+        self.assertNotEqual(r.summary, hardware.SUMMARIES[0])
+        self.assertNotIn('bad', [state for state, _part, _text in r.checks])
+        self.assertTrue(r.rows[0][3], 'no settings at 1080p')  # the row shows what to set
+
+    def test_an_rtx_3050_laptop_with_8_gb(self):
+        """A player's laptop that plays completely smooth: RTX 3050 Laptop 4 GB, Core i5 13th gen, 8 GB."""
+        r = rate_detected('NVIDIA GeForce RTX 3050 Laptop GPU', 4, '13th Gen Intel(R) Core(TM) i5-13420H', 8)
+        self.assertEqual(r.gpu.id, 'nvidia-rtx-3050-laptop')
+        self.assertRunsBelowTheMinimum(r, 'ram')
+        self.assertIn(('warn', 'ram', '8 GB is below the minimum of 16 GB: the game may close right after PLAY '
+                                      '(code 3).'), r.checks)
+        self.assertEqual(r.levels['1080p'], 2)  # the card and processor decide the frame rate, not the RAM
+        settings = profile(r, (1920, 1080))
+        self.assertEqual((settings['output_res'], settings['upscaler'], settings['preset'], settings['fps_mode']),
+                         ('1920x1080', 'fsr3', '3', '60'))
+
+    def test_a_gtx_1060_3_gb(self):
+        """A player's GTX 1060 3 GB that got up to the Blood-Starved Beast on older versions."""
+        r = rate_detected('NVIDIA GeForce GTX 1060 3GB', 3, 'Intel(R) Core(TM) i5-8400 CPU @ 2.80GHz', 16)
+        self.assertEqual(r.gpu.id, 'nvidia-gtx-1060-3-gb')
+        self.assertRunsBelowTheMinimum(r, 'gpu')
+        self.assertIn(('warn', 'gpu', 'Below the minimum (GTX 1050 Ti / GTX 1650 / RX 570).'), r.checks)
+        self.assertTrue(any(note.startswith('Settings for 4 GB cards') for note in r.notes))
+        settings = profile(r, (1920, 1080))  # the 4 GB card settings at the low end: 720p
+        self.assertEqual((settings['output_res'], settings['upscaler'], settings['preset'], settings['fps_mode']),
+                         ('1280x720', 'fsr3', '3', '60'))
+        self.assertEqual(settings['model_lod'], '0')
+        self.assertFalse(settings['object_motion'])
+
+    def test_an_rx_570_with_a_ryzen_3_3200g_and_8_gb(self):
+        r = rate_detected('AMD Radeon RX 570 Series', 8, 'AMD Ryzen 3 3200G with Radeon Vega Graphics', 8)
+        self.assertEqual(r.gpu.id, 'amd-rx-570-8-gb')
+        self.assertRunsBelowTheMinimum(r, 'ram')
+        self.assertEqual(r.levels['1080p'], 2)
+        settings = profile(r, (1920, 1080))
+        self.assertEqual((settings['output_res'], settings['upscaler'], settings['preset'], settings['fps_mode']),
+                         ('1920x1080', 'fsr3', '3', '30'))
+        self.assertEqual(settings['model_lod'], '1')
+
+    def test_no_vulkan_1_3_still_stops_the_port(self):
+        r = rate_detected('NVIDIA GeForce GTX 780', 3, 'AMD Ryzen 7 5800X 8-Core Processor', 32)
+        self.assertEqual(r.gpu.id, 'nvidia-gtx-780')
+        self.assertEqual((r.tier, r.tier_label, r.summary), (0, 'Not supported', hardware.SUMMARIES[0]))
+        self.assertIn(('bad', 'gpu', 'Not supported: no Vulkan 1.3 driver for this card.'), r.checks)
+        self.assertEqual(set(r.levels.values()), {0})
+
+    def test_only_what_stops_the_port_rates_a_pc_unsupported(self):
+        cpu = hardware.cpu_from_name('AMD Ryzen 7 5800X 8-Core Processor')
+        for card in hardware.GPU_LIST:
+            for ram in (4, 8, 12, 16):
+                r = hardware.assess(card, cpu, ram)
+                blocked = not card.vulkan13 or card.score < 25
+                self.assertEqual(r.tier == 0, blocked, (card.label, ram))
+                self.assertEqual(r.levels['1080p'] > 0, not blocked, (card.label, ram))
 
 
 class ProfileTests(unittest.TestCase):

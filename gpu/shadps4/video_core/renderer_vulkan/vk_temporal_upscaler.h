@@ -205,6 +205,7 @@ private:
     SceneTargets& scene_targets;
     int applied_preset = -1;
     int applied_upscaler = -1;
+    int applied_fsr_backend = -1;
     bool dispatched_last_frame = false;
     bool last_active = false, last_jitter = false;
 

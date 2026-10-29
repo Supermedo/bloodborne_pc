@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(ROOT / 'launcher'))
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -65,6 +66,72 @@ class MemoryTests(unittest.TestCase):
         self.assertIsNone(help_.memory_problem('1920x1080', (7.5, 24.0, 16.0)))
 
 
+class GraphicsCardTests(unittest.TestCase):
+    """The check before PLAY: what the game's renderer needs, as the graphics driver answers it
+    (scripts/vulkan_check.py); a GeForce 820M started and closed without a word."""
+
+    def window(self, vulkan=None, answer=True):
+        class Box:
+            def __init__(self):
+                self.asked = []
+
+            def askyesno(self, title, text, **_options):
+                self.asked.append(text)
+                return answer
+
+        class Window(help_.HelpMixin):
+            def var(self, key, store):
+                return type('Var', (), {'get': lambda _self: '1920x1080'})()
+        window = Window()
+        window.app, window.messagebox, window.vulkan = {}, Box(), vulkan
+        return window
+
+    @staticmethod
+    def verdict(problem, name='GeForce 820M', missing=(), **more):
+        return {'ok': problem is None, 'problem': problem, 'loader': '1.2.170',
+                'device': {'name': name, 'missing': list(missing)} if problem in (None, 'device') else None, **more}
+
+    def test_each_answer_says_what_to_do(self):
+        self.assertIn('vulkan-1.dll', self.window(self.verdict('loader')).gpu_problem())
+        self.assertIn('1.2.170', self.window(self.verdict('loader_version')).gpu_problem())
+        self.assertIn('Vulkan 1.3', self.window(self.verdict('devices')).gpu_problem())
+        text = self.window(self.verdict('device', missing=['Vulkan 1.3 (1.2.0)', 'VK_EXT_robustness2'])).gpu_problem()
+        self.assertTrue(text.startswith('GeForce 820M cannot run the port'))
+        self.assertIn('Vulkan 1.3 (1.2.0), VK_EXT_robustness2', text)
+        self.assertIn('0xC0000005', self.window(self.verdict('crashed', code='0xC0000005')).gpu_problem())
+
+    def test_helps_line(self):
+        ok = {'ok': True, 'problem': None, 'device': {'name': 'AMD Radeon RX 9070 XT', 'api': '1.4.359'}}
+        self.assertEqual(self.window(ok).gpu_check(), (
+            'ok', None, 'Graphics card AMD Radeon RX 9070 XT: Vulkan 1.4.359 and everything else the port needs.'))
+        state, topic, text = self.window(self.verdict('device', missing=['nullDescriptor'])).gpu_check()
+        self.assertEqual((state, topic), ('bad', 'driver'))
+        self.assertIn('nullDescriptor', text)
+        self.assertIsNone(self.window(None).gpu_check())
+
+    def test_the_play_page_shows_it_only_when_the_port_cannot_start(self):
+        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
+        self.assertIn("self.check_line('gpu', _('✗ The graphics card cannot run the port: see Help') if "
+                      "self.gpu_problem() else ''", source)
+
+    def test_nothing_to_say(self):
+        self.assertIsNone(self.window(self.verdict(None, 'RX 9070 XT')).gpu_problem())
+        self.assertIsNone(self.window(None).gpu_problem())  # not asked yet, or the check could not run
+
+    def test_asked_once_per_card(self):
+        window = self.window(self.verdict('device', missing=['VK_EXT_robustness2']))
+        with mock.patch.object(help_, 'memory_problem', lambda *_a: None):
+            self.assertTrue(window.preflight())
+            self.assertTrue(window.preflight())
+            self.assertEqual(len(window.messagebox.asked), 1)
+            window.vulkan = self.verdict('device', 'Other card', missing=['nullDescriptor'])
+            self.assertTrue(window.preflight())
+            self.assertEqual(len(window.messagebox.asked), 2)
+            no = self.window(self.verdict('loader'), answer=False)
+            self.assertFalse(no.preflight())
+            self.assertFalse(no.preflight())  # asked again until the player says start
+
+
 class FileTests(unittest.TestCase):
     def test_eboot_states(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -115,6 +182,59 @@ class FileTests(unittest.TestCase):
         self.assertEqual(clean['online_npid'], '(hidden)')
         self.assertEqual(clean['supermedo_user'], '(hidden)')
         self.assertEqual(clean['fps_mode'], 'uncap')
+
+
+class AfterExitTests(unittest.TestCase):
+    """After the game ended with an error. Started from Steam or a shortcut (--play), the launcher opens with
+    it: a log without a known cause gets a message too, where its own Play has the output on the screen."""
+
+    def run_after(self, log, code, always):
+        class Box:
+            def __init__(self):
+                self.shown = []
+
+            def showinfo(self, title, text):
+                self.shown.append(('info', text))
+
+            def askyesno(self, title, text):
+                self.shown.append(('ask', text))
+                return True
+
+        class Window(help_.HelpMixin):
+            def __init__(self, user):
+                self.app, self.messagebox, self.opened = {'user_dir': user}, Box(), []
+
+            def open_topic(self, key):
+                self.opened.append(key)
+        with tempfile.TemporaryDirectory() as tmp:
+            if log is not None:
+                (Path(tmp) / 'last_run.log').write_text(log, encoding='utf-8')
+            window = Window(tmp)
+            window.after_exit(code, always=always)
+        return window.messagebox.shown, window.opened
+
+    def test_a_known_cause_offers_its_fix(self):
+        shown, opened = self.run_after('GPU: device lost (submit)\n', 1, always=True)
+        self.assertEqual([kind for kind, _t in shown], ['ask'])
+        self.assertEqual(opened, ['driver'])
+
+    def test_without_a_known_cause_a_message_only_when_asked_for(self):
+        for log in ('Frame stats: 98.0 FPS\n', None):  # nothing known; no log at all
+            shown, opened = self.run_after(log, 3221225477, always=True)
+            self.assertEqual(len(shown), 1)
+            self.assertEqual(shown[0][0], 'info')
+            self.assertIn('code 0xC0000005', shown[0][1])  # as helpers know it, not 3221225477
+            self.assertEqual(opened, [])
+            self.assertEqual(self.run_after(log, 1, always=False), ([], []))
+
+    def test_nothing_after_a_normal_end(self):
+        self.assertEqual(self.run_after('GPU: device lost (submit)\n', 0, always=True), ([], []))
+
+    def test_play_opens_help_after_an_error(self):
+        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
+        main = source[source.index('\ndef main():'):]
+        self.assertIn("('help', result)", main)
+        self.assertIn('launcher.after_exit(failed, always=True)', main)
 
 
 if __name__ == '__main__':

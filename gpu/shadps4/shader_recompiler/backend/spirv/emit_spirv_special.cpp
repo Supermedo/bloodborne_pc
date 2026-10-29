@@ -182,6 +182,26 @@ static void EmitFragmentMotion(EmitContext& ctx) {
                     ctx.OpSelect(f32_type, front, dy, zero), valid, depth}));
 }
 
+// Apply projection jitter after recording unjittered positions for object motion.
+// The viewport remains fixed, so its clipping bounds cannot expose an edge row.
+static void EmitProjectionJitter(EmitContext& ctx) {
+    const Id type = ctx.F32[1];
+    const Id position = ctx.OpLoad(ctx.F32[4], ctx.output_position);
+    const Id w = ctx.OpCompositeExtract(type, position, 3u);
+    Id result = position;
+    for (u32 axis = 0; axis < 2; ++axis) {
+        const Id pointer = ctx.OpAccessChain(
+            ctx.TypePointer(spv::StorageClass::PushConstant, type),
+            ctx.push_data_block, ctx.ConstU32(axis == 0 ? PushData::XOffsetIndex
+                                                      : PushData::YOffsetIndex));
+        const Id jitter = ctx.OpLoad(type, pointer);
+        const Id coordinate = ctx.OpCompositeExtract(type, position, axis);
+        const Id shifted = ctx.OpFAdd(type, coordinate, ctx.OpFMul(type, jitter, w));
+        result = ctx.OpCompositeInsert(ctx.F32[4], shifted, result, axis);
+    }
+    ctx.OpStore(ctx.output_position, result);
+}
+
 void EmitEpilogue(EmitContext& ctx) {
     if (Sirit::ValidId(ctx.motion_out_cur)) {
         EmitVertexMotion(ctx);
@@ -195,6 +215,8 @@ void EmitEpilogue(EmitContext& ctx) {
     }
     if (ctx.hw_stage == HwStage::Vertex && ctx.runtime_info.hw.vs.clip_disable) {
         ConvertPositionToClipSpace(ctx);
+    } else if (ctx.hw_stage == HwStage::Vertex && Sirit::ValidId(ctx.output_position)) {
+        EmitProjectionJitter(ctx);
     }
 }
 

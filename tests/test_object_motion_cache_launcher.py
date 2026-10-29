@@ -54,6 +54,7 @@ class CacheEnvironmentTest(unittest.TestCase):
             process.wait.return_value = 0
             with patch.dict('os.environ', {'BB_CONFIG': str(ini)}), \
                     patch.object(launcher, 'attach_stdio'), \
+                    patch.object(launcher, 'game_underway', return_value=False), \
                     patch.object(launcher.trophies, 'Tracker'), \
                     patch.object(launcher.bbport_fsr411, 'default_backend', return_value='vk'), \
                     patch.object(launcher.bbport_fsr411, 'query', return_value={}), \

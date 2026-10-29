@@ -25,5 +25,15 @@ int main() {
     assert(ui[0] == 1 && ui[1] == 1); // don't double an already native UI viewport
     const auto larger = Scale(960, 540, 3840, 2160, true);
     assert(larger[0] == 2 && larger[1] == 2);
+    // Without Sharp UI (no BB_UI_RES) each draw's scale is the one the port always used.
+    assert(!SharpUi() && StageScale() == 1.0f);
+    const auto movie = DrawScale(1920, -1080, false, true, 960, 540, 3840, 2160);
+    assert(movie[0] == 2 && movie[1] == 2);
+    const auto window = DrawScale(0, 0, true, true, 960, 540, 3840, 2160);
+    assert(window[0] == 2 && window[1] == 2);
+    const auto icon = DrawScale(128, -128, false, true, 960, 540, 3840, 2160);
+    assert(icon[0] == 4 && icon[1] == 4); // in the guest target's pixels, as before
+    const auto shown = DrawScale(1920, -1080, false, false, 960, 540, 3840, 2160);
+    assert(shown[0] == 4 && shown[1] == 4);
     std::puts("UI composition: PASS (menu without camera, HUD, FSR off, viewport scaling)");
 }

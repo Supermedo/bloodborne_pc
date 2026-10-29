@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <filesystem>
+#include <thread>
 #include <unordered_map>
 #include <shared_mutex>
 #include <variant>
@@ -123,6 +127,11 @@ public:
     void WarmUp();
     void Sync();
 
+    /// bbport: the driver's own pipeline cache (its compiled GPU code), kept on disk next to the
+    /// shader cache: a pipeline the driver built once is not compiled again on the next start.
+    void CreateDriverCache();
+    void SaveDriverCache();
+
     bool LoadComputePipeline(Serialization::Archive& ar);
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);
@@ -197,7 +206,34 @@ private:
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
     PipelineSelection sel{}; ///< GPU thread selection state
     ComputePipelineKey compute_key{};
-    u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
+    std::atomic<u32> num_new_pipelines{}; // new pipelines added to the cache since the game start
+
+    /// bbport: preloaded pipelines are collected first and then built on all CPU cores.
+    struct PreloadJob;
+    std::vector<PreloadJob>* preload_jobs{};
+    u32 BuildPreloaded(std::vector<PreloadJob>& jobs); ///< the number that failed
+
+    std::filesystem::path driver_cache_file;
+    std::atomic<u32> driver_cache_changes{}; ///< pipelines made since the last save
+    std::mutex driver_cache_mutex;
+    std::condition_variable_any driver_cache_cv;
+    std::jthread driver_cache_saver;
+
+    /// bbport: BB_ASYNC_PIPELINES=1: a new graphics pipeline is set up on the GPU thread and
+    /// built by the driver on worker threads; its draws are skipped until it is ready (no
+    /// stutter, objects can appear a moment late). GPU thread only, except the counter.
+    struct AsyncBuild {
+        GraphicsPipelineKey key;
+        u64 hash;
+        GraphicsPipeline::SerializationSupport sdata;
+        GraphicsPipeline* pipeline;
+    };
+    std::vector<AsyncBuild> async_builds;
+    std::atomic<u32> async_done{};
+    u32 async_seen{};
+    void FinishAsyncBuilds();
+    struct BuildWorkers;
+    std::unique_ptr<BuildWorkers> build_workers; ///< last: stopped before the pipelines go
 
     // Only if Config::collectShadersForDebug()
     tsl::robin_map<vk::ShaderModule,

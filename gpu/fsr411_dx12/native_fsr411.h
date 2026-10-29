@@ -11,6 +11,7 @@ struct NativeFsr411Config {
     bool hdr;
     uint8_t adapter_luid[8];
     uint32_t shared_texture_mask{};
+    uint32_t model_version{(4u<<22)|(1u<<12)|1u};
 };
 struct NativeFsr411Plane {
     uint64_t offset;

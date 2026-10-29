@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 
 # Settings without a row of their own: internal state, or a part of another setting's row.
 INTERNAL = {'setup_done', 'auto_hw', 'bench_goal', 'test_compare', 'test_mode', 'test_scenario', 'thd_token',
+            'supermedo_pass', 'online_custom_servers',
             'output_display', 'window_custom', 'eboot_check', 'seen_version', 'ui_mode', 'auto_undo', 'test_saves',
             'test_repeats', 'test_minutes', 'last_measure', 'window_last'}
 
@@ -42,6 +43,10 @@ QUERIES = [
     ('tastenbelegung', {'page:controls', 'mouse:layout'}), ('protokoll', {'page:log'}), ('log', {'page:log'}),
     ('ziel', {'goal'}), ('leise', {'goal'}), ('ruckelt', {'topic:shader_cache', 'topic:vram'}),
     ('einrichtung', {'action:setup'}), ('bericht', {'button:report'}),
+    ('shader', {'button:shader_cache', 'topic:black_screen'}), ('shader cache', {'button:shader_cache'}),
+    ('schwarzer bildschirm', {'topic:black_screen', 'button:shader_cache'}), ('respec', {'button:respec'}),
+    ('umverteilen', {'button:respec'}), ('downgrade', {'button:versions'}),
+    ('andere version', {'button:versions'}),
     ('controller test', {'controller_test'}), ('dualsense', {'controller_test'}),
     ('controller geht nicht', {'topic:controller'}), ('spielstand kaputt', {'topic:save_lost'}),
     ('tastatur und maus', {'play_with'}), ('spiele mit', {'play_with'}), ('mauskamera', {'play_with'}),

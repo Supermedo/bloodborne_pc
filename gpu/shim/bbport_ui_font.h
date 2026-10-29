@@ -55,7 +55,8 @@ inline ChineseFontFile FindChineseFont() {
     return {};
 }
 
-inline bool ConfigureChineseFont(ImFontAtlas* atlas, std::string_view language, const ChineseFontFile& file) {
+inline bool ConfigureChineseFont(ImFontAtlas* atlas, std::string_view language, const ChineseFontFile& file,
+                                 const ImWchar* extra_ranges = nullptr) {
     chinese = false;
     if (!WantsChinese(language) || atlas->Fonts.empty() || !UsableFont(file.path)) return false;
     // Keep ranges alive until the atlas is built. Load only UI characters on legacy renderers;
@@ -63,6 +64,7 @@ inline bool ConfigureChineseFont(ImFontAtlas* atlas, std::string_view language, 
     static ImVector<ImWchar> ranges;
     ImFontGlyphRangesBuilder builder;
     builder.AddRanges(atlas->GetGlyphRangesDefault());
+    if (extra_ranges) builder.AddRanges(extra_ranges);
     for (const auto& [english, translated] : ChineseText) builder.AddText(translated);
     builder.BuildRanges(&ranges);
     ImFontConfig config;

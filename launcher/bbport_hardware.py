@@ -6,7 +6,9 @@ card, per processor generation and the memory size give a tier from "Not support
 "4K-ready", the expected frame rate at 1080p, 1440p and 4K, and the suggested upscaler. The
 launcher fills them in by itself: the graphics card from bb-gpu-capabilities.exe (Vulkan), the
 processor from the registry and CPUID, the memory from Windows. It is a rough guide from the
-requirements and the developer's measurements (RX 7800 XT), not a benchmark.
+requirements and the developer's measurements (RX 7800 XT), not a benchmark. "Not supported" is
+kept for what stops the port: no Vulkan 1.3, a card far too slow, a processor without AVX. Too
+little RAM or video memory is "Below minimum": players run the game with 8 GB and on 3 GB cards.
 
 Texts are English; `tr` translates a template before it is formatted.
 """
@@ -171,8 +173,10 @@ GPUS = [
     ('amd', 'Integrated graphics (AMD)', 'Radeon 660M', 0, 30, 'igpu'),
     ('amd', 'Integrated graphics (AMD)', 'Radeon Vega 8 / Vega 11 (Ryzen 2000–5000 G and U)', 0, 15, 'igpu'),
     ('amd', 'Integrated graphics (AMD)', 'Radeon Graphics 2 CU (Ryzen 7000/9000 desktop)', 0, 7, 'igpu'),
-    ('intel', 'Integrated graphics (Intel)', 'Arc 140V / 130V (Core Ultra 200V)', 0, 50, 'igpu'),
-    ('intel', 'Integrated graphics (Intel)', 'Arc graphics (Core Ultra 100H)', 0, 42, 'igpu'),
+    ('intel', 'Integrated graphics (Intel)', 'Arc 140V / 130V (Core Ultra 200V)', 0, 85, 'igpu'),
+    # Measured by a tester (Core Ultra 5 125H): 40-55 FPS at 1080p native with the settings for it; the
+    # 200V's Arc is faster.
+    ('intel', 'Integrated graphics (Intel)', 'Arc graphics (Core Ultra 100H)', 0, 70, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'Iris Xe (11th–13th gen laptops)', 0, 20, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'UHD 770 / 730 (12th gen+ desktop)', 0, 10, 'igpu'),
     ('intel', 'Integrated graphics (Intel)', 'UHD 620 / 630', 0, 6, 'igpu'),
@@ -333,6 +337,45 @@ def processor_support():
         return None
 
 
+INSTRUCTIONS = ('AVX', 'BMI1', 'MOVBE', 'LZCNT')  # HARD_LIMITS: AVX or nothing; the others are translated
+
+
+def instructions(cpuid=None):
+    """{name: True/False} for INSTRUCTIONS on this CPU, from CPUID as cpu_compat reads it (`cpuid` for
+    tests); None when CPUID cannot be read here."""
+    cleanup = None
+    try:
+        import cpu_compat
+        if cpuid is None:
+            found = cpu_compat._cpuid_windows()
+            if not found:
+                return None
+            cpuid, cleanup = found
+        ecx = cpuid(1)[2]
+        missing = set(cpu_compat.missing_host_extensions(cpuid) or ())
+        have = {'AVX': bool(ecx >> 28 & 1 and ecx >> 27 & 1)}  # AVX and OSXSAVE
+        have.update({name: name not in missing for name in cpu_compat.HOST_EXTENSIONS})
+        return {name: have[name] for name in INSTRUCTIONS}
+    except Exception:  # an unknown CPU never stops the launcher
+        return None
+    finally:
+        if cleanup:
+            cleanup()
+
+
+def instruction_lines(have, tr=str):
+    """[(state, text)] for the System page's hard limits: this CPU's instructions, when known."""
+    if have is None:
+        return []
+    missing = [name for name in INSTRUCTIONS if not have.get(name)]
+    if not have.get('AVX'):
+        return [('bad', tr('Your processor has no AVX: the port cannot run on it.'))]
+    if missing:
+        return [('warn', tr('Your processor lacks {}: the port translates them (compatibility mode), so expect '
+                            'bugs.').format(', '.join(missing)))]
+    return [('ok', tr('Your processor has AVX, BMI1, MOVBE and LZCNT: the port runs on it directly.'))]
+
+
 def detect_cpu():
     name = processor_name()
     cpu = cpu_from_name(name) if name else Cpu('', None)
@@ -405,10 +448,12 @@ def best_gpu_line(lines):
 
 
 def parse_gpu_line(line):
-    """bb-gpu-capabilities' 'Name, discrete, 16304 MiB' -> (name, integrated, GB)."""
+    """bb-gpu-capabilities' 'Name, discrete, 16304 MiB' -> (name, integrated, GB). The tool says
+    'integrated or other' for every card that is not discrete (integrated graphics, a virtual or
+    software device)."""
     parts = [p.strip() for p in line.split(',')]
     vram = next((int(m.group(1)) for p in parts for m in [re.match(r'(\d+) MiB', p)] if m), 0)
-    return parts[0], any(p == 'integrated' for p in parts), round(vram / 1024)
+    return parts[0], any(p.startswith('integrated') for p in parts), round(vram / 1024)
 
 
 # ---- the rating (the website's x()) --------------------------------------------------------------
@@ -423,10 +468,13 @@ RESOLUTIONS = ('1080p', '1440p', '4K')
 
 
 def gpu_tier(g):
-    if not g.vulkan13 or (not g.igpu and g.vram < 4) or g.score < 25:
+    if not g.vulkan13 or g.score < 25:
         return 0
-    return 1 if g.score < 35 else 2 if g.score < 70 else 3 if g.score < 112 else \
-        4 if g.score < 170 or g.vram < 12 else 5
+    # Under 4 GB of video memory is below the minimum, not a stop: a player's GTX 1060 3 GB played up
+    # to the Blood-Starved Beast. The launcher gives such a card the settings for 4 GB cards.
+    if (not g.igpu and g.vram < 4) or g.score < 35:
+        return 1
+    return 2 if g.score < 70 else 3 if g.score < 112 else 4 if g.score < 170 or g.vram < 12 else 5
 
 
 def resolution_levels(g, tier):
@@ -455,7 +503,9 @@ def cpu_tier(cpu):
 
 
 def ram_tier(gb):
-    return 0 if gb < 12 else 1 if gb < 16 else 5
+    # The game needs memory for its start from the RAM and the page file together (Help: code 3), so
+    # less than 16 GB is below the minimum, not a stop: a player's laptop with 8 GB runs it smoothly.
+    return 1 if gb < 16 else 5
 
 
 def upscaler_name(g):
@@ -492,7 +542,9 @@ def assess(g, cpu, ram, tr=str):
     tiers = {'gpu': gpu_tier(g), 'cpu': cpu_tier(cpu), 'ram': ram_tier(ram)}
     capped = {'gpu': tiers['gpu'], 'cpu': 5 if tiers['cpu'] == 4 else tiers['cpu'], 'ram': tiers['ram']}
     tier = min(capped.values())
-    cap = min((0, 1, 3, 4, 5)[tiers['cpu']], 0 if tiers['ram'] == 0 else 5)
+    # A slow processor caps the frame rate whatever the card can do (below the minimum: under 30 FPS,
+    # the minimum: 30–60 FPS). Too little RAM sets no cap: it shows in the tier and the memory check.
+    cap = (0, 1, 3, 4, 5)[tiers['cpu']]
     rating = Rating()
     rating.gpu, rating.cpu, rating.ram = g, cpu, ram
     rating.tier, rating.tiers = tier, tiers
@@ -503,9 +555,8 @@ def assess(g, cpu, ram, tr=str):
     # picture would not add frames).
     rating.cap, rating.levels, rating.picture_levels = cap, {}, {}
     rating.rows = []
-    for res, level in zip(RESOLUTIONS, resolution_levels(g, tiers['gpu'])):
-        picture = min(level, 0 if tiers['ram'] == 0 else 5)
-        level = min(level, cap)
+    for res, picture in zip(RESOLUTIONS, resolution_levels(g, tiers['gpu'])):
+        level = min(picture, cap)
         rating.levels[res], rating.picture_levels[res] = level, picture
         rating.rows.append((res, level, tr(LEVELS[level]), settings_text(g, picture if level else 0, res, tr)))
 
@@ -529,9 +580,7 @@ def assess(g, cpu, ram, tr=str):
         checks.append((('bad', 'warn', 'ok', 'ok', 'ok')[tiers['cpu']], 'cpu', text))
     if not g.vulkan13:
         checks.append(('bad', 'gpu', tr('Not supported: no Vulkan 1.3 driver for this card.')))
-    elif not g.igpu and g.vram < 4:
-        checks.append(('bad', 'gpu', tr('Not supported: {} GB of video memory, the port needs at least 4 GB.').format(g.vram)))
-    else:
+    else:  # under 4 GB of video memory reads "Below the minimum" like a slow card (gpu_tier)
         text = tr(('Too slow for the port.', 'Below the minimum (GTX 1050 Ti / GTX 1650 / RX 570).',
                    'Meets the minimum (GTX 1050 Ti / GTX 1650 / RX 570 / RX 6500 XT).', 'Above the minimum.',
                    'Meets the recommendation (RTX 3060 Ti / RTX 4060 / RX 6700 XT / RX 7600).',
@@ -539,9 +588,7 @@ def assess(g, cpu, ram, tr=str):
         if g.igpu:
             text += ' ' + tr('Integrated graphics use your RAM as video memory.')
         checks.append((('bad', 'warn', 'ok', 'ok', 'ok', 'ok')[tiers['gpu']], 'gpu', text))
-    if ram < 12:
-        checks.append(('bad', 'ram', tr('{} GB is not enough: the game will likely close right after PLAY (code 3).').format(ram)))
-    elif ram < 16:
+    if ram < 16:  # a warning even at 8 GB: with a large enough page file the game can start (ram_tier)
         checks.append(('warn', 'ram', tr('{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).').format(ram)))
     elif ram < 32:
         checks.append(('ok', 'ram', tr('{} GB meets the minimum (32 GB recommended). Keep the page file on "System managed".').format(ram)))
@@ -551,7 +598,7 @@ def assess(g, cpu, ram, tr=str):
 
     notes = []
     if tier > 0:
-        if not g.igpu and g.vram == 4:
+        if not g.igpu and g.vram <= 4:  # profile() sets these for 3 GB cards as well
             notes.append(tr('Settings for 4 GB cards: 720p/1080p, FSR 3.1 Performance, Model detail "As in the game", '
                             'Object motion vectors off, frame generation off, a 60 FPS cap.'))
         if g.vendor == 'intel':
@@ -731,13 +778,79 @@ def vendor_of(name):
             'intel' if 'intel' in name or ' arc' in f' {name}' else '')
 
 
-def signature(gpu_line, cpu, ram, display):
-    """What the automatic settings depend on: the hardware as detected (never a card chosen by
-    hand) and the display. A change means new hardware."""
-    if not gpu_line or not cpu:
+def signature(gpu_line, cpu, ram):
+    """The hardware the automatic settings are made for, as detected (never a card chosen by hand):
+    'NVIDIA GeForce RTX 4070 12 GB|AMD Ryzen 7 5800X 8-Core Processor|32'; '' when the graphics
+    card or the processor was not detected this time (nothing to compare). The display is no part
+    of it: 1.9.3 and 1.9.4 added it, and a TV or a second monitor switched off set the player's
+    settings back at the next start."""
+    if not gpu_line or not cpu or not cpu.name:
         return ''
     name, _integrated, vram = parse_gpu_line(gpu_line)
-    return f'{name} {vram} GB|{cpu.name}|{ram}|{display[0]}x{display[1]}'
+    return f'{name} {vram} GB|{cpu.name}|{ram}'
+
+
+def parse_card(text):
+    """(name, video memory in GB) of a signature's first part, 'NVIDIA GeForce RTX 4070 12 GB'; or None."""
+    m = re.fullmatch(r'(.+) (\d+) GB', text) if isinstance(text, str) else None
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def signature_parts(text):
+    """(card name, video memory, processor, memory in GB) of a stored signature, also one of 1.9.3
+    and 1.9.4 with the display after them (left out); None when it is empty or unreadable."""
+    parts = text.split('|') if isinstance(text, str) else []
+    card = parse_card(parts[0]) if len(parts) >= 3 else None
+    if not card:
+        return None
+    return card[0], card[1], parts[1], int(parts[2]) if parts[2].isdigit() else 0
+
+
+def stored_signature(text):
+    """A stored signature as signature() writes it now (1.9.3 and 1.9.4 had the display after the
+    hardware); '' when it is empty or unreadable."""
+    parts = signature_parts(text)
+    return f'{parts[0]} {parts[1]} GB|{parts[2]}|{parts[3]}' if parts else ''
+
+
+def same_card(a, b):
+    """Whether two (name, video memory in GB) are one graphics card model: the same name, or the same
+    entry of the table (a driver that words the name differently changes nothing). The memory may
+    differ by 1 GB: drivers report a little more or less from one version to the next."""
+    if abs(a[1] - b[1]) > 1:
+        return False
+    if _words(a[0]) == _words(b[0]):
+        return True
+    found = match_gpu(a[0], a[1])
+    return found is not None and found is match_gpu(b[0], b[1])
+
+
+def same_memory(a, b):
+    """Installed memory in whole GB, the same within rounding: 2 GB, or an eighth of large amounts
+    (Windows' fallback count leaves out what the integrated graphics reserve). 0 is unknown."""
+    return not a or not b or abs(a - b) <= max(2, max(a, b) / 8)
+
+
+def new_hardware(before, now, seen=(), integrated=False):
+    """Whether the signature `now` is other hardware than `before`, the one the settings were made
+    for: another processor, more or less memory, or a graphics card new to this PC.
+
+    Not new: anything not detected, the display, and a card that comes and goes on a PC with two.
+    A laptop shows its integrated graphics while the discrete card sleeps or is switched off (MUX,
+    eco mode), and an eGPU comes and goes with its cable; 1.9.3 and 1.9.4 set the settings back at
+    every such start. So an integrated card detected now (`integrated`) never counts, nor one this PC
+    showed before (`seen`: the cards of earlier signatures, 'Name 8 GB')."""
+    old, new = signature_parts(before), signature_parts(now)
+    if not old or not new:
+        return False
+    if old[2] and new[2] and old[2] != new[2]:
+        return True
+    if not same_memory(old[3], new[3]):
+        return True
+    card = new[:2]
+    if integrated or same_card(old[:2], card):
+        return False
+    return not any(same_card(other, card) for other in map(parse_card, seen) if other)
 
 
 # ---- the requirements (website) ---------------------------------------------------------------------

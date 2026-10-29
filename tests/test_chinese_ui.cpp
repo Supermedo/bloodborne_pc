@@ -11,8 +11,10 @@ int main() {
     chinese = false;
     assert(std::strcmp(Tr("Close"), "Close") == 0);
     chinese = true;
-    assert(std::strcmp(Tr("Close"), "关闭") == 0);
+    assert(std::strcmp(Tr("Close"), "关闭菜单") == 0);
     assert(std::strcmp(Tr("Frame generation"), "帧生成") == 0);
+    assert(std::strcmp(Tr("Bloodborne - Settings"), "血源设置") == 0);
+    assert(std::strcmp(Tr("Frame times"), "帧耗时") == 0);
     assert(std::strstr(Tr("Quit game###bb_quit"), "###bb_quit") != nullptr);
     assert(std::strcmp(Tr("cheats"), "cheats") == 0); // Internal directory, not a UI label.
     assert(std::strcmp(Tr("##value"), "##value") == 0);
@@ -23,17 +25,21 @@ int main() {
 
     ImGui::CreateContext();
     auto* atlas = ImGui::GetIO().Fonts;
-    atlas->AddFontDefault();
+    ImFontConfig base_font;
+    base_font.SizePixels = 18.0f; // Match the overlay's explicit reference size on ImGui 1.92.
+    atlas->AddFontDefault(&base_font);
     assert(!ConfigureChineseFont(atlas, "zh", {}));
     assert(!chinese && std::strcmp(Tr("Close"), "Close") == 0);
     const auto system_font = FindChineseFont();
     assert(!ConfigureChineseFont(atlas, "en", system_font));
     assert(!chinese);
     if (!system_font.path.empty()) {
-        assert(ConfigureChineseFont(atlas, "zh", system_font));
+        // Include FSR picker characters beyond the general menu translations.
+        const ImWchar extra[] = {0x9f98, 0x9f98, 0};
+        assert(ConfigureChineseFont(atlas, "zh", system_font, extra));
         assert(chinese);
         assert(atlas->Build());
-        for (ImWchar c : {ImWchar(0x5173), ImWchar(0x95ed), ImWchar(0x6e38), ImWchar(0x620f)}) {
+        for (ImWchar c : {ImWchar(0x5173), ImWchar(0x95ed), ImWchar(0x6e38), ImWchar(0x620f), ImWchar(0x9f98)}) {
             assert(atlas->Fonts[0]->IsGlyphInFont(c)); // 关闭 / 游戏
         }
         std::puts("CJK system font merge and glyph checks passed");

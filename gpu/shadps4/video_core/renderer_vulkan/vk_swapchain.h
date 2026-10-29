@@ -32,7 +32,9 @@ public:
     bool AcquireNextImage();
 
     /// Presents the current image and move to the next one
-    bool Present(vk::Queue queue = {});
+    /// bbport: present_id (VK_KHR_present_id, 0 for none) names a game frame for the latency
+    /// markers (vk_low_latency.h).
+    bool Present(vk::Queue queue = {}, u64 present_id = 0);
 
     vk::SurfaceKHR GetSurface() const {
         return surface;

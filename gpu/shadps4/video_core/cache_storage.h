@@ -43,6 +43,10 @@ public:
 
     void ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func);
 
+    /// bbport: the file for the Vulkan driver's pipeline cache, beside the blobs. It belongs to
+    /// the GPU and driver, not to a build: Clear() keeps it.
+    [[nodiscard]] std::filesystem::path DriverCachePath() const;
+
 private:
     std::jthread io_worker{};
     std::filesystem::path cache_path{};

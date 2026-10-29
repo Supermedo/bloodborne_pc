@@ -53,6 +53,7 @@ struct Frame {
     std::array<Generated, FrameGenerator::MaxGenerated> generated{};
     u32 generated_count{};
     bool detached_output{};
+    u64 latency_id{}; ///< bbport: the submitted game frame shown (LowLatency), 0 for others
 };
 
 enum SchedulerType {
@@ -133,6 +134,7 @@ private:
     /// presents it. `last`: the game frame itself, which also signals the frame's fence.
     /// False when the swapchain could not give an image.
     bool PresentImage(Frame* frame, vk::Image image, bool last);
+    u64 present_latency_id{}; ///< bbport: the game frame's id for its last image (LowLatency)
 
     void SetExpectedGameSize(s32 width, s32 height);
 

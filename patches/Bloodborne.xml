@@ -325,6 +325,12 @@
             <Line Type="bytes" Address="0x04b36de2" Value="00a0"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Larger Frame Heaps" Note="Raises the two per-frame render heaps from 256 KiB to 1 MiB each. A busy frame used up 256 KiB, and the game copied into the NULL block it got back (crash at 0x025d5b40). The port applies this always." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02595c0a" Value="0x00100000"/>
+            <Line Type="bytes32" Address="0x02595c47" Value="0x00100000"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>
@@ -1264,6 +1270,21 @@
             <Line Type="bytes" Address="0x023b9190" Value="b805000000c3"/>
             <Line Type="bytes" Address="0x023B8730" Value="31C0C3909090909090909090909090"/>
             <Line Type="bytes" Address="0x01C2C890" Value="31C0C3909090909090909090909090"/>
+            <Line Type="bytes" Address="0x023e450d" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x023b86b3" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x01d5e537" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x0227d9e1" Value="b80200000090"/>
+            <!-- The forced bb-eu URL publishes version-2 settings (gameurl2,
+                 msg2, etc.). Keep the online response handlers on the same
+                 selector, independently of the unlocked language/region. -->
+            <Line Type="bytes" Address="0x022899e6" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x0228b1e1" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x022917c1" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x02292342" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x02295fe0" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x02297161" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x022a3e9e" Value="b80200000090"/>
+            <Line Type="bytes" Address="0x022a4783" Value="b80200000090"/>
         </PatchList>
     </Metadata>
     <Metadata Title="Bloodborne" Name="Circle Confirm (Japanese/Asian button layout)" Note="The game's check for the regions where Circle confirms (Japan, Asia) always answers yes: Circle confirms and interacts, Cross cancels and dodges, and the on-screen button icons follow. Applied after Unlock Game Region, which clears the same check." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">

@@ -90,6 +90,9 @@ const char *runtime_file_user_dir(void);
 void runtime_rebirth_set_image(unsigned char *base);
 int runtime_rebirth(void);
 int runtime_rebirth_free_level(int level);
+void runtime_rebirth_closed(void);
+/* The Discord status (runtime_discord.c): started once the game image is loaded. */
+void runtime_discord_start(unsigned char *base);
 void runtime_savedata_configure(const char *title);
 uintptr_t runtime_savedata_resolve(const char *name);
 void runtime_savedata_report(void);

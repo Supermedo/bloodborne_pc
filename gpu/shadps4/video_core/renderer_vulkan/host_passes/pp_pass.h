@@ -18,6 +18,7 @@ public:
         float gamma = 1.0f;
         u32 hdr = 0;
         u32 srgb_input = 0;
+        u32 sdr_on_hdr = 0; // bbport: SDR swapchain on a display Windows runs in HDR
     };
 
     void Create(vk::Device device, vk::Format surface_format);

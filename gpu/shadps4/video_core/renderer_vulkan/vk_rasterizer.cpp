@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <xxhash.h>
+#include <cmath>
 #include <mutex>
 #include <set>
 #include "video_core/renderer_vulkan/ui_composition.h"
@@ -39,6 +40,18 @@ static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
     push_data.yoffset = regs.viewport_control.yoffset_enable ? regs.viewports[0].yoffset : 0.f;
     push_data.yscale = regs.viewport_control.yscale_enable ? regs.viewports[0].yscale : 1.f;
     return push_data;
+}
+
+// Normal clip-space draws use the otherwise unused window offsets for projection
+// jitter. Clip-disabled draws retain their screen-to-clip conversion. Reusing the
+// two floats keeps PushData within Vulkan's guaranteed 128-byte push-constant size.
+static void SetProjectionJitter(Shader::PushData& push, const AmdGpu::Regs& regs,
+                                const std::array<float, 2>& jitter) {
+    if (regs.IsClipDisabled()) return;
+    push.xoffset = std::isfinite(push.xscale) && push.xscale != 0.f
+                       ? jitter[0] / push.xscale : 0.f;
+    push.yoffset = std::isfinite(push.yscale) && push.yscale != 0.f
+                       ? jitter[1] / push.yscale : 0.f;
 }
 
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime& runtime_,
@@ -914,6 +927,7 @@ bool Rasterizer::FilterDrawPasses() const {
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
     RENDERER_TRACE;
+    MaybeSubmitEarly();
     BbStats::draws.fetch_add(1, std::memory_order_relaxed);
 
     // bbport: with the draw pipeline this thread only selects the pipeline and hands the draw
@@ -1104,7 +1118,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             });
         }
     }
-    pipeline->BindResources(set_writes, push_data);
     // bbport: jitter geometry drawn with the scene depth, not full-screen passes (a shifted
     // full-screen quad leaves an edge column unwritten).
     draw_jitter = {};
@@ -1112,6 +1125,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         (regs.num_indices > 6 || regs.num_instances.NumInstances() > 1)) {
         draw_jitter = upscaler->Jitter();
     }
+    SetProjectionJitter(push_data, regs, draw_jitter);
+    pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
@@ -1156,6 +1171,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
                               u32 max_count, VAddr count_address, u16 vertex_sgpr_offset,
                               u16 instance_sgpr_offset) {
     RENDERER_TRACE;
+    MaybeSubmitEarly();
     // bbport: like direct draws, handed to the recording thread after the pipeline selection
     // (else the GPU thread waited here for a whole frame of queued draws).
     const bool pipelined = UseDrawPipe() && FilterDrawPasses() &&
@@ -1238,11 +1254,12 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     push_data.xoffset *= target_scale[0];
     push_data.yscale *= target_scale[1];
     push_data.yoffset *= target_scale[1];
-    pipeline->BindResources(set_writes, push_data);
     draw_jitter = {};
     if (upscaler->Enabled() && db_desc.first && db_desc.first == camera_motion->Depth()) {
         draw_jitter = upscaler->Jitter();
     }
+    SetProjectionJitter(push_data, Regs(), draw_jitter);
+    pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
@@ -1397,7 +1414,43 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     scheduler.KickRecording();
 }
 
+void Rasterizer::MaybeSubmitEarly() {
+    static const bool enabled = [this] {
+        const char* env = std::getenv("BB_EARLY_SUBMIT");
+        if (!env || (env[0] != '1' && std::strcmp(env, "force") != 0)) {
+            return false;
+        }
+        // bbport: slower on AMD (RX 9070 XT, Ebrietas at 144 FPS: render latency 13 -> 19-23 ms,
+        // walking 106 -> 90 FPS), where the driver's own submission already overlaps: off there
+        // unless BB_EARLY_SUBMIT=force.
+        if (instance.GetPhysicalDevice().getProperties().vendorID == 0x1002 &&
+            std::strcmp(env, "force") != 0) {
+            std::printf("Early submit: off on AMD (slower there; BB_EARLY_SUBMIT=force turns it on)\n");
+            return false;
+        }
+        std::printf("Early submit: on\n");
+        return true;
+    }();
+    if (!enabled) {
+        return;
+    }
+    // At least a millisecond of recording and a few draws per part: each submission waits for
+    // the recording thread (Scheduler::SubmitExecution), so many small ones would cost more
+    // than the GPU gains by starting early.
+    constexpr u32 MinDraws = 48;
+    constexpr auto MinTime = std::chrono::microseconds(1000);
+    if (++draws_since_submit < MinDraws) {
+        return;
+    }
+    if (std::chrono::steady_clock::now() - last_submit < MinTime) {
+        return;
+    }
+    Flush();
+}
+
 u64 Rasterizer::Flush() {
+    draws_since_submit = 0;
+    last_submit = std::chrono::steady_clock::now();
     DrainDrawPipe();
     const u64 current_tick = scheduler.CurrentTick();
     SubmitInfo info{};
@@ -1418,6 +1471,7 @@ void Rasterizer::OnSubmit() {
     }
     texture_cache.ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
+    buffer_cache.RunArenaCollector();
     runtime.TickFrame();
 }
 
@@ -2661,6 +2715,9 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             attachment_feedback_loop = false;
             push_data.scene_size = begin_memo.scene_size;
             target_scale = begin_memo.target_scale;
+            if (ui_pass.active && UiComposition::SharpUi()) {
+                UpdateUiTransform();
+            }
             return begin_memo.state;
         }
         ++begin_memo_misses;
@@ -2681,6 +2738,20 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         }
     }
     return state;
+}
+
+void Rasterizer::UpdateUiTransform() {
+    // The UI movie viewport is now 1920x1080 even when the scene is 960x540.
+    // A native viewport (or native window-space UI vertices) must not be doubled
+    // again. The final display copy still uses the guest render-size coordinates.
+    // With Sharp UI the draws of one pass use several viewports (UiComposition::DrawScale).
+    const auto& regs = Regs();
+    const auto& viewport = regs.viewports[0];
+    const bool window_space = regs.IsClipDisabled() && !regs.viewport_control.xscale_enable &&
+                              !regs.viewport_control.yscale_enable;
+    target_scale = UiComposition::DrawScale(viewport.xscale * 2, viewport.yscale * 2, window_space,
+                                            ui_pass.native_ui, ui_pass.guest.first, ui_pass.guest.second,
+                                            ui_pass.output.first, ui_pass.output.second);
 }
 
 RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
@@ -2915,6 +2986,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     // bbport: a pass drawn into the upscaler's output-size images (UI, display pass): every
     // attachment must be redirected, viewports and scissors are scaled.
     target_scale = {1.0f, 1.0f};
+    ui_pass.active = false;
     if (color_redirected || depth_redirected) {
         u32 color_targets = 0;
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
@@ -2953,17 +3025,8 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         } else {
             state.width = redirect.width;
             state.height = redirect.height;
-            // The UI movie viewport is now 1920x1080 even when the scene is 960x540.
-            // A native viewport (or native window-space UI vertices) must not be doubled
-            // again. The final display copy still uses the guest render-size coordinates.
-            const auto& viewport = regs.viewports[0];
-            const bool native_coordinates = redirect.native_ui &&
-                (UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2) ||
-                 (regs.IsClipDisabled() && !regs.viewport_control.xscale_enable &&
-                  !regs.viewport_control.yscale_enable));
-            target_scale = UiComposition::Scale(guest_extent.first, guest_extent.second,
-                                                redirect.width, redirect.height,
-                                                native_coordinates);
+            ui_pass = {true, redirect.native_ui, guest_extent, {redirect.width, redirect.height}};
+            UpdateUiTransform();
         }
     }
 
@@ -2978,6 +3041,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         state.width = proxy.width;
         state.height = proxy.height;
         target_scale = {float(size.width) / 1920.0f, float(size.height) / 1080.0f};
+        ui_pass.active = false;
     }
     if (FrameCapture::Active()) {
         std::array<const VideoCore::ImageInfo*, AmdGpu::NUM_COLOR_BUFFERS> colors{};
@@ -3269,10 +3333,9 @@ void Rasterizer::UpdateViewportScissorState() const {
             const auto yoffset = vp_ctl.yoffset_enable ? vp.yoffset : 0.f;
             const auto yscale = vp_ctl.yscale_enable ? vp.yscale : 1.f;
 
-            // bbport: sub-pixel jitter of scene geometry for the temporal upscaler; the same
-            // shift as jittering the projection.
-            viewport.x = (xoffset - xscale) * target_scale[0] + draw_jitter[0];
-            viewport.y = (yoffset - yscale) * target_scale[1] + draw_jitter[1];
+            // Keep coverage bounds fixed; scene jitter is applied to clip positions.
+            viewport.x = (xoffset - xscale) * target_scale[0];
+            viewport.y = (yoffset - yscale) * target_scale[1];
             viewport.width = xscale * 2.0f * target_scale[0];
             viewport.height = yscale * 2.0f * target_scale[1];
         }

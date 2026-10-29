@@ -17,6 +17,8 @@ namespace Libraries::Net {
 
 // Called from the kernel's RegisterLib, before any net object exists.
 void InstallKernelIntegration();
+// bbport: the system hooks of InstallKernelIntegration alone (bbnet_glue).
+void InstallSystemHooks();
 s32 KernelClose(s32 fd);
 s64 KernelRead(s32 fd, void* buf, u64 nbytes);
 s64 KernelWrite(s32 fd, const void* buf, u64 nbytes);

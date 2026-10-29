@@ -1,5 +1,10 @@
 # FSR 4.1.1 on Windows
 
+The current combined FSR 4.1 integration is documented in
+[FSR 4.1 on Windows](FSR41_WINDOWS.md), including 4.1.2, the compact method dialog,
+live switching, ranked defaults and exact support checks. The sections below
+describe the original 4.1.1 integration and its historical measurements.
+
 Select **FSR 4.1.1 (experimental)** in **Upscaler**, then choose the method in
 **Graphics > FSR 4.1.1 backend** or the **Play** page's quick settings. Press the
 normal **PLAY** button. `Play Bloodborne.exe` uses the same saved selection.

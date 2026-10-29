@@ -134,6 +134,14 @@ static ABI int32_t launch_browser(const char *url, intptr_t arg) {
     /* Rebirth at the Doll (runtime_rebirth.c, scripts/rebirth.py). */
     if (url && !strcmp(url,"bb:b")) return runtime_rebirth();
     if (url && !strcmp(url,"bb:f")) return runtime_rebirth_free_level((int)arg);
+    if (url && !strcmp(url,"bb:e")) { runtime_rebirth_closed(); return 0; }
+    /* PC Settings (bbport_pc_menu.cpp, scripts/pc_menu.py): the System menu asks for its line;
+     * `arg` points at the menu's line list. */
+    if (url && !strcmp(url,"bb:o")) return bbgpu_pc_menu_add_line((void *)arg);
+    if (url && !strcmp(url,"bb:h")) return bbgpu_pc_menu_hide((void *)arg);
+    if (url && !strcmp(url,"bb:l")) return bbgpu_pc_menu_button_text((void *)arg);
+    if (url && !strcmp(url,"bb:r")) return bbgpu_pc_menu_question((void *)arg);
+    if (url && !strcmp(url,"bb:y")) return bbgpu_pc_menu_yes((void *)arg);
     if (url && !strcmp(url,"bb:q")) { quit_game(); return 0; }
     if (url && !strcmp(url,"bb:p")) { quit_pending=1; return 0; }
     if (url && !strcmp(url,"bb:d")) {

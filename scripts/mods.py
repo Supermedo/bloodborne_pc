@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Merge loose-file mods through links, preserving the original game and mod files."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -145,6 +146,13 @@ def mod_files(folder):
 # not symlinks, so the overlay remembers what it linked and where to. Keys are normalized:
 # MSYS2's Python spells joined paths with '/' and listed ones with '\'.
 LINKED = {}
+# A file that cannot be hard-linked (on another drive than the view, or a drive without hard links)
+# is copied once into the view's own folder of copies (COPY_FOLDER beside the mod-game-* views) and
+# linked from there at every later start. Copied straight into each view, a texture mod cost its
+# whole size at every start, and the views a 1.9.4 game left behind (ended in the Task Manager)
+# grew a player's out folder to 400 GB. Copies the last view did not use are removed.
+COPY_FOLDER = 'bbport-mod-copies'
+COPIES = {'folder': None, 'used': set(), 'made': 0}
 
 
 def key(path):
@@ -166,8 +174,49 @@ def make_link(link, target):
         try:
             os.link(target, link)
         except OSError:
-            shutil.copy2(target, link)
+            copy_once(target, link)
     LINKED[key(link)] = target
+
+
+def copy_once(target, link):
+    """`link` as a hard link to the one copy of `target` in COPIES['folder'], made now if this
+    version of the file (its path, size and time) has none yet; a plain copy where even that
+    cannot be linked."""
+    folder = COPIES['folder']
+    if folder is None:
+        shutil.copy2(target, link)
+        return
+    info = target.stat()
+    name = hashlib.sha256(f'{key(target)}|{info.st_size}|{info.st_mtime_ns}'.encode()).hexdigest()[:32]
+    copy = folder / (name + target.suffix.lower())
+    if not copy.is_file():
+        folder.mkdir(parents=True, exist_ok=True)
+        part = copy.with_name(copy.name + '.part')
+        shutil.copy2(target, part)
+        os.replace(part, copy)
+        COPIES['made'] += 1
+    COPIES['used'].add(copy.name)
+    try:
+        os.link(copy, link)
+    except OSError:
+        shutil.copy2(copy, link)
+
+
+def prune_copies():
+    """The copies no file of the view just made uses (a mod turned off or updated). A view still
+    linked to one keeps its data: a hard link outlives the name removed here."""
+    folder = COPIES['folder']
+    if folder is None or not folder.is_dir():
+        return
+    for path in folder.iterdir():
+        if path.is_file() and path.name not in COPIES['used']:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    if COPIES['made']:
+        print(f'Mods: {COPIES["made"]} files copied once into {folder} (another drive than the game view); '
+              'later starts link them', file=sys.stderr)
 
 
 def is_link(path):
@@ -266,6 +315,7 @@ def build_overlay(game, out, mods, beside_game=True):
         # Hard links only reach files on the same volume: the overlay goes beside the game.
         out = game.parent
     overlay = Path(tempfile.mkdtemp(prefix='mod-game-', dir=out))
+    COPIES.update(folder=Path(out) / COPY_FOLDER, used=set(), made=0)
     try:
         for entry in game.iterdir():
             make_link(overlay / entry.name, entry)
@@ -286,6 +336,7 @@ def build_overlay(game, out, mods, beside_game=True):
                 added += 1
             make_link(destination, source)
         print(f'Mods: {replaced} game files replaced, {added} added', file=sys.stderr)
+        prune_copies()
         return overlay
     except BaseException:
         remove_overlay(overlay)
@@ -309,11 +360,16 @@ def main():
         legacy = Path(str(args.game.resolve()) + '-mods')
         if legacy.is_dir():
             layers.append((legacy.name, legacy))
-        # A directly selected loose overlay is also accepted.
-        if child(args.mods_dir, 'dvdroot_ps4').is_dir():
-            layers.append((args.mods_dir.name, args.mods_dir))
+        # A directly selected loose overlay (a mods folder with a dvdroot_ps4 and no mod folders)
+        # is also accepted. Beside other mods a bare dvdroot_ps4 is one of them, with its switch
+        # and place in the order: as the whole overlay it left every other mod out.
+        loose = child(args.mods_dir, 'dvdroot_ps4')
+        names = selected(args.mods_dir, args.config)
+        if loose.is_dir() and set(discover(args.mods_dir)) <= {loose.name}:
+            if loose.name in names or not content_root(loose):
+                layers.append((args.mods_dir.name, args.mods_dir))
         else:
-            for name in selected(args.mods_dir, args.config):
+            for name in names:
                 layers.append((name, args.mods_dir / name))
     try:
         print(build_overlay(args.game, args.out, layers))

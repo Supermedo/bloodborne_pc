@@ -9,6 +9,16 @@ _cache = {}
 DLL = {'vk': 'amd_fidelityfx_upscaler_vk.dll', 'dx12': 'amd_fidelityfx_upscaler_dx12.dll'}
 
 
+def valid_status(status):
+    if not isinstance(status, dict) or type(status.get('supported')) is not bool or \
+            not isinstance(status.get('reason'), str) or not isinstance(status.get('detail'), str):
+        return False
+    checks = status.get('checks', [])
+    return isinstance(checks, list) and len(checks) <= 128 and all(
+        isinstance(row, dict) and all(isinstance(row.get(key), str) for key in ('id', 'state', 'detail'))
+        and row['state'] in ('pass', 'fail', 'info', 'skip') for row in checks)
+
+
 def executable(port):
     packaged = Path(port) / 'bin/bb-gpu-capabilities.exe'
     return packaged if packaged.is_file() else Path(port) / 'out/bb-gpu-capabilities.exe'
@@ -21,6 +31,8 @@ def vulkan_folder(port, data_dir, env):
 
 def environment(port, settings=None):
     env = dict(os.environ)
+    # Probes and renderer honor the same optional data-directory override.
+    env.setdefault('BB_DATA_DIR', str(Path(port)))
     for item in str((settings or {}).get('extra_env', '')).split():
         if '=' in item:
             key, value = item.split('=', 1)
@@ -49,18 +61,23 @@ def query(port, env=None, refresh=False):
         result = subprocess.run([str(exe), '--fsr411'], cwd=port, env=env,
             capture_output=True, text=True, timeout=15,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            raise ValueError('bb-gpu-capabilities.exe: exit=' + str(result.returncode))
         data = json.loads(result.stdout)
         if result.returncode or not isinstance(data, dict) or type(data.get('vendor_id')) is not int:
             raise ValueError('invalid capability response')
-        for method in ('vk', 'dx12'):
+        methods = ('vk', 'dx12') + (('dx12_interop',) if 'dx12_interop' in data else ())
+        for method in methods:
             status = data.get(method)
-            if not isinstance(status, dict) or type(status.get('supported')) is not bool or \
-                    not isinstance(status.get('reason'), str) or not isinstance(status.get('detail'), str):
+            if not valid_status(status):
                 raise ValueError('invalid method response')
         _cache[key] = data
         return data
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return {'vendor_id': None, **{m: dict(supported=False, reason='check', detail='')
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        detail = ('bb-gpu-capabilities.exe: timeout=15s' if isinstance(error, subprocess.TimeoutExpired)
+                  else str(error))
+        return {'vendor_id': None, **{m: dict(supported=False, reason='check', detail=detail,
+            checks=[dict(id='probe', state='fail', detail=detail)])
                                      for m in ('vk', 'dx12')}}
 
 

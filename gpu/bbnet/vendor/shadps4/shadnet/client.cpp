@@ -114,7 +114,12 @@ ShadNetState ShadNetClient::WaitForAuthenticated() {
         if (m_authenticated)
             return ShadNetState::Ok;
     }
-    m_sem_authenticated.acquire();
+    // bbport: not forever (SHAD_AUTH_TIMEOUT_MS): the caller stops this client and tries again.
+    if (!m_sem_authenticated.try_acquire_for(std::chrono::milliseconds(SHAD_AUTH_TIMEOUT_MS))) {
+        LOG_ERROR(ShadNet, "No login reply from {}:{} in {} s", m_host, m_port,
+                  SHAD_AUTH_TIMEOUT_MS / 1000);
+        return ShadNetState::FailureOther;
+    }
     return m_authenticated ? ShadNetState::Ok : m_state.load();
 }
 
@@ -232,7 +237,8 @@ void ShadNetClient::ReaderThread() {
         u8 hdr[SHAD_HEADER_SIZE];
         if (!RecvN(hdr, SHAD_HEADER_SIZE)) {
             if (!m_terminate)
-                LOG_WARNING(ShadNet, "Reader header recv failed, disconnecting");
+                LOG_WARNING(ShadNet, "Reader header recv failed (recv {}, error {}), disconnecting",
+                            m_last_recv_result, m_last_recv_error);
             break;
         }
         const auto ptype = static_cast<PacketType>(hdr[0]);
@@ -251,7 +257,8 @@ void ShadNetClient::ReaderThread() {
             payload.resize(payload_sz);
             if (!RecvN(payload.data(), payload_sz)) {
                 if (!m_terminate)
-                    LOG_WARNING(ShadNet, "Reader payload recv failed");
+                    LOG_WARNING(ShadNet, "Reader payload recv failed (recv {}, error {})",
+                                m_last_recv_result, m_last_recv_error);
                 break;
             }
         }
@@ -367,6 +374,7 @@ bool ShadNetClient::DoConnect() {
         ::fcntl(m_sock, F_SETFL, fl & ~O_NONBLOCK);
     }
 #endif
+    EnableKeepalive();
 
     struct sockaddr_in local{};
     socklen_t alen = sizeof(local);
@@ -452,6 +460,30 @@ void ShadNetClient::DoDisconnect() {
     }
 }
 
+// bbport: keepalive probes on the connected socket (SHAD_KEEPALIVE_*). Windows sends 10 probes
+// before it gives up; Linux gets the same count.
+void ShadNetClient::EnableKeepalive() {
+#ifdef _WIN32
+    const BOOL on = TRUE;
+    ::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char*>(&on), sizeof(on));
+    tcp_keepalive values{1, SHAD_KEEPALIVE_IDLE_MS, SHAD_KEEPALIVE_INTERVAL_MS};
+    DWORD returned = 0;
+    if (::WSAIoctl(m_sock, SIO_KEEPALIVE_VALS, &values, sizeof(values), nullptr, 0, &returned,
+                   nullptr, nullptr) != 0)
+        LOG_WARNING(ShadNet, "Keepalive timing not set (error {})", WSAGetLastError());
+#else
+    const int on = 1;
+    ::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on));
+#ifdef TCP_KEEPIDLE
+    const int idle = SHAD_KEEPALIVE_IDLE_MS / 1000, interval = SHAD_KEEPALIVE_INTERVAL_MS / 1000,
+              count = 10;
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count));
+#endif
+#endif
+}
+
 bool ShadNetClient::RecvN(u8* buf, u32 n) {
     u32 received = 0;
     while (received < n) {
@@ -459,8 +491,15 @@ bool ShadNetClient::RecvN(u8* buf, u32 n) {
             return false;
         const int r = static_cast<int>(::recv(m_sock, reinterpret_cast<char*>(buf + received),
                                               static_cast<int>(n - received), 0));
-        if (r <= 0)
+        if (r <= 0) {
+            m_last_recv_result = r;
+#ifdef _WIN32
+            m_last_recv_error = r < 0 ? WSAGetLastError() : 0;
+#else
+            m_last_recv_error = r < 0 ? errno : 0;
+#endif
             return false;
+        }
         received += static_cast<u32>(r);
     }
     return true;
@@ -1040,6 +1079,22 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
                   n.version, n.message);
         if (onClientRejected)
             onClientRejected(n);
+        break;
+    }
+    case NotificationType::SignalingHelper: {
+        shadnet::RequestSignalingInfosReply pb;
+        if (!pb.ParseFromString(blob)) {
+            LOG_WARNING(ShadNet, "SignalingHelper parse error");
+            break;
+        }
+        NotifySignalingHelper n;
+        n.npid = pb.target_npid();
+        n.ip = pb.target_ip();
+        n.port = static_cast<u16>(pb.target_port());
+        LOG_INFO(ShadNet, "SignalingHelper: '{}' at {}:{} wants to connect", n.npid, n.ip,
+                 n.port);
+        if (onSignalingHelper)
+            onSignalingHelper(n);
         break;
     }
     default:

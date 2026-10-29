@@ -19,7 +19,7 @@ bool Fg401WindowsSupported() {
     v.dwOSVersionInfoSize = sizeof(v);
     return rtl && !rtl(&v) && v.dwMajorVersion >= 10 && v.dwBuildNumber >= 22000;
 }
-Fg401Support ProbeFg401(const uint8_t bytes[8]) {
+Fg401Support ProbeFg401(const uint8_t bytes[8], uint32_t version) {
     struct Resources {
         IDXGIFactory4 *factory{};
         IDXGIAdapter1 *adapter{};
@@ -97,7 +97,7 @@ Fg401Support ProbeFg401(const uint8_t bytes[8]) {
     if (ffx.Query(nullptr, &q.header) != FFX_API_RETURN_OK)
         return {false, "provider"};
     for (size_t i = 0; i < count && i < names.size(); ++i)
-        if (names[i] && !std::strcmp(names[i], "4.0.1"))
+        if (Fg401ProviderMatches(ids[i], version))
             return {true, "ready"};
-    return {false, "provider"};
+    return {false, "provider", Fg401VersionName(version)};
 }

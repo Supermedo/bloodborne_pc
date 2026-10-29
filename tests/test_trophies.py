@@ -29,6 +29,17 @@ class TrophyTests(unittest.TestCase):
         self.assertEqual(trophies.read_log(self.user / 'trophies.log'), {14: 100, 21: 300})
         self.assertEqual(trophies.read_log(self.user / 'missing.log'), {})
 
+    def test_merge_adds_the_other_folders_unlocks_and_removes_none(self):
+        other = self.user / 'other'
+        other.mkdir()
+        (other / 'trophies.log').write_text('14 100\n21 300\n15 400\n', encoding='utf-8')
+        (self.user / 'trophies.log').write_text('21 200\n16 500\n', encoding='utf-8')
+        self.assertEqual(trophies.merge_log(other / 'trophies.log', self.user / 'trophies.log'), 2)  # 14 and 15
+        self.assertEqual(trophies.read_log(self.user / 'trophies.log'), {14: 100, 15: 400, 16: 500, 21: 200})
+        self.assertEqual(trophies.merge_log(other / 'trophies.log', self.user / 'trophies.log'), 0)  # once is enough
+        self.assertEqual(trophies.merge_log(self.user / 'missing.log', self.user / 'trophies.log'), 0)
+        self.assertEqual(self.tracker.poll(), [14, 21, 15, 16])  # the Achievements page shows them
+
     def test_observe_records_once(self):
         self.assertEqual(self.tracker.observe('Runtime: trophy 14 unlocked\n'), [14])
         self.assertEqual(self.tracker.observe('Runtime: trophy 14 unlocked\n'), [])

@@ -101,6 +101,17 @@ def files_ok(target: Path) -> bool:
     return all(verified(target / name, size, sha) for _, name, size, sha in FILES)
 
 
+def _urlopen(request, timeout):
+    """The launcher's HTTPS (launcher/bbport_tls.py: no expired certificates of the Windows stores, Windows'
+    trust when OpenSSL refuses a server) where it is there: in Bloodborne.exe and when the launcher imports
+    this script. urllib's own when the script runs by itself from a source tree."""
+    try:
+        import bbport_tls
+    except ImportError:
+        return urllib.request.urlopen(request, timeout=timeout)
+    return bbport_tls.urlopen(request, timeout=timeout)
+
+
 def _download(part: Path, progress) -> None:
     """Fills `part` with the zip, resuming what an earlier run left; the caller checks the hash."""
     for attempt in range(4):
@@ -114,7 +125,7 @@ def _download(part: Path, progress) -> None:
         if have:
             request.add_header('Range', f'bytes={have}-')
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with _urlopen(request, timeout=60) as response:
                 if have and response.status != 206:
                     have = 0  # the server ignored the range: start again
                 with open(part, 'ab' if have else 'wb') as out:

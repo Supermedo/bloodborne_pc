@@ -1,8 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """The launcher's icon in the notification area (the system tray), with ctypes only: a hidden window
-of its own receives the icon's clicks (Tk's message loop dispatches them, so the callbacks run on
-Tk's thread), a left click calls on_open, a right click shows Open / Quit. The icon comes back when
-Explorer restarts (TaskbarCreated)."""
+of its own receives the icon's clicks, a left click calls on_open, a right click shows Open / Quit.
+The icon comes back when Explorer restarts (TaskbarCreated).
+
+Tk's message loop dispatches the icon's messages, so the window procedure runs inside Tk's own event
+handling. It never calls Tk there (as bbport_frame's): a Tk call from it leaves tkinter without its
+thread state, and the next Tk callback ends the process ("Fatal Python error: PyEval_RestoreThread",
+0xc0000409; R53, the launcher closed at every click on the icon). The procedure only notes the click;
+a Tk after() loop, running while the icon is shown, calls on_open / on_quit."""
 import ctypes
 from ctypes import wintypes
 
@@ -13,6 +18,7 @@ NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
 IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
 TPM_RETURNCMD, TPM_RIGHTBUTTON, MF_STRING, MF_SEPARATOR = 0x100, 0x2, 0x0, 0x800
 MENU_OPEN, MENU_QUIT = 1, 2
+POLL_MS = 100  # how often the after() loop looks for a click
 
 LRESULT = ctypes.c_ssize_t
 WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
@@ -54,11 +60,16 @@ kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
 
 class Tray:
-    """One icon. show() puts it in the notification area, hide() takes it out; close() for good."""
+    """One icon. show() puts it in the notification area, hide() takes it out; close() for good.
+    root: the Tk window whose after() calls on_open / on_quit (on Tk's thread, outside the window
+    procedure)."""
 
-    def __init__(self, icon_path, tip, on_open, on_quit, words=('Open', 'Quit')):
-        self.on_open, self.on_quit, self.words = on_open, on_quit, words
-        self.shown = False
+    def __init__(self, icon_path, tip, on_open, on_quit, words=('Open', 'Quit'), root=None):
+        self.on_open, self.on_quit, self.words, self.root = on_open, on_quit, words, root
+        self.shown = False   # the icon is in the notification area
+        self.wanted = False  # between show() and hide(): the icon should be there (again)
+        self.clicked = None  # 'open' or 'quit', noted by the window procedure
+        self.polling = None  # the after() id while wanted
         self.proc = WNDPROC(self.window_proc)  # kept: Windows calls it as long as the window lives
         instance = kernel32.GetModuleHandleW(None)
         name = f'bbport-tray-{id(self)}'
@@ -75,14 +86,42 @@ class Tray:
                                     hIcon=self.icon, szTip=tip[:127])
 
     def show(self):
-        if not self.shown:
-            self.shown = bool(shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self.data)))
+        """From Tk (never from the window procedure): the icon, and the loop that answers its clicks."""
+        self.add()
+        self.wanted = self.shown
+        if self.wanted and self.polling is None and self.root is not None:
+            self.polling = self.root.after(POLL_MS, self.poll)
         return self.shown
 
+    def add(self):
+        """Windows calls only: also from the window procedure (TaskbarCreated)."""
+        if not self.shown:
+            self.shown = bool(shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self.data)))
+
     def hide(self):
-        if self.shown:
-            shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self.data))
-            self.shown = False
+        self.wanted = False
+        if self.polling is not None:
+            try:
+                self.root.after_cancel(self.polling)
+            except Exception:  # the window is gone already
+                pass
+            self.polling = None
+        # Also when not shown: a TaskbarCreated without a lost icon leaves it there, not shown.
+        shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self.data))
+        self.shown = False
+
+    def poll(self):
+        """Tk's after(): a click the window procedure noted, carried out on Tk's side. An icon
+        Explorer lost and could not take back yet (TaskbarCreated) is added again here."""
+        self.polling = None
+        clicked, self.clicked = self.clicked, None
+        if self.wanted and self.root is not None:
+            self.add()
+            self.polling = self.root.after(POLL_MS, self.poll)
+        if clicked == 'open':
+            self.on_open()
+        elif clicked == 'quit':
+            self.on_quit()
 
     def close(self):
         self.hide()
@@ -102,21 +141,22 @@ class Tray:
         user32.PostMessageW(self.hwnd, 0, 0, 0)  # WM_NULL: the menu closes properly (KB135788)
         user32.DestroyMenu(menu)
         if chosen == MENU_OPEN:
-            self.on_open()
+            self.clicked = 'open'
         elif chosen == MENU_QUIT:
-            self.on_quit()
+            self.clicked = 'quit'
 
     def window_proc(self, hwnd, message, wparam, lparam):
         try:
+            # Windows calls only in here, never Tk (see the top): clicks are noted for poll().
             if message == WM_APP_TRAY:
                 if lparam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
-                    self.on_open()
+                    self.clicked = 'open'
                 elif lparam == WM_RBUTTONUP:
                     self.menu()
                 return 0
-            if message == self.taskbar_created and self.shown:  # Explorer restarted: the icon again
+            if message == self.taskbar_created and self.wanted:  # Explorer restarted: the icon again
                 self.shown = False
-                self.show()
+                self.add()
         except Exception:  # never an exception into Windows' call of this procedure
             pass
         return user32.DefWindowProcW(hwnd, message, wparam, lparam)

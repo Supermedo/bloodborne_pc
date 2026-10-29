@@ -16,6 +16,7 @@
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/libraries/net/net.h"
+#include "core/libraries/net/net_p2p.h"
 #include "core/libraries/net/net_util.h"
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler/np_handler.h"
@@ -35,6 +36,7 @@ constexpr auto kMatching2Timeout = std::chrono::seconds(30);
 constexpr auto kMatching2EstablishDelay = std::chrono::milliseconds(1000);
 constexpr auto kStunPingInterval = std::chrono::seconds(5);
 constexpr s64 kHandshakeConnectTimeoutMs = 30'000;
+constexpr s64 kRelayAfterUs = 4'000'000; // no answer by then: use the shadNet relay
 constexpr s64 kHandshakeRetransmitMs = 500;
 constexpr s64 kKeepaliveIntervalMs = 45'000;
 
@@ -211,7 +213,7 @@ bool PublishSignalingInfo(const OrbisNpOnlineId& online_id) {
 
     NpSignaling::StunPing ping{};
     std::memcpy(ping.online_id, online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH);
-    ping.local_ip = NpSignaling::Transport::AdvertisedAddr();
+    ping.local_ip = NpSignaling::Transport::LocalAddr();
 
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);
@@ -318,6 +320,10 @@ void SetTransportStateLocked(NpSignaling::PeerTransport& transport,
                              NpSignaling::ConnState new_state) {
     transport.state = new_state;
     transport.status = StatusFromState(new_state);
+    if (new_state == NpSignaling::ConnState::Established ||
+        new_state == NpSignaling::ConnState::Inactive) {
+        transport.handshake_start_us = 0;
+    }
 }
 
 s32 AllocateTransportIdLocked() {
@@ -489,6 +495,9 @@ void SendHandshakeLocked(NpSignaling::PeerTransport& transport,
         return;
     }
     transport.last_handshake_send_us = NpSignaling::NowUs();
+    if (transport.handshake_start_us == 0) {
+        transport.handshake_start_us = transport.last_handshake_send_us;
+    }
     const int rc =
         NpSignaling::Transport::SignalingSendTo(&pkt, sizeof(pkt), transport.addr, transport.port);
     LOG_DEBUG(
@@ -889,7 +898,9 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port,
             }
             auto& transport =
                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
+            // Reply where the packet came from: the sender's mapped (public) address is
+            // wrong for a peer on our own network, and the port is from the packet anyway.
+            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
             transport.port = from_port;
             transport.peer_activated = true;
             if (transport.state != NpSignaling::ConnState::Established) {
@@ -904,7 +915,7 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port,
             auto& transport =
                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
             transport.peer_activated = true;
-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
+            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
             transport.port = from_port;
             if (transport.state == NpSignaling::ConnState::SendingOffer ||
                 transport.state == NpSignaling::ConnState::WaitAccept ||
@@ -1000,7 +1011,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
             if (transport_id == 0) {
                 transport_id = EnsureTransportLocked(
                     local_online_id, peer_online_id, peer_npid,
-                    pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr, from_port);
+                    from_addr != 0 ? from_addr : pkt.mapped_addr, from_port);
                 if (transport_id < 0) {
                     return;
                 }
@@ -1008,7 +1019,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
             auto& transport =
                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
             transport.peer_activated = true;
-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
+            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
             transport.port = from_port;
             if (transport.state == NpSignaling::ConnState::Inactive) {
                 SetTransportStateLocked(transport, NpSignaling::ConnState::WaitOffer);
@@ -1225,22 +1236,34 @@ void StepPendingConnections() {
     const s64 now = NpSignaling::NowUs();
     std::vector<s32> resend;
     std::vector<s32> timeout;
+    std::vector<std::pair<s32, u32>> relay;
 
     {
         NpSignaling::SignalingMutexGuard lock;
-        for (const auto& [transport_id, transport] :
+        for (auto& [transport_id, transport] :
              NpHandler::GetInstance().GetSignalingState().peer_transports) {
             if (transport.status == NpSignaling::ORBIS_NP_SIGNALING_CONN_STATUS_ACTIVE ||
                 transport.state == NpSignaling::ConnState::Inactive) {
                 continue;
             }
 
-            if (transport.last_handshake_send_us != 0 &&
-                now - transport.last_handshake_send_us >
+            // From the first handshake: every resend moves last_handshake_send_us, so timing
+            // from it never gave up and later tries reused the dead connection.
+            if (transport.handshake_start_us != 0 &&
+                now - transport.handshake_start_us >
                     std::chrono::duration_cast<std::chrono::microseconds>(kMatching2Timeout)
                         .count()) {
                 timeout.push_back(transport_id);
                 continue;
+            }
+
+            // Nothing from the peer a few seconds in: routers block the direct way, so go
+            // through the relay on the shadNet server from now on.
+            if (!transport.relayed && transport.addr != 0 && transport.handshake_start_us != 0 &&
+                transport.last_peer_rx_us < transport.handshake_start_us &&
+                now - transport.handshake_start_us > kRelayAfterUs) {
+                transport.relayed = true;
+                relay.emplace_back(transport_id, transport.addr);
             }
 
             if (transport.last_handshake_send_us == 0 ||
@@ -1252,6 +1275,18 @@ void StepPendingConnections() {
         }
     }
 
+    for (const auto& [transport_id, addr] : relay) {
+        LOG_INFO(Lib_NpSignaling, "No answer from peer {:#x}: connecting through the relay",
+                 addr);
+        Net::UseP2PRelayFor(addr);
+        // The peer may have missed our one activation request as well.
+        NpSignaling::SignalingMutexGuard lock;
+        for (const auto& [conn_id, ci] : NpHandler::GetInstance().GetSignalingState().connections) {
+            if (ci.transport_id == transport_id && ci.locally_activated) {
+                SendActivate(ci);
+            }
+        }
+    }
     for (const s32 transport_id : resend) {
         StartTransportHandshakeInitiator(transport_id);
     }
@@ -1530,6 +1565,33 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
         }
     }
     return ORBIS_OK;
+}
+
+void HandlePeerConnectRequest(std::string_view peer_online_id, u32 addr, u16 port) {
+    if (peer_online_id.empty() || addr == 0 || port == 0) {
+        return;
+    }
+    NpSignaling::SignalingControl pkt{};
+    pkt.kind = static_cast<u8>(NpSignaling::ControlKind::ActivationRequest);
+    {
+        NpSignaling::SignalingMutexGuard lock;
+        for (const auto& [ctx_id, ctx] : NpHandler::GetInstance().GetSignalingState().contexts) {
+            if (ctx.active) {
+                std::memcpy(pkt.online_id_to, ctx.owner_online_id.data,
+                            ORBIS_NP_ONLINEID_MAX_LENGTH);
+                break;
+            }
+        }
+    }
+    if (pkt.online_id_to[0] == 0) {
+        return;
+    }
+    std::memcpy(pkt.online_id_from, peer_online_id.data(),
+                std::min<size_t>(peer_online_id.size(), ORBIS_NP_ONLINEID_MAX_LENGTH));
+    LOG_INFO(Lib_NpSignaling, "Peer connect request from shadNet: peer='{}' endpoint={:#x}:{}",
+             peer_online_id, addr, Net::sceNetNtohs(port));
+    // Its ack opens our router to the peer, and our own handshakes follow.
+    HandleControlPacket(addr, port, pkt);
 }
 
 void DeactivateSig1(NpSignaling::OrbisNpSignalingConnectionId conn_id) {

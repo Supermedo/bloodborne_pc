@@ -15,6 +15,7 @@
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
+#include "video_core/renderer_vulkan/vk_low_latency.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
@@ -570,6 +571,9 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // the post process pass still sRGB encoded and has to be decoded there instead.
     pp_settings.srgb_input =
         attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
+    // bbport: Bloodborne is an SDR game, so with HDR on in Windows the desktop decodes the
+    // swapchain as sRGB; the pass corrects that to gamma 2.2 (BB_HDR_GAMMA=0 turns it off).
+    pp_settings.sdr_on_hdr = window.IsOnHdrDisplay() && EmulatorSettings.IsHdrGammaEnabled();
     pp_pass.Render(cmdbuf, image_view, image_size, *frame, pp_settings);
 
     // bbport: frame generation: the frames between the previous frame and this one.
@@ -836,7 +840,11 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         wait_until(start + step * shown);
     }
     const auto presented_generated = std::chrono::steady_clock::now();
-    if (!PresentImage(frame, frame->image, true)) {
+    present_latency_id = !is_reusing_frame && is_game_frame ? frame->latency_id : 0;
+    LowLatency::WatchGpu(present_latency_id, frame->ready_semaphore, frame->ready_tick);
+    const bool presented = PresentImage(frame, frame->image, true);
+    present_latency_id = 0;
+    if (!presented) {
         if (shown) {
             // The frame's fence was not reset and so does not cover the generated frames'
             // blits: they must be done before the frame is drawn again.
@@ -1121,9 +1129,12 @@ bool Presenter::PresentImage(Frame* frame, vk::Image image, bool last) {
     // Present to swapchain.
     {
         std::scoped_lock submit_lock{Scheduler::submit_mutex};
-        if (!swapchain.Present(present_scheduler.ExecutionQueue()) && window.GetWidth() != 0 && window.GetHeight() != 0) {
+        const u64 latency_id = last ? present_latency_id : 0;
+        LowLatency::PresentStart(latency_id);
+        if (!swapchain.Present(present_scheduler.ExecutionQueue(), latency_id) && window.GetWidth() != 0 && window.GetHeight() != 0) {
             swapchain.Recreate(window.GetWidth(), window.GetHeight());
         }
+        LowLatency::PresentEnd(latency_id);
     }
     return true;
 }

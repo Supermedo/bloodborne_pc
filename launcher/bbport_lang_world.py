@@ -139,6 +139,22 @@ WORLD = {
             'Пробуждение',
         'Back up automatically before every start':
             'Автоматически создавать копию перед каждым запуском',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} находится в другой установке порта: {1}.',
+        'A folder of another installation is in use':
+            'Используется папка другой установки',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Папка модов или кэша из настроек лаунчера находится в другой папке порта (более старой версии или '
+            'тестовой сборки): обе установки делят её. Кэш шейдеров другой версии может приводить к вылетам, а её '
+            'моды действуют и здесь.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Нажмите кнопку ниже: эта установка снова будет использовать свои папки модов и кэша. Папка сохранений '
+            'остаётся прежней, а с ней ваши персонажи и достижения.',
+        "Use this installation's own folders":
+            'Использовать папки этой установки',
         'Back up now':
             'Создать копию сейчас',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -149,6 +165,8 @@ WORLD = {
             'Баланс',
         'Before a restore':
             'Перед восстановлением',
+        'Before a respec':
+            'Перед перераспределением',
         'Before an import':
             'Перед импортом',
         'Before playing':
@@ -179,6 +197,14 @@ WORLD = {
             'CUSA03173: издание Game of the Year Edition с The Old Hunters.',
         'Cache folder':
             'Папка кэша',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Папка сохранений находится в другой установке порта: эта установка хранит шейдеры в своей папке, '
+            'потому что шейдеры другой версии могут испортить изображение.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Шейдеры, журналы и временные файлы этой установки. Пусто: её папка user ({}), чтобы у каждой версии и '
+            'каждого ПК были свои шейдеры, где бы ни лежали сохранения.',
         'Caches now: {}':
             'Кэш сейчас: {}',
         'Cancel':
@@ -225,6 +251,9 @@ WORLD = {
             'Сначала выберите сохранение, с которого начинается этот сценарий.',
         'Choose…':
             'Выбрать…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'При чёрном экране или испорченной картинке после обновления драйвера. Следующий запуск несколько минут '
+            'будет подтормаживать.',
         'Clear the shader cache':
             'Очистить кэш шейдеров',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -513,8 +542,12 @@ WORLD = {
             'Уже 16:9: картинка может выглядеть растянутой.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Нужны сохранения боссов из мода «{}» (Nexus Mods, бесплатно с учётной записью): скачайте «{}», распакуйте и выберите эту папку.',
+        'New installation: the graphics settings were made for this PC.':
+            'Новая установка: настройки графики подобраны для этого ПК.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Обнаружено новое оборудование: настройки графики подстроены под него.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Обнаружено новое оборудование. Ваши собственные настройки графики сохранены; подходящие для него — на странице «Изображение и FPS».',
         'New in version {}: what has changed':
             'Новое в версии {}: что изменилось',
         'Next is possible once the game files are right: without that the game would not start or would crash.':
@@ -637,6 +670,8 @@ WORLD = {
             'Параметры',
         'Other servers (shadNet, SuperMedo) and every option: the Online play page. Offline needs nothing: untick it.':
             'Другие серверы (shadNet, SuperMedo) и все параметры — на странице «Онлайн-игра». Для офлайна ничего не нужно: просто снимите флажок.',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Закройте оверлеи, например MSI Afterburner и RivaTuner (RTSS): они встраиваются в графический драйвер.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Разогнанная видеокарта или память: попробуйте стандартные частоты.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -743,6 +778,12 @@ WORLD = {
             'Как разрешение вывода',
         'Save':
             'Сохранение',
+        'Collecting the report… (up to a minute)':
+            'Собираем отчёт… (до минуты)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool не создал zip-файл.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Краткая сводка в буфере обмена: вставьте её в свой пост в #help, затем приложите zip-файл.',
         'Save a report':
             'Сохранить отчёт',
         'Save as zip':
@@ -757,6 +798,8 @@ WORLD = {
             'Сохранения и онлайн',
         'Saves backed up: {}':
             'Сохранения скопированы: {}',
+        'Your achievements from there came along: {} new here.':
+            'Ваши достижения оттуда тоже перенесены: новых здесь — {}.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Сохранения импортированы. Ваши персонажи — в игровом меню «Загрузить игру».',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -789,8 +832,6 @@ WORLD = {
             'Настройки: {} отличаются от рекомендуемых для вашего ПК',
         'Setup':
             'Мастер настройки',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Шейдеры, журналы и временные файлы этого ПК. Пусто: в папке сохранений, а если папка сохранений находится в облачной папке (OneDrive, Dropbox, Google Drive) — на этом ПК, чтобы у каждого ПК были свои шейдеры.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Тени от динамических источников: включены с уровня «Выше минимума».',
         'Show all ({})':
@@ -835,6 +876,32 @@ WORLD = {
             'Тест стабильности (для бета-версий)',
         'Start and sound':
             'Запуск и звук',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Видеокарта с Vulkan 1.3 не найдена. Порту нужна такая карта (GTX 1050 Ti, GTX 1650, RX 570 или новее) с '
+            'актуальным драйвером.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Рабочий драйвер Vulkan не найден (vulkan-1.dll отсутствует или повреждён). Установите актуальный '
+            'драйвер видеокарты.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Файлы Vulkan в драйвере видеокарты устарели ({} вместо нужной порту 1.3). Установите актуальный драйвер '
+            'видеокарты.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} не может запустить порт: в её драйвере нет {1}. Обновите драйвер видеокарты; если это не поможет, '
+            'карта слишком старая для порта.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Драйвер видеокарты аварийно завершился, когда лаунчер запрашивал данные о карте (код {}). Установите '
+            'актуальный драйвер видеокарты.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Видеокарта {0}: Vulkan {1} и всё остальное, что нужно порту.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ Видеокарта не может запустить порт: см. «Помощь»',
+        'The game will likely not start, or close right away.':
+            'Игра, скорее всего, не запустится или сразу закроется.',
         'Start anyway?':
             'Всё равно запустить?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -923,8 +990,28 @@ WORLD = {
             'В папке есть eboot.bin, но не вся игра (в журнале: gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Папка игры: та, в которой прямо лежат eboot.bin, sce_module, sce_sys и dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Игра завершилась с ошибкой (код {}). На странице «Помощь» есть проверки, а «Сохранить отчёт» создаёт '
+            'zip-файл, который нужно приложить, когда просите о помощи.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Игра завершилась с ошибкой (код {}). Причина указана в её журнале:',
+        'Files of different versions are mixed':
+            'Смешаны файлы разных версий',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Программа порта (bin\\bb-probe.exe) и его скрипты из разных версий — например, тестовая сборка '
+            'распакована поверх более старой версии или скопирована лишь часть пакета. Тогда игра останавливается '
+            'при запуске на чёрном экране (в журнале: «bad patch entry»).',
+        'Download the whole package of the version you want to play.':
+            'Скачайте весь пакет той версии, в которую хотите играть.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Распакуйте всё поверх этой папки с заменой файлов или в новую пустую папку.',
+        'Files of different versions in this installation: {}.':
+            'Файлы разных версий в этой установке: {}.',
+        "The port's files all belong to version {}.":
+            'Все файлы порта относятся к версии {}.',
         'The game folder is complete ({} files, {} GB).':
             'Папка игры полная (файлов: {}, {} ГБ).',
         'The game is not version 1.09':
@@ -1334,6 +1421,127 @@ WORLD = {
             '• Нет файлов FSR 4: пока используется FSR 3.1. Нажмите, чтобы скачать (30 МБ)',
         '• No saves yet: bring your character from another version, or the game creates them':
             '• Сохранений пока нет: перенесите персонажа из другой версии, или игра создаст их сама',
+        # Texts Russian players saw in English (the check: test_launcher_translations).
+        'Help':
+            'Помощь',
+        'Launcher customization':
+            'Настройки лаунчера',
+        "The launcher's language and look, what it does while you play, and shortcuts to the game.":
+            'Язык и вид лаунчера, что он делает во время игры, и ярлыки для запуска игры.',
+        'Launcher':
+            'Лаунчер',
+        'While you play':
+            'Во время игры',
+        'When the game starts':
+            'Когда игра запускается',
+        'Closed, it ends with the game; minimized, it waits on the task bar (or in the tray).':
+            'Закрытый — завершается вместе с игрой; свёрнутый — ждёт на панели задач (или в трее).',
+        'Open the launcher again when the game closes':
+            'Снова открывать лаунчер после закрытия игры',
+        'After a crash it always comes back, with the log.':
+            'После вылета он всегда возвращается — с журналом.',
+        'Minimize to the system tray':
+            'Сворачивать в системный трей',
+        'Minimized, the launcher leaves the task bar for an icon next to the clock: click it to open the launcher '
+        'again.':
+            'Свёрнутый лаунчер уходит с панели задач в значок рядом с часами: нажмите на него, чтобы снова открыть '
+            'лаунчер.',
+        'Shortcuts':
+            'Ярлыки',
+        'The desktop shortcut opens this launcher; the Steam entry starts the game straight away with these '
+        'settings.':
+            'Ярлык на рабочем столе открывает этот лаунчер; запись в Steam сразу запускает игру с этими '
+            'настройками.',
+        'Gameplay':
+            'Игровой процесс',
+        "The game's language and sound, and changes to how it plays and its menus.":
+            'Язык и звук игры, а также изменения игрового процесса и меню.',
+        'Starting the game and sound':
+            'Запуск игры и звук',
+        'Game patches for version 1.09, applied at start.':
+            'Патчи игры для версии 1.09, применяются при запуске.',
+        'Use my own servers':
+            'Использовать свои серверы',
+        'Off: the public servers. On: a private server, with the addresses from the person who runs it.':
+            'Выкл.: публичные серверы. Вкл.: частный сервер с адресами от того, кто его держит.',
+        'Key combinations and reserved keys':
+            'Сочетания клавиш и зарезервированные клавиши',
+        'Benchmark for bug reports…':
+            'Бенчмарк для отчётов об ошибках…',
+        'A fixed route in Cathedral Ward for testers: one zip to send.':
+            'Фиксированный маршрут в Соборном округе для тестеров: один zip-файл для отправки.',
+        'The benchmark plays a fixed route in Cathedral Ward on a save of its own, with your graphics settings, in '
+        'fullscreen (about 3 minutes). Your saves and settings stay as they are.\n'
+        '\n'
+        'Leave the mouse, keyboard and controller alone until it ends. Then a zip to send opens in Explorer.':
+            'Бенчмарк проходит фиксированный маршрут в Соборном округе на собственном сохранении, с вашими '
+            'настройками графики, в полноэкранном режиме (около 3 минут). Ваши сохранения и настройки не меняются.\n'
+            '\n'
+            'Не трогайте мышь, клавиатуру и контроллер, пока он не закончится. Затем в Проводнике откроется '
+            'zip-файл для отправки.',
+        'Benchmark finished. Send this file: {}':
+            'Бенчмарк завершён. Отправьте этот файл: {}',
+        'Open':
+            'Открыть',
+        'Quit':
+            'Выйти',
+        'Copy':
+            'Копировать',
+        'The benchmark stopped: {}':
+            'Бенчмарк остановлен: {}',
+        'Vulkan (fsr4vk)':
+            'Vulkan (fsr4vk)',
+        'AMD DX12':
+            'AMD DX12',
+        'Your eboot.bin is not the clean 1.09 one (modified, or from another release). The port cannot patch it: '
+        'the game runs at 30 FPS in 16:9 (ultrawide and the output resolution do not apply), the Game & effects '
+        'options do nothing, and some scenes (like the cutscene after Rom) can freeze.\n'
+        '\n'
+        'Replace eboot.bin with the one from an unmodified 1.09 update.':
+            'Ваш eboot.bin — не чистый файл 1.09 (изменён или из другого релиза). Порт не может его пропатчить: '
+            'игра идёт в 30 FPS в 16:9 (ультраширокий формат и разрешение вывода не применяются), параметры «Игра и '
+            'эффекты» ничего не делают, а некоторые сцены (например, ролик после Ром) могут зависать.\n'
+            '\n'
+            'Замените eboot.bin файлом из неизменённого обновления 1.09.',
+        "Your eboot.bin has been modified (for example with a 60 FPS patch already applied). Part of the port's "
+        'patches cannot be used with it:\n'
+        '\n'
+        '{}\n'
+        '\n'
+        'For every option, replace eboot.bin with the one from an unmodified 1.09 update.':
+            'Ваш eboot.bin изменён (например, в нём уже есть патч 60 FPS). Часть патчей порта с ним использовать нельзя:\n'
+            '\n'
+            '{}\n'
+            '\n'
+            'Чтобы работали все параметры, замените eboot.bin файлом из неизменённого обновления 1.09.',
+        'Resolution':
+            'Разрешение',
+        'The size of the picture. Your goal picks it for this PC; change it here if you like.':
+            'Размер изображения. Ваша цель подбирает его для этого ПК; при желании измените его здесь.',
+        'Saves folder':
+            'Папка сохранений',
+        'Output resolution':
+            'Разрешение вывода',
+        'Quality preset':
+            'Пресет',
+        'Frame cap (unlocked mode)':
+            'Ограничение FPS (режим без ограничения)',
+        'Model detail (LOD)':
+            'Детализация моделей',
+        'Object motion vectors':
+            'Векторы движения объектов',
+        'Sharpening (RCAS)':
+            'Резкость (RCAS)',
+        'Sharpness':
+            'Сила резкости',
+        'Frame generation':
+            'Генерация кадров',
+        'Off':
+            'Выключен',
+        'Game':
+            'Игра',
+        'Choose the folder with eboot.bin':
+            'Выберите папку с eboot.bin',
     },
     # ---- Arabic ----
     'ar': {
@@ -1493,6 +1701,22 @@ WORLD = {
             'رجوع',
         'Back up automatically before every start':
             'انسخ احتياطيًا تلقائيًا قبل كل تشغيل',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} موجود في تثبيت آخر للمنفذ: {1}.',
+        'A folder of another installation is in use':
+            'يُستخدم مجلد من تثبيت آخر',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'مجلد التعديلات أو الذاكرة المؤقتة في إعدادات المشغّل موجود في مجلد منفذ آخر (إصدار أقدم أو نسخة '
+            'تجريبية): يتشاركه التثبيتان. قد تتسبب ذاكرة الظلال المؤقتة لإصدار آخر في تعطل اللعبة، وتُطبَّق '
+            'تعديلاته هنا أيضًا.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'انقر الزر أدناه: يعود هذا التثبيت لاستخدام مجلدي التعديلات والذاكرة المؤقتة الخاصين به. يبقى مجلد '
+            'الحفظ كما هو، ومعه شخصياتك وإنجازاتك.',
+        "Use this installation's own folders":
+            'استخدام مجلدات هذا التثبيت',
         'Back up now':
             'انسخ الآن',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -1503,6 +1727,8 @@ WORLD = {
             'متوازن',
         'Before a restore':
             'قبل الاسترجاع',
+        'Before a respec':
+            'قبل إعادة التوزيع',
         'Before an import':
             'قبل الاستيراد',
         'Before playing':
@@ -1539,6 +1765,14 @@ WORLD = {
             'CUSA03173: إصدار Game of the Year Edition، مع The Old Hunters.',
         'Cache folder':
             'مجلد الكاش',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'مجلد الحفظ موجود في تثبيت آخر للمنفذ: هذا التثبيت يحفظ المظللات في مجلده الخاص، لأن مظللات إصدار آخر '
+            'قد تفسد الصورة.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'المظللات والسجلات والملفات المؤقتة لهذا التثبيت. فارغ: مجلد user الخاص به ({})، حتى يحتفظ كل إصدار وكل '
+            'جهاز بمظللاته الخاصة، أينما كانت ملفات الحفظ.',
         'Caches now: {}':
             'الكاش الآن: {}',
         'Camera':
@@ -1601,6 +1835,8 @@ WORLD = {
             'اختر أولًا ملف الحفظ الذي يبدأ منه هذا السيناريو.',
         'Choose…':
             'اختيار…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'عند ظهور شاشة سوداء أو صورة معطوبة بعد تحديث التعريف. سيتقطع التشغيل التالي لبضع دقائق.',
         'Clear the shader cache':
             'مسح كاش الشيدر',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -1912,8 +2148,8 @@ WORLD = {
             'الأغراض والقوائم',
         'Its level, weapons and bosses cannot be read from this save.':
             'لا يمكن قراءة المستوى والأسلحة والزعماء من ملف الحفظ هذا.',
-        'Jump while dashing (L3)':
-            'القفز أثناء الاندفاع (L3)',
+        'Left stick click (L3)':
+            'الضغط على العصا اليسرى (L3)',
         'Keyboard and mouse':
             'لوحة المفاتيح والماوس',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -2010,8 +2246,12 @@ WORLD = {
             'أضيق من 16:9: قد تبدو الصورة ممطوطة.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'يحتاج إلى ملفات حفظ الزعماء من التعديل «{}» (Nexus Mods، مجانًا مع حساب): نزّل «{}» وفك ضغطه ثم اختر مجلده.',
+        'New installation: the graphics settings were made for this PC.':
+            'تثبيت جديد: تم اختيار إعدادات الرسومات لهذا الحاسوب.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'تم اكتشاف عتاد جديد: ضُبطت إعدادات الرسومات وفقًا له.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'تم اكتشاف عتاد جديد. احتُفظ بإعدادات الرسومات الخاصة بك؛ الإعدادات المناسبة له في صفحة الصورة والأداء.',
         'New in version {}: what has changed':
             'الجديد في الإصدار {}: ما الذي تغيّر',
         'Next':
@@ -2150,6 +2390,8 @@ WORLD = {
             'إصدارات أخرى',
         'Other versions…':
             'إصدارات أخرى…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'أغلق التراكبات مثل MSI Afterburner وRivaTuner (RTSS): فهي تتدخل في تعريف الرسومات.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'بطاقة رسومات أو ذاكرة مرفوعة السرعة (كسر سرعة): جرّب السرعات القياسية.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -2270,6 +2512,12 @@ WORLD = {
             'مثل دقة الإخراج',
         'Save':
             'ملف الحفظ',
+        'Collecting the report… (up to a minute)':
+            'جارٍ جمع التقرير… (حتى دقيقة)',
+        'The BB Report Tool made no zip.':
+            'لم تُنشئ أداة BB Report Tool ملف zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'الملخص في الحافظة: الصقه في منشورك في \u200e#help ثم أرفق ملف zip.',
         'Save a report':
             'حفظ تقرير',
         'Save as zip':
@@ -2284,6 +2532,8 @@ WORLD = {
             'ملفات الحفظ والإنترنت',
         'Saves backed up: {}':
             'تم نسخ ملفات الحفظ: {}',
+        'Your achievements from there came along: {} new here.':
+            'انتقلت إنجازاتك من هناك أيضًا: {} جديدة هنا.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'تم استيراد ملفات الحفظ. شخصياتك موجودة في قائمة «تحميل اللعبة» داخل اللعبة.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -2322,8 +2572,6 @@ WORLD = {
             'الإعدادات: {} تختلف عن التوصية لحاسوبك',
         'Setup':
             'الإعداد الأولي',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'الشيدر والسجلات والملفات المؤقتة لهذا الحاسوب. فارغ: في مجلد الحفظ، أو على هذا الحاسوب إذا كان مجلد الحفظ داخل مجلد سحابي (OneDrive أو Dropbox أو Google Drive)، كي يحتفظ كل حاسوب بالشيدر الخاص به.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'ظلال الأضواء المتحركة: مفعّلة بدءًا من «فوق الحد الأدنى».',
         'Show all ({})':
@@ -2370,6 +2618,32 @@ WORLD = {
             'اختبار الثبات (للإصدارات التجريبية)',
         'Start and sound':
             'التشغيل والصوت',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'لم يتم العثور على بطاقة رسومات تدعم Vulkan 1.3. يحتاج المنفذ إلى بطاقة كهذه (GTX 1050 Ti أو GTX 1650 أو '
+            'RX 570 أو أحدث) مع تعريف حديث.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'لم يتم العثور على تعريف Vulkan يعمل (الملف vulkan-1.dll مفقود أو تالف). ثبّت أحدث تعريف لبطاقة '
+            'الرسومات.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'ملفات Vulkan في تعريف بطاقة الرسومات قديمة جدًا ({} بدلًا من 1.3 التي يحتاجها المنفذ). ثبّت أحدث تعريف '
+            'لبطاقة الرسومات.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            'لا تستطيع {0} تشغيل المنفذ: ينقص تعريفها {1}. حدّث تعريف بطاقة الرسومات؛ وإن لم يساعد ذلك فالبطاقة أقدم '
+            'من أن تشغّل المنفذ.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'توقف تعريف بطاقة الرسومات بينما كان المشغّل يستعلم عن البطاقة (الرمز {}). ثبّت أحدث تعريف لبطاقة '
+            'الرسومات.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'بطاقة الرسومات {0}: \u200fVulkan {1} وكل ما يحتاجه المنفذ.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ لا تستطيع بطاقة الرسومات تشغيل المنفذ: راجع المساعدة',
+        'The game will likely not start, or close right away.':
+            'على الأرجح لن تبدأ اللعبة، أو ستُغلق فورًا.',
         'Start anyway?':
             'التشغيل على أي حال؟',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -2474,8 +2748,28 @@ WORLD = {
             'يحتوي المجلد على eboot.bin لكن ليس على اللعبة كاملة (يذكر السجل gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'مجلد اللعبة: المجلد الذي يحتوي eboot.bin وsce_module وsce_sys وdvdroot_ps4 مباشرة.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'انتهت اللعبة بخطأ (الرمز {}). في المساعدة توجد الفحوصات، و«حفظ تقرير» ينشئ ملف zip لإرفاقه عندما '
+            'تطلب المساعدة.',
         'The game ended with an error (code {}). Its log names the cause:':
             'انتهت اللعبة بخطأ (الرمز {}). يذكر سجلها السبب:',
+        'Files of different versions are mixed':
+            'ملفات من إصدارات مختلفة مختلطة',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'برنامج المنفذ (bin\\bb-probe.exe) ونصوصه البرمجية من إصدارات مختلفة، مثلًا بعد فك نسخة تجريبية فوق '
+            'إصدار أقدم أو نسخ جزء من الحزمة فقط. عندها تتوقف اللعبة عند البدء بشاشة سوداء (يذكر السجل «bad patch '
+            'entry»).',
+        'Download the whole package of the version you want to play.':
+            'نزّل الحزمة الكاملة للإصدار الذي تريد اللعب به.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'فك ضغط كل شيء فوق هذا المجلد مع استبدال الملفات، أو في مجلد جديد فارغ.',
+        'Files of different versions in this installation: {}.':
+            'ملفات من إصدارات مختلفة في هذا التثبيت: {}.',
+        "The port's files all belong to version {}.":
+            'جميع ملفات المنفذ تنتمي إلى الإصدار {}.',
         'The game folder is complete ({} files, {} GB).':
             'مجلد اللعبة مكتمل ({} ملف، {} GB).',
         'The game is not version 1.09':
@@ -3077,6 +3371,22 @@ WORLD = {
             'Atrás',
         'Back up automatically before every start':
             'Hacer una copia automática antes de cada inicio',
+        'The {0} is in another installation of the port: {1}.':
+            'La {0} está en otra instalación del port: {1}.',
+        'A folder of another installation is in use':
+            'Se usa una carpeta de otra instalación',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'La carpeta de mods o caché de los ajustes del launcher está en otra carpeta del port (una versión '
+            'anterior o de prueba): ambas instalaciones la comparten. La caché de shaders de otra versión puede '
+            'cerrar el juego, y sus mods se aplican aquí también.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Pulsa el botón de abajo: esta instalación vuelve a usar sus propias carpetas de mods y caché. La '
+            'carpeta de partidas se queda, y con ella tus personajes y logros.',
+        "Use this installation's own folders":
+            'Usar las carpetas de esta instalación',
         'Back up now':
             'Hacer copia ahora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -3087,6 +3397,8 @@ WORLD = {
             'Equilibrado',
         'Before a restore':
             'Antes de restaurar',
+        'Before a respec':
+            'Antes de una redistribución',
         'Before an import':
             'Antes de una importación',
         'Before playing':
@@ -3123,6 +3435,14 @@ WORLD = {
             'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
         'Cache folder':
             'Carpeta de caché',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Tu carpeta de partidas está en otra instalación del port: esta guarda sus shaders en su propia '
+            'carpeta, porque los shaders de otra versión pueden estropear la imagen.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, registros y archivos temporales de esta instalación. Vacío: su carpeta user ({}), para que '
+            'cada versión y cada PC tenga sus propios shaders, estén donde estén las partidas.',
         'Caches now: {}':
             'Cachés ahora: {}',
         'Camera':
@@ -3185,6 +3505,9 @@ WORLD = {
             'Primero elige la partida desde la que empieza este escenario.',
         'Choose…':
             'Elegir…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Para una pantalla negra o una imagen rota tras actualizar el controlador. El próximo inicio tendrá '
+            'tirones unos minutos.',
         'Clear the shader cache':
             'Borrar la caché de shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -3497,8 +3820,8 @@ WORLD = {
             'Objetos y menús',
         'Its level, weapons and bosses cannot be read from this save.':
             'No se pueden leer su nivel, sus armas ni sus jefes de esta partida.',
-        'Jump while dashing (L3)':
-            'Saltar al correr (L3)',
+        'Left stick click (L3)':
+            'Pulsar el stick izquierdo (L3)',
         'Keyboard and mouse':
             'Teclado y ratón',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -3596,8 +3919,12 @@ WORLD = {
             'Más estrecho que 16:9: la imagen puede verse estirada.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Necesita las partidas de jefes del mod «{}» (Nexus Mods, gratis con una cuenta): descarga «{}», descomprímelo y elige su carpeta.',
+        'New installation: the graphics settings were made for this PC.':
+            'Instalación nueva: los ajustes gráficos se eligieron para este PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nuevo hardware detectado: los ajustes gráficos se han adaptado a él.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Nuevo hardware detectado. Se han mantenido tus propios ajustes gráficos; los adecuados para él están en Imagen y rendimiento.',
         'New in version {}: what has changed':
             'Novedades de la versión {}: qué ha cambiado',
         'Next':
@@ -3737,6 +4064,8 @@ WORLD = {
             'Otras versiones',
         'Other versions…':
             'Otras versiones…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Cierra superposiciones como MSI Afterburner y RivaTuner (RTSS): se enganchan al controlador gráfico.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Tarjeta gráfica o memoria con overclock: prueba con las frecuencias de serie.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -3857,6 +4186,12 @@ WORLD = {
             'Igual que la resolución de salida',
         'Save':
             'Partida',
+        'Collecting the report… (up to a minute)':
+            'Recopilando el informe… (hasta un minuto)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool no creó ningún zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'El resumen está en el portapapeles: pégalo en tu publicación de #help y luego adjunta el zip.',
         'Save a report':
             'Guardar un informe',
         'Save as zip':
@@ -3871,6 +4206,8 @@ WORLD = {
             'Partidas y en línea',
         'Saves backed up: {}':
             'Partidas copiadas: {}',
+        'Your achievements from there came along: {} new here.':
+            'Tus logros de allí también se han traído: {} nuevos aquí.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Partidas importadas. Tus personajes están en el menú «Cargar partida» del juego.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -3909,8 +4246,6 @@ WORLD = {
             'Ajustes: {} difieren de la recomendación para tu PC',
         'Setup':
             'Configuración',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, registros y archivos temporales de este PC. Vacío: en la carpeta de partidas, o en este PC si la carpeta de partidas está en una carpeta en la nube (OneDrive, Dropbox, Google Drive), para que cada PC conserve sus propios shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Sombras de luces dinámicas: activadas a partir de «Por encima del mínimo».',
         'Show all ({})':
@@ -3957,6 +4292,32 @@ WORLD = {
             'Prueba de estabilidad (para versiones beta)',
         'Start and sound':
             'Inicio y sonido',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'No se encontró ninguna tarjeta gráfica con Vulkan 1.3. El port necesita una (GTX 1050 Ti, GTX 1650, RX '
+            '570 o más nueva) con un controlador actual.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'No se encontró ningún controlador Vulkan que funcione (falta vulkan-1.dll o está dañado). Instala el '
+            'controlador actual de tu tarjeta gráfica.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Los archivos Vulkan del controlador gráfico son demasiado antiguos ({} en lugar de la 1.3 que necesita '
+            'el port). Instala el controlador actual de tu tarjeta gráfica.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} no puede ejecutar el port: a su controlador le falta {1}. Actualiza el controlador gráfico; si no '
+            'ayuda, la tarjeta es demasiado antigua para el port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'El controlador gráfico se detuvo mientras el launcher le preguntaba por la tarjeta (código {}). Instala '
+            'el controlador actual de tu tarjeta gráfica.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Tarjeta gráfica {0}: Vulkan {1} y todo lo demás que necesita el port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ La tarjeta gráfica no puede ejecutar el port: consulta la Ayuda',
+        'The game will likely not start, or close right away.':
+            'Lo más probable es que el juego no arranque o se cierre enseguida.',
         'Start anyway?':
             '¿Iniciar de todos modos?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -4062,8 +4423,28 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'La carpeta del juego: la que tiene eboot.bin, sce_module, sce_sys y dvdroot_ps4 directamente '
             'dentro.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'El juego terminó con un error (código {}). La Ayuda tiene las comprobaciones, y «Guardar un informe» '
+            'crea el zip que debes adjuntar al pedir ayuda.',
         'The game ended with an error (code {}). Its log names the cause:':
             'El juego terminó con un error (código {}). Su registro indica la causa:',
+        'Files of different versions are mixed':
+            'Hay archivos de versiones distintas mezclados',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'El programa del port (bin\\bb-probe.exe) y sus scripts son de versiones distintas, por ejemplo tras '
+            'descomprimir una versión de prueba sobre una versión anterior o copiar solo parte de un paquete. El '
+            'juego se detiene al iniciar con la pantalla en negro (el registro dice «bad patch entry»).',
+        'Download the whole package of the version you want to play.':
+            'Descarga el paquete completo de la versión que quieras jugar.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Descomprímelo todo sobre esta carpeta reemplazando los archivos, o en una carpeta nueva y vacía.',
+        'Files of different versions in this installation: {}.':
+            'Archivos de versiones distintas en esta instalación: {}.',
+        "The port's files all belong to version {}.":
+            'Todos los archivos del port son de la versión {}.',
         'The game folder is complete ({} files, {} GB).':
             'La carpeta del juego está completa ({} archivos, {} GB).',
         'The game is not version 1.09':
@@ -4668,6 +5049,22 @@ WORLD = {
             'Voltar',
         'Back up automatically before every start':
             'Fazer backup automático antes de cada início',
+        'The {0} is in another installation of the port: {1}.':
+            'A {0} está em outra instalação do port: {1}.',
+        'A folder of another installation is in use':
+            'Uma pasta de outra instalação está em uso',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'A pasta de mods ou cache das configurações do launcher fica em outra pasta do port (uma versão mais '
+            'antiga ou de teste): as duas instalações a compartilham. O cache de shaders de outra versão pode '
+            'derrubar o jogo, e os mods dela valem aqui também.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Clique no botão abaixo: esta instalação volta a usar as próprias pastas de mods e cache. A pasta de '
+            'saves fica, e com ela os seus personagens e conquistas.',
+        "Use this installation's own folders":
+            'Usar as pastas desta instalação',
         'Back up now':
             'Fazer backup agora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -4678,6 +5075,8 @@ WORLD = {
             'Equilibrado',
         'Before a restore':
             'Antes de restaurar',
+        'Before a respec':
+            'Antes de uma redistribuição',
         'Before an import':
             'Antes de uma importação',
         'Before playing':
@@ -4714,6 +5113,14 @@ WORLD = {
             'CUSA03173: a Game of the Year Edition, com The Old Hunters.',
         'Cache folder':
             'Pasta de cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'A sua pasta de saves está noutra instalação do port: esta guarda os shaders na sua própria pasta, '
+            'porque shaders de outra versão podem estragar a imagem.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, registos e ficheiros temporários desta instalação. Vazio: a sua pasta user ({}), para que '
+            'cada versão e cada PC tenha os seus próprios shaders, estejam os saves onde estiverem.',
         'Caches now: {}':
             'Caches agora: {}',
         'Camera':
@@ -4776,6 +5183,9 @@ WORLD = {
             'Primeiro escolha o save a partir do qual este cenário começa.',
         'Choose…':
             'Escolher…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Para tela preta ou imagem quebrada após atualizar o driver. A próxima inicialização vai engasgar por '
+            'alguns minutos.',
         'Clear the shader cache':
             'Limpar o cache de shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -5088,8 +5498,8 @@ WORLD = {
             'Itens e menus',
         'Its level, weapons and bosses cannot be read from this save.':
             'Não é possível ler o nível, as armas e os chefes deste save.',
-        'Jump while dashing (L3)':
-            'Pular ao correr (L3)',
+        'Left stick click (L3)':
+            'Pressionar o analógico esquerdo (L3)',
         'Keyboard and mouse':
             'Teclado e mouse',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -5187,8 +5597,12 @@ WORLD = {
             'Mais estreito que 16:9: a imagem pode parecer esticada.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Precisa dos saves de chefes do mod “{}” (Nexus Mods, grátis com uma conta): baixe “{}”, descompacte e escolha a pasta.',
+        'New installation: the graphics settings were made for this PC.':
+            'Instalação nova: as configurações gráficas foram escolhidas para este PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Novo hardware detectado: as configurações de gráficos foram ajustadas a ele.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Novo hardware detectado. Suas próprias configurações de gráficos foram mantidas; as adequadas para ele estão em Imagem e desempenho.',
         'New in version {}: what has changed':
             'Novidades da versão {}: o que mudou',
         'Next':
@@ -5327,6 +5741,8 @@ WORLD = {
             'Outras versões',
         'Other versions…':
             'Outras versões…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Feche sobreposições como MSI Afterburner e RivaTuner (RTSS): elas se acoplam ao driver de vídeo.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Placa de vídeo ou memória com overclock: tente os clocks padrão.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -5447,6 +5863,12 @@ WORLD = {
             'Igual à resolução de saída',
         'Save':
             'Save',
+        'Collecting the report… (up to a minute)':
+            'Coletando o relatório… (até um minuto)',
+        'The BB Report Tool made no zip.':
+            'O BB Report Tool não criou nenhum zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'O resumo está na área de transferência: cole-o no seu post em #help e depois anexe o zip.',
         'Save a report':
             'Salvar um relatório',
         'Save as zip':
@@ -5461,6 +5883,8 @@ WORLD = {
             'Saves e online',
         'Saves backed up: {}':
             'Backup dos saves feito: {}',
+        'Your achievements from there came along: {} new here.':
+            'As suas conquistas de lá vieram junto: {} novas aqui.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Saves importados. Os seus personagens estão em Carregar jogo, no menu do jogo.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -5499,8 +5923,6 @@ WORLD = {
             'Configurações: {} diferem da recomendação para o seu PC',
         'Setup':
             'Configuração inicial',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, logs e arquivos temporários deste PC. Vazio: na pasta de saves, ou neste PC quando a pasta de saves estiver numa pasta na nuvem (OneDrive, Dropbox, Google Drive), para que cada PC mantenha seus próprios shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Sombras de luzes dinâmicas: ligadas a partir de "Acima do mínimo".',
         'Show all ({})':
@@ -5547,6 +5969,32 @@ WORLD = {
             'Teste de estabilidade (para versões beta)',
         'Start and sound':
             'Início e som',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Nenhuma placa de vídeo com Vulkan 1.3 foi encontrada. O port precisa de uma (GTX 1050 Ti, GTX 1650, RX '
+            '570 ou mais nova) com um driver atual.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Nenhum driver Vulkan funcional foi encontrado (o vulkan-1.dll está ausente ou danificado). Instale o '
+            'driver atual da sua placa de vídeo.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Os arquivos Vulkan do driver de vídeo são antigos demais ({} em vez da 1.3 de que o port precisa). '
+            'Instale o driver atual da sua placa de vídeo.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} não consegue rodar o port: falta {1} no driver dela. Atualize o driver de vídeo; se não ajudar, a '
+            'placa é antiga demais para o port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'O driver de vídeo parou enquanto o launcher consultava a placa (código {}). Instale o driver atual da '
+            'sua placa de vídeo.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Placa de vídeo {0}: Vulkan {1} e tudo o mais de que o port precisa.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ A placa de vídeo não consegue rodar o port: veja a Ajuda',
+        'The game will likely not start, or close right away.':
+            'O jogo provavelmente não vai iniciar ou vai fechar logo em seguida.',
         'Start anyway?':
             'Iniciar mesmo assim?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -5649,8 +6097,28 @@ WORLD = {
             'A pasta tem eboot.bin, mas não o jogo inteiro (o registro diz gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'A pasta do jogo: a que tem eboot.bin, sce_module, sce_sys e dvdroot_ps4 diretamente dentro.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'O jogo terminou com um erro (código {}). A Ajuda tem as verificações, e "Salvar um relatório" cria o '
+            'zip para anexar quando você pedir ajuda.',
         'The game ended with an error (code {}). Its log names the cause:':
             'O jogo terminou com um erro (código {}). O registro dele indica a causa:',
+        'Files of different versions are mixed':
+            'Arquivos de versões diferentes estão misturados',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'O programa do port (bin\\bb-probe.exe) e seus scripts são de versões diferentes, por exemplo depois de '
+            'extrair uma versão de teste sobre uma versão mais antiga ou copiar só parte de um pacote. O jogo então '
+            'para no início com tela preta (o log diz "bad patch entry").',
+        'Download the whole package of the version you want to play.':
+            'Baixe o pacote completo da versão que você quer jogar.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Extraia tudo sobre esta pasta substituindo os arquivos, ou em uma pasta nova e vazia.',
+        'Files of different versions in this installation: {}.':
+            'Arquivos de versões diferentes nesta instalação: {}.',
+        "The port's files all belong to version {}.":
+            'Todos os arquivos do port são da versão {}.',
         'The game folder is complete ({} files, {} GB).':
             'A pasta do jogo está completa ({} arquivos, {} GB).',
         'The game is not version 1.09':
@@ -6255,6 +6723,22 @@ WORLD = {
             'Retour',
         'Back up automatically before every start':
             'Faire une copie automatique avant chaque lancement',
+        'The {0} is in another installation of the port: {1}.':
+            'Le {0} se trouve dans une autre installation du port : {1}.',
+        'A folder of another installation is in use':
+            "Un dossier d'une autre installation est utilisé",
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Le dossier de mods ou de cache des réglages du launcher se trouve dans un autre dossier du port (une '
+            "version plus ancienne ou de test) : les deux installations le partagent. Le cache de shaders d'une "
+            "autre version peut faire planter le jeu, et ses mods s'appliquent aussi ici.",
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Cliquez sur le bouton ci-dessous : cette installation utilise de nouveau ses propres dossiers de mods '
+            'et de cache. Le dossier de sauvegardes reste, et avec lui vos personnages et vos succès.',
+        "Use this installation's own folders":
+            'Utiliser les dossiers de cette installation',
         'Back up now':
             'Copier maintenant',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -6265,6 +6749,8 @@ WORLD = {
             'Équilibré',
         'Before a restore':
             'Avant une restauration',
+        'Before a respec':
+            'Avant une redistribution',
         'Before an import':
             'Avant une importation',
         'Before playing':
@@ -6301,6 +6787,14 @@ WORLD = {
             'CUSA03173 : la Game of the Year Edition, avec The Old Hunters.',
         'Cache folder':
             'Dossier du cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Ton dossier de sauvegardes se trouve dans une autre installation du port : celle-ci garde ses shaders '
+            "dans son propre dossier, car les shaders d'une autre version peuvent abîmer l'image.",
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shaders, journaux et fichiers temporaires de cette installation. Vide : son dossier user ({}), pour '
+            'que chaque version et chaque PC garde ses propres shaders, où que soient les sauvegardes.',
         'Caches now: {}':
             'Caches actuellement : {}',
         'Camera':
@@ -6363,6 +6857,9 @@ WORLD = {
             'Choisissez d’abord la sauvegarde de départ de ce scénario.',
         'Choose…':
             'Choisir…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            "En cas d'écran noir ou d'image cassée après une mise à jour du pilote. Le prochain démarrage saccadera "
+            'quelques minutes.',
         'Clear the shader cache':
             'Vider le cache des shaders',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -6675,8 +7172,8 @@ WORLD = {
             'Objets et menus',
         'Its level, weapons and bosses cannot be read from this save.':
             'Son niveau, ses armes et ses boss ne peuvent pas être lus dans cette sauvegarde.',
-        'Jump while dashing (L3)':
-            'Sauter en sprintant (L3)',
+        'Left stick click (L3)':
+            'Clic du joystick gauche (L3)',
         'Keyboard and mouse':
             'Clavier et souris',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -6774,8 +7271,12 @@ WORLD = {
             "Plus étroit que 16:9 : l'image peut paraître étirée.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Nécessite les sauvegardes de boss du mod « {} » (Nexus Mods, gratuit avec un compte) : téléchargez « {} », décompressez-le, puis choisissez son dossier.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nouvelle installation : les réglages graphiques ont été choisis pour ce PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nouveau matériel détecté : les réglages graphiques ont été adaptés.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Nouveau matériel détecté. Vos propres réglages graphiques ont été conservés ; ceux qui lui conviennent sont dans Image et performances.',
         'New in version {}: what has changed':
             'Nouveautés de la version {} : ce qui a changé',
         'Next':
@@ -6915,6 +7416,9 @@ WORLD = {
             'Autres versions',
         'Other versions…':
             'Autres versions…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Fermez les overlays comme MSI Afterburner et RivaTuner (RTSS) : ils se greffent sur le pilote '
+            'graphique.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Carte graphique ou mémoire overclockée : essayez les fréquences d’origine.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -7035,6 +7539,12 @@ WORLD = {
             'Comme la résolution de sortie',
         'Save':
             'Sauvegarde',
+        'Collecting the report… (up to a minute)':
+            'Création du rapport… (jusqu’à une minute)',
+        'The BB Report Tool made no zip.':
+            "BB Report Tool n'a créé aucun zip.",
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Le résumé est dans le presse-papiers : collez-le dans votre message #help, puis joignez le zip.',
         'Save a report':
             'Enregistrer un rapport',
         'Save as zip':
@@ -7049,6 +7559,8 @@ WORLD = {
             'Sauvegardes et en ligne',
         'Saves backed up: {}':
             'Sauvegardes copiées : {}',
+        'Your achievements from there came along: {} new here.':
+            'Vos succès de là-bas ont suivi : {} nouveaux ici.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Sauvegardes importées. Vos personnages se trouvent dans le menu « Charger une partie » du jeu.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -7087,8 +7599,6 @@ WORLD = {
             'Réglages : {} diffèrent de la recommandation pour votre PC',
         'Setup':
             'Configuration',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shaders, journaux et fichiers temporaires de ce PC. Vide : dans le dossier des sauvegardes, ou sur ce PC si le dossier des sauvegardes est dans un dossier cloud (OneDrive, Dropbox, Google Drive), pour que chaque PC garde ses propres shaders.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Ombres des lumières dynamiques : activées à partir de « Au-dessus du minimum ».',
         'Show all ({})':
@@ -7135,6 +7645,32 @@ WORLD = {
             'Test de stabilité (pour les versions bêta)',
         'Start and sound':
             'Lancement et son',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            "Aucune carte graphique compatible Vulkan 1.3 n'a été trouvée. Le port en a besoin d'une (GTX 1050 Ti, "
+            'GTX 1650, RX 570 ou plus récente) avec un pilote à jour.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            "Aucun pilote Vulkan fonctionnel n'a été trouvé (vulkan-1.dll est absent ou endommagé). Installez le "
+            'pilote actuel de votre carte graphique.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Les fichiers Vulkan du pilote graphique sont trop anciens ({} au lieu de la 1.3 dont le port a besoin). '
+            'Installez le pilote actuel de votre carte graphique.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} ne peut pas faire tourner le port : il manque {1} à son pilote. Mettez à jour le pilote graphique ; '
+            'si cela ne suffit pas, la carte est trop ancienne pour le port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            "Le pilote graphique s'est arrêté pendant que le launcher l'interrogeait sur la carte (code {}). "
+            'Installez le pilote actuel de votre carte graphique.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Carte graphique {0} : Vulkan {1} et tout ce dont le port a besoin.',
+        '✗ The graphics card cannot run the port: see Help':
+            "✗ La carte graphique ne peut pas faire tourner le port : voir l'Aide",
+        'The game will likely not start, or close right away.':
+            'Le jeu ne démarrera probablement pas, ou se fermera aussitôt.',
         'Start anyway?':
             'Lancer quand même ?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -7240,8 +7776,29 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Le dossier du jeu : celui qui contient directement eboot.bin, sce_module, sce_sys et '
             'dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            "Le jeu s'est terminé avec une erreur (code {}). L'aide contient les vérifications, et « Enregistrer "
+            "un rapport » crée le zip à joindre quand vous demandez de l'aide.",
         'The game ended with an error (code {}). Its log names the cause:':
             'Le jeu s’est terminé avec une erreur (code {}). Son journal en indique la cause :',
+        'Files of different versions are mixed':
+            'Des fichiers de versions différentes sont mélangés',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Le programme du port (bin\\bb-probe.exe) et ses scripts viennent de versions différentes, par exemple '
+            'après avoir décompressé une version de test sur une version plus ancienne ou copié seulement une '
+            "partie d'un paquet. Le jeu s'arrête alors au démarrage sur un écran noir (le journal indique « bad "
+            'patch entry »).',
+        'Download the whole package of the version you want to play.':
+            'Téléchargez le paquet complet de la version à laquelle vous voulez jouer.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Décompressez tout dans ce dossier en remplaçant les fichiers, ou dans un nouveau dossier vide.',
+        'Files of different versions in this installation: {}.':
+            'Fichiers de versions différentes dans cette installation : {}.',
+        "The port's files all belong to version {}.":
+            'Tous les fichiers du port appartiennent à la version {}.',
         'The game folder is complete ({} files, {} GB).':
             'Le dossier du jeu est complet ({} fichiers, {} Go).',
         'The game is not version 1.09':
@@ -7848,6 +8405,22 @@ WORLD = {
             'Indietro',
         'Back up automatically before every start':
             'Backup automatico prima di ogni avvio',
+        'The {0} is in another installation of the port: {1}.':
+            "La {0} si trova in un'altra installazione del port: {1}.",
+        'A folder of another installation is in use':
+            "È in uso una cartella di un'altra installazione",
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            "La cartella delle mod o della cache nelle impostazioni del launcher si trova in un'altra cartella del "
+            'port (una versione precedente o di prova): le due installazioni la condividono. La cache degli shader '
+            "di un'altra versione può far crashare il gioco, e le sue mod valgono anche qui.",
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Fai clic sul pulsante qui sotto: questa installazione torna a usare le sue cartelle delle mod e della '
+            'cache. La cartella dei salvataggi resta, e con essa i tuoi personaggi e obiettivi.',
+        "Use this installation's own folders":
+            'Usa le cartelle di questa installazione',
         'Back up now':
             'Fai un backup ora',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -7858,6 +8431,8 @@ WORLD = {
             'Bilanciato',
         'Before a restore':
             'Prima di un ripristino',
+        'Before a respec':
+            'Prima di una ridistribuzione',
         'Before an import':
             'Prima di un’importazione',
         'Before playing':
@@ -7894,6 +8469,14 @@ WORLD = {
             'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
         'Cache folder':
             'Cartella della cache',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            "La cartella dei salvataggi è in un'altra installazione del port: questa tiene i suoi shader in una "
+            "cartella propria, perché gli shader di un'altra versione possono rovinare l'immagine.",
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shader, log e file temporanei di questa installazione. Vuoto: la sua cartella user ({}), così ogni '
+            'versione e ogni PC tiene i propri shader, ovunque siano i salvataggi.',
         'Caches now: {}':
             'Cache ora: {}',
         'Camera':
@@ -7956,6 +8539,9 @@ WORLD = {
             'Scegli prima il salvataggio da cui parte questo scenario.',
         'Choose…':
             'Scegli…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            "Per uno schermo nero o un'immagine rovinata dopo un aggiornamento del driver. Il prossimo avvio "
+            'scatterà per qualche minuto.',
         'Clear the shader cache':
             'Svuota la cache degli shader',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -8268,8 +8854,8 @@ WORLD = {
             'Oggetti e menu',
         'Its level, weapons and bosses cannot be read from this save.':
             'Livello, armi e boss non si possono leggere da questo salvataggio.',
-        'Jump while dashing (L3)':
-            'Salto durante lo scatto (L3)',
+        'Left stick click (L3)':
+            'Pressione della levetta sinistra (L3)',
         'Keyboard and mouse':
             'Tastiera e mouse',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -8367,8 +8953,12 @@ WORLD = {
             "Più stretto di 16:9: l'immagine può sembrare allungata.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Servono i salvataggi dei boss della mod «{}» (Nexus Mods, gratis con un account): scarica «{}», estrailo e scegli la sua cartella.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nuova installazione: le impostazioni grafiche sono state scelte per questo PC.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Nuovo hardware rilevato: le impostazioni grafiche sono state adattate.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Nuovo hardware rilevato. Le tue impostazioni grafiche sono state mantenute; quelle adatte sono in Immagine e prestazioni.',
         'New in version {}: what has changed':
             'Novità della versione {}: cosa è cambiato',
         'Next':
@@ -8508,6 +9098,8 @@ WORLD = {
             'Altre versioni',
         'Other versions…':
             'Altre versioni…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Chiudi gli overlay come MSI Afterburner e RivaTuner (RTSS): si agganciano al driver video.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Scheda video o memoria in overclock: prova le frequenze standard.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -8628,6 +9220,12 @@ WORLD = {
             'Come la risoluzione di uscita',
         'Save':
             'Salvataggio',
+        'Collecting the report… (up to a minute)':
+            'Raccolta del rapporto… (fino a un minuto)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool non ha creato nessuno zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Il riepilogo è negli appunti: incollalo nel tuo post in #help, poi allega lo zip.',
         'Save a report':
             'Salva un rapporto',
         'Save as zip':
@@ -8642,6 +9240,8 @@ WORLD = {
             'Salvataggi e online',
         'Saves backed up: {}':
             'Backup dei salvataggi fatto: {}',
+        'Your achievements from there came along: {} new here.':
+            'Anche i tuoi obiettivi da lì sono stati portati: {} nuovi qui.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Salvataggi importati. I tuoi personaggi sono nel menu "Carica partita" del gioco.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -8680,8 +9280,6 @@ WORLD = {
             'Impostazioni: {} diverse da quelle consigliate per il tuo PC',
         'Setup':
             'Configurazione',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shader, log e file temporanei di questo PC. Vuoto: nella cartella dei salvataggi, oppure su questo PC se la cartella dei salvataggi è in una cartella cloud (OneDrive, Dropbox, Google Drive), così ogni PC conserva i propri shader.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Ombre delle luci dinamiche: attive da "Sopra il minimo".',
         'Show all ({})':
@@ -8728,6 +9326,32 @@ WORLD = {
             'Test di stabilità (per le build beta)',
         'Start and sound':
             'Avvio e audio',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Non è stata trovata nessuna scheda video con Vulkan 1.3. Il port ne richiede una (GTX 1050 Ti, GTX '
+            '1650, RX 570 o più recente) con un driver aggiornato.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Non è stato trovato alcun driver Vulkan funzionante (vulkan-1.dll manca o è danneggiato). Installa il '
+            'driver aggiornato della tua scheda video.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'I file Vulkan del driver video sono troppo vecchi ({} invece della 1.3 richiesta dal port). Installa il '
+            'driver aggiornato della tua scheda video.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} non può eseguire il port: al suo driver manca {1}. Aggiorna il driver video; se non basta, la '
+            'scheda è troppo vecchia per il port.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Il driver video si è arrestato mentre il launcher lo interrogava sulla scheda (codice {}). Installa il '
+            'driver aggiornato della tua scheda video.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Scheda video {0}: Vulkan {1} e tutto il resto che serve al port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ La scheda video non può eseguire il port: vedi Aiuto',
+        'The game will likely not start, or close right away.':
+            'Probabilmente il gioco non si avvierà o si chiuderà subito.',
         'Start anyway?':
             'Avviare comunque?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -8833,8 +9457,28 @@ WORLD = {
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'La cartella del gioco: quella che contiene direttamente eboot.bin, sce_module, sce_sys e '
             'dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Il gioco è terminato con un errore (codice {}). La pagina Aiuto ha i controlli, e "Salva un rapporto" '
+            'crea lo zip da allegare quando chiedi aiuto.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Il gioco si è chiuso con un errore (codice {}). Il suo registro indica la causa:',
+        'Files of different versions are mixed':
+            'Sono mescolati file di versioni diverse',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Il programma del port (bin\\bb-probe.exe) e i suoi script vengono da versioni diverse, per esempio dopo '
+            'aver estratto una versione di prova sopra una versione più vecchia o copiato solo parte di un '
+            'pacchetto. Il gioco si ferma allora all\'avvio con lo schermo nero (il log dice "bad patch entry").',
+        'Download the whole package of the version you want to play.':
+            'Scarica il pacchetto completo della versione che vuoi giocare.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Estrai tutto sopra questa cartella sostituendo i file, oppure in una cartella nuova e vuota.',
+        'Files of different versions in this installation: {}.':
+            'File di versioni diverse in questa installazione: {}.',
+        "The port's files all belong to version {}.":
+            'Tutti i file del port appartengono alla versione {}.',
         'The game folder is complete ({} files, {} GB).':
             'La cartella del gioco è completa ({} file, {} GB).',
         'The game is not version 1.09':
@@ -9440,6 +10084,22 @@ WORLD = {
             'Wstecz',
         'Back up automatically before every start':
             'Twórz kopię automatycznie przed każdym uruchomieniem',
+        'The {0} is in another installation of the port: {1}.':
+            '{0} jest w innej instalacji portu: {1}.',
+        'A folder of another installation is in use':
+            'Używany jest folder innej instalacji',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Folder modów lub pamięci podręcznej z ustawień launchera leży w innym folderze portu (starszej wersji '
+            'lub wersji testowej): obie instalacje go współdzielą. Pamięć shaderów innej wersji może powodować '
+            'awarie gry, a jej mody działają też tutaj.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Kliknij przycisk poniżej: ta instalacja znów używa własnych folderów modów i pamięci podręcznej. '
+            'Folder zapisów zostaje, a z nim twoje postacie i osiągnięcia.',
+        "Use this installation's own folders":
+            'Używaj folderów tej instalacji',
         'Back up now':
             'Utwórz kopię teraz',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -9450,6 +10110,8 @@ WORLD = {
             'Wyważony',
         'Before a restore':
             'Przed przywróceniem',
+        'Before a respec':
+            'Przed przydzieleniem punktów',
         'Before an import':
             'Przed importem',
         'Before playing':
@@ -9486,6 +10148,14 @@ WORLD = {
             'CUSA03173: Game of the Year Edition, z The Old Hunters.',
         'Cache folder':
             'Folder pamięci podręcznej',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Folder zapisów leży w innej instalacji portu: ta instalacja trzyma shadery we własnym folderze, bo '
+            'shadery innej wersji mogą zepsuć obraz.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Shadery, logi i pliki tymczasowe tej instalacji. Puste: jej folder user ({}), aby każda wersja i każdy '
+            'PC miały własne shadery, niezależnie od tego, gdzie są zapisy.',
         'Caches now: {}':
             'Pamięć podręczna teraz: {}',
         'Camera':
@@ -9548,6 +10218,9 @@ WORLD = {
             'Najpierw wybierz zapis, od którego startuje ten scenariusz.',
         'Choose…':
             'Wybierz…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Przy czarnym ekranie lub zepsutym obrazie po aktualizacji sterownika. Następne uruchomienie będzie '
+            'przez kilka minut przycinać.',
         'Clear the shader cache':
             'Wyczyść pamięć shaderów',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -9860,8 +10533,8 @@ WORLD = {
             'Przedmioty i menu',
         'Its level, weapons and bosses cannot be read from this save.':
             'Z tego zapisu nie da się odczytać poziomu, broni ani bossów.',
-        'Jump while dashing (L3)':
-            'Skok podczas sprintu (L3)',
+        'Left stick click (L3)':
+            'Wciśnięcie lewej gałki (L3)',
         'Keyboard and mouse':
             'Klawiatura i mysz',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -9958,8 +10631,12 @@ WORLD = {
             'Węższe niż 16:9: obraz może wyglądać na rozciągnięty.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'Wymaga zapisów bossów z moda „{}” (Nexus Mods, za darmo z kontem): pobierz „{}”, rozpakuj, a potem wybierz jego folder.',
+        'New installation: the graphics settings were made for this PC.':
+            'Nowa instalacja: ustawienia grafiki dobrano do tego komputera.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Wykryto nowy sprzęt: ustawienia grafiki zostały do niego dostosowane.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Wykryto nowy sprzęt. Twoje własne ustawienia grafiki zostały zachowane; te dla niego są w zakładce Obraz i wydajność.',
         'New in version {}: what has changed':
             'Nowości w wersji {}: co się zmieniło',
         'Next':
@@ -10098,6 +10775,8 @@ WORLD = {
             'Inne wersje',
         'Other versions…':
             'Inne wersje…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'Zamknij nakładki, takie jak MSI Afterburner i RivaTuner (RTSS): wpinają się w sterownik graficzny.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Podkręcona karta graficzna lub pamięć: spróbuj standardowych taktowań.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -10218,6 +10897,12 @@ WORLD = {
             'Jak rozdzielczość wyjścia',
         'Save':
             'Zapis',
+        'Collecting the report… (up to a minute)':
+            'Zbieranie raportu… (do minuty)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool nie utworzył pliku zip.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Podsumowanie jest w schowku: wklej je do swojego posta na #help, a potem dołącz plik zip.',
         'Save a report':
             'Zapisz raport',
         'Save as zip':
@@ -10232,6 +10917,8 @@ WORLD = {
             'Zapisy i online',
         'Saves backed up: {}':
             'Zapisy skopiowane: {}',
+        'Your achievements from there came along: {} new here.':
+            'Twoje osiągnięcia stamtąd też zostały przeniesione: {} nowych tutaj.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Zapisy zaimportowane. Twoje postacie są w menu gry „Wczytaj grę”.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -10270,8 +10957,6 @@ WORLD = {
             'Ustawienia: niektóre ({}) odbiegają od zalecenia dla twojego PC',
         'Setup':
             'Konfiguracja',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Shadery, logi i pliki tymczasowe tego PC. Puste: w folderze zapisów albo na tym PC, gdy folder zapisów leży w folderze w chmurze (OneDrive, Dropbox, Google Drive), aby każdy PC miał własne shadery.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Cienie dynamicznych świateł: włączone od „Powyżej minimum”.',
         'Show all ({})':
@@ -10318,6 +11003,32 @@ WORLD = {
             'Test stabilności (dla wersji beta)',
         'Start and sound':
             'Uruchamianie i dźwięk',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Nie znaleziono karty graficznej z Vulkan 1.3. Port wymaga takiej karty (GTX 1050 Ti, GTX 1650, RX 570 '
+            'lub nowszej) z aktualnym sterownikiem.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Nie znaleziono działającego sterownika Vulkan (brak pliku vulkan-1.dll lub jest uszkodzony). Zainstaluj '
+            'aktualny sterownik karty graficznej.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Pliki Vulkan sterownika graficznego są zbyt stare ({} zamiast wymaganej przez port wersji 1.3). '
+            'Zainstaluj aktualny sterownik karty graficznej.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} nie uruchomi portu: jej sterownikowi brakuje {1}. Zaktualizuj sterownik graficzny; jeśli to nie '
+            'pomoże, karta jest za stara dla portu.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Sterownik graficzny przestał działać, gdy launcher pytał go o kartę (kod {}). Zainstaluj aktualny '
+            'sterownik karty graficznej.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Karta graficzna {0}: Vulkan {1} i wszystko inne, czego potrzebuje port.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ Karta graficzna nie uruchomi portu: zobacz Pomoc',
+        'The game will likely not start, or close right away.':
+            'Gra najpewniej się nie uruchomi albo od razu się zamknie.',
         'Start anyway?':
             'Uruchomić mimo to?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -10422,8 +11133,28 @@ WORLD = {
             'Folder ma eboot.bin, ale nie całą grę (w dzienniku jest gxshader.shaderbnd.dcx not found).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Folder gry: ten, w którym bezpośrednio leżą eboot.bin, sce_module, sce_sys i dvdroot_ps4.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Gra zakończyła się błędem (kod {}). Pomoc zawiera sprawdzenia, a „Zapisz raport” tworzy plik zip do '
+            'dołączenia, gdy prosisz o pomoc.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Gra zakończyła się błędem (kod {}). Jej dziennik podaje przyczynę:',
+        'Files of different versions are mixed':
+            'Pomieszane są pliki z różnych wersji',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Program portu (bin\\bb-probe.exe) i jego skrypty pochodzą z różnych wersji, np. po rozpakowaniu wersji '
+            'testowej na starszą wersję albo skopiowaniu tylko części paczki. Gra zatrzymuje się wtedy przy starcie '
+            'na czarnym ekranie (w logu: „bad patch entry”).',
+        'Download the whole package of the version you want to play.':
+            'Pobierz całą paczkę wersji, w którą chcesz grać.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Rozpakuj wszystko do tego folderu, zastępując pliki, albo do nowego, pustego folderu.',
+        'Files of different versions in this installation: {}.':
+            'Pliki z różnych wersji w tej instalacji: {}.',
+        "The port's files all belong to version {}.":
+            'Wszystkie pliki portu należą do wersji {}.',
         'The game folder is complete ({} files, {} GB).':
             'Folder gry jest kompletny (pliki: {}, {} GB).',
         'The game is not version 1.09':
@@ -11028,6 +11759,22 @@ WORLD = {
             'Geri',
         'Back up automatically before every start':
             'Her başlatmadan önce otomatik yedekle',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}, portun başka bir kurulumunda: {1}.',
+        'A folder of another installation is in use':
+            'Başka bir kurulumun klasörü kullanılıyor',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'Başlatıcı ayarlarındaki mod veya önbellek klasörü başka bir port klasöründe (daha eski bir sürüm veya '
+            'test sürümü): iki kurulum onu paylaşır. Başka bir sürümün gölgelendirici önbelleği oyunu çökertebilir '
+            've onun modları burada da geçerli olur.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            'Aşağıdaki düğmeye tıklayın: bu kurulum yeniden kendi mod ve önbellek klasörlerini kullanır. Kayıt '
+            'klasörü olduğu gibi kalır, onunla birlikte karakterleriniz ve başarımlarınız da.',
+        "Use this installation's own folders":
+            'Bu kurulumun klasörlerini kullan',
         'Back up now':
             'Şimdi yedekle',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -11038,6 +11785,8 @@ WORLD = {
             'Dengeli',
         'Before a restore':
             'Geri yüklemeden önce',
+        'Before a respec':
+            'Yeniden dağıtımdan önce',
         'Before an import':
             'İçe aktarmadan önce',
         'Before playing':
@@ -11074,6 +11823,14 @@ WORLD = {
             'CUSA03173: The Old Hunters’ı içeren Game of the Year Edition.',
         'Cache folder':
             'Önbellek klasörü',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'Kayıt klasörün portun başka bir kurulumunda: bu kurulum gölgelendiricilerini kendi klasöründe tutar, '
+            'çünkü başka bir sürümün gölgelendiricileri görüntüyü bozabilir.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'Bu kurulumun gölgelendiricileri, günlükleri ve geçici dosyaları. Boş: kurulumun user klasörü ({}); '
+            'böylece kayıtlar nerede olursa olsun her sürüm ve her PC kendi gölgelendiricilerini tutar.',
         'Caches now: {}':
             'Önbellekler şu an: {}',
         'Camera':
@@ -11136,6 +11893,9 @@ WORLD = {
             'Önce bu senaryonun başlayacağı kaydı seçin.',
         'Choose…':
             'Seç…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            'Siyah ekran veya sürücü güncellemesinden sonra bozuk görüntü için. Sonraki açılış birkaç dakika '
+            'takılacaktır.',
         'Clear the shader cache':
             'Shader önbelleğini temizle',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -11448,8 +12208,8 @@ WORLD = {
             'Eşyalar ve menüler',
         'Its level, weapons and bosses cannot be read from this save.':
             'Bu kayıttan seviye, silahlar ve boss’lar okunamıyor.',
-        'Jump while dashing (L3)':
-            'Koşarken zıpla (L3)',
+        'Left stick click (L3)':
+            'Sol çubuğa basma (L3)',
         'Keyboard and mouse':
             'Klavye ve fare',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -11547,8 +12307,12 @@ WORLD = {
             "16:9'dan dar: görüntü gerilmiş görünebilir.",
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '“{}” modunun (Nexus Mods, hesapla ücretsiz) boss kayıtları gerekir: “{}” dosyasını indirin, arşivden çıkarın ve klasörünü seçin.',
+        'New installation: the graphics settings were made for this PC.':
+            'Yeni kurulum: grafik ayarları bu bilgisayara göre seçildi.',
         'New hardware detected: the graphics settings were adjusted to it.':
             'Yeni donanım algılandı: grafik ayarları buna göre uyarlandı.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            'Yeni donanım algılandı. Kendi grafik ayarlarınız korundu; ona uygun olanlar Görüntü ve performans sayfasında.',
         'New in version {}: what has changed':
             '{} sürümündeki yenilikler: neler değişti',
         'Next':
@@ -11687,6 +12451,8 @@ WORLD = {
             'Diğer sürümler',
         'Other versions…':
             'Diğer sürümler…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner ve RivaTuner (RTSS) gibi katmanları kapatın: ekran kartı sürücüsüne müdahale ederler.',
         'Overclocked graphics card or memory: try the standard clocks.':
             'Hız aşırtılmış ekran kartı veya bellek: standart saat hızlarını deneyin.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -11807,6 +12573,12 @@ WORLD = {
             'Çıkış çözünürlüğüyle aynı',
         'Save':
             'Kayıt',
+        'Collecting the report… (up to a minute)':
+            'Rapor hazırlanıyor… (bir dakikaya kadar)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool bir zip dosyası oluşturmadı.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            'Özet panoda: #help gönderinize yapıştırın, ardından zip dosyasını ekleyin.',
         'Save a report':
             'Rapor kaydet',
         'Save as zip':
@@ -11821,6 +12593,8 @@ WORLD = {
             'Kayıtlar ve çevrim içi',
         'Saves backed up: {}':
             'Kayıtlar yedeklendi: {}',
+        'Your achievements from there came along: {} new here.':
+            'Oradaki başarımlarınız da geldi: burada {} yeni.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'Kayıtlar içe aktarıldı. Karakterleriniz oyunun Load Game menüsünde.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -11859,8 +12633,6 @@ WORLD = {
             'Ayarlar: {} ayar bilgisayarınız için önerilenden farklı',
         'Setup':
             'Kurulum',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'Bu bilgisayarın shader’ları, günlükleri ve geçici dosyaları. Boş: kayıt klasöründe; kayıt klasörü bir bulut klasöründeyse (OneDrive, Dropbox, Google Drive) bu bilgisayarda, böylece her bilgisayar kendi shader’larını tutar.',
         'Shadows of dynamic lights: on from "Above minimum".':
             'Dinamik ışık gölgeleri: "Minimum üstü" seviyesinden itibaren açık.',
         'Show all ({})':
@@ -11907,6 +12679,32 @@ WORLD = {
             'Kararlılık testi (beta sürümler için)',
         'Start and sound':
             'Başlangıç ve ses',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3 destekli bir ekran kartı bulunamadı. Port böyle bir karta (GTX 1050 Ti, GTX 1650, RX 570 '
+            'veya daha yenisi) ve güncel bir sürücüye ihtiyaç duyar.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            'Çalışan bir Vulkan sürücüsü bulunamadı (vulkan-1.dll eksik veya bozuk). Ekran kartınızın güncel '
+            'sürücüsünü yükleyin.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'Ekran kartı sürücüsünün Vulkan dosyaları çok eski (portun ihtiyaç duyduğu 1.3 yerine {}). Ekran '
+            'kartınızın güncel sürücüsünü yükleyin.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} portu çalıştıramaz: sürücüsünde {1} eksik. Ekran kartı sürücüsünü güncelleyin; işe yaramazsa kart '
+            'port için çok eski.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'Başlatıcı karta dair bilgi isterken ekran kartı sürücüsü durdu (kod {}). Ekran kartınızın güncel '
+            'sürücüsünü yükleyin.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'Ekran kartı {0}: Vulkan {1} ve portun ihtiyaç duyduğu diğer her şey.',
+        '✗ The graphics card cannot run the port: see Help':
+            "✗ Ekran kartı portu çalıştıramaz: Yardım'a bakın",
+        'The game will likely not start, or close right away.':
+            'Oyun büyük olasılıkla başlamaz ya da hemen kapanır.',
         'Start anyway?':
             'Yine de başlatılsın mı?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -12011,8 +12809,28 @@ WORLD = {
             'Klasörde eboot.bin var ama oyunun tamamı yok (günlükte gxshader.shaderbnd.dcx not found yazar).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'Oyun klasörü: içinde doğrudan eboot.bin, sce_module, sce_sys ve dvdroot_ps4 bulunan klasör.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'Oyun bir hatayla sona erdi (kod {}). Yardım\'da denetimler var; "Rapor kaydet", yardım isterken '
+            'ekleyeceğiniz zip dosyasını oluşturur.',
         'The game ended with an error (code {}). Its log names the cause:':
             'Oyun bir hatayla kapandı (kod {}). Oyunun günlüğü nedeni belirtiyor:',
+        'Files of different versions are mixed':
+            'Farklı sürümlerin dosyaları karışmış',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            'Portun programı (bin\\bb-probe.exe) ve betikleri farklı sürümlerden; örneğin bir test sürümü daha eski '
+            'bir sürümün üzerine açıldığında veya paketin yalnızca bir kısmı kopyalandığında. Oyun bu durumda '
+            'açılışta siyah ekranda kalır (günlükte "bad patch entry" yazar).',
+        'Download the whole package of the version you want to play.':
+            'Oynamak istediğiniz sürümün paketinin tamamını indirin.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'Hepsini dosyaların yerine geçecek şekilde bu klasörün üzerine ya da yeni, boş bir klasöre açın.',
+        'Files of different versions in this installation: {}.':
+            'Bu kurulumda farklı sürümlerin dosyaları var: {}.',
+        "The port's files all belong to version {}.":
+            'Portun tüm dosyaları {} sürümüne ait.',
         'The game folder is complete ({} files, {} GB).':
             'Oyun klasörü eksiksiz ({} dosya, {} GB).',
         'The game is not version 1.09':
@@ -12618,6 +13436,19 @@ WORLD = {
             '返回',
         'Back up automatically before every start':
             '每次启动前自动备份',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}位于移植版的另一个安装中：{1}。',
+        'A folder of another installation is in use':
+            '正在使用另一个安装的文件夹',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            '启动器设置中的模组或缓存文件夹位于另一个移植版文件夹（旧版本或测试版）中：两个安装共用它。另一版本的着色器缓存可能导致游戏崩溃，它的模组在这里也会生效。',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '点击下面的按钮：此安装重新使用它自己的模组和缓存文件夹。存档文件夹保持不变，你的角色和成就也随之保留。',
+        "Use this installation's own folders":
+            '使用此安装自己的文件夹',
         'Back up now':
             '立即备份',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -12628,6 +13459,8 @@ WORLD = {
             '均衡',
         'Before a restore':
             '恢复前',
+        'Before a respec':
+            '重新分配属性之前',
         'Before an import':
             '导入前',
         'Before playing':
@@ -12664,6 +13497,12 @@ WORLD = {
             'CUSA03173：年度版，含“老猎人”DLC。',
         'Cache folder':
             '缓存文件夹',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            '你的存档文件夹位于端口的另一个安装中：此安装将着色器保存在自己的文件夹中，因为其他版本的着色器可能会破坏画面。',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            '此安装的着色器、日志和临时文件。留空：其 user 文件夹（{}），这样无论存档在哪里，每个版本和每台电脑都保留自己的着色器。',
         'Caches now: {}':
             '当前缓存位置：{}',
         'Camera':
@@ -12726,6 +13565,8 @@ WORLD = {
             '请先选择此场景的起始存档。',
         'Choose…':
             '选择…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '用于黑屏，或更新驱动后画面异常。下次启动会卡顿几分钟。',
         'Clear the shader cache':
             '清除着色器缓存',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -13037,8 +13878,8 @@ WORLD = {
             '道具与菜单',
         'Its level, weapons and bosses cannot be read from this save.':
             '无法从此存档读取等级、武器和 Boss。',
-        'Jump while dashing (L3)':
-            '冲刺时跳跃（L3）',
+        'Left stick click (L3)':
+            '按下左摇杆（L3）',
         'Keyboard and mouse':
             '键盘和鼠标',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -13134,8 +13975,12 @@ WORLD = {
             '比 16:9 更窄：画面可能看起来被拉伸。',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '需要模组 “{}”（Nexus Mods，有账号即可免费下载）中的 Boss 存档：下载 “{}”，解压，然后选择其文件夹。',
+        'New installation: the graphics settings were made for this PC.':
+            '新安装：已按此电脑选择图形设置。',
         'New hardware detected: the graphics settings were adjusted to it.':
             '检测到新硬件：图形设置已相应调整。',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            '检测到新硬件。已保留你自己的图形设置；适合它的设置在“画面与性能”中。',
         'New in version {}: what has changed':
             '版本 {} 新内容：有哪些变化',
         'Next':
@@ -13274,6 +14119,8 @@ WORLD = {
             '其他版本',
         'Other versions…':
             '其他版本…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            '关闭 MSI Afterburner 和 RivaTuner（RTSS）等叠加层：它们会挂接到显卡驱动中。',
         'Overclocked graphics card or memory: try the standard clocks.':
             '显卡或内存超频：请尝试恢复默认频率。',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -13394,6 +14241,12 @@ WORLD = {
             '与输出分辨率相同',
         'Save':
             '存档',
+        'Collecting the report… (up to a minute)':
+            '正在收集报告…（最多一分钟）',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool 未生成 zip 文件。',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '摘要已在剪贴板中：将其粘贴到你在 #help 的帖子里，然后附上 zip 文件。',
         'Save a report':
             '保存报告',
         'Save as zip':
@@ -13408,6 +14261,8 @@ WORLD = {
             '存档与在线',
         'Saves backed up: {}':
             '存档已备份：{}',
+        'Your achievements from there came along: {} new here.':
+            '那里的成就也一并带了过来：此处新增 {} 个。',
         "Saves imported. Your characters are in the game's Load Game menu.":
             '存档已导入。你的角色在游戏的“载入游戏”菜单中。',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -13446,8 +14301,6 @@ WORLD = {
             '设置：有 {} 项与你电脑的推荐设置不一致',
         'Setup':
             '初始设置',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            '本机的着色器、日志和临时文件。为空：放在存档文件夹中；若存档文件夹位于云同步文件夹（OneDrive、Dropbox、Google Drive）中，则放在本机，让每台电脑保留自己的着色器。',
         'Shadows of dynamic lights: on from "Above minimum".':
             '动态光源阴影：从“高于最低”档起开启。',
         'Show all ({})':
@@ -13494,6 +14347,27 @@ WORLD = {
             '稳定性测试（用于测试版）',
         'Start and sound':
             '启动与声音',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            '未找到支持 Vulkan 1.3 的显卡。移植版需要一块这样的显卡（GTX 1050 Ti、GTX 1650、RX 570 或更新），并使用最新驱动。',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '未找到可用的 Vulkan 驱动（vulkan-1.dll 缺失或已损坏）。请安装显卡的最新驱动。',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            '显卡驱动的 Vulkan 文件太旧（为 {}，移植版需要 1.3）。请安装显卡的最新驱动。',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} 无法运行移植版：其驱动缺少 {1}。请更新显卡驱动；如果仍不行，说明这块显卡对移植版来说太旧了。',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            '启动器查询显卡信息时，显卡驱动停止了响应（代码 {}）。请安装显卡的最新驱动。',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            '显卡 {0}：Vulkan {1}，以及移植版所需的其他一切。',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ 这块显卡无法运行移植版：请查看“帮助”',
+        'The game will likely not start, or close right away.':
+            '游戏很可能无法启动，或会立即关闭。',
         'Start anyway?':
             '仍要启动吗？',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -13598,8 +14472,25 @@ WORLD = {
             '该文件夹有 eboot.bin，但游戏不完整（日志显示 gxshader.shaderbnd.dcx not found）。',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             '游戏文件夹：直接包含 eboot.bin、sce_module、sce_sys 和 dvdroot_ps4 的那个。',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            '游戏因错误而结束（代码 {}）。“帮助”中有各项检查，“保存报告”会生成求助时要附上的 zip 文件。',
         'The game ended with an error (code {}). Its log names the cause:':
             '游戏因错误而结束（代码 {}）。日志中给出了原因：',
+        'Files of different versions are mixed':
+            '不同版本的文件混在了一起',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '移植版的程序（bin\\bb-probe.exe）和它的脚本来自不同版本，例如把测试版解压到旧版本上，或只复制了软件包的一部分。游戏会在启动时停在黑屏（日志中显示“bad patch entry”）。',
+        'Download the whole package of the version you want to play.':
+            '下载你想玩的那个版本的完整软件包。',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            '把全部内容解压到此文件夹并替换文件，或解压到一个新的空文件夹。',
+        'Files of different versions in this installation: {}.':
+            '此安装中有不同版本的文件：{}。',
+        "The port's files all belong to version {}.":
+            '移植版的文件全部属于版本 {}。',
         'The game folder is complete ({} files, {} GB).':
             '游戏文件夹完整（{} 个文件，{} GB）。',
         'The game is not version 1.09':
@@ -14200,6 +15091,19 @@ WORLD = {
             '戻る',
         'Back up automatically before every start':
             '起動のたびに自動でバックアップ',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}が移植版の別のインストールにあります：{1}。',
+        'A folder of another installation is in use':
+            '別のインストールのフォルダーが使われています',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            'ランチャー設定のMODまたはキャッシュのフォルダーが、別の移植版フォルダー（以前のバージョンやテスト版）にあります。両方のインストールで共有されます。別バージョンのシェーダーキャッシュはゲームをクラッシュさせることがあり、そのMODもここで有効になります。',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '下のボタンをクリックしてください。このインストールが再び自分のMODフォルダーとキャッシュフォルダーを使います。セーブフォルダーはそのままなので、キャラクターとトロフィーもそのまま残ります。',
+        "Use this installation's own folders":
+            'このインストールのフォルダーを使う',
         'Back up now':
             '今すぐバックアップ',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -14210,6 +15114,8 @@ WORLD = {
             'バランス',
         'Before a restore':
             '復元前',
+        'Before a respec':
+            '能力値の振り直しの前',
         'Before an import':
             'インポート前',
         'Before playing':
@@ -14246,6 +15152,12 @@ WORLD = {
             'CUSA03173：The Old Hunters を収録した Game of the Year Edition。',
         'Cache folder':
             'キャッシュフォルダー',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            'セーブフォルダーはポートの別のインストール内にあります。このインストールはシェーダーを自分のフォルダーに保存します。別バージョンのシェーダーは画面を壊すことがあるためです。',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            'このインストールのシェーダー、ログ、一時ファイル。空欄：その user フォルダー（{}）。セーブの場所に関係なく、バージョンごと・PCごとに専用のシェーダーを保持します。',
         'Caches now: {}':
             '現在のキャッシュ：{}',
         'Camera':
@@ -14308,6 +15220,8 @@ WORLD = {
             '先に、このシナリオの開始に使うセーブデータを選択してください。',
         'Choose…':
             '選択…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '画面が真っ暗なとき、またはドライバー更新後に表示が崩れたときに。次回の起動は数分間カクつきます。',
         'Clear the shader cache':
             'シェーダーキャッシュを消去',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -14619,8 +15533,8 @@ WORLD = {
             'アイテムとメニュー',
         'Its level, weapons and bosses cannot be read from this save.':
             'このセーブデータからはレベル、武器、ボスを読み取れません。',
-        'Jump while dashing (L3)':
-            'ダッシュ中にジャンプ (L3)',
+        'Left stick click (L3)':
+            '左スティック押し込み (L3)',
         'Keyboard and mouse':
             'キーボードとマウス',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -14716,8 +15630,12 @@ WORLD = {
             '16:9 より縦長：映像が引き伸ばされて見えることがあります。',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             'MOD「{}」（Nexus Mods、アカウントがあれば無料）のボス用セーブデータが必要です：「{}」をダウンロードして展開し、そのフォルダーを選択してください。',
+        'New installation: the graphics settings were made for this PC.':
+            '新しいインストール：グラフィック設定をこのPC向けにしました。',
         'New hardware detected: the graphics settings were adjusted to it.':
             '新しいハードウェアを検出しました：グラフィック設定をそれに合わせて調整しました。',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            '新しいハードウェアを検出しました。ご自身のグラフィック設定はそのまま残しました。それに合った設定は「画質とパフォーマンス」にあります。',
         'New in version {}: what has changed':
             'バージョン {} の新機能：変更内容',
         'Next':
@@ -14856,6 +15774,8 @@ WORLD = {
             'ほかのバージョン',
         'Other versions…':
             'ほかのバージョン…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner や RivaTuner（RTSS）などのオーバーレイを閉じてください。グラフィックドライバーに介入します。',
         'Overclocked graphics card or memory: try the standard clocks.':
             'グラフィックカードやメモリをオーバークロックしている場合：定格クロックで試してください。',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -14976,6 +15896,12 @@ WORLD = {
             '出力解像度と同じ',
         'Save':
             'セーブデータ',
+        'Collecting the report… (up to a minute)':
+            'レポートを作成しています…（最大 1 分）',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool は zip を作成しませんでした。',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '概要はクリップボードにあります：#help の投稿に貼り付けてから、zip を添付してください。',
         'Save a report':
             'レポートを保存',
         'Save as zip':
@@ -14990,6 +15916,8 @@ WORLD = {
             'セーブデータとオンライン',
         'Saves backed up: {}':
             'セーブデータをバックアップしました：{}',
+        'Your achievements from there came along: {} new here.':
+            'そちらのトロフィーも一緒に移されました：ここでは新たに {} 個。',
         "Saves imported. Your characters are in the game's Load Game menu.":
             'セーブデータをインポートしました。キャラクターはゲームの「ロードゲーム」メニューにあります。',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -15028,8 +15956,6 @@ WORLD = {
             '設定：{} 項目がこの PC の推奨と異なります',
         'Setup':
             'セットアップ',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            'この PC のシェーダー、ログ、一時ファイル。空欄：セーブフォルダー内。ただしセーブフォルダーがクラウドフォルダー（OneDrive、Dropbox、Google Drive）にある場合は、PC ごとに自分のシェーダーを持てるようこの PC 上に置きます。',
         'Shadows of dynamic lights: on from "Above minimum".':
             '動的ライトの影：「最低より上」からオン。',
         'Show all ({})':
@@ -15076,6 +16002,27 @@ WORLD = {
             '安定性テスト（ベータ版向け）',
         'Start and sound':
             '起動とサウンド',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3 対応のグラフィックカードが見つかりません。移植版には最新ドライバーの入った対応カード（GTX 1050 Ti、GTX 1650、RX 570 以降）が必要です。',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '動作する Vulkan ドライバーが見つかりません（vulkan-1.dll がないか、壊れています）。グラフィックカードの最新ドライバーをインストールしてください。',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            'グラフィックドライバーの Vulkan ファイルが古すぎます（移植版に必要な 1.3 ではなく {}）。グラフィックカードの最新ドライバーをインストールしてください。',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0} では移植版を実行できません：ドライバーに {1} がありません。グラフィックドライバーを更新してください。それでも解決しない場合、このカードは移植版には古すぎます。',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            'ランチャーがカードの情報を問い合わせている間にグラフィックドライバーが停止しました（コード {}）。グラフィックカードの最新ドライバーをインストールしてください。',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            'グラフィックカード {0}：Vulkan {1} と、移植版に必要なその他すべて。',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ このグラフィックカードでは移植版を実行できません：ヘルプを参照',
+        'The game will likely not start, or close right away.':
+            'ゲームはおそらく起動しないか、すぐに終了します。',
         'Start anyway?':
             'このまま起動しますか？',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -15180,8 +16127,26 @@ WORLD = {
             'フォルダーに eboot.bin はありますが、ゲーム全体がそろっていません（ログに gxshader.shaderbnd.dcx not found と出ます）。',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             'ゲームフォルダー：eboot.bin、sce_module、sce_sys、dvdroot_ps4 が直下にあるフォルダーです。',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            'ゲームはエラーで終了しました（コード {}）。ヘルプにはチェックがあり、「レポートを保存」で、助けを求めるときに添付する zip が作成されます。',
         'The game ended with an error (code {}). Its log names the cause:':
             'ゲームがエラーで終了しました（コード {}）。ログに原因が記録されています：',
+        'Files of different versions are mixed':
+            '異なるバージョンのファイルが混在しています',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '移植版のプログラム（bin\\bb-probe.exe）とスクリプトのバージョンが異なります。たとえばテスト版を古いバージョンの上に展開した場合や、パッケージの一部だけをコピーした場合です。ゲームは起動時に黒い画面のまま止まります（ログに「bad '
+            'patch entry」と表示されます）。',
+        'Download the whole package of the version you want to play.':
+            'プレイしたいバージョンのパッケージ一式をダウンロードしてください。',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            'すべてをこのフォルダーに上書きして展開するか、新しい空のフォルダーに展開してください。',
+        'Files of different versions in this installation: {}.':
+            'このインストールに異なるバージョンのファイルがあります：{}。',
+        "The port's files all belong to version {}.":
+            '移植版のファイルはすべてバージョン {} のものです。',
         'The game folder is complete ({} files, {} GB).':
             'ゲームフォルダーはそろっています（{} ファイル、{} GB）。',
         'The game is not version 1.09':
@@ -15783,6 +16748,20 @@ WORLD = {
             '뒤로',
         'Back up automatically before every start':
             '시작할 때마다 자동 백업',
+        'The {0} is in another installation of the port: {1}.':
+            '{0}가 포트의 다른 설치에 있습니다: {1}.',
+        'A folder of another installation is in use':
+            '다른 설치의 폴더를 사용 중입니다',
+        "The mods or cache folder in the launcher's settings lies in another port folder (an earlier version or a "
+        "test build): both installations share it. Another version's shader cache can crash the game, and its mods "
+        'apply here too.':
+            '런처 설정의 모드 또는 캐시 폴더가 다른 포트 폴더(이전 버전이나 테스트 빌드)에 있어 두 설치가 함께 씁니다. 다른 버전의 셰이더 캐시는 게임을 충돌시킬 수 있고, 그 모드도 여기에 '
+            '적용됩니다.',
+        'Click the button below: this installation uses its own mods and cache folders again. The saves folder '
+        'stays, and with it your characters and achievements.':
+            '아래 버튼을 누르세요. 이 설치가 다시 자체 모드 폴더와 캐시 폴더를 사용합니다. 세이브 폴더는 그대로이므로 캐릭터와 업적도 그대로 남습니다.',
+        "Use this installation's own folders":
+            '이 설치의 폴더 사용',
         'Back up now':
             '지금 백업',
         "Backup put back. Your characters are in the game's Load Game menu.":
@@ -15793,6 +16772,8 @@ WORLD = {
             '균형',
         'Before a restore':
             '복원 전',
+        'Before a respec':
+            '능력치 재분배 전',
         'Before an import':
             '가져오기 전',
         'Before playing':
@@ -15829,6 +16810,12 @@ WORLD = {
             'CUSA03173: The Old Hunters가 포함된 Game of the Year Edition.',
         'Cache folder':
             '캐시 폴더',
+        'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
+        "because another version's shaders can break the picture.":
+            '저장 폴더가 포트의 다른 설치 안에 있습니다. 이 설치는 셰이더를 자체 폴더에 보관합니다. 다른 버전의 셰이더가 화면을 망가뜨릴 수 있기 때문입니다.',
+        'Shaders, logs and temporary files of this installation. Empty: its user folder ({}), so every version and '
+        'every PC keeps its own shaders, wherever the saves are.':
+            '이 설치의 셰이더, 로그, 임시 파일입니다. 비워 두면: 해당 설치의 user 폴더({})를 사용하여, 저장 위치와 상관없이 버전마다, PC마다 자체 셰이더를 유지합니다.',
         'Caches now: {}':
             '현재 캐시: {}',
         'Camera':
@@ -15891,6 +16878,8 @@ WORLD = {
             '먼저 이 시나리오를 시작할 세이브를 선택하세요.',
         'Choose…':
             '선택…',
+        'For a black screen, or a broken picture after a driver update. The next start stutters for a few minutes.':
+            '검은 화면이나 드라이버 업데이트 후 화면이 깨질 때 사용하세요. 다음 실행은 몇 분간 끊깁니다.',
         'Clear the shader cache':
             '셰이더 캐시 지우기',
         'Clear the shader cache (the button below). The next start stutters for a few minutes while it is built again.':
@@ -16202,8 +17191,8 @@ WORLD = {
             '아이템 및 메뉴',
         'Its level, weapons and bosses cannot be read from this save.':
             '이 세이브에서는 레벨, 무기, 보스를 읽을 수 없습니다.',
-        'Jump while dashing (L3)':
-            '달리는 중 점프 (L3)',
+        'Left stick click (L3)':
+            '왼쪽 스틱 누르기 (L3)',
         'Keyboard and mouse':
             '키보드 및 마우스',
         'Keyboard and mouse bindings, up to three per action. The controller keeps working side by side; edit its lines in input.ini directly — see docs/INPUT.md.':
@@ -16300,8 +17289,12 @@ WORLD = {
             '16:9보다 좁음: 화면이 늘어나 보일 수 있습니다.',
         'Needs the boss saves of the mod “{}” (Nexus Mods, free with an account): download “{}”, unpack it, then choose its folder.':
             '“{}” 모드(Nexus Mods, 계정이 있으면 무료)의 보스 세이브가 필요합니다: “{}”를 다운로드해 압축을 풀고 그 폴더를 선택하세요.',
+        'New installation: the graphics settings were made for this PC.':
+            '새 설치: 그래픽 설정을 이 PC에 맞게 정했습니다.',
         'New hardware detected: the graphics settings were adjusted to it.':
             '새 하드웨어 감지됨: 그래픽 설정을 그에 맞게 조정했습니다.',
+        'New hardware detected. Your own graphics settings were kept; the ones for it are on Picture & performance.':
+            '새 하드웨어 감지됨. 직접 정한 그래픽 설정은 그대로 두었습니다. 그에 맞는 설정은 화면 및 성능에 있습니다.',
         'New in version {}: what has changed':
             '버전 {}의 새로운 기능: 변경 사항',
         'Next':
@@ -16440,6 +17433,8 @@ WORLD = {
             '다른 버전',
         'Other versions…':
             '다른 버전…',
+        'Close overlays such as MSI Afterburner and RivaTuner (RTSS): they hook into the graphics driver.':
+            'MSI Afterburner, RivaTuner(RTSS) 같은 오버레이를 닫으세요. 그래픽 드라이버에 끼어듭니다.',
         'Overclocked graphics card or memory: try the standard clocks.':
             '그래픽 카드나 메모리를 오버클럭했다면: 기본 클럭으로 되돌려 보세요.',
         'Overlays: if the game won’t start or keeps crashing, close MSI Afterburner, RTSS and other overlays.':
@@ -16560,6 +17555,12 @@ WORLD = {
             '출력 해상도와 같게',
         'Save':
             '세이브',
+        'Collecting the report… (up to a minute)':
+            '보고서를 수집하는 중…(최대 1분)',
+        'The BB Report Tool made no zip.':
+            'BB Report Tool이 zip 파일을 만들지 못했습니다.',
+        'Its summary is in the clipboard: paste it into your #help post, then attach the zip.':
+            '요약이 클립보드에 있습니다: #help 게시물에 붙여넣은 다음 zip 파일을 첨부하세요.',
         'Save a report':
             '보고서 저장',
         'Save as zip':
@@ -16574,6 +17575,8 @@ WORLD = {
             '세이브 및 온라인',
         'Saves backed up: {}':
             '세이브를 백업했습니다: {}',
+        'Your achievements from there came along: {} new here.':
+            '그곳의 업적도 함께 옮겨졌습니다: 여기에 새로 {}개.',
         "Saves imported. Your characters are in the game's Load Game menu.":
             '세이브를 가져왔습니다. 캐릭터는 게임의 불러오기 메뉴에 있습니다.',
         'Saves page, Backups: put back the newest backup from before the problem ("Before playing" with the date of your last good session).':
@@ -16612,8 +17615,6 @@ WORLD = {
             '설정: {}개가 PC 권장값과 다름',
         'Setup':
             '초기 설정',
-        'Shaders, logs and temporary files of this PC. Empty: in the saves folder, or on this PC when the saves folder is in a cloud folder (OneDrive, Dropbox, Google Drive), so every PC keeps its own shaders.':
-            '이 PC의 셰이더, 로그, 임시 파일. 비워 두면: 세이브 폴더에 두며, 세이브 폴더가 클라우드 폴더(OneDrive, Dropbox, Google Drive)에 있으면 각 PC가 자신의 셰이더를 갖도록 이 PC에 둡니다.',
         'Shadows of dynamic lights: on from "Above minimum".':
             '동적 조명 그림자: "최소 이상"부터 켬.',
         'Show all ({})':
@@ -16660,6 +17661,27 @@ WORLD = {
             '안정성 테스트 (베타 빌드용)',
         'Start and sound':
             '시작 및 사운드',
+        'No graphics card with Vulkan 1.3 was found. The port needs one (GTX 1050 Ti, GTX 1650, RX 570 or newer) '
+        'with a current driver.':
+            'Vulkan 1.3을 지원하는 그래픽 카드를 찾지 못했습니다. 포트에는 최신 드라이버가 설치된 지원 카드(GTX 1050 Ti, GTX 1650, RX 570 이상)가 필요합니다.',
+        'No working Vulkan driver was found (vulkan-1.dll is missing or broken). Install the current driver for your '
+        'graphics card.':
+            '작동하는 Vulkan 드라이버를 찾지 못했습니다(vulkan-1.dll이 없거나 손상됨). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        'The Vulkan files of the graphics driver are too old ({} of the 1.3 the port needs). Install the current '
+        'driver for your graphics card.':
+            '그래픽 드라이버의 Vulkan 파일이 너무 오래되었습니다(포트에 필요한 1.3 대신 {}). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        '{0} cannot run the port: its driver lacks {1}. Update the graphics driver; if that does not help, the card '
+        'is too old for the port.':
+            '{0}에서는 포트를 실행할 수 없습니다: 드라이버에 {1}이(가) 없습니다. 그래픽 드라이버를 업데이트하세요. 그래도 안 되면 이 카드는 포트에 너무 오래되었습니다.',
+        'The graphics driver stopped while the launcher asked it about the card (code {}). Install the current '
+        'driver for your graphics card.':
+            '런처가 카드 정보를 조회하는 동안 그래픽 드라이버가 중지되었습니다(코드 {}). 그래픽 카드의 최신 드라이버를 설치하세요.',
+        'Graphics card {0}: Vulkan {1} and everything else the port needs.':
+            '그래픽 카드 {0}: Vulkan {1} 및 포트에 필요한 나머지 전부.',
+        '✗ The graphics card cannot run the port: see Help':
+            '✗ 이 그래픽 카드로는 포트를 실행할 수 없습니다: 도움말 참조',
+        'The game will likely not start, or close right away.':
+            '게임이 시작되지 않거나 바로 종료될 가능성이 높습니다.',
         'Start anyway?':
             '그래도 시작할까요?',
         'Start menu > Windows Security > Virus & threat protection > Manage settings.':
@@ -16764,8 +17786,26 @@ WORLD = {
             '폴더에 eboot.bin은 있지만 게임 전체가 없습니다 (로그에 gxshader.shaderbnd.dcx not found가 표시됨).',
         'Your game folder: the one with eboot.bin, sce_module, sce_sys and dvdroot_ps4 directly inside.':
             '게임 폴더: eboot.bin, sce_module, sce_sys, dvdroot_ps4가 바로 안에 있는 폴더입니다.',
+        'The game ended with an error (code {}). Help has the checks, and "Save a report" makes the zip to attach '
+        'when you ask for help.':
+            '게임이 오류로 종료되었습니다(코드 {}). 도움말에 점검 항목이 있고, "보고서 저장"은 도움을 요청할 때 첨부할 zip 파일을 만듭니다.',
         'The game ended with an error (code {}). Its log names the cause:':
             '게임이 오류로 종료되었습니다 (코드 {}). 로그에 나온 원인:',
+        'Files of different versions are mixed':
+            '서로 다른 버전의 파일이 섞여 있습니다',
+        "The port's program (bin\\bb-probe.exe) and its scripts come from different versions, for example after a "
+        'test build was unpacked over an older version or only part of a package was copied. The game then stops at '
+        'the start with a black screen (the log says "bad patch entry").':
+            '포트 프로그램(bin\\bb-probe.exe)과 스크립트의 버전이 서로 다릅니다. 예를 들어 테스트 빌드를 이전 버전 위에 풀었거나 패키지의 일부만 복사한 경우입니다. 그러면 게임이 '
+            '시작할 때 검은 화면에서 멈춥니다(로그에 "bad patch entry"라고 나옵니다).',
+        'Download the whole package of the version you want to play.':
+            '플레이하려는 버전의 전체 패키지를 다운로드하세요.',
+        'Unpack all of it over this folder and replace the files, or into a new, empty folder.':
+            '모든 파일을 이 폴더에 덮어써서 풀거나, 새로운 빈 폴더에 푸세요.',
+        'Files of different versions in this installation: {}.':
+            '이 설치에 서로 다른 버전의 파일이 있습니다: {}.',
+        "The port's files all belong to version {}.":
+            '포트 파일이 모두 {} 버전입니다.',
         'The game folder is complete ({} files, {} GB).':
             '게임 폴더가 완전합니다 (파일 {}개, {} GB).',
         'The game is not version 1.09':

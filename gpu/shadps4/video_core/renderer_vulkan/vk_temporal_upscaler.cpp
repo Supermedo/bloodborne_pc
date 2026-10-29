@@ -298,6 +298,10 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool active = Active();
     const bool jitter_on = active && settings.jitter && !BbToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
+    const int backend = settings.fsr411_backend;
+    const bool method_changed = (upscaler == BbSettings::UpscalerFsr411 ||
+                                 upscaler == BbSettings::UpscalerFsr412) &&
+                                applied_fsr_backend != backend;
     const int output = settings.output_res.load();
     // Ultrawide outputs apply after a restart (startup patch), not live.
     const bool output_changed = !scaled_session && applied_output != output &&
@@ -310,7 +314,7 @@ bool TemporalUpscaler::OnFrameStart() {
         fsr4_failed = false;
     }
     const bool changed = output_changed || applied_preset != preset || active != last_active ||
-                         jitter_on != last_jitter || applied_upscaler != upscaler;
+                         jitter_on != last_jitter || applied_upscaler != upscaler || method_changed;
     if (applied_upscaler != upscaler) {
         // A failed provider keeps a fatal flag internally; a user retry gets a fresh context.
         scheduler.Finish();
@@ -333,6 +337,7 @@ bool TemporalUpscaler::OnFrameStart() {
     applied_preset = preset;
     applied_output = output;
     applied_upscaler = upscaler;
+    applied_fsr_backend = backend;
     last_active = active;
     last_jitter = jitter_on;
     dispatched_last_frame = false;
@@ -748,8 +753,7 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
 bool TemporalUpscaler::DirectSharpen(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image& produced) {
     const auto& settings = BbSettings::Get();
     const float strength = std::clamp(settings.sharpness.load(), 0.0f, 2.0f);
-    if (settings.upscaler != BbSettings::UpscalerFsr411 ||
-        !(instance.IsFsr4VkSupported() || instance.IsFsr411NativeSupported()) || !UseFsr4() ||
+    if (!BbSettings::UsesHostSharpen(settings.upscaler, UseFsr4()) ||
         !settings.sharpen || strength <= 0.f ||
         produced.format != vk::Format::eR16G16B16A16Sfloat || !produced.view || !produced.width ||
         !produced.height) {
@@ -835,8 +839,7 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
                                     u32 h, vk::ImageView supplied_view) {
     const auto& settings = BbSettings::Get();
     // fsr4vk has no internal RCAS. Its full sharpening range is applied here.
-    const bool host_sharpen = settings.upscaler == BbSettings::UpscalerFsr411 &&
-        UseFsr4() && (instance.IsFsr4VkSupported() || instance.IsFsr411NativeSupported());
+    const bool host_sharpen = BbSettings::UsesHostSharpen(settings.upscaler, UseFsr4());
     const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - (host_sharpen ? 0.0f : 1.0f);
     if (!settings.sharpen || extra <= 0.0f) {
         return;
@@ -1751,7 +1754,10 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
     // with a scene (G-buffer depth this frame) fills the whole width: upscaler off, or a menu
     // over the world.
     const bool scene = !camera_motion.Enabled() || camera_motion.Depth();
-    const float side = scene ? 0.0f : 0.5f * (1.0f - 1920.0f / float(UiComposition::Canvas()[0]));
+    // (In stage units: with Sharp UI the canvas is the stage scaled up, no wider.)
+    const float side = scene ? 0.0f
+                             : 0.5f * (1.0f - 1920.0f * UiComposition::StageScale() /
+                                                  float(UiComposition::Canvas()[0]));
     const s32 src_side = s32(std::lround(source_width * side));
     const s32 dst_side = s32(std::lround(ui_width * side));
     if (dst_side > 0) {
@@ -2197,7 +2203,11 @@ namespace Vulkan {
 
 bool TemporalUpscaler::UseFsr4() const {
     const int selected = BbSettings::Get().upscaler;
-    const bool supported = selected == BbSettings::UpscalerFsr411
+    const auto& settings = BbSettings::Get();
+    const bool supported = selected == BbSettings::UpscalerFsr412
+                               ? (settings.FsrMethodSupported(selected, BbSettings::Fsr411Vulkan) ||
+                                  settings.FsrMethodSupported(selected, BbSettings::Fsr411Dx12))
+                           : selected == BbSettings::UpscalerFsr411
                                ? instance.IsFsr411Supported()
                                : instance.IsFsr4Int8Supported();
     return BbSettings::IsFsr4(selected) && supported && !fsr4_failed;
@@ -2293,6 +2303,9 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
             .frame_ms = frame_ms,
             .sharpness = settings.sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
         });
+        // A DLSS interposer (OptiScaler's Vulkan-on-D3D12 bridge) may continue the recording in
+        // another command buffer; dynamic state set before Evaluate is then undefined there.
+        scheduler.GetDynamicState().Invalidate();
     }
     if (!ok) {
         std::printf("Upscaler: DLSS failed; falling back to FSR 3.1\n");

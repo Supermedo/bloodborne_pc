@@ -39,6 +39,20 @@ index a78e1eb..f8588d9 100644
      if (it == state.entries.end()) {
          it = state.entries.find("*");
      }
+@@ -440,7 +455,12 @@
+-// Extract the path-and-query portion from a full URL
++// Extract the path-and-query portion from a full URL or an origin-form target.
+ static std::string ExtractPathFromUrl(const std::string& url) {
++    // bbport: Bloodborne also supplies paths such as /bb-eu/ss.info directly.
++    if (!url.empty() && url.front() == '/') {
++        return url;
++    }
++
+     auto scheme_end = url.find("://");
+     if (scheme_end == std::string::npos) {
+         return "/";
+     }
+     auto authority_start = scheme_end + 3;
 @@ -875,6 +891,9 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                           plan.scheme, plan.host);
              }
@@ -49,7 +63,19 @@ index a78e1eb..f8588d9 100644
              if (config_disabled_verify) {
                  LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled by configuration",
                           plan.scheme, plan.host);
-@@ -1745,6 +1764,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
+@@ -1509,7 +1524,10 @@ int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char* url,
+     auto req = std::make_shared<HttpRequest>();
+     req->conn_id = connId;
+     req->method = method;
+-    req->url = url;
++    // bbport: Bloodborne passes an empty request URL after creating a connection with
++    // the full URL. Keep that connection's path and query; using an empty URL
++    // here makes SendRequest request '/' instead (ss.info then returns 404).
++    req->url = url[0] ? url : conn_it->second.url;
+     req->content_length = contentLength;
+     req->settings = conn_it->second.settings;
+     req->epoll_id = conn_it->second.epoll_id;
+@@ -1745,6 +1768,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
                                                          ? tmpl_user_agent
                                                          : BuildLibhttpUserAgent(""));
          }
@@ -118,3 +144,607 @@ index 1d8b958..f05d5cb 100644
  }
  
  u64 ShadNetClient::ReportClientVersion() {
+diff --git a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+index 9701234..2755db0 100644
+--- a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp
++++ b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+@@ -824,6 +824,12 @@ void OnMatchingReply(ShadNet::CommandType cmd, u64 pkt_id, ShadNet::ErrorType er
+     DispatchRequestComplete(pr, error, body);
+ }
+ 
++// The address of this PC on the network it reaches shadNet through.
++static u32 MmLocalAddr() {
++    std::lock_guard lock(g_mm.mutex);
++    return g_mm.client ? g_mm.client->GetAddrLocal() : 0;
++}
++
+ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
+                         std::string_view server_host, u16 tcp_port) {
+     u32 server_addr = 0;
+@@ -864,6 +870,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
+         .configured_port = Net::GetP2PAdvertisedPort, // the bound port once running
+         .advertised_addr = Net::GetP2PAdvertisedAddr,
+         .ensure_transport = Net::EnsureP2PTransport,
++        .local_addr = MmLocalAddr,
+     });
+     NpSignaling::Transport::SetPeerResolver(matching2_enabled ? RequestSignalingInfos : nullptr);
+     NpSignaling::Transport::SetMatching2Enabled(matching2_enabled);
+diff --git a/a/core/libraries/np/np_matching2/np_matching2_signaling.cpp b/b/core/libraries/np/np_matching2/np_matching2_signaling.cpp
+index 01bfa18..56d418f 100644
+--- a/a/core/libraries/np/np_matching2/np_matching2_signaling.cpp
++++ b/b/core/libraries/np/np_matching2/np_matching2_signaling.cpp
+@@ -65,7 +65,7 @@ bool SendMatching2StunPing(const ContextObject& ctx) {
+     Matching2StunPing ping{};
+     ping.cmd = 0x01;
+     std::memcpy(ping.online_id, ctx.online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH);
+-    ping.local_ip = NpSignaling::Transport::AdvertisedAddr();
++    ping.local_ip = NpSignaling::Transport::LocalAddr();
+ 
+     const int rc =
+         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);
+diff --git a/a/core/libraries/np/np_signaling/np_signaling_transport.cpp b/b/core/libraries/np/np_signaling/np_signaling_transport.cpp
+index a75de84..df05bf6 100644
+--- a/a/core/libraries/np/np_signaling/np_signaling_transport.cpp
++++ b/b/core/libraries/np/np_signaling/np_signaling_transport.cpp
+@@ -52,6 +52,11 @@ bool EnsureTransport() {
+     return g_transport.ensure_transport ? g_transport.ensure_transport() : TransportIsReady();
+ }
+ 
++u32 LocalAddr() {
++    const u32 addr = g_transport.local_addr ? g_transport.local_addr() : 0;
++    return addr != 0 ? addr : AdvertisedAddr();
++}
++
+ void SetPeerResolver(PeerResolver fn) {
+     g_peer_resolver = fn;
+ }
+diff --git a/a/core/libraries/np/np_signaling/np_signaling_transport.h b/b/core/libraries/np/np_signaling/np_signaling_transport.h
+index 9d33b24..1f06de0 100644
+--- a/a/core/libraries/np/np_signaling/np_signaling_transport.h
++++ b/b/core/libraries/np/np_signaling/np_signaling_transport.h
+@@ -18,6 +18,7 @@ struct TransportHooks {
+     u16 (*configured_port)() = nullptr;
+     u32 (*advertised_addr)() = nullptr;
+     bool (*ensure_transport)() = nullptr;
++    u32 (*local_addr)() = nullptr;
+ };
+ void SetTransportHooks(const TransportHooks& hooks);
+ 
+@@ -29,6 +30,9 @@ bool TransportIsReady();
+ u16 ConfiguredPort();
+ u32 AdvertisedAddr();
+ bool EnsureTransport();
++// The LAN address sent in STUN pings (network order). shadNet hands it to players behind the
++// same public IP, since most routers don't loop packets for their own public IP back inside.
++u32 LocalAddr();
+ 
+ using PeerResolver = bool (*)(std::string_view online_id, u32* out_addr, u16* out_port);
+ void SetPeerResolver(PeerResolver fn);
+diff --git a/a/core/libraries/np/signaling_handler.cpp b/b/core/libraries/np/signaling_handler.cpp
+index ff0d91d..2d6854c 100644
+--- a/a/core/libraries/np/signaling_handler.cpp
++++ b/b/core/libraries/np/signaling_handler.cpp
+@@ -211,7 +211,7 @@ bool PublishSignalingInfo(const OrbisNpOnlineId& online_id) {
+ 
+     NpSignaling::StunPing ping{};
+     std::memcpy(ping.online_id, online_id.data, ORBIS_NP_ONLINEID_MAX_LENGTH);
+-    ping.local_ip = NpSignaling::Transport::AdvertisedAddr();
++    ping.local_ip = NpSignaling::Transport::LocalAddr();
+ 
+     const int rc =
+         NpSignaling::Transport::SignalingSendTo(&ping, sizeof(ping), server_addr, server_udp);
+diff --git a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+index 2755db0..4f36fd3 100644
+--- a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp
++++ b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+@@ -880,6 +880,10 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
+     }
+     client->onRoomEvent = [](const ShadNet::NotifyRoomEvent& n) { HandleRoomEvent(n); };
+     client->onRoomMessage = [](const ShadNet::NotifyRoomMessage& n) { HandleRoomMessage(n); };
++    client->onSignalingHelper = [](const ShadNet::NotifySignalingHelper& n) {
++        SignalingHandler::HandlePeerConnectRequest(n.npid, IpStringToAddr(n.ip),
++                                                   Libraries::Net::sceNetHtons(n.port));
++    };
+ }
+ 
+ void ClearMmShadNetClient() {
+@@ -895,6 +899,7 @@ void ClearMmShadNetClient() {
+     if (old_client) {
+         old_client->onRoomEvent = nullptr;
+         old_client->onRoomMessage = nullptr;
++        old_client->onSignalingHelper = nullptr;
+     }
+     NpSignaling::Transport::SetTransportHooks({});
+     NpSignaling::Transport::SetPeerResolver(nullptr);
+diff --git a/a/core/libraries/np/np_signaling/np_signaling_state.h b/b/core/libraries/np/np_signaling/np_signaling_state.h
+index e1d4a6d..57dc386 100644
+--- a/a/core/libraries/np/np_signaling/np_signaling_state.h
++++ b/b/core/libraries/np/np_signaling/np_signaling_state.h
+@@ -159,6 +159,7 @@ struct PeerTransport {
+     s64 last_echo_ping_us = 0;
+     s64 last_peer_rx_us = 0;
+     s64 last_handshake_send_us = 0;
++    s64 handshake_start_us = 0; // first handshake send of the current attempt
+ };
+ 
+ struct ConnectionInfo {
+diff --git a/a/core/libraries/np/signaling_handler.cpp b/b/core/libraries/np/signaling_handler.cpp
+index 2d6854c..f43a017 100644
+--- a/a/core/libraries/np/signaling_handler.cpp
++++ b/b/core/libraries/np/signaling_handler.cpp
+@@ -318,6 +318,10 @@ void SetTransportStateLocked(NpSignaling::PeerTransport& transport,
+                              NpSignaling::ConnState new_state) {
+     transport.state = new_state;
+     transport.status = StatusFromState(new_state);
++    if (new_state == NpSignaling::ConnState::Established ||
++        new_state == NpSignaling::ConnState::Inactive) {
++        transport.handshake_start_us = 0;
++    }
+ }
+ 
+ s32 AllocateTransportIdLocked() {
+@@ -489,6 +493,9 @@ void SendHandshakeLocked(NpSignaling::PeerTransport& transport,
+         return;
+     }
+     transport.last_handshake_send_us = NpSignaling::NowUs();
++    if (transport.handshake_start_us == 0) {
++        transport.handshake_start_us = transport.last_handshake_send_us;
++    }
+     const int rc =
+         NpSignaling::Transport::SignalingSendTo(&pkt, sizeof(pkt), transport.addr, transport.port);
+     LOG_DEBUG(
+@@ -889,7 +896,9 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port,
+             }
+             auto& transport =
+                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
++            // Reply where the packet came from: the sender's mapped (public) address is
++            // wrong for a peer on our own network, and the port is from the packet anyway.
++            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
+             transport.port = from_port;
+             transport.peer_activated = true;
+             if (transport.state != NpSignaling::ConnState::Established) {
+@@ -904,7 +913,7 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port,
+             auto& transport =
+                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+             transport.peer_activated = true;
+-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
++            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
+             transport.port = from_port;
+             if (transport.state == NpSignaling::ConnState::SendingOffer ||
+                 transport.state == NpSignaling::ConnState::WaitAccept ||
+@@ -1000,7 +1009,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
+             if (transport_id == 0) {
+                 transport_id = EnsureTransportLocked(
+                     local_online_id, peer_online_id, peer_npid,
+-                    pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr, from_port);
++                    from_addr != 0 ? from_addr : pkt.mapped_addr, from_port);
+                 if (transport_id < 0) {
+                     return;
+                 }
+@@ -1008,7 +1017,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const NpSignaling::Signal
+             auto& transport =
+                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+             transport.peer_activated = true;
+-            transport.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
++            transport.addr = from_addr != 0 ? from_addr : pkt.mapped_addr;
+             transport.port = from_port;
+             if (transport.state == NpSignaling::ConnState::Inactive) {
+                 SetTransportStateLocked(transport, NpSignaling::ConnState::WaitOffer);
+@@ -1235,8 +1244,10 @@ void StepPendingConnections() {
+                 continue;
+             }
+ 
+-            if (transport.last_handshake_send_us != 0 &&
+-                now - transport.last_handshake_send_us >
++            // From the first handshake: every resend moves last_handshake_send_us, so timing
++            // from it never gave up and later tries reused the dead connection.
++            if (transport.handshake_start_us != 0 &&
++                now - transport.handshake_start_us >
+                     std::chrono::duration_cast<std::chrono::microseconds>(kMatching2Timeout)
+                         .count()) {
+                 timeout.push_back(transport_id);
+@@ -1532,6 +1543,33 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
+     return ORBIS_OK;
+ }
+ 
++void HandlePeerConnectRequest(std::string_view peer_online_id, u32 addr, u16 port) {
++    if (peer_online_id.empty() || addr == 0 || port == 0) {
++        return;
++    }
++    NpSignaling::SignalingControl pkt{};
++    pkt.kind = static_cast<u8>(NpSignaling::ControlKind::ActivationRequest);
++    {
++        NpSignaling::SignalingMutexGuard lock;
++        for (const auto& [ctx_id, ctx] : NpHandler::GetInstance().GetSignalingState().contexts) {
++            if (ctx.active) {
++                std::memcpy(pkt.online_id_to, ctx.owner_online_id.data,
++                            ORBIS_NP_ONLINEID_MAX_LENGTH);
++                break;
++            }
++        }
++    }
++    if (pkt.online_id_to[0] == 0) {
++        return;
++    }
++    std::memcpy(pkt.online_id_from, peer_online_id.data(),
++                std::min<size_t>(peer_online_id.size(), ORBIS_NP_ONLINEID_MAX_LENGTH));
++    LOG_INFO(Lib_NpSignaling, "Peer connect request from shadNet: peer='{}' endpoint={:#x}:{}",
++             peer_online_id, addr, Net::sceNetNtohs(port));
++    // Its ack opens our router to the peer, and our own handshakes follow.
++    HandleControlPacket(addr, port, pkt);
++}
++
+ void DeactivateSig1(NpSignaling::OrbisNpSignalingConnectionId conn_id) {
+     {
+         NpSignaling::SignalingMutexGuard lock;
+diff --git a/a/core/libraries/np/signaling_handler.h b/b/core/libraries/np/signaling_handler.h
+index e2cac16..f390f8e 100644
+--- a/a/core/libraries/np/signaling_handler.h
++++ b/b/core/libraries/np/signaling_handler.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include <string_view>
++
+ #include "common/types.h"
+ #include "core/libraries/np/np_matching2/np_matching2.h"
+ #include "core/libraries/np/np_types.h"
+@@ -25,6 +27,9 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
+ bool FindMatching2MemberNpId(OrbisNpAccountId account_id, OrbisNpId* out_npid);
+ void DeactivateSig1(NpSignaling::OrbisNpSignalingConnectionId conn_id);
+ void TerminateSig1(NpSignaling::OrbisNpSignalingConnectionId conn_id);
++// shadNet's notice that a player wants to connect (addr/port network order), handled like
++// that player's activation request, which our router drops until we have sent to them.
++void HandlePeerConnectRequest(std::string_view peer_online_id, u32 addr, u16 port);
+ 
+ void StartMatching2(NpMatching2::ContextObject& ctx);
+ void StopMatching2(NpMatching2::ContextObject& ctx, s32 error_code);
+diff --git a/a/shadnet/client.cpp b/b/shadnet/client.cpp
+index 8ad393b..a301665 100644
+--- a/a/shadnet/client.cpp
++++ b/b/shadnet/client.cpp
+@@ -1042,6 +1042,22 @@ void ShadNetClient::HandleNotification(u16 cmd_raw, const std::vector<u8>& paylo
+             onClientRejected(n);
+         break;
+     }
++    case NotificationType::SignalingHelper: {
++        shadnet::RequestSignalingInfosReply pb;
++        if (!pb.ParseFromString(blob)) {
++            LOG_WARNING(ShadNet, "SignalingHelper parse error");
++            break;
++        }
++        NotifySignalingHelper n;
++        n.npid = pb.target_npid();
++        n.ip = pb.target_ip();
++        n.port = static_cast<u16>(pb.target_port());
++        LOG_INFO(ShadNet, "SignalingHelper: '{}' at {}:{} wants to connect", n.npid, n.ip,
++                 n.port);
++        if (onSignalingHelper)
++            onSignalingHelper(n);
++        break;
++    }
+     default:
+         LOG_DEBUG(ShadNet, "Unknown notification type {}", cmd_raw);
+         break;
+diff --git a/a/shadnet/client.h b/b/shadnet/client.h
+index 03bb318..39a729b 100644
+--- a/a/shadnet/client.h
++++ b/b/shadnet/client.h
+@@ -128,6 +128,7 @@ enum class NotificationType : u16 {
+     WebApiPushEvent = 17,    // Generic NP WebApi push event
+     ServiceUnavailable = 18, // Server refused a service (e.g. matchmaking full)
+     ClientRejected = 19,     // Server is signing this client out (e.g. version not accepted)
++    SignalingHelper = 100,   // SuperMedo shadNet: a player wants to connect to us
+ };
+ 
+ enum class ErrorType : uint8_t {
+@@ -226,6 +227,11 @@ struct NotifyServiceUnavailable {
+ };
+ // Notification 19 (NotifyClientRejected): the server is signing this client out and will
+ // disconnect right after.
++struct NotifySignalingHelper {
++    std::string npid; // the player who wants to connect
++    std::string ip;   // where they can be reached
++    u16 port = 0;
++};
+ struct NotifyClientRejected {
+     enum : u32 { ReasonVersion = 1 };
+     u32 reason = 0;
+@@ -349,6 +355,7 @@ public:
+     std::function<void(const NotifyWebApiPushEvent&)> onWebApiPushEvent;
+     std::function<void(const NotifyServiceUnavailable&)> onServiceUnavailable;
+     std::function<void(const NotifyClientRejected&)> onClientRejected;
++    std::function<void(const NotifySignalingHelper&)> onSignalingHelper;
+     // Async reply callback.
+     //   cmd    —command this reply is for (matches the request's cmd)
+     //   pkt_id —packet id echoed back from the original request header
+diff --git a/a/core/libraries/net/net_p2p.cpp b/b/core/libraries/net/net_p2p.cpp
+index 17942cf..d395456 100644
+--- a/a/core/libraries/net/net_p2p.cpp
++++ b/b/core/libraries/net/net_p2p.cpp
+@@ -49,6 +49,8 @@ struct P2PState {
+     std::shared_ptr<P2P::Keyring> keyring = std::make_shared<P2P::Keyring>();
+     u16 configured_port = 3658; // host order
+     u32 advertised_addr = 0;    // network order
++    u32 relay_addr = 0;         // network order
++    u16 relay_port = 0;         // network order
+     std::chrono::steady_clock::time_point retry_after{};
+     std::pair<u16, Error> last_failure{0, Error::Ok};
+ };
+@@ -80,6 +82,18 @@ void LogBroadcast(std::span<const u8> packet, const P2P::Endpoint& from) {
+                 address, from.Port(), packet.size(), hex, packet.size() > shown ? " ..." : "");
+ }
+ 
++std::optional<P2P::Endpoint> RelayEndpoint(const P2PState& state) {
++    if (state.relay_addr == 0 || state.relay_port == 0) {
++        return std::nullopt;
++    }
++    sockaddr_in server{};
++    server.sin_family = AF_INET;
++    server.sin_addr.s_addr = state.relay_addr;
++    server.sin_port = state.relay_port;
++    return P2P::Endpoint::FromSockaddr(reinterpret_cast<const sockaddr*>(&server),
++                                       sizeof(server));
++}
++
+ constexpr u16 P2PPortFallbacks = 16;
+ 
+ u16 StartLocked(P2PState& state, u16 udp_port, bool allow_fallback) {
+@@ -114,6 +128,7 @@ u16 StartLocked(P2PState& state, u16 udp_port, bool allow_fallback) {
+     }
+     state.last_failure = {0, Error::Ok};
+     const u16 port = transport->BoundPort();
++    transport->SetRelayServer(RelayEndpoint(state));
+     state.transport = transport;
+     Core::Net::SetP2PTransport(AF_INET, std::move(transport));
+     if (udp_port != 0 && port != udp_port) {
+@@ -282,6 +297,22 @@ u32 GetP2PAdvertisedAddr() {
+     return hooks.public_addr ? hooks.public_addr() : 0;
+ }
+ 
++void SetP2PRelayServer(u32 addr, u16 port) {
++    auto& state = P2PStateInstance();
++    std::scoped_lock lock{state.mutex};
++    state.relay_addr = addr;
++    state.relay_port = port;
++    if (state.transport) {
++        state.transport->SetRelayServer(RelayEndpoint(state));
++    }
++}
++
++void UseP2PRelayFor(u32 peer_addr) {
++    if (const auto transport = RunningTransport()) {
++        transport->UseRelayFor(peer_addr);
++    }
++}
++
+ u16 GetP2PAdvertisedPort() {
+     const u16 bound = GetP2PBoundPort();
+     return bound != 0 ? bound : GetP2PConfiguredPort();
+diff --git a/a/core/libraries/net/net_p2p.h b/b/core/libraries/net/net_p2p.h
+index 8959fe7..737b92d 100644
+--- a/a/core/libraries/net/net_p2p.h
++++ b/b/core/libraries/net/net_p2p.h
+@@ -23,6 +23,10 @@ bool P2PTransportIsReady();
+ u16 GetP2PConfiguredPort(); // host order
+ u16 GetP2PBoundPort();      // host order, 0 when not running
+ u32 GetP2PAdvertisedAddr(); // Network order, 0 if unknown.
++// SuperMedo relay through the shadNet server (network order, 0 = none), and the peers
++// whose packets go through it.
++void SetP2PRelayServer(u32 addr, u16 port);
++void UseP2PRelayFor(u32 peer_addr);
+ u16 GetP2PAdvertisedPort();
+ int P2PSignalingSendTo(const void* data, u32 len, u32 dest_addr, u16 dest_port);
+ int P2PSignalingRecvFrom(void* buf, u32 len, u32* from_addr, u16* from_port);
+diff --git a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+index 4f36fd3..4b0ab2e 100644
+--- a/a/core/libraries/np/np_matching2/np_matching2_mm.cpp
++++ b/b/core/libraries/np/np_matching2/np_matching2_mm.cpp
+@@ -857,6 +857,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
+         NpSignaling::Transport::SetPeerResolver(nullptr);
+         NpSignaling::Transport::SetMatching2Enabled(false);
+         NpSignaling::Transport::SetMmServerEndpoint(0, 0);
++        Net::SetP2PRelayServer(0, 0);
+         StopMatching2SignalingRuntime();
+         return;
+     }
+@@ -875,6 +876,7 @@ void SetMmShadNetClient(std::shared_ptr<ShadNet::ShadNetClient> client,
+     NpSignaling::Transport::SetPeerResolver(matching2_enabled ? RequestSignalingInfos : nullptr);
+     NpSignaling::Transport::SetMatching2Enabled(matching2_enabled);
+     NpSignaling::Transport::SetMmServerEndpoint(server_addr, server_udp_port);
++    Net::SetP2PRelayServer(server_addr, server_udp_port);
+     if (!matching2_enabled) {
+         StopMatching2SignalingRuntime();
+     }
+diff --git a/a/core/libraries/np/np_signaling/np_signaling_state.h b/b/core/libraries/np/np_signaling/np_signaling_state.h
+index 57dc386..1e15ceb 100644
+--- a/a/core/libraries/np/np_signaling/np_signaling_state.h
++++ b/b/core/libraries/np/np_signaling/np_signaling_state.h
+@@ -160,6 +160,7 @@ struct PeerTransport {
+     s64 last_peer_rx_us = 0;
+     s64 last_handshake_send_us = 0;
+     s64 handshake_start_us = 0; // first handshake send of the current attempt
++    bool relayed = false;       // switched to the shadNet relay
+ };
+ 
+ struct ConnectionInfo {
+diff --git a/a/core/libraries/np/signaling_handler.cpp b/b/core/libraries/np/signaling_handler.cpp
+index f43a017..0a3f9fd 100644
+--- a/a/core/libraries/np/signaling_handler.cpp
++++ b/b/core/libraries/np/signaling_handler.cpp
+@@ -16,6 +16,7 @@
+ #include "common/logging/log.h"
+ #include "common/singleton.h"
+ #include "core/libraries/net/net.h"
++#include "core/libraries/net/net_p2p.h"
+ #include "core/libraries/net/net_util.h"
+ #include "core/libraries/np/np_error.h"
+ #include "core/libraries/np/np_handler/np_handler.h"
+@@ -35,6 +36,7 @@ constexpr auto kMatching2Timeout = std::chrono::seconds(30);
+ constexpr auto kMatching2EstablishDelay = std::chrono::milliseconds(1000);
+ constexpr auto kStunPingInterval = std::chrono::seconds(5);
+ constexpr s64 kHandshakeConnectTimeoutMs = 30'000;
++constexpr s64 kRelayAfterUs = 4'000'000; // no answer by then: use the shadNet relay
+ constexpr s64 kHandshakeRetransmitMs = 500;
+ constexpr s64 kKeepaliveIntervalMs = 45'000;
+ 
+@@ -1234,10 +1236,11 @@ void StepPendingConnections() {
+     const s64 now = NpSignaling::NowUs();
+     std::vector<s32> resend;
+     std::vector<s32> timeout;
++    std::vector<std::pair<s32, u32>> relay;
+ 
+     {
+         NpSignaling::SignalingMutexGuard lock;
+-        for (const auto& [transport_id, transport] :
++        for (auto& [transport_id, transport] :
+              NpHandler::GetInstance().GetSignalingState().peer_transports) {
+             if (transport.status == NpSignaling::ORBIS_NP_SIGNALING_CONN_STATUS_ACTIVE ||
+                 transport.state == NpSignaling::ConnState::Inactive) {
+@@ -1254,6 +1257,15 @@ void StepPendingConnections() {
+                 continue;
+             }
+ 
++            // Nothing from the peer a few seconds in: routers block the direct way, so go
++            // through the relay on the shadNet server from now on.
++            if (!transport.relayed && transport.addr != 0 && transport.handshake_start_us != 0 &&
++                transport.last_peer_rx_us < transport.handshake_start_us &&
++                now - transport.handshake_start_us > kRelayAfterUs) {
++                transport.relayed = true;
++                relay.emplace_back(transport_id, transport.addr);
++            }
++
+             if (transport.last_handshake_send_us == 0 ||
+                 now - transport.last_handshake_send_us >=
+                     std::chrono::duration_cast<std::chrono::microseconds>(kMatching2StepInterval)
+@@ -1263,6 +1275,18 @@ void StepPendingConnections() {
+         }
+     }
+ 
++    for (const auto& [transport_id, addr] : relay) {
++        LOG_INFO(Lib_NpSignaling, "No answer from peer {:#x}: connecting through the relay",
++                 addr);
++        Net::UseP2PRelayFor(addr);
++        // The peer may have missed our one activation request as well.
++        NpSignaling::SignalingMutexGuard lock;
++        for (const auto& [conn_id, ci] : NpHandler::GetInstance().GetSignalingState().connections) {
++            if (ci.transport_id == transport_id && ci.locally_activated) {
++                SendActivate(ci);
++            }
++        }
++    }
+     for (const s32 transport_id : resend) {
+         StartTransportHandshakeInitiator(transport_id);
+     }
+diff --git a/a/core/net/p2p_transport.cpp b/b/core/net/p2p_transport.cpp
+index 67b84e6..aa58642 100644
+--- a/a/core/net/p2p_transport.cpp
++++ b/b/core/net/p2p_transport.cpp
+@@ -170,6 +170,16 @@ void Transport::SetOutgoingLossForTesting(double probability) {
+     loss_for_testing_ = probability;
+ }
+ 
++void Transport::SetRelayServer(std::optional<Endpoint> relay_server) {
++    std::scoped_lock lock{mutex_};
++    relay_server_ = std::move(relay_server);
++}
++
++void Transport::UseRelayFor(u32 peer_addr) {
++    std::scoped_lock lock{mutex_};
++    relayed_peers_.insert(peer_addr);
++}
++
+ std::shared_ptr<DatagramSocket> Transport::CreateDatagram() {
+     return std::shared_ptr<DatagramSocket>(new DatagramSocket(shared_from_this()));
+ }
+@@ -260,6 +270,12 @@ void Transport::Reschedule(const Connection& connection) {
+     }
+ }
+ 
++// SuperMedo relay frames: "SMRL", kind, IPv4 address and port (network order), packet.
++constexpr u8 kRelayMagic[4] = {'S', 'M', 'R', 'L'};
++constexpr u8 kRelaySend = 0x02;    // to the server: the address is the destination
++constexpr u8 kRelayDeliver = 0x03; // from the server: the address is the source
++constexpr size_t kRelayHeaderSize = 11;
++
+ Error Transport::SendPacket(std::span<const u8> packet, const Endpoint& to) {
+     if (loss_for_testing_ > 0) {
+         loss_rng_ ^= loss_rng_ << 13;
+@@ -270,6 +286,20 @@ Error Transport::SendPacket(std::span<const u8> packet, const Endpoint& to) {
+             return Error::Ok;
+         }
+     }
++    if (relay_server_ && to.Family() == AF_INET) {
++        const auto* in = reinterpret_cast<const sockaddr_in*>(to.Sockaddr());
++        if (relayed_peers_.contains(in->sin_addr.s_addr)) {
++            std::vector<u8> framed(kRelayHeaderSize + packet.size());
++            std::memcpy(framed.data(), kRelayMagic, 4);
++            framed[4] = kRelaySend;
++            std::memcpy(framed.data() + 5, &in->sin_addr.s_addr, 4);
++            std::memcpy(framed.data() + 9, &in->sin_port, 2);
++            std::memcpy(framed.data() + kRelayHeaderSize, packet.data(), packet.size());
++            return Host::SendTo(socket_, framed.data(), framed.size(), 0,
++                                relay_server_->Sockaddr(), relay_server_->Length())
++                .error;
++        }
++    }
+     const auto r =
+         Host::SendTo(socket_, packet.data(), packet.size(), 0, to.Sockaddr(), to.Length());
+     return r.error;
+@@ -307,6 +337,19 @@ u16 Transport::AllocateVport(bool stream) {
+ 
+ void Transport::HandlePacket(std::span<const u8> packet, const Endpoint& from,
+                              Clock::time_point now) {
++    if (relay_server_ && from == *relay_server_ && packet.size() > kRelayHeaderSize &&
++        std::memcmp(packet.data(), kRelayMagic, 4) == 0 && packet[4] == kRelayDeliver) {
++        sockaddr_in source{};
++        source.sin_family = AF_INET;
++        std::memcpy(&source.sin_addr.s_addr, packet.data() + 5, 4);
++        std::memcpy(&source.sin_port, packet.data() + 9, 2);
++        relayed_peers_.insert(source.sin_addr.s_addr); // answer the way it came
++        HandlePacket(packet.subspan(kRelayHeaderSize),
++                     Endpoint::FromSockaddr(reinterpret_cast<const sockaddr*>(&source),
++                                            sizeof(source)),
++                     now);
++        return;
++    }
+     Codec::Decoded decoded = codec_->Decode(packet, from);
+     switch (decoded.kind) {
+     case Codec::Kind::Stream:
+diff --git a/a/core/net/p2p_transport.h b/b/core/net/p2p_transport.h
+index fdcee13..5aa466d 100644
+--- a/a/core/net/p2p_transport.h
++++ b/b/core/net/p2p_transport.h
+@@ -11,6 +11,8 @@
+ #include <map>
+ #include <memory>
+ #include <mutex>
++#include <optional>
++#include <set>
+ #include <thread>
+ 
+ #include "core/net/p2p_tcp.h"
+@@ -206,6 +208,12 @@ public:
+ 
+     void SetOutgoingLossForTesting(double probability);
+ 
++    // SuperMedo relay: packets for a relayed peer address go to the shadNet server, which
++    // forwards them over the mapping the peer's STUN pings keep open. For routers that
++    // block a direct connection. No relay server = off.
++    void SetRelayServer(std::optional<Endpoint> relay_server);
++    void UseRelayFor(u32 peer_addr); // IPv4, network order
++
+ private:
+     friend class DatagramSocket;
+     friend class StreamSocket;
+@@ -245,6 +253,8 @@ private:
+     u64 iss_state_;
+     double loss_for_testing_ = 0.0;
+     u64 loss_rng_ = 0x9e3779b97f4a7c15ull;
++    std::optional<Endpoint> relay_server_;
++    std::set<u32> relayed_peers_; // IPv4, network order
+ 
+     std::thread thread_;
+     std::atomic<bool> stop_{false};

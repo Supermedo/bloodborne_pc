@@ -2,6 +2,8 @@
 #ifdef _WIN32
 #include "vk_fg401_native.h"
 #include "native_fg401.h"
+#include "bbport_settings.h"
+#include "fg401_support.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include <algorithm>
@@ -144,6 +146,8 @@ struct Fg401Native::Impl {
                                uint32_t(NativeFormat(f.depth.format)),
                                {}};
         next.async_compute = overlap;
+        next.provider_version = BbSettings::Get().ActiveFrameGen() == BbSettings::FrameGenFsr402
+                                    ? Fg402Version : Fg401Version;
         // Color, motion and the result cross the API boundary as shared textures.
         // Depth keeps the buffer route to support the game's depth/stencil format.
         next.shared_texture_mask = (1u << 0) | (1u << 2) | (1u << 3);
@@ -152,7 +156,8 @@ struct Fg401Native::Impl {
             next.render_height == config.render_height &&
             next.output_width == config.output_width &&
             next.output_height == config.output_height &&
-            next.color_format == config.color_format && next.depth_format == config.depth_format)
+            next.color_format == config.color_format && next.depth_format == config.depth_format &&
+            next.provider_version == config.provider_version)
             return;
         const std::array texture_formats{f.color.format, vk::Format::eR32Sfloat,
                                          vk::Format::eR16G16Sfloat, vk::Format::eR8G8B8A8Unorm};
