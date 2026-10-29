@@ -56,3 +56,11 @@ The port checks each group of patch sites before applying patches. A modified
 1.09 executable can disable FPS or resolution patches even when its metadata
 reports the expected version. Use a clean dump to enable all options; do not
 change metadata or bypass these checks.
+
+## AMD Polaris (RX 400/500) on RADV
+
+With depth compression on, RADV on Polaris shows black blocks along the edges of
+characters, foliage and other objects. The port turns it off for these GPUs
+(`RADV_DEBUG=nohiz`, reported at start as `GPU: RADV on Polaris`). A
+`RADV_DEBUG` set in the environment is kept as it is, so include `nohiz` there
+if you set other RADV debug options.
