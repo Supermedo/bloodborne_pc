@@ -16,6 +16,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+import bbport_mods
 import bbport_theme as theme
 
 L = None  # bbport_launcher_win, set by bind()
@@ -843,6 +844,15 @@ class HelpMixin:
         except OSError:
             text = ''
         topics = hints_in_log(text)
+        loaded = bbport_mods.enabled_mods(self.app, L.DATA_DIR) if not topics and not always and L else []
+        if loaded:
+            # No known cause, but mods were loaded: one start without them says whether one is the cause.
+            if self.messagebox.askyesno('Bloodborne', _('The game ended with an error (code {}).').format(shown) +
+                                        '\n\n' + _('{} mods were loaded. Start once without them, to see whether one '
+                                                    'of them causes it? They stay on for later starts.').format(
+                                                        len(loaded))):
+                self.play_without_mods()
+            return
         if not topics:
             if always:
                 self.messagebox.showinfo('Bloodborne', _('The game ended with an error (code {}). Help has the checks, '

@@ -87,6 +87,8 @@ WORDS = {
     'online': 'online koop coop multiplayer freunde glocke beschworen invasion',
     'online_pool': 'server online shadnet hunters dream thd bbhost spielen mit play with',
     'mods_enabled': 'mods mod remaster texturen',
+    'button:without_mods': 'ohne mods without mods mods aus deaktivieren absturz crash ursache test '
+                           'zahlen numbers texte texts',
     'translucent_window': 'transparent durchsichtig transparenz glas acrylic opacity deckkraft see through '
                           'unreadable unlesbar',
     'ui_language': 'sprache language launcher',
