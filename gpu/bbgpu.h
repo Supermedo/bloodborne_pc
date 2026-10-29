@@ -40,8 +40,9 @@ int bbgpu_overlay_captures_input(void);
  * game image, then its System menu's request for the line ("bb:o"); `list` points at the menu's
  * line list, which the call may replace. */
 void bbgpu_pc_menu_set_image(unsigned char *base);
-/* After the patches, while the code is still writable: the PC page's name table. */
-void bbgpu_pc_menu_prepare(unsigned char *base);
+/* After the patches, while the code is still writable: the PC page's name table. `size` is the
+ * image's size; an image without the game's code cave (the loader tests' images) is left alone. */
+void bbgpu_pc_menu_prepare(unsigned char *base, uint64_t size);
 int bbgpu_pc_menu_add_line(void *list);
 int bbgpu_pc_menu_hide(void *movie);
 /* The settings pages' Defaults button (Restart Game on the PC page): its texts ("bb:l" name and
