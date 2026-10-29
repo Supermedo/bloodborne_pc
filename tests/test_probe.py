@@ -1,6 +1,7 @@
 """Boundary tests for the native loader; uses tiny synthetic x86-64 images."""
 from paths import ROOT
 from pathlib import Path
+import os
 import struct
 import subprocess
 import tempfile
@@ -35,6 +36,20 @@ def native_package(name='fixture-native', binding_address=4112, binding_kind=1,
 
 @unittest.skipUnless(EXE.exists(), 'build native probe first')
 class LoaderTests(unittest.TestCase):
+    def test_first_launch_creates_nested_gpu_user_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = root / 'boot.bin'
+            image.write_bytes(package(b'\xff\x25\x02\0\0\0\x90\x90',
+                                     [(8, 1, 0, 0)], ['fixture-import']))
+            gpu_user = root / 'new' / 'nested' / 'gpu'
+            env = dict(os.environ, HOME=str(root), BB_GPU_USER_DIR=str(gpu_user))
+            result = subprocess.run([str(EXE.resolve()), str(image), '--cpu-only'],
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 20, result.stdout + result.stderr)
+            self.assertTrue((gpu_user / 'shader').is_dir())
+            self.assertFalse((root / '.local' / 'share' / 'shadPS4').exists())
+
     def test_invalid_content_profile_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'content.bin'

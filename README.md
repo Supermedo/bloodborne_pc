@@ -146,6 +146,9 @@ Crashes on AMD RDNA2 cards, slow FSR 4 and online errors are collected in
 
 ## Building from source
 
+For the native Linux build, including Fedora/Bazzite dependencies and launch
+commands, see [docs/LINUX.md](docs/LINUX.md).
+
 See [packaging/windows/README.md](packaging/windows/README.md): MSYS2 CLANG64, `bash build.sh`,
 then `bash packaging/windows/package.sh`. DLSS is built separately with
 `packaging/windows/build_dlss.sh` (needs Visual Studio 2022).

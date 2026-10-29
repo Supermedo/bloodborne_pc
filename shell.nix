@@ -6,5 +6,6 @@ pkgs.mkShell {
     vulkan-headers vulkan-loader sdl3
     # GPU library (gpu/): shadPS4 video core dependencies
     ffmpeg-headless boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross xbyak zydis spirv-headers miniz libx11 libxcb xorgproto wayland
+    protobuf openssl zlib miniupnpc nlohmann_json
   ];
 }

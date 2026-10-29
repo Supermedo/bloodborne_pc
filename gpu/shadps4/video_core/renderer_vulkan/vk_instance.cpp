@@ -26,8 +26,8 @@
 #include "fg401_support.h"
 #include "fsr411_support.h"
 #include "fsr411_vulkan_support.h"
-#include "video_core/renderer_vulkan/vk_low_latency.h"
 #endif
+#include "video_core/renderer_vulkan/vk_low_latency.h"
 
 namespace Vulkan {
 
@@ -283,7 +283,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
+#ifdef VK_VALVE_shader_mixed_float_dot_product
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
+#endif
         vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT,
         vk::PhysicalDeviceDescriptorBufferFeaturesEXT,
         vk::PhysicalDeviceFaultFeaturesEXT, vk::PhysicalDevicePresentIdFeaturesKHR,
@@ -427,10 +429,12 @@ bool Instance::CreateDevice() {
     // bbport: FSR 4 v07 INT8 (vk_temporal_upscaler): quad derivatives in compute shaders.
     compute_shader_derivatives = add_extension(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
     // bbport: FSR 4.1.1 passes (dot2 of halves accumulated in float, as vkd3d-proton translates them).
+#ifdef VK_VALVE_shader_mixed_float_dot_product
     mixed_float_dot_product =
         feature_chain.get<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>()
             .shaderMixedFloatDotProductFloat16AccFloat32 &&
         add_extension(VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME);
+#endif
 #ifdef _WIN32
     const char* native_setting = std::getenv("BB_FSR411_NATIVE");
     const char* fsr411_backend = std::getenv("BB_FSR411_BACKEND");
@@ -732,9 +736,11 @@ bool Instance::CreateDevice() {
             .computeDerivativeGroupLinear =
                 compute_shader_derivatives_features.computeDerivativeGroupLinear,
         },
+#ifdef VK_VALVE_shader_mixed_float_dot_product
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE{
             .shaderMixedFloatDotProductFloat16AccFloat32 = true,
         },
+#endif
         vk::PhysicalDevicePresentIdFeaturesKHR{
             .presentId = true,
         },
@@ -802,9 +808,11 @@ bool Instance::CreateDevice() {
     if (!compute_shader_derivatives) {
         device_chain.unlink<vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR>();
     }
+#ifdef VK_VALVE_shader_mixed_float_dot_product
     if (!mixed_float_dot_product) {
         device_chain.unlink<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
     }
+#endif
     if (!present_id) {
         device_chain.unlink<vk::PhysicalDevicePresentIdFeaturesKHR>();
     }
