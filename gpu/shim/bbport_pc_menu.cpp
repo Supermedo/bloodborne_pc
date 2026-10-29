@@ -512,7 +512,8 @@ void* AddLine(void* list, int text, void* (SYSV* handler)(void*, void*)) {
 extern "C" void bbgpu_pc_menu_set_image(unsigned char* base) { image = base; }
 
 // After the patches, before the code is protected: pc_menu.py's page name table gets addresses.
-extern "C" void bbgpu_pc_menu_prepare(unsigned char* base) {
+extern "C" void bbgpu_pc_menu_prepare(unsigned char* base, uint64_t size) {
+    if (size < CAVE_END) return;
     for (uint32_t at = CAVE; at + 8 + TABLE_NAMES * 8 <= CAVE_END; at += 8) {
         if (std::memcmp(base + at, TABLE_MAGIC, 8) != 0) continue;
         unsigned char* table = base + at + 8;

@@ -4,6 +4,7 @@
 #include "bbport_settings.h"
 #include "bbport_copy.h"
 #ifndef _WIN32
+#include <dlfcn.h>
 #include <sys/resource.h>
 #endif
 #include "bbport_toggles.h"
@@ -286,7 +287,53 @@ static void StartProfileWriter() {
 }
 #endif
 
+#ifndef _WIN32
+// RADV on Polaris (GFX8): with depth compression (HTILE) the game's depth-edge passes show black
+// blocks around characters and foliage. RADV_DEBUG=nohiz removes them (tested on an RX 570,
+// Mesa 26.2.5; nodcc and nofmask were not needed). RADV reads RADV_DEBUG when an instance is
+// created, so a short-lived instance identifies the GPU before the renderer creates its own.
+// A RADV_DEBUG that the user set is kept.
+static void ApplyRadvWorkarounds() {
+    if (std::getenv("RADV_DEBUG")) return;
+    void* library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!library) return;
+    const auto get_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(library, "vkGetInstanceProcAddr"));
+    const auto create = get_proc ? reinterpret_cast<PFN_vkCreateInstance>(get_proc(nullptr, "vkCreateInstance")) : nullptr;
+    VkInstance instance = VK_NULL_HANDLE;
+    const VkApplicationInfo app{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .apiVersion = VK_API_VERSION_1_2};
+    const VkInstanceCreateInfo info{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app};
+    bool polaris = false;
+    if (create && create(&info, nullptr, &instance) == VK_SUCCESS) {
+        const auto enumerate = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(get_proc(instance, "vkEnumeratePhysicalDevices"));
+        const auto properties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(get_proc(instance, "vkGetPhysicalDeviceProperties2"));
+        const auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(get_proc(instance, "vkDestroyInstance"));
+        u32 count = 0;
+        if (enumerate && properties && enumerate(instance, &count, nullptr) == VK_SUCCESS) {
+            std::vector<VkPhysicalDevice> devices(count);
+            enumerate(instance, &count, devices.data());
+            for (VkPhysicalDevice device : devices) {
+                VkPhysicalDeviceDriverProperties driver{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+                VkPhysicalDeviceProperties2 props{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &driver};
+                properties(device, &props);
+                // RADV names the chip in the device name: "AMD Radeon RX 570 Series (RADV POLARIS10)".
+                polaris |= driver.driverID == VK_DRIVER_ID_MESA_RADV &&
+                           std::strstr(props.properties.deviceName, "RADV POLARIS") != nullptr;
+            }
+        }
+        if (destroy) destroy(instance, nullptr);
+    }
+    dlclose(library);
+    if (polaris) {
+        setenv("RADV_DEBUG", "nohiz", 0);
+        std::printf("GPU: RADV on Polaris: RADV_DEBUG=nohiz (depth compression off; avoids black blocks at edges)\n");
+    }
+}
+#endif
+
 extern "C" int bbgpu_init(const BbGpuConfig* config) {
+#ifndef _WIN32
+    ApplyRadvWorkarounds();
+#endif
     BbSettings::Load();
 #ifdef BB_PGO_GENERATE
     StartProfileWriter();
