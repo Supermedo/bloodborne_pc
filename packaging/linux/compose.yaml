@@ -1,0 +1,15 @@
+# Linux build environment (Dockerfile). The produced binaries run on the host natively:
+#   docker compose -f packaging/linux/compose.yaml run --rm build
+services:
+  build:
+    build: .
+    image: bbport-linux-build:sniper
+    user: "${BB_UID:-1000}:${BB_GID:-1000}"
+    network_mode: none
+    environment:
+      HOME: /tmp
+    working_dir: /work
+    volumes:
+      - ../..:/work
+    # Lowest CPU priority, so the machine stays usable during the long LTO link.
+    command: nice -n 19 bash packaging/linux/build.sh

@@ -405,6 +405,35 @@ def compile_patches(xml, names, app_version, segments):
     return writes
 
 
+# Built-in frame-rate fix (Supermedo/bloodborne_pc#33 by Aljoscha-Ide; the same bytes as #31 by
+# DUDUYG), applied with every preset above 30 FPS; the same code as the Windows release's
+# patches.py. After each physics step the player controller (0x1514500) checks for "blocked"
+# movement: commanded speed > 5 m/s while the character moved less than 1/30 m this frame
+# (vmulss 30.0 at 0x1514c24). The threshold is per frame, so it means 1 m/s only at 30 FPS; at
+# 144 FPS it is 4.8 m/s, sprinting counts as blocked, the root motion scale (ctrl+0x1e0) drops to
+# its floor of 0.5 and the halved speed keeps it there. The fix divides the moved distance by the
+# frame time (dt, local -0x74(%rbp)) instead: "blocked" is then below 1 m/s at any frame rate.
+# Off with sprint_fix=0 in bbport.ini or BB_SPRINT_FIX=0. Checked against the original bytes.
+FRAME_RATE_FIXES=[
+    # (vaddr, original bytes, replacement)
+    (0x1514c24,bytes.fromhex('c5fa590500174103'),bytes.fromhex('c5fa5e458c0f1f00')),  # vdivss -0x74(%rbp),%xmm0; nop
+]
+
+
+def sprint_fix_enabled(settings):
+    return os.environ.get('BB_SPRINT_FIX',settings.get('sprint_fix','1'))!='0'
+
+
+def frame_rate_fixes(elf):
+    writes=[]
+    for vaddr,original,new in FRAME_RATE_FIXES:
+        if eboot_bytes(elf,vaddr,vaddr+len(original))!=original:
+            print(f'Patches: frame-rate fix at {vaddr:#x} skipped (unexpected code)')
+            continue
+        writes.append((vaddr,new))
+    return writes
+
+
 # Third-party patch files (shadPS4/GoldHEN XML) in the data directory's patches/ folder.
 # Every retail release with update 1.09 (the same executable): US, EU, UK, JP, Asia, then the
 # editions with The Old Hunters.
@@ -557,6 +586,10 @@ def main():
     segments=eboot_segments((a.out/'eboot.elf').read_bytes())
     writes=compile_patches(a.xml,names,a.app_version,segments)
     fps_count=len(compile_patches(a.xml,fps_names,a.app_version,segments)) if fps_names else 0  # the first writes
+    if a.fps!='30' and sprint_fix_enabled(read_settings(a.settings)):
+        fixes=frame_rate_fixes((a.out/'eboot.elf').read_bytes())
+        writes+=fixes
+        if fixes: names.append('Frame-rate fix: blocked-movement check')
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res and 'resolution' in groups else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws
     # it into the output-size image with a viewport scaled by output / 1920
