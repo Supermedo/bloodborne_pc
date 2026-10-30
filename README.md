@@ -11,9 +11,10 @@ start `Bloodborne.exe`, pick your game folder and press **PLAY**.
 Check my other ports 
 https://nativeretro.com/
 
-> **No game files are included.** You need your own decrypted dump of Bloodborne
-> (CUSA03173). Version 1.09 is needed for the community patches (60/90/unlocked FPS,
-> resolution, effects); other versions run at 30 FPS.
+> **No game files are included.** You need your own decrypted dump of Bloodborne, any retail
+> edition (US CUSA00900, EU CUSA00207, the Game of the Year editions such as CUSA03173, ...),
+> as SELF or plain ELF files. Version 1.09 is needed for the community patches (60/90/unlocked
+> FPS, resolution, effects); other versions run at 30 FPS.
 > This project is not affiliated with Sony Interactive Entertainment or FromSoftware.
 
 ## Features
@@ -92,8 +93,9 @@ Nothing else to install: everything the game needs is in the zip.
    with `eboot.bin`) and your PC, and sets the picture for your hardware.
 3. Press **PLAY**.
 
-**DLC.** The Game of the Year edition (CUSA03173) already has The Old Hunters. With a base-game
-dump, also dump your add-ons: each is a folder named like `SPEXPANSIONDLC03` with only
+**DLC.** The Game of the Year editions (CUSA03179 US, CUSA03173 EU, CUSA03014 JP, CUSA03023
+Asia) already have The Old Hunters. With a base-game dump (US CUSA00900, EU CUSA00207, ...),
+also dump your add-ons: each is a folder named like `SPEXPANSIONDLC03` with only
 `sce_sys` inside, since their data ships with the 1.09 update. Put them in one folder and choose
 it as **DLC folder** on **Game & effects**, or copy them to `user\addcont\<title id>\` (the
 layout shadPS4 and bbport use).
