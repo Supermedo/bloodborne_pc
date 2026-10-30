@@ -109,6 +109,24 @@ def system_folder(game):
     return game / 'sce_sys'
 
 
+def image_sha256(elf, ph):
+    """SHA-256 of the loaded image as prepare() builds it: the load segments' bytes at their
+    addresses, zero between them and past their file sizes. It is the same for every dump of the
+    same code, whatever wraps it (a plain ELF, or a SELF with another region's content ID and
+    signatures). Hashed piece by piece: 0.05 s for the eboot, 0.3 s with the image built.
+    None when load segments overlap."""
+    loads = sorted((p for p in ph if p['type'] in (1, 0x61000010)), key=lambda p: p['vaddr'])
+    digest, at, view = hashlib.sha256(), 0, memoryview(elf)
+    for p in loads:
+        if p['vaddr'] < at:
+            return None
+        digest.update(bytes(p['vaddr'] - at))
+        digest.update(span(view, p['offset'], p['filesz']))
+        at = p['vaddr'] + p['filesz']
+    digest.update(bytes(max((p['vaddr'] + p['memsz'] for p in loads), default=0) - at))
+    return digest.hexdigest()
+
+
 def sfo(data):
     magic, version, keys, values, count = unpack('<4sIIII', data, 0)
     if magic != b'\0PSF':

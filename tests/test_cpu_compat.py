@@ -120,6 +120,21 @@ class ApplyImageTests(unittest.TestCase):
                 mutate(data)
                 self.reject(data)
 
+    def test_the_inspected_code_dumped_another_way_matches_the_plan(self):
+        """A plain ELF or another region's SELF: another file, the inspected loaded image."""
+        inspected = {'eboot.bin': ('d' * 64, 'a' * 64)}
+        data = fixture()
+        data['main'] = {'sha256': 'c' * 64, 'image_sha256': 'd' * 64}
+        with patch.dict(cpu_compat.INSPECTED_IMAGES, inspected):
+            report = cpu_compat.patch_image(**data)[2]
+            self.assertEqual(report['patched_sites'], 1)
+            self.assertEqual(report['source_hashes']['eboot.bin'], 'a' * 64)
+            data['main']['image_sha256'] = 'e' * 64  # other code
+            self.reject(data)
+        self.assertEqual(cpu_compat.source_sha256('eboot.bin', {'sha256': 'f' * 64}), 'f' * 64)
+        self.assertEqual(cpu_compat.source_sha256('other.prx', {'sha256': 'f' * 64, 'image_sha256': 'd' * 64}),
+                         'f' * 64)
+
     def test_relocation_next_to_site_is_preserved(self):
         data = fixture()
         data['relocations'] = [(24, 0, 0, 0), (37, 0, 0, 0)]
