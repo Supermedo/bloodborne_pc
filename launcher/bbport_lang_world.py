@@ -193,8 +193,10 @@ WORLD = {
             'Процессор',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Процессоры без AVX (многие модели Pentium/Celeron) вообще не могут его запустить.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: издание Game of the Year Edition с The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: издание Game of the Year Edition с The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: основная игра. The Old Hunters, если он у вас есть, берётся из папки DLC («Файлы игры»).',
         'Cache folder':
             'Папка кэша',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -221,8 +223,8 @@ WORLD = {
             'Проверка игры',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Проверьте результат: eboot.bin (около 89 МБ), sce_module, sce_sys и dvdroot_ps4 (около 29 ГБ) лежат прямо в папке. The Old Hunters уже входит в издание GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Проверьте размер: eboot.bin из обновления — ровно 93\xa0825\xa0704 байт (89,4 МБ).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Проверьте размер: eboot.bin из обновления — ровно 93\xa0825\xa0704 байт (89,4 МБ) или 93\xa0667\xa0640 байт в виде обычного ELF-файла.',
         'Check this installation':
             'Проверить эту установку',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -480,10 +482,10 @@ WORLD = {
             'Всё ли в порядке с папкой игры? Это проверяется на странице «Помощь».',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Файл повредился при распаковке (в журнале: «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Это не исходный файл (файл PS4 SELF): его преобразовала другая программа, или он не от '
-            'Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Это ни исходный файл (файл PS4 SELF), ни обычный ELF-файл: он всё ещё зашифрован, его '
+            'преобразовала другая программа, или он не от Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Порт может запуститься, но ожидайте низкую частоту кадров и проблемы.',
         'Its level, weapons and bosses cannot be read from this save.':
@@ -756,8 +758,8 @@ WORLD = {
             'После установки перезагрузите ПК.',
         'Restore':
             'Восстановить',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Правый клик по eboot.bin > «Свойства»: чистый файл — ровно 93\xa0825\xa0704 байт.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Правый клик по eboot.bin > «Свойства»: чистый файл — ровно 93\xa0825\xa0704 байт (93\xa0667\xa0640, если программа для дампа сохранила его как обычный ELF-файл).',
         'Route':
             'Маршрут',
         'Run {}: the game is starting.':
@@ -1130,8 +1132,8 @@ WORLD = {
             'Без ограничения, но не выше частоты монитора (максимум 120): ваш ПК, по оценке, выдаст больше 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Снова поместите обновление 1.09 в новую пустую папку.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Используйте eboot.bin из неизменённого обновления 1.09 (ровно 93 825 704 байта).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Используйте eboot.bin из неизменённого обновления 1.09 (ровно 93 825 704 байта или 93 667 640 в виде обычного ELF-файла).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Используйте eboot.bin из неизменённого обновления 1.09 в новой пустой папке. Не берите '
@@ -1235,8 +1237,8 @@ WORLD = {
             'пропатчить: игра работает в 30 FPS, параметры эффектов ничего не делают, а некоторые сцены '
             '(например, ролик после битвы с Ром) могут зависать.\n\nЗамените eboot.bin файлом из '
             'неизменённого обновления 1.09.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Ваше издание (Game of the Year, CUSA03173) уже содержит The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Ваше издание ({}) уже содержит The Old Hunters.',
         'Your game':
             'Ваша игра',
         'Your game and your PC':
@@ -1257,8 +1259,8 @@ WORLD = {
             'Предел задаёт ваша видеокарта.',
         'Your memory sets the limit.':
             'Предел задаёт ваша оперативная память.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Ваши собственные файлы Bloodborne (CUSA03173, Game of the Year Edition) с обновлением 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Ваши собственные файлы Bloodborne (любое издание) с обновлением 1.09.',
         'Your previous saves: {}':
             'Ваши прежние сохранения: {}',
         'Your processor sets the limit.':
@@ -1415,8 +1417,8 @@ WORLD = {
             'Настроек, отличающихся от рекомендуемых: {}.',
         '{} · version {}':
             '{} · версия {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: порт рассчитан на CUSA03173 — издание Game of the Year Edition. Другие издания могут не работать.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: это не розничное издание Bloodborne. Порт запускает Bloodborne любого региона, включая издания Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Нет файлов FSR 4: пока используется FSR 3.1. Нажмите, чтобы скачать (30 МБ)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -1761,8 +1763,10 @@ WORLD = {
             'المعالج',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'المعالجات التي لا تدعم AVX (كثير من طرازات Pentium/Celeron) لا يمكنها تشغيله إطلاقًا.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: إصدار Game of the Year Edition، مع The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: إصدار Game of the Year Edition، مع The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: اللعبة الأساسية. The Old Hunters، إن كنت تملكها، تأتي من مجلد المحتوى الإضافي (ملفات اللعبة).',
         'Cache folder':
             'مجلد الكاش',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -1805,8 +1809,8 @@ WORLD = {
             'فحص اللعبة',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'تحقق من النتيجة: يجب أن تكون eboot.bin (نحو 89 MB) وsce_module وsce_sys وdvdroot_ps4 (نحو 29 GB) داخله مباشرةً. The Old Hunters جزء من إصدار GOTY أصلًا.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'تحقق من الحجم: حجم eboot.bin الخاص بالتحديث 93,825,704 بايت بالضبط (89.4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'تحقق من الحجم: حجم eboot.bin الخاص بالتحديث 93,825,704 بايت بالضبط (89.4 MB)، أو 93,667,640 بايت كملف ELF عادي.',
         'Check this installation':
             'فحص هذا التثبيت',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -2139,9 +2143,9 @@ WORLD = {
             'هل مجلد اللعبة سليم؟ «المساعدة» تفحصه.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'تلف أثناء فك الضغط (يذكر السجل «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'ليس الملف الأصلي (ملف PS4 SELF): حوّلته أداة أخرى، أو أنه ليس من Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'ليس الملف الأصلي (ملف PS4 SELF) ولا ملف ELF عاديًا: ما زال مشفّرًا، أو حوّلته أداة أخرى، أو أنه ليس من Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'قد يبدأ التشغيل، لكن توقّع معدلات إطارات منخفضة ومشكلات.',
         'Items and menus':
@@ -2490,8 +2494,8 @@ WORLD = {
             'استرجاع',
         'Right half of the touchpad (debug menu)':
             'النصف الأيمن من لوحة اللمس (قائمة التصحيح)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'انقر بزر الماوس الأيمن على eboot.bin > خصائص: حجم الملف السليم 93,825,704 بايت بالضبط.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'انقر بزر الماوس الأيمن على eboot.bin > خصائص: حجم الملف السليم 93,825,704 بايت بالضبط (93,667,640 إذا حفظته أداة التفريغ كملف ELF عادي).',
         'Route':
             'المسار',
         'Run {}: the game is starting.':
@@ -2896,8 +2900,8 @@ WORLD = {
             'بدون حد، مقيّد بتردد الشاشة (بحد أقصى 120): يُتوقع أن يتجاوز حاسوبك 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'ضع تحديث 1.09 مجددًا في مجلد جديد فارغ.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'استخدم eboot.bin من تحديث 1.09 غير معدّل (93,825,704 بايت بالضبط).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'استخدم eboot.bin من تحديث 1.09 غير معدّل (93,825,704 بايت بالضبط، أو 93,667,640 كملف ELF عادي).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'استخدم eboot.bin من تحديث 1.09 غير معدّل في مجلد جديد فارغ. لا تستخدم ملف eboot.bin منفردًا '
@@ -3020,8 +3024,8 @@ WORLD = {
         'it: the game runs at 30 FPS, the Game & effects options do nothing, and some scenes (like the '
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             'ملف eboot.bin لديك ليس ملف 1.09 السليم (معدّل، أو من نسخة أخرى). لا يستطيع المنفذ ترقيعه: تعمل اللعبة بـ 30 FPS، ولا تعمل خيارات «اللعبة والمؤثرات»، وقد تتجمد بعض المشاهد (مثل المشهد السينمائي بعد روم).\n\nاستبدل eboot.bin بالملف الموجود في تحديث 1.09 غير معدّل.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'إصدارك (Game of the Year، CUSA03173) يتضمن The Old Hunters بالفعل.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'إصدارك ({}) يتضمن The Old Hunters بالفعل.',
         'Your game':
             'لعبتك',
         'Your game and your PC':
@@ -3042,8 +3046,8 @@ WORLD = {
             'بطاقة الرسومات هي العامل المحدِّد.',
         'Your memory sets the limit.':
             'الذاكرة هي العامل المحدِّد.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'ملفات Bloodborne الخاصة بك (CUSA03173، إصدار Game of the Year) مع تحديث 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'ملفات Bloodborne الخاصة بك (أي إصدار) مع تحديث 1.09.',
         'Your previous saves: {}':
             'ملفات حفظك السابقة: {}',
         'Your processor sets the limit.':
@@ -3206,8 +3210,8 @@ WORLD = {
             '{} إعدادات تختلف عن التوصية.',
         '{} · version {}':
             '{} · الإصدار {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: المنفذ مصمم لـ CUSA03173، أي Game of the Year Edition. قد لا تعمل الإصدارات الأخرى.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: ليس إصدارًا تجاريًا من Bloodborne. يشغّل المنفذ Bloodborne من أي منطقة، بما في ذلك إصدارات Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• ملفات FSR 4 غير موجودة: يُستخدم FSR 3.1 مؤقتًا. انقر للتنزيل (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -3431,8 +3435,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Las CPU sin AVX (muchos modelos Pentium/Celeron) no pueden ejecutarlo en absoluto.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: una Game of the Year Edition, con The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: el juego base. The Old Hunters, si lo tienes, viene de su carpeta de DLC (Archivos del juego).',
         'Cache folder':
             'Carpeta de caché',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -3475,8 +3481,8 @@ WORLD = {
             'Comprobar el juego',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Comprueba el resultado: eboot.bin (unos 89 MB), sce_module, sce_sys y dvdroot_ps4 (unos 29 GB) están directamente dentro. The Old Hunters ya forma parte de la edición GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Comprueba el tamaño: el eboot.bin de la actualización tiene exactamente 93.825.704 bytes (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Comprueba el tamaño: el eboot.bin de la actualización tiene exactamente 93.825.704 bytes (89,4 MB), o 93.667.640 bytes como archivo ELF simple.',
         'Check this installation':
             'Comprobar esta instalación',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -3810,10 +3816,10 @@ WORLD = {
             '¿Está bien la carpeta del juego? Ayuda la comprueba.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Se dañó al extraerlo (el registro dice «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'No es el archivo original (un archivo SELF de PS4): otra herramienta lo ha convertido o no es '
-            'de Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'No es el archivo original (un archivo SELF de PS4) ni un archivo ELF simple: sigue cifrado, '
+            'otra herramienta lo ha convertido o no es de Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Puede que se inicie, pero espera FPS bajos y problemas.',
         'Items and menus':
@@ -4164,8 +4170,8 @@ WORLD = {
             'Restaurar',
         'Right half of the touchpad (debug menu)':
             'Mitad derecha del touchpad (menú de depuración)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic derecho en eboot.bin > Propiedades: el archivo limpio tiene exactamente 93.825.704 bytes.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic derecho en eboot.bin > Propiedades: el archivo limpio tiene exactamente 93.825.704 bytes (93.667.640 si tu herramienta de volcado lo guardó como un archivo ELF simple).',
         'Route':
             'Ruta',
         'Run {}: the game is starting.':
@@ -4571,8 +4577,8 @@ WORLD = {
             'Sin límite, con tope en la frecuencia de la pantalla (como máximo 120): se espera que tu PC supere los 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Vuelve a poner la actualización 1.09 en una carpeta nueva y vacía.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Usa el eboot.bin de una actualización 1.09 sin modificar (exactamente 93.825.704 bytes).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Usa el eboot.bin de una actualización 1.09 sin modificar (exactamente 93.825.704 bytes, o 93.667.640 como archivo ELF simple).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Usa el eboot.bin de una actualización 1.09 sin modificar, en una carpeta nueva y vacía. No uses '
@@ -4698,8 +4704,8 @@ WORLD = {
             'parchearlo: el juego va a 30 FPS, las opciones de Juego y efectos no hacen nada y algunas '
             'escenas (como la cinemática tras Rom) pueden congelarse.\n\nReemplaza eboot.bin por el de una '
             'actualización 1.09 sin modificar.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Tu edición (Game of the Year, CUSA03173) ya incluye The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Tu edición ({}) ya incluye The Old Hunters.',
         'Your game':
             'Tu juego',
         'Your game and your PC':
@@ -4721,9 +4727,8 @@ WORLD = {
             'El límite lo pone tu tarjeta gráfica.',
         'Your memory sets the limit.':
             'El límite lo pone tu memoria.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Tus propios archivos de Bloodborne (CUSA03173, Game of the Year Edition) con la actualización '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Tus propios archivos de Bloodborne (cualquier edición) con la actualización 1.09.',
         'Your previous saves: {}':
             'Tus partidas anteriores: {}',
         'Your processor sets the limit.':
@@ -4886,8 +4891,8 @@ WORLD = {
             '{} ajustes difieren de la recomendación.',
         '{} · version {}':
             '{} · versión {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: el port está hecho para CUSA03173, la Game of the Year Edition. Puede que otras ediciones no funcionen.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: no es una edición comercial de Bloodborne. El port ejecuta Bloodborne de cualquier región, también las ediciones Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Faltan los archivos de FSR 4: mientras tanto se usa FSR 3.1. Haz clic para descargarlos (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -5109,8 +5114,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'CPUs sem AVX (muitos modelos Pentium/Celeron) não conseguem rodá-lo de jeito nenhum.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: a Game of the Year Edition, com The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: uma Game of the Year Edition, com The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: o jogo base. The Old Hunters, se você tiver, vem da pasta de DLC (Arquivos do jogo).',
         'Cache folder':
             'Pasta de cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -5153,8 +5160,8 @@ WORLD = {
             'Verificar o jogo',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Confira o resultado: eboot.bin (cerca de 89 MB), sce_module, sce_sys e dvdroot_ps4 (cerca de 29 GB) ficam diretamente na pasta. The Old Hunters já faz parte da edição GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Confira o tamanho: o eboot.bin da atualização tem exatamente 93.825.704 bytes (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Confira o tamanho: o eboot.bin da atualização tem exatamente 93.825.704 bytes (89,4 MB), ou 93.667.640 bytes como arquivo ELF simples.',
         'Check this installation':
             'Verificar esta instalação',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -5488,10 +5495,10 @@ WORLD = {
             'A pasta do jogo está certa? A Ajuda verifica.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Ele se corrompeu durante a extração (o registro diz "prepare failed: out of bounds").',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Não é o arquivo original (um arquivo SELF de PS4): outra ferramenta o converteu, ou ele não é '
-            'do Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Não é o arquivo original (um arquivo SELF de PS4) nem um arquivo ELF simples: ainda está '
+            'criptografado, outra ferramenta o converteu, ou ele não é do Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'O jogo pode até iniciar, mas espere taxas de quadros baixas e problemas.',
         'Items and menus':
@@ -5841,8 +5848,8 @@ WORLD = {
             'Restaurar',
         'Right half of the touchpad (debug menu)':
             'Metade direita do touchpad (menu de depuração)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clique com o botão direito em eboot.bin > Propriedades: o arquivo limpo tem exatamente 93.825.704 bytes.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clique com o botão direito em eboot.bin > Propriedades: o arquivo limpo tem exatamente 93.825.704 bytes (93.667.640 se a sua ferramenta de dump o salvou como um arquivo ELF simples).',
         'Route':
             'Trajeto',
         'Run {}: the game is starting.':
@@ -6245,8 +6252,8 @@ WORLD = {
             'Sem limite, até a taxa da tela (no máximo 120): o seu PC deve passar de 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Coloque a atualização 1.09 de novo em uma pasta nova e vazia.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Use o eboot.bin de uma atualização 1.09 sem modificações (exatamente 93.825.704 bytes).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Use o eboot.bin de uma atualização 1.09 sem modificações (exatamente 93.825.704 bytes, ou 93.667.640 como arquivo ELF simples).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Use o eboot.bin de uma atualização 1.09 sem modificações, em uma pasta nova e vazia. Não use um '
@@ -6370,8 +6377,8 @@ WORLD = {
             'patches nele: o jogo roda a 30 FPS, as opções de efeitos não fazem nada e algumas cenas (como a '
             'cutscene depois de Rom) podem congelar.\n\nSubstitua o eboot.bin pelo de uma atualização 1.09 '
             'não modificada (a Ajuda mostra como).',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Sua edição (Game of the Year, CUSA03173) já inclui The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Sua edição ({}) já inclui The Old Hunters.',
         'Your game':
             'Seu jogo',
         'Your game and your PC':
@@ -6393,9 +6400,8 @@ WORLD = {
             'Sua placa de vídeo é o limite.',
         'Your memory sets the limit.':
             'Sua memória é o limite.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Seus próprios arquivos do Bloodborne (CUSA03173, Game of the Year Edition) com a atualização '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Seus próprios arquivos do Bloodborne (qualquer edição) com a atualização 1.09.',
         'Your previous saves: {}':
             'Seus saves anteriores: {}',
         'Your processor sets the limit.':
@@ -6558,8 +6564,8 @@ WORLD = {
             '{} configurações diferem da recomendação.',
         '{} · version {}':
             '{} · versão {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: o port foi feito para CUSA03173, a Game of the Year Edition. Outras edições podem não funcionar.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: não é uma edição comercial do Bloodborne. O port roda o Bloodborne de qualquer região, inclusive as edições Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Faltam os arquivos do FSR 4: por enquanto usa-se FSR 3.1. Clique para baixar (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -6783,8 +6789,10 @@ WORLD = {
             'Processeur',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Les processeurs sans AVX (beaucoup de modèles Pentium/Celeron) ne peuvent pas du tout le faire tourner.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173 : la Game of the Year Edition, avec The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{} : une Game of the Year Edition, avec The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{} : le jeu de base. The Old Hunters, si vous le possédez, vient de son dossier des DLC (Fichiers du jeu).',
         'Cache folder':
             'Dossier du cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -6827,8 +6835,8 @@ WORLD = {
             'Vérifier le jeu',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Vérifiez le résultat : eboot.bin (environ 89 Mo), sce_module, sce_sys et dvdroot_ps4 (environ 29 Go) s’y trouvent directement. The Old Hunters fait déjà partie de l’édition GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Vérifiez la taille : l’eboot.bin de la mise à jour fait exactement 93 825 704 octets (89,4 Mo).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Vérifiez la taille : l’eboot.bin de la mise à jour fait exactement 93 825 704 octets (89,4 Mo), ou 93 667 640 octets en simple fichier ELF.',
         'Check this installation':
             'Vérifier cette installation',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -7162,10 +7170,10 @@ WORLD = {
             'Le dossier du jeu est-il correct ? L’Aide le vérifie.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Le fichier a été endommagé lors de l’extraction (le journal indique « prepare failed: out of bounds »).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Ce n’est pas le fichier d’origine (un fichier SELF PS4) : un autre outil l’a converti, ou il ne '
-            'vient pas de Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Ce n’est ni le fichier d’origine (un fichier SELF PS4) ni un simple fichier ELF : il est encore '
+            'chiffré, un autre outil l’a converti, ou il ne vient pas de Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Le jeu peut démarrer, mais attendez-vous à des fréquences d’images basses et à des problèmes.',
         'Items and menus':
@@ -7517,8 +7525,8 @@ WORLD = {
             'Restaurer',
         'Right half of the touchpad (debug menu)':
             'Moitié droite du touchpad (menu de débogage)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic droit sur eboot.bin > Propriétés : le fichier d’origine fait exactement 93 825 704 octets.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic droit sur eboot.bin > Propriétés : le fichier d’origine fait exactement 93 825 704 octets (93 667 640 si votre outil de dump l’a écrit sous forme de simple fichier ELF).',
         'Route':
             'Trajet',
         'Run {}: the game is starting.':
@@ -7925,8 +7933,8 @@ WORLD = {
             'Illimité, plafonné à la fréquence de l’écran (120 au maximum) : votre PC devrait dépasser 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Remettez la mise à jour 1.09 dans un nouveau dossier vide.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée (exactement 93 825 704 octets).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée (exactement 93 825 704 octets, ou 93 667 640 en simple fichier ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée, dans un nouveau dossier vide. '
@@ -8052,8 +8060,8 @@ WORLD = {
             'portage ne peut pas le patcher : le jeu tourne à 30 FPS, les options d’effets n’ont aucun '
             'effet, et certaines scènes (comme la cinématique après Rom) peuvent se figer.\n\nRemplacez '
             'eboot.bin par celui d’une mise à jour 1.09 non modifiée.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Votre édition (Game of the Year, CUSA03173) inclut déjà The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Votre édition ({}) inclut déjà The Old Hunters.',
         'Your game':
             'Votre jeu',
         'Your game and your PC':
@@ -8075,9 +8083,8 @@ WORLD = {
             'Votre carte graphique fixe la limite.',
         'Your memory sets the limit.':
             'Votre mémoire fixe la limite.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Vos propres fichiers de Bloodborne (CUSA03173, Game of the Year Edition) avec la mise à jour '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Vos propres fichiers de Bloodborne (toute édition) avec la mise à jour 1.09.',
         'Your previous saves: {}':
             'Vos sauvegardes précédentes : {}',
         'Your processor sets the limit.':
@@ -8240,8 +8247,8 @@ WORLD = {
             '{} réglages diffèrent de la recommandation.',
         '{} · version {}':
             '{} · version {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{} : le portage est conçu pour CUSA03173, la Game of the Year Edition. Les autres éditions risquent de ne pas fonctionner.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{} : ce n’est pas une édition commerciale de Bloodborne. Le portage lance Bloodborne de toutes les régions, les éditions Game of the Year comprises.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Fichiers FSR 4 manquants : FSR 3.1 est utilisé en attendant. Cliquez pour télécharger (30 Mo)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -8465,8 +8472,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Le CPU senza AVX (molti modelli Pentium/Celeron) non possono eseguirlo affatto.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: una Game of the Year Edition, con The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: il gioco base. The Old Hunters, se lo possiedi, arriva dalla sua cartella DLC (File del gioco).',
         'Cache folder':
             'Cartella della cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -8509,8 +8518,8 @@ WORLD = {
             'Verifica il gioco',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Controlla il risultato: eboot.bin (circa 89 MB), sce_module, sce_sys e dvdroot_ps4 (circa 29 GB) sono direttamente all’interno. The Old Hunters è già incluso nell’edizione GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Controlla la dimensione: l’eboot.bin dell’aggiornamento è esattamente di 93.825.704 byte (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Controlla la dimensione: l’eboot.bin dell’aggiornamento è esattamente di 93.825.704 byte (89,4 MB), o di 93.667.640 byte come semplice file ELF.',
         'Check this installation':
             'Verifica questa installazione',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -8844,10 +8853,10 @@ WORLD = {
             'La cartella del gioco è a posto? La pagina Aiuto la verifica.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Si è danneggiato durante l’estrazione (il registro riporta "prepare failed: out of bounds").',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Non è il file originale (un file SELF PS4): un altro strumento lo ha convertito, oppure non è '
-            'di Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Non è né il file originale (un file SELF PS4) né un semplice file ELF: è ancora cifrato, un '
+            'altro strumento lo ha convertito, oppure non è di Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Potrebbe avviarsi, ma aspettati frequenze fotogrammi basse e problemi.',
         'Items and menus':
@@ -9198,8 +9207,8 @@ WORLD = {
             'Ripristina',
         'Right half of the touchpad (debug menu)':
             'Metà destra del touchpad (menu di debug)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic destro su eboot.bin > Proprietà: il file pulito è esattamente di 93.825.704 byte.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic destro su eboot.bin > Proprietà: il file pulito è esattamente di 93.825.704 byte (93.667.640 se lo strumento di dump lo ha salvato come semplice file ELF).',
         'Route':
             'Tragitto',
         'Run {}: the game is starting.':
@@ -9605,8 +9614,8 @@ WORLD = {
             'Senza limite, con tetto alla frequenza dello schermo (al massimo 120): il tuo PC dovrebbe superare i 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Rimetti l’aggiornamento 1.09 in una cartella nuova e vuota.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Usa l’eboot.bin di un aggiornamento 1.09 non modificato (esattamente 93.825.704 byte).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Usa l’eboot.bin di un aggiornamento 1.09 non modificato (esattamente 93.825.704 byte, o 93.667.640 come semplice file ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Usa l’eboot.bin di un aggiornamento 1.09 non modificato, in una cartella nuova e vuota. Non '
@@ -9732,8 +9741,8 @@ WORLD = {
             'non può applicarvi le patch: il gioco gira a 30 FPS, le opzioni degli effetti non fanno nulla e '
             'alcune scene (come il filmato dopo Rom) possono bloccarsi.\n\nSostituisci eboot.bin con quello '
             'di un aggiornamento 1.09 non modificato.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'La tua edizione (Game of the Year, CUSA03173) include già The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'La tua edizione ({}) include già The Old Hunters.',
         'Your game':
             'Il tuo gioco',
         'Your game and your PC':
@@ -9755,8 +9764,8 @@ WORLD = {
             'Il limite è la tua scheda video.',
         'Your memory sets the limit.':
             'Il limite è la tua memoria.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'I tuoi file di Bloodborne (CUSA03173, Game of the Year Edition) con l’aggiornamento 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'I tuoi file di Bloodborne (qualsiasi edizione) con l’aggiornamento 1.09.',
         'Your previous saves: {}':
             'I tuoi salvataggi precedenti: {}',
         'Your processor sets the limit.':
@@ -9919,8 +9928,8 @@ WORLD = {
             '{} impostazioni differiscono da quelle consigliate.',
         '{} · version {}':
             '{} · versione {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: il port è fatto per CUSA03173, la Game of the Year Edition. Altre edizioni potrebbero non funzionare.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: non è un’edizione commerciale di Bloodborne. Il port avvia Bloodborne di ogni regione, anche le edizioni Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Mancano i file di FSR 4: nel frattempo si usa FSR 3.1. Fai clic per scaricarli (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -10144,8 +10153,10 @@ WORLD = {
             'Procesor',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Procesory bez AVX (wiele modeli Pentium/Celeron) w ogóle go nie uruchomią.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: Game of the Year Edition, z The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: Game of the Year Edition, z The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: gra podstawowa. The Old Hunters, jeśli go masz, pochodzi z folderu DLC (Pliki gry).',
         'Cache folder':
             'Folder pamięci podręcznej',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -10188,8 +10199,8 @@ WORLD = {
             'Sprawdź grę',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Sprawdź wynik: eboot.bin (ok. 89 MB), sce_module, sce_sys i dvdroot_ps4 (ok. 29 GB) znajdują się bezpośrednio w środku. The Old Hunters jest już częścią edycji GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Sprawdź rozmiar: eboot.bin z aktualizacji ma dokładnie 93\xa0825\xa0704 bajty (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Sprawdź rozmiar: eboot.bin z aktualizacji ma dokładnie 93\xa0825\xa0704 bajty (89,4 MB) albo 93\xa0667\xa0640 bajtów jako zwykły plik ELF.',
         'Check this installation':
             'Sprawdź tę instalację',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -10523,10 +10534,10 @@ WORLD = {
             'Czy folder gry jest w porządku? Sprawdzi to strona „Pomoc”.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Plik uszkodził się podczas rozpakowywania (w dzienniku jest „prepare failed: out of bounds”).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'To nie jest oryginalny plik (plik PS4 SELF): inne narzędzie go przekonwertowało albo nie '
-            'pochodzi z Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'To nie jest ani oryginalny plik (plik PS4 SELF), ani zwykły plik ELF: jest nadal '
+            'zaszyfrowany, inne narzędzie go przekonwertowało albo nie pochodzi z Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Może się uruchomić, ale spodziewaj się niskiej liczby klatek i problemów.',
         'Items and menus':
@@ -10875,8 +10886,8 @@ WORLD = {
             'Przywróć',
         'Right half of the touchpad (debug menu)':
             'Prawa połowa touchpada (menu debugowania)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Kliknij prawym przyciskiem eboot.bin > Właściwości: czysty plik ma dokładnie 93\xa0825\xa0704 bajty.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Kliknij prawym przyciskiem eboot.bin > Właściwości: czysty plik ma dokładnie 93\xa0825\xa0704 bajty (93\xa0667\xa0640, jeśli narzędzie do zrzutu zapisało go jako zwykły plik ELF).',
         'Route':
             'Trasa',
         'Run {}: the game is starting.':
@@ -11281,8 +11292,8 @@ WORLD = {
             'Bez limitu, z ograniczeniem do odświeżania ekranu (maks. 120): twój PC powinien osiągać ponad 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Ponownie umieść aktualizację 1.09 w nowym, pustym folderze.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09 (dokładnie 93 825 704 bajty).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09 (dokładnie 93 825 704 bajty albo 93 667 640 jako zwykły plik ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09, w nowym, pustym folderze. Nie używaj '
@@ -11408,8 +11419,8 @@ WORLD = {
             'może go załatać: gra działa w 30 FPS, opcje efektów nic nie robią, a niektóre sceny (np. '
             'przerywnik po Rom) mogą się zawiesić.\n\nZastąp eboot.bin plikiem z niezmodyfikowanej '
             'aktualizacji 1.09.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Twoja edycja (Game of the Year, CUSA03173) już zawiera The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Twoja edycja ({}) już zawiera The Old Hunters.',
         'Your game':
             'Twoja gra',
         'Your game and your PC':
@@ -11430,8 +11441,8 @@ WORLD = {
             'Limit wyznacza twoja karta graficzna.',
         'Your memory sets the limit.':
             'Limit wyznacza twoja pamięć.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Twoje własne pliki Bloodborne (CUSA03173, Game of the Year Edition) z aktualizacją 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Twoje własne pliki Bloodborne (dowolne wydanie) z aktualizacją 1.09.',
         'Your previous saves: {}':
             'Twoje poprzednie zapisy: {}',
         'Your processor sets the limit.':
@@ -11594,8 +11605,8 @@ WORLD = {
             'Ustawienia odbiegające od zalecenia: {}.',
         '{} · version {}':
             '{} · wersja {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: port jest przeznaczony dla CUSA03173, Game of the Year Edition. Inne wydania mogą nie działać.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: to nie jest wydanie sklepowe Bloodborne. Port uruchamia Bloodborne z każdego regionu, także wydania Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Brak plików FSR 4: do tego czasu używany jest FSR 3.1. Kliknij, aby pobrać (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -11819,8 +11830,10 @@ WORLD = {
             'İşlemci',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX desteği olmayan işlemciler (birçok Pentium/Celeron modeli) portu hiç çalıştıramaz.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: The Old Hunters’ı içeren Game of the Year Edition.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: The Old Hunters’ı içeren bir Game of the Year Edition.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: ana oyun. The Old Hunters, sahipseniz, DLC klasöründen gelir (Oyun dosyaları).',
         'Cache folder':
             'Önbellek klasörü',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -11863,8 +11876,8 @@ WORLD = {
             'Oyunu kontrol et',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Sonucu kontrol edin: eboot.bin (yaklaşık 89 MB), sce_module, sce_sys ve dvdroot_ps4 (yaklaşık 29 GB) doğrudan klasörün içinde olmalı. The Old Hunters, GOTY baskısında zaten mevcut.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Boyutu kontrol edin: güncellemenin eboot.bin dosyası tam olarak 93.825.704 bayttır (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Boyutu kontrol edin: güncellemenin eboot.bin dosyası tam olarak 93.825.704 bayttır (89,4 MB); düz bir ELF dosyası olarak 93.667.640 bayttır.',
         'Check this installation':
             'Bu kurulumu kontrol et',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -12198,10 +12211,10 @@ WORLD = {
             'Oyun klasörü sorunsuz mu? Yardım sayfası kontrol eder.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Çıkarma sırasında bozuldu (günlükte "prepare failed: out of bounds" yazar).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Orijinal dosya değil (bir PS4 SELF dosyası): başka bir araç dönüştürmüş ya da Bloodborne’a ait '
-            'değil.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Ne orijinal dosya (bir PS4 SELF dosyası) ne de düz bir ELF dosyası: hâlâ şifreli, başka bir '
+            'araç dönüştürmüş ya da Bloodborne’a ait değil.',
         'It may start, but expect low frame rates and problems.':
             'Başlayabilir ama düşük kare hızları ve sorunlar beklenebilir.',
         'Items and menus':
@@ -12551,8 +12564,8 @@ WORLD = {
             'Geri yükle',
         'Right half of the touchpad (debug menu)':
             'Dokunmatik yüzeyin sağ yarısı (hata ayıklama menüsü)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin’e sağ tıklayın > Özellikler: temiz dosya tam olarak 93.825.704 bayttır.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin’e sağ tıklayın > Özellikler: temiz dosya tam olarak 93.825.704 bayttır (döküm aracınız onu düz bir ELF dosyası olarak yazdıysa 93.667.640).',
         'Route':
             'Rota',
         'Run {}: the game is starting.':
@@ -12957,9 +12970,9 @@ WORLD = {
             'Sınırsız, ekran yenileme hızıyla sınırlı (en fazla 120): bilgisayarınızın 60 FPS’in üzerine çıkması bekleniyor.',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 güncellemesini yeniden yeni, boş bir klasöre koyun.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
             'Değiştirilmemiş bir 1.09 güncellemesinin eboot.bin dosyasını kullanın (tam olarak 93.825.704 '
-            'bayt).',
+            'bayt; düz bir ELF dosyası olarak 93.667.640).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Değiştirilmemiş bir 1.09 güncellemesinin eboot.bin dosyasını yeni, boş bir klasörde kullanın. '
@@ -13085,8 +13098,8 @@ WORLD = {
             'yama uygulayamaz: oyun 30 FPS’te çalışır, efekt seçenekleri hiçbir şey yapmaz ve bazı sahneler '
             '(örneğin Rom’dan sonraki ara sahne) donabilir.\n\neboot.bin’i değiştirilmemiş bir 1.09 '
             'güncellemesindeki dosyayla değiştirin.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            "Sürümün (Game of the Year, CUSA03173) The Old Hunters'ı zaten içeriyor.",
+        'Your edition ({}) already includes The Old Hunters.':
+            "Sürümün ({}) The Old Hunters'ı zaten içeriyor.",
         'Your game':
             'Oyununuz',
         'Your game and your PC':
@@ -13107,8 +13120,8 @@ WORLD = {
             'Sınırı ekran kartınız belirliyor.',
         'Your memory sets the limit.':
             'Sınırı belleğiniz belirliyor.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Kendi Bloodborne oyun dosyalarınız (CUSA03173, Game of the Year Edition) ve 1.09 güncellemesi.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Kendi Bloodborne oyun dosyalarınız (herhangi bir baskı) ve 1.09 güncellemesi.',
         'Your previous saves: {}':
             'Önceki kayıtlarınız: {}',
         'Your processor sets the limit.':
@@ -13271,8 +13284,8 @@ WORLD = {
             '{} ayar öneriden farklı.',
         '{} · version {}':
             '{} · sürüm {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: port, Game of the Year Edition olan CUSA03173 için yapıldı. Diğer baskılar çalışmayabilir.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: Bloodborne’un bir perakende baskısı değil. Port, Game of the Year baskıları dahil her bölgenin Bloodborne’unu çalıştırır.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 dosyaları eksik: bu arada FSR 3.1 kullanılıyor. İndirmek için tıklayın (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -13493,8 +13506,10 @@ WORLD = {
             '处理器',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             '不支持 AVX 的 CPU（许多 Pentium/Celeron 型号）完全无法运行。',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173：年度版，含“老猎人”DLC。',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}：年度版，含“老猎人”DLC。',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}：本体游戏。The Old Hunters（如果你拥有）来自它的 DLC 文件夹（游戏文件）。',
         'Cache folder':
             '缓存文件夹',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -13535,8 +13550,8 @@ WORLD = {
             '检查游戏',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '检查结果：eboot.bin（约 89 MB）、sce_module、sce_sys 和 dvdroot_ps4（约 29 GB）应直接位于其中。“老猎人”DLC 已包含在年度版中。',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            '检查大小：更新中的 eboot.bin 正好为 93,825,704 字节（89.4 MB）。',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            '检查大小：更新中的 eboot.bin 正好为 93,825,704 字节（89.4 MB），若为普通 ELF 文件则为 93,667,640 字节。',
         'Check this installation':
             '检查此安装',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -13869,9 +13884,9 @@ WORLD = {
             '游戏文件夹是否正常？“帮助”页面会进行检查。',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '它在解包时损坏了（日志显示“prepare failed: out of bounds”）。',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '这不是原始文件（PS4 SELF 文件）：它已被其他工具转换过，或者并非来自 Bloodborne。',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '它既不是原始文件（PS4 SELF 文件），也不是普通的 ELF 文件：它仍是加密的、已被其他工具转换过，或者并非来自 Bloodborne。',
         'It may start, but expect low frame rates and problems.':
             '也许能启动，但帧率会很低，并可能出现问题。',
         'Items and menus':
@@ -14219,8 +14234,8 @@ WORLD = {
             '恢复',
         'Right half of the touchpad (debug menu)':
             '触摸板右半部分（调试菜单）',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            '右键点击 eboot.bin > 属性：纯净的文件正好为 93,825,704 字节。',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            '右键点击 eboot.bin > 属性：纯净的文件正好为 93,825,704 字节（如果你的导出工具将其保存为普通 ELF 文件，则为 93,667,640 字节）。',
         'Route':
             '路线',
         'Run {}: the game is starting.':
@@ -14617,8 +14632,8 @@ WORLD = {
             '不限帧，上限为显示器刷新率（最高 120）：预计你的电脑可超过 60 FPS。',
         'Put the 1.09 update into a new, empty folder again.':
             '把 1.09 更新重新放进一个新的空文件夹。',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '使用未经修改的 1.09 更新中的 eboot.bin（正好 93,825,704 字节）。',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '使用未经修改的 1.09 更新中的 eboot.bin（正好 93,825,704 字节；若为普通 ELF 文件则为 93,667,640 字节）。',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '在新的空文件夹中使用未经修改的 1.09 更新的 eboot.bin。不要使用别人单独分享的 eboot.bin。',
@@ -14740,8 +14755,8 @@ WORLD = {
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             '你的 eboot.bin 不是纯净的 1.09 版本（被修改过，或来自其他版本）。移植版无法为它打补丁：游戏将以 30 FPS '
             '运行，“游戏与效果”中的选项无效，某些场景（例如罗姆之后的过场动画）可能会卡死。\n\n请用未经修改的 1.09 更新中的 eboot.bin 替换它。',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            '你的版本（年度版，CUSA03173）已包含 The Old Hunters。',
+        'Your edition ({}) already includes The Old Hunters.':
+            '你的版本（{}）已包含 The Old Hunters。',
         'Your game':
             '你的游戏',
         'Your game and your PC':
@@ -14762,8 +14777,8 @@ WORLD = {
             '瓶颈在于你的显卡。',
         'Your memory sets the limit.':
             '瓶颈在于你的内存。',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            '你自己的 Bloodborne 游戏文件（CUSA03173，年度版），含 1.09 更新。',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            '你自己的 Bloodborne 游戏文件（任意发行版），含 1.09 更新。',
         'Your previous saves: {}':
             '你之前的存档：{}',
         'Your processor sets the limit.':
@@ -14926,8 +14941,8 @@ WORLD = {
             '有 {} 项设置与推荐不一致。',
         '{} · version {}':
             '{} · 版本 {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}：本移植版是为 CUSA03173（年度版）制作的。其他版本可能无法运行。',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}：这不是 Bloodborne 的零售版本。本移植版可运行任何地区的 Bloodborne，包括年度版。',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• 缺少 FSR 4 文件：暂时使用 FSR 3.1。点击下载（30 MB）',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -15148,8 +15163,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX 非対応の CPU（Pentium/Celeron の多くのモデル）ではまったく動作しません。',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173：The Old Hunters を収録した Game of the Year Edition。',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}：The Old Hunters を収録した Game of the Year Edition。',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}：本編のみ。The Old Hunters をお持ちの場合は DLC フォルダー（ゲームファイル）から読み込みます。',
         'Cache folder':
             'キャッシュフォルダー',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -15190,8 +15207,8 @@ WORLD = {
             'ゲームの確認',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '結果を確認してください：eboot.bin（約 89 MB）、sce_module、sce_sys、dvdroot_ps4（約 29 GB）がフォルダーの直下にあること。The Old Hunters は GOTY 版にすでに含まれています。',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'サイズを確認してください：アップデートの eboot.bin はちょうど 93,825,704 バイト（89.4 MB）です。',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'サイズを確認してください：アップデートの eboot.bin はちょうど 93,825,704 バイト（89.4 MB）、プレーンな ELF ファイルなら 93,667,640 バイトです。',
         'Check this installation':
             'このインストールを確認',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -15524,9 +15541,9 @@ WORLD = {
             'ゲームフォルダーに問題はありませんか？「ヘルプ」で確認できます。',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '展開中に壊れています（ログに「prepare failed: out of bounds」と出ます）。',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '元のファイル（PS4 の SELF ファイル）ではありません。別のツールで変換されたか、Bloodborne のものではありません。',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '元のファイル（PS4 の SELF ファイル）でもプレーンな ELF ファイルでもありません。まだ暗号化されているか、別のツールで変換されたか、Bloodborne のものではありません。',
         'It may start, but expect low frame rates and problems.':
             '起動はするかもしれませんが、フレームレートが低く、問題が起きる可能性があります。',
         'Items and menus':
@@ -15874,8 +15891,8 @@ WORLD = {
             '復元',
         'Right half of the touchpad (debug menu)':
             'タッチパッドの右半分（デバッグメニュー）',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin を右クリック > プロパティ：無改変のファイルはちょうど 93,825,704 バイトです。',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin を右クリック > プロパティ：無改変のファイルはちょうど 93,825,704 バイトです（ダンプツールがプレーンな ELF ファイルとして書き出した場合は 93,667,640 バイト）。',
         'Route':
             'ルート',
         'Run {}: the game is starting.':
@@ -16273,8 +16290,8 @@ WORLD = {
             '無制限、ディスプレイのリフレッシュレートが上限（最大 120）：この PC は 60 FPS を超えると予想されます。',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 アップデートを新しい空のフォルダーに入れ直してください。',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '改変されていない 1.09 アップデートの eboot.bin（ちょうど 93,825,704 バイト）を使ってください。',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '改変されていない 1.09 アップデートの eboot.bin（ちょうど 93,825,704 バイト、プレーンな ELF ファイルなら 93,667,640 バイト）を使ってください。',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '改変されていない 1.09 アップデートの eboot.bin を、新しい空のフォルダーで使ってください。誰かが単体で共有した eboot.bin は使わないでください。',
@@ -16397,8 +16414,8 @@ WORLD = {
             'お使いの eboot.bin は無改変の 1.09 のものではありません（改変されているか、別の版のもの）。移植版はこれにパッチを当てられないため、ゲームは 30 FPS '
             'で動作し、「ゲームとエフェクト」のオプションは効かず、一部の場面（ロマ撃破後のムービーなど）でフリーズすることがあります。\n\neboot.bin を、改変されていない 1.09 '
             'アップデートのものに置き換えてください。',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'お使いのエディション（Game of the Year、CUSA03173）には The Old Hunters が含まれています。',
+        'Your edition ({}) already includes The Old Hunters.':
+            'お使いのエディション（{}）には The Old Hunters が含まれています。',
         'Your game':
             'あなたのゲーム',
         'Your game and your PC':
@@ -16419,8 +16436,8 @@ WORLD = {
             'グラフィックカードが上限を決めています。',
         'Your memory sets the limit.':
             'メモリが上限を決めています。',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'ご自身の Bloodborne のゲームファイル（CUSA03173、Game of the Year Edition）と 1.09 アップデート。',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'ご自身の Bloodborne のゲームファイル（どのエディションでも可）と 1.09 アップデート。',
         'Your previous saves: {}':
             '以前のセーブデータ：{}',
         'Your processor sets the limit.':
@@ -16583,8 +16600,8 @@ WORLD = {
             '{} 項目の設定が推奨と異なります。',
         '{} · version {}':
             '{} · バージョン {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}：移植版は CUSA03173（Game of the Year Edition）向けに作られています。他のエディションでは動作しない可能性があります。',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}：Bloodborne の製品版ではありません。移植版はすべての地域の Bloodborne（Game of the Year Edition を含む）を実行できます。',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 ファイルがありません：当面は FSR 3.1 を使用します。クリックでダウンロード（30 MB）',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -16806,8 +16823,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX가 없는 CPU (여러 Pentium/Celeron 모델)에서는 아예 실행할 수 없습니다.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: The Old Hunters가 포함된 Game of the Year Edition.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: The Old Hunters가 포함된 Game of the Year Edition.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: 기본 게임입니다. The Old Hunters를 보유하고 있다면 DLC 폴더(게임 파일)에서 가져옵니다.',
         'Cache folder':
             '캐시 폴더',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -16848,8 +16867,8 @@ WORLD = {
             '게임 확인',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '결과를 확인하세요: eboot.bin (약 89 MB), sce_module, sce_sys, dvdroot_ps4 (약 29 GB)가 폴더 바로 안에 있어야 합니다. The Old Hunters는 GOTY 에디션에 이미 포함되어 있습니다.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            '크기를 확인하세요: 업데이트의 eboot.bin은 정확히 93,825,704바이트 (89.4 MB)입니다.',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            '크기를 확인하세요: 업데이트의 eboot.bin은 정확히 93,825,704바이트 (89.4 MB)이며, 일반 ELF 파일이라면 93,667,640바이트입니다.',
         'Check this installation':
             '이 설치 확인',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -17182,9 +17201,9 @@ WORLD = {
             '게임 폴더에 문제가 없나요? 도움말에서 확인할 수 있습니다.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '압축 해제 중에 손상되었습니다 (로그에 "prepare failed: out of bounds"가 표시됨).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '원본 파일(PS4 SELF 파일)이 아닙니다. 다른 도구로 변환되었거나 Bloodborne의 파일이 아닙니다.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '원본 파일(PS4 SELF 파일)도 일반 ELF 파일도 아닙니다. 아직 암호화되어 있거나, 다른 도구로 변환되었거나, Bloodborne의 파일이 아닙니다.',
         'It may start, but expect low frame rates and problems.':
             '시작은 될 수 있지만 낮은 프레임 속도와 여러 문제를 각오하세요.',
         'Items and menus':
@@ -17533,8 +17552,8 @@ WORLD = {
             '복원',
         'Right half of the touchpad (debug menu)':
             '터치패드 오른쪽 절반 (디버그 메뉴)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin을 마우스 오른쪽 버튼으로 클릭 > 속성: 원본 파일은 정확히 93,825,704바이트입니다.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin을 마우스 오른쪽 버튼으로 클릭 > 속성: 원본 파일은 정확히 93,825,704바이트입니다(덤프 도구가 일반 ELF 파일로 저장했다면 93,667,640바이트).',
         'Route':
             '경로',
         'Run {}: the game is starting.':
@@ -17932,8 +17951,8 @@ WORLD = {
             '제한 없음, 디스플레이 주사율로 상한 (최대 120): 이 PC는 60 FPS 이상이 예상됩니다.',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 업데이트를 새 빈 폴더에 다시 넣으세요.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '수정되지 않은 1.09 업데이트의 eboot.bin(정확히 93,825,704바이트)을 사용하세요.',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '수정되지 않은 1.09 업데이트의 eboot.bin(정확히 93,825,704바이트, 일반 ELF 파일이라면 93,667,640바이트)을 사용하세요.',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '수정되지 않은 1.09 업데이트의 eboot.bin을 새 빈 폴더에서 사용하세요. 누군가 따로 공유한 eboot.bin은 쓰지 마세요.',
@@ -18055,8 +18074,8 @@ WORLD = {
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             'eboot.bin이 원본 1.09 파일이 아닙니다 (수정되었거나 다른 버전의 파일). 포트가 패치할 수 없어 게임이 30 FPS로 실행되고, 효과 옵션이 작동하지 않으며, '
             '일부 장면 (롬 이후의 컷신 등)에서 멈출 수 있습니다.\n\neboot.bin을 수정되지 않은 1.09 업데이트의 파일로 바꾸세요.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            '이 에디션(Game of the Year, CUSA03173)에는 The Old Hunters가 이미 포함되어 있습니다.',
+        'Your edition ({}) already includes The Old Hunters.':
+            '이 에디션({})에는 The Old Hunters가 이미 포함되어 있습니다.',
         'Your game':
             '내 게임',
         'Your game and your PC':
@@ -18077,8 +18096,8 @@ WORLD = {
             '그래픽 카드가 성능의 한계입니다.',
         'Your memory sets the limit.':
             '메모리가 성능의 한계입니다.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            '본인의 Bloodborne 게임 파일(CUSA03173, Game of the Year Edition)과 1.09 업데이트.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            '본인의 Bloodborne 게임 파일(모든 에디션)과 1.09 업데이트.',
         'Your previous saves: {}':
             '이전 세이브: {}',
         'Your processor sets the limit.':
@@ -18241,8 +18260,8 @@ WORLD = {
             '설정 {}개가 권장값과 다릅니다.',
         '{} · version {}':
             '{} · 버전 {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: 이 포트는 Game of the Year Edition인 CUSA03173용으로 만들어졌습니다. 다른 에디션은 작동하지 않을 수 있습니다.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: Bloodborne의 정식 발매판이 아닙니다. 이 포트는 Game of the Year Edition을 포함해 모든 지역의 Bloodborne을 실행합니다.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 파일 없음: 그동안 FSR 3.1 사용. 클릭하여 다운로드 (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':

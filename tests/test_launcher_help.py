@@ -140,6 +140,13 @@ class FileTests(unittest.TestCase):
             self.assertEqual(help_.eboot_state(folder)[0], 'unreadable')
             (Path(folder) / 'eboot.bin').write_bytes(b'O\x15=\x1d' + bytes(60))
             self.assertIn(help_.eboot_state(folder)[0], ('truncated', 'unreadable'))
+            # A plain ELF dump is read (US CUSA00900 seen so): not the 1.09 build here, so modified.
+            from prepare import parse_self
+            from test_prepare import fixture
+            (Path(folder) / 'eboot.bin').write_bytes(bytes(parse_self(fixture())[0]))
+            self.assertEqual(help_.eboot_state(folder)[0], 'modified')
+        self.assertEqual(help_.clean_size(b'\x7fELF\x02\x01\x01'), help_.EBOOT_ELF_SIZE)
+        self.assertEqual(help_.clean_size(b'O\x15=\x1d'), help_.EBOOT_SIZE)
 
     def test_scan_and_mods(self):
         with tempfile.TemporaryDirectory() as folder:

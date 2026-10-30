@@ -135,6 +135,16 @@ def image_sha256(game):
     return hashlib.sha256(eboot_image(game)).hexdigest()
 
 
+def default_game():
+    """Without BB_GAME_DIR: a retail release's folder beside the port (CUSA03173 first, as before)."""
+    sys.path.insert(0, str(PORT / 'scripts'))
+    from patches import BLOODBORNE_IDS
+    for title in sorted(BLOODBORNE_IDS, key=lambda title: (title != 'CUSA03173', title)):
+        if (PORT.parent / title / 'eboot.bin').is_file():
+            return PORT.parent / title
+    return PORT.parent / 'CUSA03173'
+
+
 def fail(message):
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -575,7 +585,7 @@ def main():
         if clang64.is_dir():
             env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
 
-    game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03173'))
+    game = Path(env['BB_GAME_DIR']) if env.get('BB_GAME_DIR') else default_game()
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()

@@ -767,7 +767,9 @@ def add_ons(folder):
 
 def dlc_status(game_dir, dlc_dir, user_dir):
     """('ok' | 'warn' | 'none', text): does the game get The Old Hunters?"""
-    edition = title_id(game_dir) == 'CUSA03173'  # the Game of the Year Edition has it
+    from patches import OLD_HUNTERS_IDS
+    serial = title_id(game_dir)
+    edition = serial in OLD_HUNTERS_IDS  # the Game of the Year editions have it
     if dlc_dir:
         folder = Path(dlc_dir)
         if not folder.is_dir():
@@ -788,7 +790,7 @@ def dlc_status(game_dir, dlc_dir, user_dir):
     if addcont.is_dir() and any(OLD_HUNTERS in add_ons(title) for title in addcont.iterdir()):
         return 'ok', _('The Old Hunters found in the saves folder (addcont).')
     if edition:
-        return 'ok', _('Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.')
+        return 'ok', _('Your edition ({}) already includes The Old Hunters.').format(serial)
     return 'none', _('The Old Hunters: not found. Only needed if you own it; without it its areas stay closed.')
 
 
@@ -2550,7 +2552,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         x, y = px(40), int(h * 0.27)
         info = game_info(self.var('game_dir', 'app').get())
         if info:
-            first = (_('CUSA03173 · game version {}', 'CUSA03173 · версия игры {}').format(info[1]), GOLD, theme.GOLD, ())
+            edition = title_id(self.var('game_dir', 'app').get()) or info[0]  # the dump's CUSA id
+            first = (_('{} · game version {}', '{} · версия игры {}').format(edition, info[1]), GOLD, theme.GOLD, ())
         else:
             first = (renamed(_('Choose your game folder (Game & effects)', 'Выберите папку игры («Игра и эффекты»)')),
                      theme.TEXT_STRONG, theme.BLOOD_LIGHT, ('choose',))
@@ -2816,13 +2819,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.section(f, _('Game', 'Игра'), top=4)
         self.folder(f, 'game_dir', _('Game folder', 'Папка игры'),
                     _('Choose the folder with eboot.bin', 'Выберите папку с eboot.bin'),
-                    _('Your own game files of CUSA03173 (eboot.bin, sce_module, sce_sys, dvdroot_ps4); '
-                      'version 1.09 for the community patches.',
-                      'Ваши собственные файлы игры CUSA03173 (eboot.bin, sce_module, sce_sys, dvdroot_ps4); '
-                      'версия 1.09 для патчей сообщества.'), on_change=self.game_changed)
+                    _('Your own Bloodborne game files, any edition (eboot.bin, sce_module, sce_sys, '
+                      'dvdroot_ps4); version 1.09 for the community patches.',
+                      'Ваши собственные файлы Bloodborne, любое издание (eboot.bin, sce_module, sce_sys, '
+                      'dvdroot_ps4); версия 1.09 для патчей сообщества.'), on_change=self.game_changed)
         self.folder(f, 'dlc_dir', _('DLC folder'), _('Choose the DLC folder'),
                     _('Your add-ons, one folder each named like SPEXPANSIONDLC03 (The Old Hunters). Only '
-                      'needed with the base game alone; the Game of the Year edition (CUSA03173) has it.'))
+                      'needed with the base game alone; the Game of the Year editions have it.'))
         dlc = self.tk.Label(f, text='', bg=PANEL, font=(theme.BODY, 9), justify='left', anchor='w')
         dlc.grid(row=self.next_row(f), column=1, sticky='w', pady=(4, 2))
 
@@ -4951,8 +4954,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.refresh_status()
                 return
         if not game_info(self.app['game_dir']):
-            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
-                                                      'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin.',
+                                                      'Выберите папку игры с eboot.bin.'))
             self.show('game')
             return
         problem = start_problem(self.app)

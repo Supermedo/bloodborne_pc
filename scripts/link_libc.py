@@ -22,7 +22,7 @@ if _prepare_spec is None or _prepare_spec.loader is None:
 _prepare = importlib.util.module_from_spec(_prepare_spec)
 sys.modules['prepare'] = _prepare
 _prepare_spec.loader.exec_module(_prepare)
-parse_self, span, unpack = _prepare.parse_self, _prepare.span, _prepare.unpack
+image_sha256, parse_self, span, unpack = _prepare.image_sha256, _prepare.parse_self, _prepare.span, _prepare.unpack
 from cpu_compat import atomic_output, patch_libc
 
 
@@ -83,7 +83,8 @@ def module(path):
             relocations.append((target, info & 0xffffffff, info >> 32, addend))
     return dict(elf=elf, header=header, ph=ph, tags=tags, symbols=symbols,
                 relocs=relocations, identity=identity, libraries=libraries, modules=modules,
-                sha256=hashlib.sha256(source).hexdigest(), missing=missing)
+                sha256=hashlib.sha256(source).hexdigest(), image_sha256=image_sha256(elf, ph),
+                missing=missing)
 
 
 def link(game, out):

@@ -394,8 +394,8 @@ UI = {'de': {
         'Keine Erweiterung in diesem Ordner: The Old Hunters ist darin ein Ordner namens {}.',
     'The Old Hunters found in the saves folder (addcont).':
         'The Old Hunters im Spielstandordner gefunden (addcont).',
-    'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-        'Deine Ausgabe (Game of the Year, CUSA03173) enthält The Old Hunters schon.',
+    'Your edition ({}) already includes The Old Hunters.':
+        'Deine Ausgabe ({}) enthält The Old Hunters schon.',
     'The Old Hunters: not found. Only needed if you own it; without it its areas stay closed.':
         'The Old Hunters: nicht gefunden. Nur nötig, wenn du es besitzt; ohne bleiben seine Gebiete verschlossen.',
     'Width × height, e.g. 2400x1080 (from 640x360 to 7680x4320).':
