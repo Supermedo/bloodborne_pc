@@ -1520,7 +1520,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         root.geometry(f'{min(self.px(1180), free_w)}x{min(self.px(760), free_h)}')
         root.minsize(min(self.px(1000), free_w), min(self.px(680), free_h))
         self.compact = min(self.px(760), free_h) < self.px(740)  # a short screen: smaller banner and emblem
-        theme.load_fonts(root)
+        theme.load_fonts(root, LANG)
         self.theme = theme.Theme(root, self.dpi)
         self.set_icon()
         self.style()
@@ -2354,7 +2354,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
     def title_state(self):
         """The maximize button's glyph follows the window's state; Windows learns where the bar is."""
-        if not getattr(self, 'title_buttons', None):
+        if not getattr(self, 'title_buttons', None) or not self.title_buttons['maximize'].winfo_exists():
             return
         zoomed = self.root.state() == 'zoomed'
         glyph = self.TITLE_ICONS['restore' if zoomed else 'maximize']

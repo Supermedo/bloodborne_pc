@@ -500,6 +500,17 @@ set_source_files_properties(../tests/test_fsr411_sharpen.cpp PROPERTIES
 target_link_libraries(fsr411-sharpen-test PRIVATE Vulkan::Vulkan)
 add_dependencies(fsr411-sharpen-test host_shaders)
 
+# UI language/font checks without a game dump or Vulkan device.
+add_executable(chinese-ui-test EXCLUDE_FROM_ALL ../tests/test_chinese_ui.cpp
+    third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp)
+target_include_directories(chinese-ui-test PRIVATE shim third_party/imgui)
+target_compile_options(chinese-ui-test PRIVATE -UNDEBUG)
+target_compile_definitions(chinese-ui-test PRIVATE IMGUI_DISABLE_SSE)
+if (WIN32)
+    target_link_libraries(chinese-ui-test PRIVATE user32 gdi32 imm32)
+endif()
+
 # Normalize dependency include paths for the Windows driver integration.
 foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)
   get_target_property(includes ${dependency} INTERFACE_INCLUDE_DIRECTORIES)

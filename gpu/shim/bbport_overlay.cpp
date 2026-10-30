@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_overlay.h"
+#include "bbport_ui_font.h"
+#include <cstdarg>
 
 #include <algorithm>
 #include <array>
@@ -61,6 +63,7 @@ extern "C" void runtime_restart(void); // bb-probe (probe.c)
 namespace BbOverlay {
 
 namespace {
+using BbUi::Tr;
 
 std::mutex imgui_mutex; // the ImGui context: window thread (input) and present thread
 bool initialized = false;
@@ -355,24 +358,39 @@ void Store(std::atomic<T>& target, T value, bool changed) {
     }
 }
 
+
+void UiText(const char* fmt, ...) { va_list args; va_start(args, fmt); ImGui::TextV(Tr(fmt), args); va_end(args); }
+void UiTextDisabled(const char* fmt, ...) { va_list args; va_start(args, fmt); ImGui::TextDisabledV(Tr(fmt), args); va_end(args); }
+void UiTextWrapped(const char* fmt, ...) { va_list args; va_start(args, fmt); ImGui::TextWrappedV(Tr(fmt), args); va_end(args); }
+void UiTextColored(const ImVec4& color, const char* fmt, ...) { va_list args; va_start(args, fmt); ImGui::TextColoredV(color, Tr(fmt), args); va_end(args); }
+void UiTextUnformatted(const char* text) { ImGui::TextUnformatted(Tr(text)); }
+void UiSeparatorText(const char* text) { ImGui::SeparatorText(Tr(text)); }
+bool UiBegin(const char* name, bool* open, ImGuiWindowFlags flags) { return ImGui::Begin(Tr(name), open, flags); }
+bool UiBeginCombo(const char* name, const char* preview) { return ImGui::BeginCombo(Tr(name), Tr(preview)); }
+bool UiSelectable(const char* text, bool selected) { return ImGui::Selectable(Tr(text), selected); }
+bool UiButton(const char* text) { return ImGui::Button(Tr(text)); }
+bool UiSliderInt(const char* label, int* value, int lo, int hi, const char* format, ImGuiSliderFlags flags = 0) {
+    return ImGui::SliderInt(Tr(label), value, lo, hi, Tr(format), flags);
+}
+
 void Checkbox(const char* label, std::atomic<bool>& value) {
     bool v = value;
-    const bool changed = ImGui::Checkbox(label, &v);
+    const bool changed = ImGui::Checkbox(Tr(label), &v);
     Store(value, v, changed);
 }
 
 void Slider(const char* label, std::atomic<float>& value, float lo, float hi) {
     float v = value;
-    const bool changed = ImGui::SliderFloat(label, &v, lo, hi, "%.2f");
+    const bool changed = ImGui::SliderFloat(Tr(label), &v, lo, hi, "%.2f");
     Store(value, v, changed);
 }
 
 void Hint(const char* text) {
     ImGui::SameLine();
-    ImGui::TextDisabled("(?)");
+    UiTextDisabled("(?)");
     if (ImGui::BeginItemTooltip()) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::TextUnformatted(text);
+        UiTextUnformatted(text);
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
@@ -387,7 +405,7 @@ std::string FpsText() {
     char text[96];
     const int generated = s.frame_gen != BbSettings::FrameGenOff ? s.frame_gen_now.load() : 0;
     if (generated > 0 && s.game_fps > 0.0f) {
-        std::snprintf(text, sizeof(text), "%.0f FPS (game %.0f, frame gen %dx)", shown,
+        std::snprintf(text, sizeof(text), Tr("%.0f FPS (game %.0f, frame gen %dx)"), shown,
                       s.game_fps.load(), int(shown / s.game_fps + 0.5f));
     } else {
         std::snprintf(text, sizeof(text), "%.0f FPS", shown);
@@ -416,7 +434,7 @@ void Fsr41Settings() {
     ImGui::SetNextWindowSize(ImVec2(std::min(420.f*base_scale,max_width),0), ImGuiCond_Appearing);
     const std::string title=std::string(Fsr41Ui::Text(Fsr41Ui::Settings))+"###FSR41Settings";
     if(!ImGui::BeginPopupModal(title.c_str(),nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoTitleBar)) return;
-    ImGui::TextUnformatted(Fsr41Ui::Text(Fsr41Ui::Settings));
+    UiTextUnformatted(Fsr41Ui::Text(Fsr41Ui::Settings));
     ImGui::Spacing();
     if(ImGui::BeginTable("FSR41Methods",2,ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Method",ImGuiTableColumnFlags_WidthStretch,1.1f);
@@ -425,7 +443,7 @@ void Fsr41Settings() {
             if ((route.backend==0 && route.version==BbSettings::UpscalerFsr412) ||
                 (route.backend==1 && route.version==BbSettings::UpscalerFsr411)) {
                 ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
-                ImGui::TextDisabled("FSR %s",route.version==BbSettings::UpscalerFsr412 ? "4.1.2" : "4.1.1");
+                UiTextDisabled("FSR %s",route.version==BbSettings::UpscalerFsr412 ? "4.1.2" : "4.1.1");
             }
             const bool ready=s.FsrMethodSupported(route.version,route.backend);
             const bool selected=s.upscaler==route.version && s.fsr411_backend==route.backend;
@@ -447,7 +465,7 @@ void Fsr41Settings() {
             if(ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) || ImGui::IsItemFocused()) {
                 ImGui::BeginTooltip();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize()*30.f);
-                ImGui::TextUnformatted(Fsr41Ui::Text(route.hint));
+                UiTextUnformatted(Fsr41Ui::Text(route.hint));
                 ImGui::PopTextWrapPos();
                 ImGui::EndTooltip();
             }
@@ -457,13 +475,13 @@ void Fsr41Settings() {
                 status==1 ? ImVec4(.88f,.47f,.44f,1) :
                 status==5 || status==6 || status==8 ? ImVec4(.54f,.55f,.56f,1) : ImVec4(.85f,.64f,.25f,1);
             ImGui::PushTextWrapPos();
-            ImGui::TextColored(color,"%s",Fsr41Ui::Text(Fsr41Ui::Supported+status));
+            UiTextColored(color,"%s",Fsr41Ui::Text(Fsr41Ui::Supported+status));
             ImGui::PopTextWrapPos();
         }
         ImGui::EndTable();
     }
     ImGui::Spacing();
-    if(ImGui::Button(Fsr41Ui::Text(Fsr41Ui::Close))) ImGui::CloseCurrentPopup();
+    if(UiButton(Fsr41Ui::Text(Fsr41Ui::Close))) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 
@@ -480,19 +498,19 @@ void Menu() {
         ImVec2(0.0f, 0.0f),
         ImVec2(FLT_MAX, std::max(viewport->WorkSize.y - 60.0f * base_scale, 200.0f * base_scale)));
     bool keep_open = true;
-    static const std::string title = "Bloodborne - Settings (" + MenuOpeners() + ")###settings";
-    if (!ImGui::Begin(title.c_str(), &keep_open, ImGuiWindowFlags_NoCollapse)) {
+    static const std::string title = std::string(Tr("Bloodborne - Settings")) + " (" + MenuOpeners() + ")###settings";
+    if (!UiBegin(title.c_str(), &keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
-    ImGui::Text("%s", FpsText().c_str());
+    UiText("%s", FpsText().c_str());
 
-    ImGui::SeparatorText("Temporal upscaling");
+    UiSeparatorText("Temporal upscaling");
     static const char* upscalers[] = {"Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (experimental)",
                                      "TAA (native anti-aliasing)", "DLSS (NVIDIA RTX)", "FSR 4.1.2 (experimental)"};
     static const char* later[] = {"XeSS"};
     int upscaler = s.upscaler;
-    if (ImGui::BeginCombo("Upscaler", IsFsr41(upscaler) ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[upscaler])) {
+    if (UiBeginCombo("Upscaler", IsFsr41(upscaler) ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[upscaler])) {
         static const int order[] = {BbSettings::UpscalerOff, BbSettings::UpscalerFsr3,
             BbSettings::UpscalerFsr4,
 #ifdef _WIN32
@@ -509,7 +527,7 @@ void Menu() {
                 : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load() : true;
             ImGui::BeginDisabled(!supported);
             const bool family = i == BbSettings::UpscalerFsr412;
-            if (ImGui::Selectable(family ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[i],
+            if (UiSelectable(family ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[i],
                                   family ? IsFsr41(upscaler) : i == upscaler)) {
                 if (family) {
                     if (!IsFsr41(upscaler)) {
@@ -532,21 +550,21 @@ void Menu() {
             if (!supported) {
                 ImGui::SameLine();
                 if (family) {
-                    ImGui::TextDisabled("- %s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
+                    UiTextDisabled("- %s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
                 } else if (i == BbSettings::UpscalerFsr411) {
-                    ImGui::TextDisabled("- unavailable");
+                    UiTextDisabled("- unavailable");
                     if (const char* problem = s.fsr411_problem.load()) Hint(problem);
                 } else {
-                    ImGui::TextDisabled("- unsupported by this GPU");
+                    UiTextDisabled("- unsupported by this GPU");
                 }
             }
         }
         for (const char* name : later) {
             ImGui::BeginDisabled();
-            ImGui::Selectable(name, false);
+            UiSelectable(name, false);
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextDisabled("- in development");
+            UiTextDisabled("- in development");
         }
         ImGui::EndCombo();
     }
@@ -554,28 +572,28 @@ void Menu() {
     const bool fsr411_selected = IsFsr41(s.upscaler);
     const std::string settings_button = std::string(Fsr41Ui::Text(Fsr41Ui::Settings))+"##FSR41SettingsButton";
     ImGui::BeginDisabled(!fsr411_selected);
-    if (ImGui::Button(settings_button.c_str())) ImGui::OpenPopup("###FSR41Settings");
+    if (UiButton(settings_button.c_str())) ImGui::OpenPopup("###FSR41Settings");
     ImGui::EndDisabled();
     if (fsr411_selected) {
         ImGui::SameLine();
         for (const auto& route : Fsr41Routes) if (route.version==s.upscaler && route.backend==s.fsr411_backend)
-            ImGui::TextDisabled("%s: %s", Fsr41Ui::Text(Fsr41Ui::Selected), route.title);
-    } else if (!AnyFsr41()) ImGui::TextDisabled("%s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
+            UiTextDisabled("%s: %s", Fsr41Ui::Text(Fsr41Ui::Selected), route.title);
+    } else if (!AnyFsr41()) UiTextDisabled("%s", Fsr41Ui::Text(Fsr41Ui::Unavailable));
     Fsr41Settings();
     if (const char* problem = s.fsr4_method_problem.load(); problem && fsr411_selected) {
         ImGui::PushTextWrapPos();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
+        UiTextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
         ImGui::PopTextWrapPos();
     }
 #endif
     if (const char* problem = s.dlss_problem.load(); problem && upscaler == BbSettings::UpscalerDlss) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS: %s", problem);
+        UiTextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS: %s", problem);
     }
     if (const char* problem = s.fsr4_problem.load()) {
         ImGui::PushTextWrapPos();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "FSR 4 unavailable: %s", problem);
+        UiTextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "FSR 4 unavailable: %s", problem);
         if (!BbSettings::IsFsr4(s.upscaler))
-            ImGui::TextUnformatted("The selected mode is active. You can select FSR 4 again.");
+            UiTextUnformatted("The selected mode is active. You can select FSR 4 again.");
         ImGui::PopTextWrapPos();
     }
     if (BbSettings::IsFsr4(s.upscaler)) {
@@ -600,18 +618,18 @@ void Menu() {
     ImGui::BeginDisabled(taa);
     int preset = taa ? BbSettings::NativeAA : s.preset.load();
     char preset_label[64];
-    std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)", BbSettings::PresetName(preset),
+    std::snprintf(preset_label, sizeof(preset_label), Tr("%s (x%.1f)"), Tr(BbSettings::PresetName(preset)),
                   BbSettings::PresetScale(preset));
-    if (ImGui::BeginCombo("Preset", preset_label)) {
+    if (UiBeginCombo("Preset", preset_label)) {
         for (int i = 0; i < BbSettings::PresetCount; ++i) {
             char label[64];
             const float scale = BbSettings::PresetScale(i);
             const int output = s.output_res;
-            std::snprintf(label, sizeof(label), "%s (x%.1f, render %dx%d)",
-                          BbSettings::PresetName(i), scale,
+            std::snprintf(label, sizeof(label), Tr("%s (x%.1f, render %dx%d)"),
+                          Tr(BbSettings::PresetName(i)), scale,
                           int(std::lround(BbSettings::OutputWidths[output] / scale / 2) * 2),
                           int(std::lround(BbSettings::OutputHeights[output] / scale / 2) * 2));
-            if (ImGui::Selectable(label, i == preset)) {
+            if (UiSelectable(label, i == preset)) {
                 Store(s.preset, i, true);
             }
         }
@@ -619,12 +637,12 @@ void Menu() {
     }
     ImGui::EndDisabled();
     if (taa) {
-        ImGui::TextWrapped("TAA smooths the scene at output resolution without FSR upscaling. The saved upscaling preset returns when you select an upscaler.");
+        UiTextWrapped("TAA smooths the scene at output resolution without FSR upscaling. The saved upscaling preset returns when you select an upscaler.");
     }
-    ImGui::Text("Active scene resolution: %d x %d", s.active_render_width.load(),
+    UiText("Active scene resolution: %d x %d", s.active_render_width.load(),
                 s.active_render_height.load());
     if (BbSettings::FixedRenderSession()) {
-        ImGui::Text("Startup preset: %s", BbSettings::PresetName(s.startup_preset));
+        UiText("Startup preset: %s", Tr(BbSettings::PresetName(s.startup_preset)));
         if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
             automatic && automatic[0] == '1') {
             Hint("At outputs other than 1080p, the scene resolution is patched at startup. Changes to the preset or output require a restart. This saves GPU work on older GPUs. Non-16:9 outputs always use this path to keep camera and HUD geometry synchronized.");
@@ -642,7 +660,7 @@ void Menu() {
     Checkbox("Subpixel jitter", s.jitter);
     Hint("The camera shifts by a fraction of a pixel each frame so the upscaler can recover detail across multiple frames. Without jitter, it only smooths using frame history.");
 
-    ImGui::SeparatorText("Reactive mask");
+    UiSeparatorText("Reactive mask");
     ImGui::BeginDisabled(taa);
     Checkbox("Enable mask", s.reactive);
     Hint("Marks transparent effects such as particles and fog so the upscaler relies less on history. Reduces trails, but can increase shimmer behind those effects.");
@@ -651,7 +669,7 @@ void Menu() {
     Slider("Threshold", s.reactive_threshold, 0.0f, 1.0f);
     Slider("Maximum", s.reactive_max, 0.0f, 1.0f);
     bool show_mask = s.debug_view == BbSettings::DebugReactive;
-    if (ImGui::Checkbox("Show mask (debug)", &show_mask)) {
+    if (ImGui::Checkbox(Tr("Show mask (debug)"), &show_mask)) {
         s.debug_view = show_mask ? BbSettings::DebugReactive : BbSettings::DebugNone;
     }
     ImGui::EndDisabled();
@@ -662,7 +680,7 @@ void Menu() {
     Checkbox("Object motion vectors", s.object_motion);
     ImGui::EndDisabled();
     if (motion_unavailable) {
-        ImGui::TextDisabled("%s", motion_unavailable);
+        UiTextDisabled("%s", motion_unavailable);
     }
     Hint("Accurate vectors for animated objects reduce breakup on clothing and weapons during movement. Static geometry receives no extra pass. Changes require a restart.");
 #ifdef _WIN32
@@ -675,35 +693,35 @@ void Menu() {
     if (cache_available && BbSettings::FsrSettingsNeedRestart()) {
         const bool active = s.startup_object_motion_cache && s.startup_object_motion &&
             (s.startup_upscaler == BbSettings::UpscalerFsr3 || BbSettings::IsFsr4(s.startup_upscaler));
-        ImGui::TextDisabled("Startup cache mode: %s; changes apply after restart", active ? "On" : "Off");
+        UiTextDisabled("Startup cache mode: %s; changes apply after restart", active ? "On" : "Off");
     }
 #endif
     bool show_motion = s.debug_view == BbSettings::DebugMotion;
-    if (ImGui::Checkbox("Show motion vectors (debug)", &show_motion)) {
+    if (ImGui::Checkbox(Tr("Show motion vectors (debug)"), &show_motion)) {
         s.debug_view = show_motion ? BbSettings::DebugMotion : BbSettings::DebugNone;
     }
     Hint("Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel has accurate object motion, beyond camera motion. A moving object with no blue or red/green is treated as stationary and may leave trails.");
     ImGui::EndDisabled(); // upscaler off
 
-    ImGui::SeparatorText("Frame generation");
+    UiSeparatorText("Frame generation");
     static const char* frame_gens[] = {"Off", "FSR 3.1 (any GPU)", "DLSS (NVIDIA RTX 40/50)",
         "AMD ML-FG 4.0.1 (RX 9000, 2x SDR, experimental)",
         "AMD ML-FG 4.0.2 (RX 9000, 2x SDR, experimental)"};
     static_assert(sizeof(frame_gens) / sizeof(*frame_gens) == BbSettings::FrameGenCount);
     const int frame_gen = s.frame_gen;
-    if (ImGui::BeginCombo("Frame generation", frame_gens[frame_gen])) {
+    if (UiBeginCombo("Frame generation", frame_gens[frame_gen])) {
         for (int i = 0; i < BbSettings::FrameGenCount; ++i) {
             const bool supported = (i != BbSettings::FrameGenDlss || s.dlssg_max_multiplier > 1) &&
                 (!BbSettings::IsMlFrameGen(i) || s.MlFgSupported(i));
             ImGui::BeginDisabled(!supported);
-            if (ImGui::Selectable(frame_gens[i], i == frame_gen)) {
+            if (UiSelectable(frame_gens[i], i == frame_gen)) {
                 BbSettings::SelectFrameGen(i);
                 dirty = true;
             }
             ImGui::EndDisabled();
             if (!supported) {
                 ImGui::SameLine();
-                ImGui::TextDisabled(BbSettings::IsMlFrameGen(i) ? "- unavailable" : "- unsupported by this GPU");
+                UiTextDisabled(BbSettings::IsMlFrameGen(i) ? "- unavailable" : "- unsupported by this GPU");
                 if (BbSettings::IsMlFrameGen(i))
                     if (const char* problem = s.MlFgProblem(i)) Hint(problem);
             }
@@ -715,7 +733,7 @@ void Menu() {
         s.frame_gen == BbSettings::FrameGenDlss ? s.dlssg_max_multiplier.load() : 2;
     ImGui::BeginDisabled(s.frame_gen == BbSettings::FrameGenOff || max_multiplier <= 2);
     int multiplier = std::min(s.frame_gen_multiplier.load(), max_multiplier);
-    if (ImGui::SliderInt("Multiplier", &multiplier, 2, std::max(max_multiplier, 2), "%dx")) {
+    if (UiSliderInt("Multiplier", &multiplier, 2, std::max(max_multiplier, 2), "%dx")) {
         Store(s.frame_gen_multiplier, multiplier, true);
     }
     ImGui::EndDisabled();
@@ -727,42 +745,42 @@ void Menu() {
     if (s.ActiveFrameGen() != BbSettings::FrameGenOff && !s.frame_gen_hdr && s.frame_gen_display_hz > 0) {
         const int now = std::min(s.frame_gen_now.load(), multiplier - 1);
         if (now > 0 && s.frame_gen_flip_limit > 0) {
-            ImGui::TextDisabled("Now %dx on a %d Hz display; V-Sync (FIFO) caps the game at %d FPS",
+            UiTextDisabled("Now %dx on a %d Hz display; V-Sync (FIFO) caps the game at %d FPS",
                                 now + 1, s.frame_gen_display_hz.load(),
                                 s.frame_gen_flip_limit.load());
         } else if (now > 0) {
-            ImGui::TextDisabled("Now %dx on a %d Hz display", now + 1,
+            UiTextDisabled("Now %dx on a %d Hz display", now + 1,
                                 s.frame_gen_display_hz.load());
         } else if (s.frame_gen_fit_display) {
-            ImGui::TextDisabled("Paused: no room on a %d Hz display at this frame rate",
+            UiTextDisabled("Paused: no room on a %d Hz display at this frame rate",
                                 s.frame_gen_display_hz.load());
         } else {
-            ImGui::TextDisabled("Paused: presenting fell behind (V-Sync on a slower display?)");
+            UiTextDisabled("Paused: presenting fell behind (V-Sync on a slower display?)");
         }
     }
     if (BbSettings::IsMlFrameGen(s.frame_gen)) {
         if (const char* problem = s.MlFgProblem(s.frame_gen)) {
             ImGui::PushTextWrapPos();
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
+            UiTextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
             ImGui::PopTextWrapPos();
         }
         if (s.frame_gen_hdr)
-            ImGui::TextDisabled("ML-FG paused: HDR output.");
+            UiTextDisabled("ML-FG paused: HDR output.");
     }
     if (const char* problem = s.frame_gen_problem.load(); problem && !s.frame_gen_hdr) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
+        UiTextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", problem);
     }
 
-    ImGui::SeparatorText("Output resolution");
+    UiSeparatorText("Output resolution");
     static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160",
                                     "2560 x 1080 (21:9)", "3440 x 1440 (21:9)",
                                     "3840 x 1600 (21:9)", "5120 x 2160 (21:9)",
                                     "3840 x 1080 (32:9)", "5120 x 1440 (32:9)"};
     static_assert(sizeof(outputs) / sizeof(*outputs) == BbSettings::OutputCount);
     int output = s.output_res;
-    if (ImGui::BeginCombo("Output resolution", outputs[output])) {
+    if (UiBeginCombo("Output resolution", outputs[output])) {
         for (int i = 0; i < BbSettings::OutputCount; ++i) {
-            if (ImGui::Selectable(outputs[i], i == output)) {
+            if (UiSelectable(outputs[i], i == output)) {
                 Store(s.output_res, i, true);
             }
         }
@@ -771,7 +789,7 @@ void Menu() {
     if (BbSettings::Ultrawide(s.output_res)) {
         int hud = s.hud_position;
         Store(s.hud_position, hud,
-              ImGui::SliderInt("HUD position", &hud, 0, 100, hud == 0 ? "Centred (16:9)" :
+              UiSliderInt("HUD position", &hud, 0, 100, hud == 0 ? "Centred (16:9)" :
                                                          hud == 100 ? "Screen edges" : "%d%%"));
         Hint("Ultrawide (21:9, 32:9): moves the health, items and Blood Echoes from the centred 16:9 area toward the screen edges. Changes require a restart.");
     }
@@ -782,32 +800,32 @@ void Menu() {
     }
     static const char* live_modes[] = {"Auto (based on GPU)", "Off (faster)", "On"};
     int live = s.live_resolution + 1;
-    if (ImGui::BeginCombo("Live resolution changes", live_modes[live])) {
+    if (UiBeginCombo("Live resolution changes", live_modes[live])) {
         for (int i = 0; i < 3; ++i) {
-            if (ImGui::Selectable(live_modes[i], i == live)) {
+            if (UiSelectable(live_modes[i], i == live)) {
                 Store(s.live_resolution, i - 1, true);
             }
         }
         ImGui::EndCombo();
     }
     Hint("On: output and presets change without restarting, while game post-processing stays at 1080p. Off: the scene is patched to the preset resolution at startup. Auto enables the live path on capable discrete GPUs, except for outputs above 1080p with depth of field on (the live path blurs those scenes). Changes apply after restarting the game.");
-    ImGui::SeparatorText("Game effects (restart required)");
+    UiSeparatorText("Game effects (restart required)");
     static const char* lods[] = {"Highest (-2)", "Original", "Lower (1)", "Lowest (2)"};
     static constexpr int lod_values[] = {-2, 0, 1, 2};
     int lod_index = 1;
     for (int i = 0; i < 4; ++i) {
         if (lod_values[i] == s.model_lod) lod_index = i;
     }
-    if (ImGui::BeginCombo("Model detail", lods[lod_index])) {
+    if (UiBeginCombo("Model detail", lods[lod_index])) {
         for (int i = 0; i < 4; ++i) {
-            if (ImGui::Selectable(lods[i], i == lod_index)) {
+            if (UiSelectable(lods[i], i == lod_index)) {
                 Store(s.model_lod, lod_values[i], true);
             }
         }
         ImGui::EndCombo();
     }
     int fov = s.fov;
-    Store(s.fov, fov, ImGui::SliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
+    Store(s.fov, fov, UiSliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
                                        fov == BbSettings::FovDefault ? "%d (game)" : "%d"));
     Hint("Vertical field of view in degrees; the game's camera has 43. Every camera is scaled by the same amount (scripts/fov.py).");
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
@@ -825,16 +843,16 @@ void Menu() {
         restart |= s.effects[e] != s.startup_effects[e];
     }
     if (restart) {
-        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+        UiTextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                            "Changes will apply after restarting the game");
-        if (ImGui::Button("Apply and restart")) {
+        if (UiButton("Apply and restart")) {
             BbSettings::Save();
             runtime_restart();
         }
     }
 
-    ImGui::SeparatorText("Other");
-    ImGui::TextDisabled("Counter (top right), one switch per line it shows:");
+    UiSeparatorText("Other");
+    UiTextDisabled("Counter (top right), one switch per line it shows:");
     Checkbox("FPS", s.show_fps);
     ImGui::SameLine();
     Checkbox("Frame times", s.show_frame_times);
@@ -854,16 +872,16 @@ void Menu() {
     static const char* prompt_modes[] = {"Follow the device in use", "PlayStation", "Keyboard and mouse", "Xbox",
                                          "Nintendo Switch"};
     int prompts = s.button_prompts;
-    if (ImGui::BeginCombo("Button prompts", prompt_modes[prompts])) {
+    if (UiBeginCombo("Button prompts", prompt_modes[prompts])) {
         for (int i = 0; i < BbSettings::PromptsCount; ++i) {
-            if (ImGui::Selectable(prompt_modes[i], i == prompts)) Store(s.button_prompts, i, true);
+            if (UiSelectable(prompt_modes[i], i == prompts)) Store(s.button_prompts, i, true);
         }
         ImGui::EndCombo();
     }
     Hint("The game's button icons: keyboard and mouse keys from input.ini while you play with them, the controller's (PlayStation, Xbox or Switch) while you use it.");
 
     ImGui::Spacing();
-    if (ImGui::Button("Close")) {
+    if (UiButton("Close")) {
         keep_open = false;
     }
     // Issues #74, #116: leaving the game from the pad (this menu opens with L3+R3). A second
@@ -873,7 +891,7 @@ void Menu() {
     ImGui::SameLine();
     // One ID for both labels ("###bb_quit"): with a new ID the button lost the pad's or keyboard's
     // focus at the first press, which disarmed it at once.
-    if (ImGui::Button(quit_armed ? "Press again to quit###bb_quit" : "Quit game###bb_quit")) {
+    if (UiButton(quit_armed ? "Press again to quit###bb_quit" : "Quit game###bb_quit")) {
         if (quit_armed) {
             SDL_Event quit{};
             quit.type = SDL_EVENT_QUIT;
@@ -885,7 +903,7 @@ void Menu() {
         quit_armed = false;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Settings are saved to bbport.ini");
+    UiTextDisabled("Settings are saved to bbport.ini");
     ImGui::End();
     if (!keep_open) {
         SetOpen(false);
@@ -901,18 +919,18 @@ void TextEntryBox() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(viewport->WorkSize.x * 0.32f, 0.0f),
                                         ImVec2(viewport->WorkSize.x * 0.8f, FLT_MAX));
     ImGui::SetNextWindowBgAlpha(0.92f);
-    ImGui::Begin("##text_entry", nullptr,
+    UiBegin("##text_entry", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::TextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), "%s", text_entry_prompt.c_str());
+    UiTextColored(ImVec4(0.85f, 0.72f, 0.45f, 1.0f), "%s", text_entry_prompt.c_str());
     ImGui::Separator();
     ImGui::SetWindowFontScale(1.4f);
-    ImGui::Text("%s_", text_entry_text.c_str());
+    UiText("%s_", text_entry_text.c_str());
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Separator();
-    ImGui::TextDisabled("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel");
-    ImGui::TextDisabled("Controller: Cross (A) = OK, Circle (B) = cancel");
+    UiTextDisabled("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel");
+    UiTextDisabled("Controller: Cross (A) = OK, Circle (B) = cancel");
     ImGui::End();
 }
 
@@ -976,7 +994,7 @@ u32 output_width = 0, output_height = 0; ///< the presented size, set in Render
 // column is measured, not a constant: a longer label or a larger UI scale would otherwise crowd a
 // value or clip it.
 void Label(const char* text, float column) {
-    ImGui::TextDisabled("%s", text);
+    UiTextDisabled("%s", Tr(text));
     ImGui::SameLine(column);
 }
 
@@ -1078,7 +1096,7 @@ void FpsCounter() {
                                    viewport->WorkPos.y + pad),
                             ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.5f);
-    ImGui::Begin("##fps", nullptr,
+    UiBegin("##fps", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
@@ -1091,33 +1109,33 @@ void FpsCounter() {
     // Measured and constant, so values line up and never move when a switch is flipped.
     float column = 0.0f;
     for (const char* label : {"FPS:", "Frame:", "Latency:", "VRAM:", "GPU:", "CPU:", "RAM:"}) {
-        column = std::max(column, ImGui::CalcTextSize(label).x);
+        column = std::max(column, ImGui::CalcTextSize(Tr(label)).x);
     }
     column += 10.0f * base_scale;
     if (s.show_fps) {
         Label("FPS:", column);
         ImGui::PushStyleColor(ImGuiCol_Text, pace);
-        ImGui::Text("%.1f", double(rate));
+        UiText("%.1f", double(rate));
         ImGui::PopStyleColor();
         ImGui::SameLine(0.0f, model_gap);
         const int out = s.output_res;
-        ImGui::TextDisabled("|  %ux%u", output_width ? output_width : u32(BbSettings::OutputWidths[out]),
+        UiTextDisabled("|  %ux%u", output_width ? output_width : u32(BbSettings::OutputWidths[out]),
                             output_height ? output_height : u32(BbSettings::OutputHeights[out]));
         if (UpscalerLabel(s.upscaler)[0] != '\0') {
             ImGui::SameLine(0.0f, 6.0f * base_scale);
-            ImGui::TextColored(PlainCounter() ? PlainValue : UpscalerColor(s.upscaler), "%s",
+            UiTextColored(PlainCounter() ? PlainValue : UpscalerColor(s.upscaler), "%s",
                                UpscalerLabel(s.upscaler));
         }
         const int generated = s.frame_gen != BbSettings::FrameGenOff ? s.frame_gen_now.load() : 0;
         if (generated > 0 && s.game_fps > 0.0f) {
             ImGui::SameLine(0.0f, 6.0f * base_scale);
-            ImGui::TextDisabled("(game %.0f, %dx)", double(s.game_fps.load()), generated);
+            UiTextDisabled("(game %.0f, %dx)", double(s.game_fps.load()), generated);
         }
     }
     if (s.show_frame_times) {
         Label("Frame:", column);
         ImGui::PushStyleColor(ImGuiCol_Text, pace);
-        ImGui::Text("%.1f ms", frame_ms_avg);
+        UiText("%.1f ms", frame_ms_avg);
         ImGui::PopStyleColor();
     }
     // Render latency, its own line (it sat under FPS, where players took it for the frame time):
@@ -1128,12 +1146,12 @@ void FpsCounter() {
         const int mode = std::clamp(s.latency_mode.load(), 0, 4);
         Label("Latency:", column);
         if (const float latency = s.latency_ms.load(std::memory_order_relaxed); latency > 0.0f) {
-            ImGui::Text("%.1f ms", double(latency));
+            UiText("%.1f ms", double(latency));
         } else {
-            ImGui::TextDisabled("--");
+            UiTextDisabled("--");
         }
         ImGui::SameLine(0.0f, model_gap);
-        ImGui::TextDisabled("|  render latency, %s", modes[mode]);
+        UiTextDisabled("|  render latency, %s", Tr(modes[mode]));
     }
     // Video memory in use, against the limit the collector holds itself to: the same numbers the
     // low-memory warning reports. 0, so nothing shown, until the first collector pass.
@@ -1145,57 +1163,57 @@ void FpsCounter() {
                              VramColor(used, vram_pressure.load(std::memory_order_relaxed),
                                        vram_critical.load(std::memory_order_relaxed)));
         if (limit != 0) {
-            ImGui::Text("%.1f / %.1f GB", double(used) / gb, double(limit) / gb);
+            UiText("%.1f / %.1f GB", double(used) / gb, double(limit) / gb);
         } else {
-            ImGui::Text("%.1f GB", double(used) / gb);
+            UiText("%.1f GB", double(used) / gb);
         }
         ImGui::PopStyleColor();
         // The card's own headroom: the limit above is the port's conservative budget, so without
         // this "4.6 of 4.6" reads as "the card is full" when it is not.
         ImGui::SameLine(0.0f, 8.0f * base_scale);
-        ImGui::TextDisabled("(card: %.1f GB free)",
+        UiTextDisabled("(card: %.1f GB free)",
                             double(vram_card_free.load(std::memory_order_relaxed)) / gb);
     }
     if (s.show_gpu) {
         Label("GPU:", column);
         const float gpu = Load().gpu.load(std::memory_order_relaxed);
         if (gpu < 0.0f) {
-            ImGui::TextDisabled("--");
+            UiTextDisabled("--");
         } else {
-            ImGui::TextColored(LoadColor(gpu, 90.0f, 97.0f), "%.0f%%", double(gpu));
+            UiTextColored(LoadColor(gpu, 90.0f, 97.0f), "%.0f%%", double(gpu));
         }
         if (!gpu_name.empty()) {
             ImGui::SameLine(0.0f, model_gap);
-            ImGui::TextDisabled("%s", gpu_name.c_str());
+            UiTextDisabled("%s", gpu_name.c_str());
         }
     }
     if (s.show_cpu) {
         Label("CPU:", column);
         const float cpu = Load().cpu.load(std::memory_order_relaxed);
         if (cpu < 0.0f) {
-            ImGui::TextDisabled("--");
+            UiTextDisabled("--");
         } else {
-            ImGui::TextColored(LoadColor(cpu, 70.0f, 90.0f), "%.0f%%", double(cpu));
+            UiTextColored(LoadColor(cpu, 70.0f, 90.0f), "%.0f%%", double(cpu));
         }
         const std::string& model = CpuName();
         if (!model.empty()) {
             ImGui::SameLine(0.0f, model_gap);
-            ImGui::TextDisabled("%s", model.c_str());
+            UiTextDisabled("%s", model.c_str());
         }
     }
     if (s.show_ram) {
         Label("RAM:", column);
         const u64 ram = Load().ram.load(std::memory_order_relaxed);
         if (ram == 0) {
-            ImGui::TextDisabled("--");
+            UiTextDisabled("--");
         } else {
-            ImGui::Text("%.1f GB", double(ram) / gb);
+            UiText("%.1f GB", double(ram) / gb);
             // The machine's headroom, like the VRAM row's card figure: the game's working set on
             // its own looks like it is eating all the memory.
             const u64 free = Load().ram_free.load(std::memory_order_relaxed);
             if (free != 0) {
                 ImGui::SameLine(0.0f, 8.0f * base_scale);
-                ImGui::TextDisabled("(%.1f GB free)", double(free) / gb);
+                UiTextDisabled("(%.1f GB free)", double(free) / gb);
             }
         }
     }
@@ -1209,9 +1227,9 @@ void FpsCounter() {
                                                   ImGui::ColorConvertFloat4ToU32(pace),
                                                   1.5f * base_scale);
         ImGui::SameLine(0.0f, 6.0f * base_scale);
-        ImGui::Text("Frame: %.1f ms", frame_ms_avg);
+        UiText("Frame: %.1f ms", frame_ms_avg);
         ImGui::SameLine(0.0f, 14.0f * base_scale);
-        ImGui::TextDisabled("%.0f FPS", double(rate));
+        UiTextDisabled("%.0f FPS", double(rate));
     }
     ImGui::End();
 }
@@ -1240,14 +1258,14 @@ void WarningBanner() {
     ImGui::SetNextWindowBgAlpha(0.92f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.42f, 0.20f, 0.02f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.95f, 0.60f, 0.20f, 1.0f));
-    if (ImGui::Begin("##vram-warning", nullptr,
+    if (UiBegin("##vram-warning", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoFocusOnAppearing)) {
         ImGui::PushTextWrapPos(560.0f * base_scale);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.82f, 0.45f, 1.00f));
-        ImGui::TextUnformatted(headline.c_str());
+        UiTextUnformatted(headline.c_str());
         ImGui::PopStyleColor();
         if (fraction >= 0.0f) {
             // How much of the memory in use: the bar says in one glance what the numbers say.
@@ -1259,7 +1277,7 @@ void WarningBanner() {
         }
         if (!detail.empty()) {
             ImGui::Spacing();
-            ImGui::TextUnformatted(detail.c_str());
+            UiTextUnformatted(detail.c_str());
         }
         ImGui::PopTextWrapPos();
     }
@@ -1300,12 +1318,17 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     font_config.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
                                    int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config, picker_glyphs.Data);
+    const char* ui_language = std::getenv("BB_UI_LANGUAGE");
+    if (!BbUi::ConfigureChineseFont(io.Fonts, ui_language ? ui_language : "", BbUi::FindChineseFont(), picker_glyphs.Data) &&
+        BbUi::WantsChinese(ui_language ? ui_language : "")) {
+        std::printf("Overlay: no usable system CJK font; keeping English menu text\n");
+    }
 
 #ifdef _WIN32
     if (const char* windows=std::getenv("WINDIR")) {
         const std::string language=Fsr41Ui::languages[Fsr41Ui::Language()];
         const char* candidates[] = {"msyh.ttc","YuGothM.ttc","msgothic.ttc","malgun.ttf"};
-        if (language=="zh" || language=="ja" || language=="ko") for(const char* file:candidates) {
+        if ((language=="zh" && !BbUi::chinese) || language=="ja" || language=="ko") for(const char* file:candidates) {
             const auto path=std::filesystem::path(windows)/"Fonts"/file;
             if(!std::filesystem::is_regular_file(path)) continue;
             ImFontConfig merge; merge.MergeMode=true;
