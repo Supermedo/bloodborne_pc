@@ -1,6 +1,6 @@
-/* One file read from two threads, with pread and with seek + read, as the game's loaders do:
- * every read gets the bytes of the place it asked for (R68: on Windows a pread moved the place a
- * seek of the other thread had set). Then the position after read, write, append and seeks. */
+/* One file read from two threads, with pread and with seek + read: every read gets the bytes of
+ * the place it asked for (on Windows a pread used to move the place a seek of the other thread
+ * had set). Then the position after read, write, append and seeks. */
 #include "../src/runtime_file.c"
 #include <assert.h>
 static int32_t guest_errno;

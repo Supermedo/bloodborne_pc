@@ -493,10 +493,8 @@ static ssize_t host_write(int h,const void *buffer,uint64_t size) { return write
 /* bbport: a descriptor keeps its own position and every read and write goes to an explicit
  * place; the host file pointer is not used. A positioned read on Windows moves that pointer
  * (compat_pread put it back afterwards), so a seek + read of another thread in between read at
- * the wrong place. The game's loaders read one archive from several threads, with pread and with
- * seek + read: they got wrong bytes, parts of a map never loaded and the loading screen after a
- * death never ended (R68). read, write and lseek of a descriptor take its lock; pread and pwrite
- * need none. */
+ * the wrong place (tests/test_file_positions.c). read, write and lseek of a descriptor take its
+ * lock; pread and pwrite need none. */
 static SRWLOCK position_locks[MAX_FILES];
 static size_t raced;
 /* A seek or read while a pread of the same descriptor runs: what used to read wrong bytes. */

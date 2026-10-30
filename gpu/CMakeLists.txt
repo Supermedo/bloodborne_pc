@@ -442,7 +442,7 @@ add_executable(vram-warning-test EXCLUDE_FROM_ALL ../tests/test_vram_warning.cpp
 target_include_directories(vram-warning-test PRIVATE shim)
 target_compile_options(vram-warning-test PRIVATE -UNDEBUG)
 
-# bbport: one file read from two threads, pread next to seek + read (R68): ninja -C out/gpu
+# bbport: one file read from two threads, pread next to seek + read: ninja -C out/gpu
 # file-positions-test, then run it in the source tree (it writes under out/). No GPU, no game.
 if (WIN32)
     add_executable(file-positions-test EXCLUDE_FROM_ALL ../tests/test_file_positions.c ../src/compat_win.c)
