@@ -2018,14 +2018,22 @@ def game_values(folder):
 
 
 def find_game(start=''):
-    """A folder with eboot.bin near the port or under `start` (CUSA03173 first), or ''."""
+    """A folder with eboot.bin near the port or under `start`, or ''. A retail release first, then
+    a complete one (not the update folder alone), then version 1.09."""
+    from patches import BLOODBORNE_IDS
     places = []
     if start:
         places += [Path(start)] + _children(Path(start))
     for base in (L.PORT_DIR, L.PORT_DIR.parent):
-        places += [base / 'CUSA03173'] + _children(base)
+        places += [base / title for title in sorted(BLOODBORNE_IDS)] + _children(base)
     found = [p for p in places if (p / 'eboot.bin').is_file()]
-    found.sort(key=lambda p: game_values(p).get('TITLE_ID') != 'CUSA03173')
+
+    def order(folder):
+        values = game_values(folder)
+        complete = all((folder / name).is_dir() for name in ('sce_module', 'sce_sys', 'dvdroot_ps4'))
+        return (values.get('TITLE_ID') not in BLOODBORNE_IDS, not complete,
+                values.get('APP_VER') != L.PATCH_VERSION)
+    found.sort(key=order)
     return str(found[0]) if found else ''
 
 
@@ -2049,11 +2057,16 @@ def game_checks(folder):
     values = game_values(folder)
     title, version = values.get('TITLE_ID', '?'), values.get('APP_VER', '?')
     checks.append(('ok', _('eboot.bin found.')))
-    if title == 'CUSA03173':
-        checks.append(('ok', _('CUSA03173: the Game of the Year Edition, with The Old Hunters.')))
+    # Every retail release runs the same 1.09 executable (scripts/patches.py BLOODBORNE_IDS).
+    from patches import BLOODBORNE_IDS, OLD_HUNTERS_IDS
+    if title in OLD_HUNTERS_IDS:
+        checks.append(('ok', _('{}: a Game of the Year Edition, with The Old Hunters.').format(title)))
+    elif title in BLOODBORNE_IDS:
+        checks.append(('ok', _('{}: the base game. The Old Hunters, if you own it, comes from its DLC folder '
+                               '(Game files).').format(title)))
     else:
-        checks.append(('warn', _('{}: the port is made for CUSA03173, the Game of the Year Edition. Other '
-                                 'editions may not work.').format(title)))
+        checks.append(('warn', _('{}: not a retail release of Bloodborne. The port runs Bloodborne of every '
+                                 'region, the Game of the Year editions too.').format(title)))
     if version == L.PATCH_VERSION:
         checks.append(('ok', _('Version 01.09: every community patch is available.')))
     else:
@@ -2385,8 +2398,7 @@ class SetupGuide:
                       bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9)).pack(anchor='w', pady=(px(6), 0))
         need = self.card(body, pady=(px(14), 0))
         self.heading(need, _('What you need'))
-        for state, text in (('ok', _('Your own Bloodborne game files (CUSA03173, Game of the Year Edition) '
-                                     'with the 1.09 update.')),
+        for state, text in (('ok', _('Your own Bloodborne game files (any edition) with the 1.09 update.')),
                             ('ok', _('Windows 10 or 11 (64-bit) and a graphics card with Vulkan 1.3 and at least '
                                      '4 GB of video memory.'))):
             self.app.state_line(need, state, text, theme.CARD, wrap=660).pack(fill='x', pady=px(3))

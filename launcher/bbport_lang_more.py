@@ -49,7 +49,7 @@ MORE_KEYS = [
     'DLC folder',
     'Choose the DLC folder',
     'Your add-ons, one folder each named like SPEXPANSIONDLC03 (The Old Hunters). Only needed with the base '
-    'game alone; the Game of the Year edition (CUSA03173) has it.',
+    'game alone; the Game of the Year editions have it.',
     'Japanese/Asian buttons: Circle confirms and interacts, Cross dodges',
 ]
 
@@ -100,7 +100,7 @@ MORE = {
         'Не удалось добавить игру в Steam: {}',
         'Папка DLC',
         'Выберите папку DLC',
-        'Ваши дополнения, по папке на каждое, с именем вроде SPEXPANSIONDLC03 (The Old Hunters). Нужны только с одной основной игрой; издание Game of the Year (CUSA03173) уже содержит его.',
+        'Ваши дополнения, по папке на каждое, с именем вроде SPEXPANSIONDLC03 (The Old Hunters). Нужны только с одной основной игрой; издания Game of the Year уже содержат его.',
         'Японская раскладка: Круг — подтверждение и действие, Крест — уклонение',
     ],
     'ar': [
@@ -149,7 +149,7 @@ MORE = {
         'تعذّرت إضافة اللعبة إلى Steam: {}',
         'مجلد المحتوى الإضافي',
         'اختر مجلد المحتوى الإضافي',
-        'إضافاتك، مجلد لكل إضافة باسم مثل SPEXPANSIONDLC03 (The Old Hunters). مطلوبة فقط مع اللعبة الأساسية وحدها؛ إصدار Game of the Year (CUSA03173) يتضمنها.',
+        'إضافاتك، مجلد لكل إضافة باسم مثل SPEXPANSIONDLC03 (The Old Hunters). مطلوبة فقط مع اللعبة الأساسية وحدها؛ إصدارات Game of the Year تتضمنها.',
         'أزرار يابانية/آسيوية: الدائرة للتأكيد والتفاعل، وX للمراوغة',
     ],
     'es': [
@@ -198,7 +198,7 @@ MORE = {
         'No se pudo añadir el juego a Steam: {}',
         'Carpeta de DLC',
         'Elige la carpeta de DLC',
-        'Tus complementos, una carpeta por cada uno con un nombre como SPEXPANSIONDLC03 (The Old Hunters). Solo hacen falta con el juego base solo; la Game of the Year Edition (CUSA03173) ya lo incluye.',
+        'Tus complementos, una carpeta por cada uno con un nombre como SPEXPANSIONDLC03 (The Old Hunters). Solo hacen falta con el juego base solo; las ediciones Game of the Year ya lo incluyen.',
         'Botones japoneses/asiáticos: Círculo confirma e interactúa, Equis esquiva',
     ],
     'pt': [
@@ -247,7 +247,7 @@ MORE = {
         'Não foi possível adicionar o jogo à Steam: {}',
         'Pasta de DLC',
         'Escolha a pasta de DLC',
-        'Seus complementos, uma pasta para cada um com nome como SPEXPANSIONDLC03 (The Old Hunters). Só são necessários com o jogo base sozinho; a Game of the Year Edition (CUSA03173) já inclui.',
+        'Seus complementos, uma pasta para cada um com nome como SPEXPANSIONDLC03 (The Old Hunters). Só são necessários com o jogo base sozinho; as edições Game of the Year já incluem.',
         'Botões japoneses/asiáticos: Círculo confirma e interage, Xis esquiva',
     ],
     'fr': [
@@ -296,7 +296,7 @@ MORE = {
         "Impossible d'ajouter le jeu à Steam : {}",
         'Dossier des DLC',
         'Choisissez le dossier des DLC',
-        'Vos extensions, un dossier chacune nommé comme SPEXPANSIONDLC03 (The Old Hunters). Nécessaires seulement avec le jeu de base seul ; l’édition Game of the Year (CUSA03173) l’inclut.',
+        'Vos extensions, un dossier chacune nommé comme SPEXPANSIONDLC03 (The Old Hunters). Nécessaires seulement avec le jeu de base seul ; les éditions Game of the Year l’incluent.',
         'Boutons japonais/asiatiques : Rond valide et interagit, Croix esquive',
     ],
     'de': [
@@ -345,7 +345,7 @@ MORE = {
         'Das Spiel konnte nicht zu Steam hinzugefügt werden: {}',
         'DLC-Ordner',
         'DLC-Ordner wählen',
-        'Deine Erweiterungen, je ein Ordner mit einem Namen wie SPEXPANSIONDLC03 (The Old Hunters). Nur mit dem Grundspiel allein nötig; die Game of the Year Edition (CUSA03173) enthält sie.',
+        'Deine Erweiterungen, je ein Ordner mit einem Namen wie SPEXPANSIONDLC03 (The Old Hunters). Nur mit dem Grundspiel allein nötig; die Game of the Year Editions enthalten sie.',
         'Japanische/asiatische Tasten: Kreis bestätigt und interagiert, Kreuz weicht aus',
     ],
     'it': [
@@ -394,7 +394,7 @@ MORE = {
         'Impossibile aggiungere il gioco a Steam: {}',
         'Cartella DLC',
         'Scegli la cartella DLC',
-        'I tuoi contenuti aggiuntivi, una cartella ciascuno con un nome come SPEXPANSIONDLC03 (The Old Hunters). Servono solo con il gioco base da solo; la Game of the Year Edition (CUSA03173) lo include.',
+        'I tuoi contenuti aggiuntivi, una cartella ciascuno con un nome come SPEXPANSIONDLC03 (The Old Hunters). Servono solo con il gioco base da solo; le edizioni Game of the Year lo includono.',
         'Tasti giapponesi/asiatici: Cerchio conferma e interagisce, Croce schiva',
     ],
     'pl': [
@@ -443,7 +443,7 @@ MORE = {
         'Nie udało się dodać gry do Steam: {}',
         'Folder DLC',
         'Wybierz folder DLC',
-        'Twoje dodatki, każdy w osobnym folderze o nazwie np. SPEXPANSIONDLC03 (The Old Hunters). Potrzebne tylko z samą grą podstawową; wydanie Game of the Year (CUSA03173) go zawiera.',
+        'Twoje dodatki, każdy w osobnym folderze o nazwie np. SPEXPANSIONDLC03 (The Old Hunters). Potrzebne tylko z samą grą podstawową; wydania Game of the Year go zawierają.',
         'Przyciski japońskie/azjatyckie: Kółko potwierdza i wchodzi w interakcję, Krzyżyk to unik',
     ],
     'tr': [
@@ -492,7 +492,7 @@ MORE = {
         "Oyun Steam'e eklenemedi: {}",
         'DLC klasörü',
         'DLC klasörünü seçin',
-        'Ek içerikleriniz, her biri SPEXPANSIONDLC03 (The Old Hunters) gibi adlandırılmış ayrı bir klasörde. Yalnızca tek başına ana oyunla gerekir; Game of the Year sürümü (CUSA03173) bunu içerir.',
+        'Ek içerikleriniz, her biri SPEXPANSIONDLC03 (The Old Hunters) gibi adlandırılmış ayrı bir klasörde. Yalnızca tek başına ana oyunla gerekir; Game of the Year sürümleri bunu içerir.',
         'Japon/Asya tuşları: Daire onaylar ve etkileşir, Çarpı kaçınır',
     ],
     'zh': [
@@ -541,7 +541,7 @@ MORE = {
         '无法将游戏添加到 Steam：{}',
         'DLC 文件夹',
         '选择 DLC 文件夹',
-        '你的追加内容，每个一个文件夹，名称如 SPEXPANSIONDLC03（The Old Hunters）。仅在只有本体游戏时需要；年度版（CUSA03173）已包含。',
+        '你的追加内容，每个一个文件夹，名称如 SPEXPANSIONDLC03（The Old Hunters）。仅在只有本体游戏时需要；各年度版已包含。',
         '日版/亚洲版按键：圆圈键确认和互动，叉键闪避',
     ],
     'ja': [
@@ -590,7 +590,7 @@ MORE = {
         'ゲームを Steam に追加できませんでした: {}',
         'DLC フォルダー',
         'DLC フォルダーを選択',
-        '追加コンテンツ。SPEXPANSIONDLC03（The Old Hunters）のような名前で 1 つずつフォルダーに入れます。本編のみの場合に必要で、Game of the Year Edition（CUSA03173）には含まれています。',
+        '追加コンテンツ。SPEXPANSIONDLC03（The Old Hunters）のような名前で 1 つずつフォルダーに入れます。本編のみの場合に必要で、Game of the Year Edition には含まれています。',
         '日本/アジア配置：○で決定・調べる、×で回避',
     ],
     'ko': [
@@ -639,7 +639,7 @@ MORE = {
         '게임을 Steam에 추가할 수 없습니다: {}',
         'DLC 폴더',
         'DLC 폴더 선택',
-        '추가 콘텐츠를 SPEXPANSIONDLC03 (The Old Hunters) 같은 이름의 폴더에 하나씩 넣으세요. 기본 게임만 있을 때 필요하며, Game of the Year Edition(CUSA03173)에는 포함되어 있습니다.',
+        '추가 콘텐츠를 SPEXPANSIONDLC03 (The Old Hunters) 같은 이름의 폴더에 하나씩 넣으세요. 기본 게임만 있을 때 필요하며, Game of the Year Edition에는 포함되어 있습니다.',
         '일본/아시아 버튼 배치: 동그라미로 결정·상호작용, 엑스로 회피',
     ],
 }

@@ -410,6 +410,9 @@ def compile_patches(xml, names, app_version, segments):
 # editions with The Old Hunters.
 BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
                 'CUSA03179','CUSA03173','CUSA03014','CUSA03023'}
+# The Game of the Year editions (US, EU, JP, Asia) include The Old Hunters; the others need its
+# add-on (the launcher's DLC folder).
+OLD_HUNTERS_IDS={'CUSA03179','CUSA03173','CUSA03014','CUSA03023'}
 
 
 # Patches only the port's own file has (patches/Bloodborne.xml of any version since 1.8).
