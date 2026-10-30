@@ -135,6 +135,9 @@ struct Values {
     std::atomic<bool> show_fps_graph{false};
     /// Silence the game while its window does not have focus (bbgpu_audio_muted).
     std::atomic<bool> mute_unfocused{false};
+    /// Refill cheat (bbport_refill.h): Blood Vials and Quicksilver Bullets topped up to 20 on
+    /// each spawn. Live.
+    std::atomic<bool> cheat_refill{false};
     /// Keyboard and mouse button prompts: with the device in use (auto), or always one kind.
     std::atomic<int> button_prompts{PromptsAuto};
     // FSR 4 checks (menu): the provider's auto exposure, the jitter sign it is given.
