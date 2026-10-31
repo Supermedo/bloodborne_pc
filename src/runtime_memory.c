@@ -62,7 +62,10 @@ _Static_assert(sizeof(BatchEntry)==32,"PS4 batch map entry layout");
  * protection) share it; map/unmap/protect take it exclusively. Both nest: code
  * under the lock may write guest memory, and a GPU-tracked page then faults into
  * runtime_memory_gpu_protect on the same thread. Readers nest because glibc's
- * default rwlock prefers readers; a thread holding it exclusively skips relocking. */
+ * default rwlock prefers readers; a thread holding it exclusively skips relocking.
+ * The game's own arguments and results (pointers it passes in) are read before the lock and
+ * written after it: such a page may be GPU-tracked, and its fault drains the draw pipe, whose
+ * recording thread looks regions up here for every draw (a freeze while the game mapped). */
 static pthread_rwlock_t lock=PTHREAD_RWLOCK_INITIALIZER;
 static __thread unsigned exclusive_depth;
 /* Odd while a writer holds the lock; readers' region caches are valid for one even value. */
@@ -525,9 +528,10 @@ static ABI int32_t direct_allocate(int64_t low, int64_t high, uint64_t size,
         }
         if (!overlap) break;
     }
-    blocks[slot] = (Block){start, size, type, 1}; *out = (int64_t)start;
+    blocks[slot] = (Block){start, size, type, 1};
     ++allocations; live_bytes += size;
     write_unlock();
+    *out = (int64_t)start;
     printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
     return 0;
 }
@@ -541,11 +545,16 @@ static int32_t map_direct_locked(void **out, uint64_t size, int prot, int flags,
     return result;
 }
 static ABI int32_t direct_map(void **out, uint64_t size, int prot, int flags, int64_t physical, uint64_t alignment) {
+    if (!out) return INVALID;
+    void *address=*out;
     write_lock();
-    int32_t result=map_direct_locked(out,size,prot,flags,physical,alignment);
+    int32_t result=map_direct_locked(&address,size,prot,flags,physical,alignment);
     write_unlock();
     flush_hooks();
-    if (!result) printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", *out, size, prot);
+    if (!result) {
+        *out=address;
+        printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", address, size, prot);
+    }
     return result;
 }
 static ABI int32_t direct_map_named(void **out, uint64_t size, int prot, int flags, int64_t physical,
@@ -620,11 +629,14 @@ static int32_t map_flexible_locked(void **inout, uint64_t size, int prot, int fl
     return result;
 }
 static ABI int32_t map_flexible(void **inout, uint64_t size, int prot, int flags) {
+    if (!inout) return INVALID;
+    void *address=*inout;
     write_lock();
-    int32_t result=map_flexible_locked(inout,size,prot,flags);
+    int32_t result=map_flexible_locked(&address,size,prot,flags);
     write_unlock();
     flush_hooks();
-    if (!result) printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", *inout, size, prot);
+    if (!result) *inout=address;
+    if (!result) printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", address, size, prot);
     else fprintf(stderr,"Runtime: flexible map of %" PRIu64 " bytes failed (0x%x), in use=%" PRIu64 "\n",
                  size, (unsigned)result, flexible_bytes);
     return result;
@@ -636,13 +648,15 @@ static ABI int32_t release_flexible(void *address, uint64_t size) { return direc
 static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment) {
     if (!alignment) alignment=PAGE;
     if (!inout || !size || size%PAGE || !valid_alignment(alignment)) return INVALID;
+    void *address=*inout;
     write_lock();
-    if ((flags & MAP_FIXED_FLAG) && overlaps((uintptr_t)*inout,(uintptr_t)*inout+size,0)) {
+    if ((flags & MAP_FIXED_FLAG) && overlaps((uintptr_t)address,(uintptr_t)address+size,0)) {
         write_unlock(); return NO_MEMORY;
     }
-    int32_t result=place(inout,size,0,flags,alignment,KIND_RESERVED,0,0);
+    int32_t result=place(&address,size,0,flags,alignment,KIND_RESERVED,0,0);
     write_unlock();
-    if (!result) printf("Runtime: reserved virtual range %p, size=%" PRIu64 "\n", *inout, size);
+    if (!result) *inout=address;
+    if (!result) printf("Runtime: reserved virtual range %p, size=%" PRIu64 "\n", address, size);
     return result;
 }
 static int32_t protect_locked(uintptr_t start, uint64_t size, int prot, int type) {
@@ -674,11 +688,13 @@ static ABI int32_t query_protection(void *address, void **start, void **end, uin
     size_t first=i, last=i;
     while (first && vmas[first-1].end==vmas[first].start && vmas[first-1].kind!=KIND_RESERVED && vmas[first-1].prot==vmas[i].prot) --first;
     while (last+1<vma_count && vmas[last+1].start==vmas[last].end && vmas[last+1].kind!=KIND_RESERVED && vmas[last+1].prot==vmas[i].prot) ++last;
-    if (start) *start=(void *)vmas[first].start;
-    if (end) *end=(void *)vmas[last].end;
-    if (prot) *prot=(uint32_t)vmas[i].prot;
+    const uintptr_t run_start=vmas[first].start, run_end=vmas[last].end;
+    const uint32_t run_prot=(uint32_t)vmas[i].prot;
     __atomic_add_fetch(&queries,1,__ATOMIC_RELAXED);
     read_unlock();
+    if (start) *start=(void *)run_start;
+    if (end) *end=(void *)run_end;
+    if (prot) *prot=run_prot;
     return 0;
 }
 static ABI int32_t virtual_query(const void *address, int flags, VirtualQueryInfo *info, uint64_t info_size) {
@@ -687,33 +703,38 @@ static ABI int32_t virtual_query(const void *address, int flags, VirtualQueryInf
     size_t i=vma_index((uintptr_t)address);
     if (i==vma_count || (vmas[i].start>(uintptr_t)address && !(flags & 1))) { read_unlock(); return ACCESS; }
     Vma v=vmas[i];
+    __atomic_add_fetch(&queries,1,__ATOMIC_RELAXED);
+    read_unlock();
     memset(info,0,sizeof(*info));
     info->start=v.start; info->end=v.end;
     info->offset=v.kind==KIND_DIRECT ? v.phys : 0;
     info->protection=v.prot; info->memory_type=v.type;
     info->flags=(v.kind==KIND_FLEXIBLE ? 1u : 0) | (v.kind==KIND_DIRECT ? 2u : 0) | (v.kind!=KIND_RESERVED ? 16u : 0);
     strcpy(info->name, v.kind==KIND_RESERVED ? "reserved" : v.kind==KIND_DIRECT ? "direct" : "flexible");
-    __atomic_add_fetch(&queries,1,__ATOMIC_RELAXED);
-    read_unlock();
     return 0;
 }
 static ABI int32_t direct_memory_type(uint64_t phys, int *type, void **start, void **end) {
     read_lock();
     for (int i=0;i<LIMIT;++i) if (blocks[i].used && phys>=blocks[i].start && phys-blocks[i].start<blocks[i].size) {
-        if (type) *type=blocks[i].type;
-        if (start) *start=(void *)(uintptr_t)blocks[i].start;
-        if (end) *end=(void *)(uintptr_t)(blocks[i].start+blocks[i].size);
-        read_unlock(); return 0;
+        const Block b=blocks[i];
+        read_unlock();
+        if (type) *type=b.type;
+        if (start) *start=(void *)(uintptr_t)b.start;
+        if (end) *end=(void *)(uintptr_t)(b.start+b.size);
+        return 0;
     }
     read_unlock();
     return ACCESS;
 }
 static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, int flags) {
     if (!entries || count<0) return INVALID;
+    BatchEntry *copy=malloc((size_t)(count ? count : 1)*sizeof(*copy));
+    if (!copy) return NO_MEMORY;
+    memcpy(copy,entries,(size_t)count*sizeof(*copy));
     int32_t result=0; int done=0;
     write_lock();
     for (; done<count; ++done) {
-        BatchEntry *e=&entries[done];
+        BatchEntry *e=&copy[done];
         switch (e->operation) {
         case 0: result=map_direct_locked(&e->start,e->length,(uint8_t)e->prot,flags,(int64_t)e->offset,0); break;
         case 1: result=unmap_locked((uintptr_t)e->start,e->length); break;
@@ -726,6 +747,8 @@ static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, in
     }
     write_unlock();
     flush_hooks();
+    for (int i=0; i<done; ++i) entries[i].start=copy[i].start;
+    free(copy);
     if (processed) *processed=done;
     return result;
 }
