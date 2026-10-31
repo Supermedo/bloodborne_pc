@@ -312,6 +312,8 @@ SETUP = {'de': {
     'Below the minimum at 1080p: 720p, the low end of the minimum requirements.':
         'Unter dem Minimum bei 1080p: 720p, das untere Ende der Mindestanforderungen.',
     "The website's settings for 4 GB cards: FSR 3.1.": 'Die Website-Einstellungen für 4-GB-Karten: FSR 3.1.',
+    'DLSS on a GeForce RTX, also with 4 GB of video memory.':
+        'DLSS auf einer GeForce RTX, auch mit 4 GB Grafikspeicher.',
     "The website's settings for 4 GB cards: Performance.": 'Die Website-Einstellungen für 4-GB-Karten: Performance.',
     "The website's settings for 4 GB cards: a 60 FPS cap.": 'Die Website-Einstellungen für 4-GB-Karten: 60-FPS-Grenze.',
     "The website's settings for 4 GB cards: model detail as in the game.":
@@ -339,8 +341,8 @@ SETUP = {'de': {
     'Highest model detail: your card has room to spare at this resolution.':
         'Höchstes Modelldetail: Deine Karte hat bei dieser Auflösung Reserven.',
     'Model detail as in the game.': 'Modelldetail wie im Spiel.',
-    'Lower model detail: below "Above minimum" every millisecond counts.':
-        'Geringeres Modelldetail: Unter „Über dem Minimum“ zählt jede Millisekunde.',
+    'Lower model detail: integrated graphics or a card below the minimum.':
+        'Geringeres Modelldetail: integrierte Grafik oder eine Karte unter dem Minimum.',
     'Object motion vectors cost about 5–10% FPS: on from "Recommended".':
         'Objekt-Bewegungsvektoren kosten etwa 5–10 % FPS: an ab „Empfohlen“.',
     'RCAS sharpening with an upscaler.': 'RCAS-Schärfung mit Upscaler.',

@@ -96,12 +96,12 @@ class SetupMixin:
         self.auto_settings()
 
     def detected_gpu(self):
-        """(table entry or None, chosen by hand, the Vulkan name). A card chosen by hand counts
+        """(table entry, a generic one for a card not in the table, or None; chosen by hand, the Vulkan name). A card chosen by hand counts
         only for the maker of the card Vulkan reports (another model, the right memory size): a
         GeForce chosen on a Radeon PC (a stray click, a wheel turn over the list in 1.9.2's
         redesign) would recommend DLSS where it cannot run, so it is dropped."""
-        name, _integrated, vram = hardware.parse_gpu_line(self.gpu_line) if self.gpu_line else ('', False, 0)
-        found = hardware.match_gpu(name, vram) if name else None
+        name, integrated, vram = hardware.parse_gpu_line(self.gpu_line) if self.gpu_line else ('', False, 0)
+        found = (hardware.match_gpu(name, vram) or hardware.generic_gpu(name, integrated, vram)) if name else None
         chosen = hardware.GPU_BY_ID.get(self.var('gpu_override', 'app').get())
         maker = hardware.vendor_of(name)
         if chosen and maker and chosen.vendor != maker:
