@@ -2890,7 +2890,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if key not in TASTE_EFFECTS:
                 self.check(f, key, 'ini', _(*title))
         self.row(f, _('Model detail (LOD)', 'Детализация моделей'), self.choice(f, 'model_lod', 'ini', LODS),
-                 _('A game patch (game version 1.09).', 'Патч игры (версия 1.09).'))
+                 _('A game patch (game version 1.09). "Highest" can break armor and capes: parts go missing or '
+                   'look wrong.',
+                   'Патч игры (версия 1.09). «Максимальная» может ломать броню и плащи: части пропадают или '
+                   'выглядят неправильно.'))
         self.note(f, _('Effects are game patches for version 1.09, applied at start.'), top=6)
         self.section(f, _('Frame rate', 'Частота кадров'))
         self.row(f, _('Frame rate', 'Режим'), self.choice(f, 'fps_mode', 'app', FPS_MODES),

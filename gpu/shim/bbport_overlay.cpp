@@ -806,6 +806,10 @@ void Menu() {
         }
         ImGui::EndCombo();
     }
+    Hint("Model LOD game patch. Highest (-2) asks for a detail level some armor parts don't have: capes vanish and some armor looks wrong.");
+    if (s.model_lod == -2) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Highest can break armor and capes");
+    }
     int fov = s.fov;
     Store(s.fov, fov, ImGui::SliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
                                        fov == BbSettings::FovDefault ? "%d (game)" : "%d"));

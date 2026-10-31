@@ -884,7 +884,7 @@ class Test:
 DOWN = [('object_motion', False), ('effect_ssao+effect_dynamic_shadows', False), ('preset', '+1'),
         ('model_lod', '0'), ('preset', '+1'), ('model_lod', '1')]
 # Going up: the biggest gain first (Native AA cost ~3.5 % there).
-UP = [('preset', '-1'), ('preset', '-1'), ('object_motion', True), ('model_lod', '-2')]
+UP = [('preset', '-1'), ('preset', '-1'), ('object_motion', True)]
 PRESET_ORDER = ['0', '1', '2', '3', '4']  # Native AA .. Ultra Performance
 LOWEST = {'preset': '3', 'object_motion': False, 'effect_ssao': False, 'effect_dynamic_shadows': False,
           'model_lod': '0'}

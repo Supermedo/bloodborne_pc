@@ -22,7 +22,7 @@ class Window(bbport_setup.SetupMixin):
         self.rating = hardware.assess(gpu, self.cpu, self.ram)
         self.ini_new, self.applied, self.rating_views = ini_new, [], []
         self.status = types.SimpleNamespace(configure=lambda **_k: None)
-        values = {'setup_done': True, 'auto_graphics': auto_graphics, 'goal': 'smooth'}
+        values = {'setup_done': True, 'auto_graphics': auto_graphics, 'goal': 'smooth', 'model_lod': '0'}
         self.var = lambda key, store: types.SimpleNamespace(get=lambda: values[key])
         self.app = {'auto_hw': hardware.signature(ARC, self.cpu, self.ram) if auto_hw == 'same' else auto_hw}
 

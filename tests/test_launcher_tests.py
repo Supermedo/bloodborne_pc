@@ -182,7 +182,8 @@ class PlanTests(unittest.TestCase):
         tried = drive(plan, lambda s: {'fps': 120 if s['preset'] != '0' else 80, 'p99_ms': 12})
         self.assertEqual(tried[0][0], 'recommended')
         self.assertEqual(tried[1][1]['preset'], '0')  # Native AA next
-        self.assertEqual(plan.choice['settings']['model_lod'], '-2')
+        self.assertEqual(plan.choice['settings']['model_lod'], '0')
+        self.assertFalse([s for _name, s in tried if s.get('model_lod') == '-2'])
 
     def test_goal_missed_steps_down(self):
         speeds = {('1', True): 50, ('1', False): 56, ('2', False): 66}

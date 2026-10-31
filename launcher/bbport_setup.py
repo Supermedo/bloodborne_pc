@@ -332,6 +332,16 @@ class SetupMixin:
         return [entry for entry in entries if entry[1] not in ('upscaler', 'fsr411_backend')
                 and not (entry[1] == 'sharpen' and kept not in hardware.FSR4_FAMILY)]
 
+    def drop_automatic_highest_lod(self):
+        """R89: up to 1.9.7 the automatic settings chose model detail "Highest" (-2) on strong PCs, which
+        breaks some armor and capes. Where the launcher set it and the player kept it, "As in the game"
+        (0) instead; a -2 the player chose by hand stays."""
+        applied = self.app.get('auto_applied') or {}
+        if applied.get('model_lod') != '-2' or self.var('model_lod', 'ini').get() != '-2':
+            return
+        self.apply_settings({('ini', 'model_lod'): '0'})
+        self.app['auto_applied'] = {**applied, 'model_lod': '0'}
+
     def auto_settings(self):
         """At start, once the PC is rated: new hardware with automatic settings on → the settings for
         it, with an Undo on Picture & performance. The first time (an installation set up before this
@@ -346,6 +356,7 @@ class SetupMixin:
         the defaults, FSR 4 and every effect, which freeze Intel graphics and slow small cards down."""
         if not self.rating or not self.var('setup_done', 'app').get():
             return
+        self.drop_automatic_highest_lod()
         new_ini, self.ini_new = getattr(self, 'ini_new', False), False
         if new_ini:
             chosen = self.recommended()
