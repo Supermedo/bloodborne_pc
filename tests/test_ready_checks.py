@@ -109,6 +109,14 @@ class CleanEbootTests(Folder):
         self.assertLess(source.index('restored = restore_eboot(game)'), source.index('prepatched = digest =='))
 
 
+class CleanEbootVersionTests(unittest.TestCase):
+    def test_a_game_of_the_year_dump_is_1_09(self):
+        # APP_VER 01.00 over the 1.09 code: patches.game_app_version decides, as for the patches.
+        with mock.patch('patches.game_app_version', return_value='01.09') as version:
+            self.assertEqual(C.app_version('CUSA03173'), '01.09')
+        version.assert_called_once_with('CUSA03173')
+
+
 class CleanImageTests(unittest.TestCase):
     """CLEAN_IMAGE is the clean 1.09 eboot's: checked where a game folder is at hand (BB_GAME_DIR)."""
 

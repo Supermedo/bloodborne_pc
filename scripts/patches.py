@@ -70,7 +70,7 @@ MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LO
 def game_app_version(game):
     """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read.
     Game of the Year discs (CUSA03173) ship the 1.09 code with APP_VER 01.00: a game whose
-    eboot.bin has the 1.09 patch fingerprint is 01.09 whatever its param.sfo says."""
+    eboot.bin has the 1.09 bytes of a patch group (eboot_is_109) is 01.09 whatever its param.sfo says."""
     try:
         from prepare import sfo, system_folder
         version=sfo((system_folder(game) / 'param.sfo').read_bytes()).get('APP_VER')
