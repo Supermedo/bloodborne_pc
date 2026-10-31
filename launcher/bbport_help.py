@@ -962,6 +962,8 @@ class HelpMixin:
             try:
                 import game_files
                 result = game_files.check(game, progress)
+                game_files.write_result(result, Path(self.app.get('user_dir') or L.DATA_DIR / 'user')
+                                        / 'game_files_check.txt')
                 bad = result['differ'] + result['missing']
                 text = (_('All {} game files are those of the clean 1.09.').format(number(result['checked']))
                         if not bad else

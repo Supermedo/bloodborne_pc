@@ -751,6 +751,8 @@ Set-Content (Join-Path $stage 'windows-crashes.txt') (Hide-Private ($eventText -
 $hintText = @("Hints for the helper (found automatically by BB Report Tool $ToolVersion - they can be wrong):", '') +
     $(if ($hintList.Count) { $hintList | ForEach-Object { "- $_" } } else { '- nothing obvious, see last_run.log' })
 Set-Content (Join-Path $stage 'hints.txt') (Hide-Private ($hintText -join "`r`n")) -Encoding UTF8
+$filesCheck = if ($userDir) { Join-Path $userDir 'game_files_check.txt' }
+if ($filesCheck -and (Test-Path $filesCheck)) { Copy-Item $filesCheck (Join-Path $stage 'game_files_check.txt') }
 if ($portOk) {
     foreach ($name in 'bbport.ini', 'input.ini', 'mods.json', 'patches.json') {
         $file = Join-Path $port $name

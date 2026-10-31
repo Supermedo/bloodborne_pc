@@ -157,6 +157,21 @@ class GameFilesTests(Folder):
             size, digest, name = stream.readline().rstrip('\n').split('\t')
         self.assertEqual((len(digest), int(size) > 0), (32, True))
 
+    def test_the_list_has_the_clean_menu_textures(self):
+        clean = G.read_list()
+        self.assertEqual(clean['dvdroot_ps4/menu/common.tpf.dcx'], (9415151, 'f70fe66b2b7106c8be0e5a552c19c693'))
+        self.assertFalse([name for name in clean if name.endswith('.bak')])
+        self.assertEqual(len(clean), 28804)
+
+    def test_the_full_result_is_written(self):
+        (self.game / 'dvdroot_ps4/chr/c0000.bnd').write_bytes(b'hu')
+        (self.game / 'sce_module/libc.prx').unlink()
+        out = self.root / 'user' / 'game_files_check.txt'
+        G.write_result(G.check(self.game, clean=self.clean), out)
+        self.assertEqual(out.read_text(encoding='utf-8').splitlines(),
+                         ['3 files: 1 differ, 1 missing', 'differ\tdvdroot_ps4/chr/c0000.bnd',
+                          'missing\tsce_module/libc.prx'])
+
 
 class GameFolderTests(Folder):
     def test_a_synced_game_folder(self):
