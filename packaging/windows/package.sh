@@ -77,8 +77,11 @@ out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN
     --workpath out/pyi-work --specpath out/pyi-work --paths "$(cygpath -w "$PWD/scripts")" "${hidden[@]}" \
     --add-data "$(cygpath -w "$PWD/launcher/assets");assets" \
     "$(cygpath -w "$PWD/launcher/bbport_launcher_win.py")"
-out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe \
-    "$(cygpath -w "$PWD/out/pyi-dist/Bloodborne/_internal")"
+# Compare native files/data first, then check Python imports in the actual bundle
+# through its existing --script role. The console runner limits it to 30 seconds.
+out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe --launcher \
+    "$(cygpath -w "$PWD/out/pyi-dist/Bloodborne/Bloodborne.exe")" \
+    "$(cygpath -w "$PWD/packaging/windows/check_launcher_runtime.py")"
 
 # The package is assembled in a fresh staging folder and zipped from there; dist/bbport-windows
 # (a playable copy that may hold saves and settings) is only refreshed afterwards.
