@@ -104,8 +104,8 @@ This statement concerns their Vulkan work, not D3D12 debug-layer validation.
 The `feat/fsr-sdk24-upscaling` topic starts from official `b480526`.
 Shared API headers, atomic size/SHA256 file verification and recursive package
 manifests are in foundation commit `2943038`; the separate headless-device fix
-is `238137e`. A future SDK FG topic can start at that second commit without
-depending on the upscaling integration. The six common API headers and upscaling
+is `238137e`. The independent `feat/mlfg-sdk24` topic starts at that second
+commit without depending on the upscaling integration. The six common API headers and upscaling
 header retain AMD's original blob IDs. The recursive manifest change is shared
 with the standalone launcher-runtime topic.
 
@@ -139,3 +139,18 @@ matching documentation and real frozen runtime. Existing DLSS files are retained
 without a new NVIDIA test. Package/frozen checks remain distinct from the GPU
 fixtures. No new game-performance, 1%/0.1%-low or movement-quality result is
 claimed for this extracted topic.
+
+## Overlay regression-test follow-up
+
+The test-only follow-up restores the `runtime_restart` stub used by the PC
+menu's separate translation unit and finds the settings window through its
+stable `###settings` ID. The test observes restart requests and exercises
+method selection, shared storage and restart boundaries through the actual
+overlay widgets. Product overlay behaviour and SDK runtime sources are unchanged.
+
+The shared foundation remains `2943038` plus `238137e`: common public API,
+verified fetching, nested-runtime manifests and the separate headless fix.
+The SR topic adds two upscaling DLLs; the FG topic owns its effect pin and
+frame-generation headers/runtime. The nested manifest change matches PR #140.
+The original AMD Vulkan findings above remain open; this follow-up does not
+change shader bytes or turn the SDK SR topic into a clean conformance result.
