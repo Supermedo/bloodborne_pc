@@ -113,6 +113,13 @@ struct PageManager::Impl {
         const auto is_gpu_thread = rasterizer->IsGpuSideThread();
         if (is_gpu_thread) {
             BbStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
+        } else if (runtime_fault_recover) {
+            // bbport: a draw preparation worker reading ahead of the GPU thread (it holds the
+            // shader cache's lock, which the GPU thread takes to add a shader). Serving the fault
+            // would drain the draw pipe and download from the GPU: waiting for the GPU thread
+            // while blocking it (a freeze). It goes back to its recovery point (probe.c) and the
+            // GPU thread prepares that draw itself.
+            return false;
         }
         if (Common::IsWriteError(context)) {
             BbStats::Timer timer{BbStats::t_write_faults};
