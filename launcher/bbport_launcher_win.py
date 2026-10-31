@@ -407,9 +407,10 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 # after they were applied (a later difference is the player's own) and the hardware
                 # their upscaler was chosen for (one chosen by hand for another card is no choice for a
                 # new one); the graphics cards this PC has shown (a laptop's two are no new hardware when
-                # they take turns).
+                # they take turns); a new installation still waiting for its settings (kept through a restart:
+                # the guide's language change, a close before the rating) and the version that last applied them.
                 'auto_graphics': True, 'auto_hw': '', 'auto_undo': {}, 'auto_applied': {}, 'auto_applied_hw': '',
-                'auto_gpus': [],
+                'auto_gpus': [], 'auto_new': False, 'auto_version': '',
                 'bench_goal': '60',  # the performance test's frame rate goal
                 'eboot_check': {},
                 # The launcher's view: simple (the pages a player needs) or expert (every page); empty
@@ -1463,8 +1464,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             # Set up with an earlier launcher: every page as before (expert). New: the simple view.
             self.app['ui_mode'] = 'expert' if saved.get('setup_done') or saved.get('game_dir') else 'simple'
         # A folder without bbport.ini yet (a new installation, a test build beside the old one) gets the
-        # settings for this PC once it is rated (auto_settings), not the fixed defaults.
-        self.ini_new = not ini_path().exists()
+        # settings for this PC once it is rated (auto_settings), not the fixed defaults. Kept in settings.json:
+        # the guide's language change restarts the launcher after bbport.ini was written.
+        if not ini_path().exists():
+            self.app['auto_new'] = True
         self.ini, self.ini_lines = load_ini(self.app)
         self.app = mirrored(self.app, self.ini)  # the game's PC Settings page may have changed them
         self.remap_ini_path = input_ini_path(ini_path())
@@ -5328,6 +5331,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def play(self):
         if self.process or self.fsr411_downloading or self.update_installing():
             return
+        if self.app.get('auto_new') and not self.hw_ready:
+            # A new installation starts with the settings for this PC (auto_settings), not the defaults: PLAY goes
+            # on when the hardware check is done (hardware_ready).
+            self.play_waiting = True
+            self.status.configure(text=_('Checking your PC…'), fg=GOLD)
+            return
         if game_underway():
             # Started from Steam, a shortcut or the in-game restart: its window comes to the front instead of a
             # second game on the same saves.
@@ -6763,7 +6772,10 @@ def main():
     restore_benchmark_backup(Path(settings.get('user_dir') or DATA_DIR / 'user'))
     # Without a usable game folder there is nothing to play yet: open the launcher instead.
     page, failed, problem = 'play', None, None
-    if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() and CONFIG_FILE.exists():
+    # Nor without bbport.ini (a new folder): the launcher opens once and makes the settings for this PC; started
+    # without it the engine filled the defaults, FSR 4.1 on any card, Native AA and every effect.
+    if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() and CONFIG_FILE.exists() \
+            and ini_path().exists() and not settings.get('auto_new'):
         # What cannot be repaired is said before the start, in the launcher's window (there is none otherwise).
         problem = start_problem(settings)
         if problem:

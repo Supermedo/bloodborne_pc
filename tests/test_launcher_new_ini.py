@@ -20,11 +20,12 @@ class Window(bbport_setup.SetupMixin):
         gpu = hardware.match_gpu('Intel(R) Arc(TM) Graphics', 23)
         self.gpu_line, self.cpu, self.ram = ARC, hardware.cpu_from_name('Intel(R) Core(TM) Ultra 5 125H'), 39
         self.rating = hardware.assess(gpu, self.cpu, self.ram)
-        self.ini_new, self.applied, self.rating_views = ini_new, [], []
+        self.applied, self.rating_views = [], []
         self.status = types.SimpleNamespace(configure=lambda **_k: None)
         values = {'setup_done': True, 'auto_graphics': auto_graphics, 'goal': 'smooth'}
         self.var = lambda key, store: types.SimpleNamespace(get=lambda: values[key])
-        self.app = {'auto_hw': hardware.signature(ARC, self.cpu, self.ram) if auto_hw == 'same' else auto_hw}
+        self.app = {'auto_hw': hardware.signature(ARC, self.cpu, self.ram) if auto_hw == 'same' else auto_hw,
+                    'auto_new': ini_new, 'auto_applied': {}}
 
     def display_size(self):
         return 1920, 1080
@@ -43,7 +44,7 @@ class NewIniTests(unittest.TestCase):
         self.assertEqual(window.applied['upscaler'], 'off')  # not FSR 4 on Intel graphics
         self.assertFalse(window.applied['object_motion'])
         self.assertIn('New installation', window.auto_note)
-        self.assertFalse(window.ini_new)  # once
+        self.assertFalse(window.app['auto_new'])  # once
 
     def test_also_with_automatic_settings_off_or_never_rated_before(self):
         for auto_hw, auto_graphics in (('same', False), ('', True)):
@@ -58,7 +59,7 @@ class NewIniTests(unittest.TestCase):
 
     def test_the_launcher_notes_it_before_reading_the_ini(self):
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        self.assertLess(source.index('self.ini_new = not ini_path().exists()'),
+        self.assertLess(source.index("self.app['auto_new'] = True"),
                         source.index('self.ini, self.ini_lines = load_ini(self.app)'))
 
 

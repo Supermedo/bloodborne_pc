@@ -74,6 +74,8 @@ class AutoProfileTests(unittest.TestCase):
         saved = (json.loads((self.folder / 'settings.json').read_text(encoding='utf-8'))
                  if (self.folder / 'settings.json').exists() else {})
         ui.app = {**launcher.APP_DEFAULTS, **saved}
+        if not launcher.ini_path().exists():  # as Launcher.__init__ does
+            ui.app['auto_new'] = True
         ui.ini, ui.ini_lines = launcher.load_ini(ui.app)
         ui.vars, ui.mod_order, ui.patch_vars = {}, [], {}
         ui.remap_edits, ui.mouse_edited = {}, False
@@ -336,6 +338,84 @@ class AutoProfileTests(unittest.TestCase):
         self.assertNotIn('sharpen', self.recommended(ui))
         self.assertTrue(self.saved(ui)['sharpen'])
 
+    # ---- a new installation that never got its settings, an update ----------------------------------------
+    def test_a_skipped_guide_still_gets_the_settings(self):
+        """The rating came while the guide was open (or it was skipped): auto_settings returned while setup was
+        not done, and nothing called it again. The guide's finish calls it now."""
+        self.ini.unlink()
+        ui = self.start(RADEON)
+        self.assertEqual(ui.automatic, 0)  # the guide is open
+        ui.var('setup_done', 'app').set(True)  # SetupGuide.finish, skipped
+        ui.auto_settings()
+        now = self.saved(ui)
+        self.assertEqual({key: now[key] for key in self.recommended(ui)}, self.recommended(ui))
+        self.assertFalse(ui.app['auto_new'])
+        self.assertEqual(self.start(RADEON).automatic, 0)  # once
+
+    def test_the_guides_language_restart_keeps_the_new_installation(self):
+        """Its relaunch saves bbport.ini first: the restarted launcher found one and took it for the player's."""
+        self.ini.unlink()
+        self.saved(self.start(RADEON))  # relaunch: collect, then a new start
+        self.assertTrue(self.ini.exists())
+        ui = self.start(RADEON)
+        self.assertTrue(ui.app['auto_new'])
+        ui.var('setup_done', 'app').set(True)
+        ui.auto_settings()
+        self.assertFalse(ui.app['auto_new'])
+        self.assertEqual(self.saved(ui)['upscaler'], self.recommended(ui)['upscaler'])
+
+    def test_an_update_brings_the_new_recommendation_where_the_launcher_set_it(self):
+        """Since 1.9.3 the ratings capped common cards at 30 FPS. What the launcher set and the player left gets
+        this version's settings once; what the player changed stays."""
+        self.set_up(RADEON)
+        settings = json.loads((self.folder / 'settings.json').read_text(encoding='utf-8'))
+        settings['auto_version'] = '1.9.6'
+        settings['fps_mode'] = settings['auto_applied']['fps_mode'] = '30'  # an earlier version's choice
+        settings['auto_applied']['effect_ssao'] = not settings['auto_applied']['effect_ssao']  # changed since
+        (self.folder / 'settings.json').write_text(json.dumps(settings), encoding='utf-8')
+        own_ssao = self.start(RADEON).var('effect_ssao', 'ini').get()
+        ui = self.start(RADEON)
+        self.assertEqual(ui.automatic, 1)
+        self.assertIn('adjusted to this version', ui.status.text)
+        now = self.saved(ui)
+        self.assertEqual(now['fps_mode'], self.recommended(ui)['fps_mode'])
+        self.assertNotEqual(now['fps_mode'], '30')
+        self.assertEqual(now['effect_ssao'], own_ssao)
+        self.assertEqual(ui.app['auto_undo'], {'fps_mode': '30'})  # Undo on Picture & performance
+        self.assertEqual(self.start(RADEON).automatic, 0)  # once
+
+    def test_an_update_leaves_the_players_own_settings(self):
+        self.set_up(RADEON)
+        settings = json.loads((self.folder / 'settings.json').read_text(encoding='utf-8'))
+        settings.update(auto_version='1.9.6', auto_applied={})  # Undo: nothing is the launcher's
+        settings['fps_mode'] = '30'
+        (self.folder / 'settings.json').write_text(json.dumps(settings), encoding='utf-8')
+        ui = self.start(RADEON)
+        self.assertEqual(ui.automatic, 0)
+        self.assertEqual(self.saved(ui)['fps_mode'], '30')
+
+    def test_play_waits_for_the_hardware_check_on_a_new_installation(self):
+        self.ini.unlink()
+        ui = launcher.Launcher.__new__(launcher.Launcher)
+        ui.app = {**launcher.APP_DEFAULTS, 'auto_new': True}
+        ui.process, ui.fsr411_downloading, ui.update_installing = None, False, lambda: False
+        ui.status = Status()
+        ui.init_hardware()
+        ui.play()
+        self.assertTrue(ui.play_waiting)
+        played = []
+        ui.update_rating = ui.auto_settings = lambda **_k: None
+        ui.play = lambda: played.append(True)
+        ui.hardware_ready()
+        self.assertEqual((played, ui.play_waiting), ([True], False))
+
+    def test_the_game_without_bbport_ini_opens_the_launcher(self):
+        """Play Bloodborne.exe and Steam (--play) in a new folder: the engine filled the defaults."""
+        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
+        start = source[source.index("    if '--play' in args"):source.index('result = play_without_window(settings)')]
+        self.assertIn('ini_path().exists()', start)
+        self.assertIn("not settings.get('auto_new')", start)
+
 
 class SignatureTests(unittest.TestCase):
     def test_the_signature_is_the_hardware_only(self):
@@ -383,6 +463,8 @@ class TextTests(unittest.TestCase):
         for language in [code for code, _name in bbport_lang.LANGUAGE_NAMES if code not in ('', 'en')]:
             with self.subTest(language=language):
                 self.assertTrue(bbport_lang.table(language).get(note))
+                self.assertTrue(bbport_lang.table(language).get(
+                    'Update: the graphics settings the launcher had made were adjusted to this version.'))
 
     def test_a_card_not_detected_is_not_called_missing_from_the_list(self):
         """Your PC and the guide said "Your graphics card (?) is not in the list of the hardware check" when the
