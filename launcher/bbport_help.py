@@ -626,13 +626,12 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
             state = eboot_state(game)[0]
         eboot = {'key': key, 'state': state}
         size = number(stat.st_size)
-        values = {}
         try:
-            from prepare import sfo
-            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
-        except (OSError, ValueError, ImportError):
-            pass
-        version = values.get('APP_VER')
+            # game_app_version: Game of the Year dumps say APP_VER 01.00 over the 1.09 code.
+            from patches import game_app_version
+            version = game_app_version(game)
+        except ImportError:
+            version = None
         # Another version's eboot.bin is not 1.09's anyway (the base game 1.00): the version line below
         # says what to do, with the update's steps.
         other_version = state == 'modified' and version and version != '01.09'
