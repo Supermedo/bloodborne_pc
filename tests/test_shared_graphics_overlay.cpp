@@ -16,6 +16,8 @@
 static int restarts = 0;
 // Keep the restart observable while linking the renderer's actual runtime dependencies.
 extern "C" void overlay_test_restart() { ++restarts; }
+// The PC System menu lives in another translation unit and keeps the real name.
+extern "C" void runtime_restart() { overlay_test_restart(); }
 
 static std::string Frame(ImGuiID activate = 0, ImGuiWindow* target = nullptr) {
     ImGui::GetIO().DeltaTime = 1.0f / 60;
@@ -65,7 +67,7 @@ int main() {
     assert(text.find("Selected: FSR 4.1.1 - Vulkan (fsr4vk)") != std::string::npos);
     assert(text.find("Advanced FSR options") == std::string::npos);
     assert(text.find("FSR 4.1 backend") == std::string::npos);
-    ImGuiWindow* window = ImGui::FindWindowByName("Bloodborne - Settings (Insert / L3+R3)");
+    ImGuiWindow* window = ImGui::FindWindowByName("###settings");
     assert(window);
     const ImGuiID settings = window->GetID("FSR 4.1 Settings##FSR41SettingsButton");
     const ImGuiID cache = window->GetID("Motion-vector cache (experimental)");
