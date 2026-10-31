@@ -93,7 +93,8 @@ def eboot_is_109(path,_size=None,_mtime=None):
     try:
         from prepare import parse_self
         elf=bytes(parse_self(Path(path).read_bytes())[0])
-        return patch_fingerprint(elf,BUILTIN_XML,'01.09')==PATCH_FINGERPRINTS['01.09']
+        # Any group with its 1.09 bytes is the 1.09 code: as for APP_VER 01.09, only those groups are patched.
+        return bool(matching_groups_of(lambda start,end: eboot_bytes(elf,start,end),'01.09'))
     except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error, ET.ParseError, ImportError):
         return False
 
