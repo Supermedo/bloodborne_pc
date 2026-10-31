@@ -87,6 +87,7 @@ class SetupMixin:
         self.gpu_line, self.cpu, self.ram, self.rating, self.guide = '', None, 0, None, None
         self.cpu_instructions = None  # hardware.instructions(), with the processor (detect_gpu)
         self.hw_ready = False
+        self.play_waiting = False  # PLAY on a new installation, until the hardware is rated
         self.rating_views = []  # callables redrawing what shows the rating
 
     def hardware_ready(self):
@@ -94,6 +95,9 @@ class SetupMixin:
         self.hw_ready = True
         self.update_rating(force=True)
         self.auto_settings()
+        if getattr(self, 'play_waiting', False):  # PLAY on a new installation waited for this
+            self.play_waiting = False
+            self.play()
 
     def detected_gpu(self):
         """(table entry or None, chosen by hand, the Vulkan name). A card chosen by hand counts
@@ -253,6 +257,7 @@ class SetupMixin:
             if key in applied and key not in touched and not same_setting(applied[key], value):
                 applied[key] = value
         self.app['auto_applied'] = applied
+        self.app['auto_version'] = L.VERSION
         self.remember_hardware(hardware.signature(self.gpu_line, self.cpu, self.ram))
         # The card the upscaler was chosen for (set_by_hand): one the player's own upscaler stayed through (a goal
         # on a laptop's processor graphics) keeps the card it was chosen on.
@@ -343,13 +348,16 @@ class SetupMixin:
         settings was changed by hand since it was applied, all of them stay; the status line says so
         once, and the Play page shows what differs from the settings for the new hardware, with Apply
         on Picture & performance. A new bbport.ini (a new folder) always gets them: its values are only
-        the defaults, FSR 4 and every effect, which freeze Intel graphics and slow small cards down."""
+        the defaults, FSR 4 and every effect, which freeze Intel graphics and slow small cards down.
+
+        Also called when the guide closes (finished or skipped): before, a rating that came while the guide was
+        open, or a skipped guide, left a new installation on the defaults for good."""
         if not self.rating or not self.var('setup_done', 'app').get():
             return
-        new_ini, self.ini_new = getattr(self, 'ini_new', False), False
-        if new_ini:
+        if self.app.get('auto_new'):
             chosen = self.recommended()
             if chosen:
+                self.app['auto_new'] = False
                 self.apply_profile(chosen[2])  # remembers the hardware as well
                 self.auto_note = _('New installation: the graphics settings were made for this PC.')
                 self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
@@ -363,9 +371,10 @@ class SetupMixin:
             return
         self.remember_hardware(before)  # 1.9.3's and 1.9.4's had the display: written without it
         integrated = hardware.parse_gpu_line(self.gpu_line)[1]
-        if not hardware.new_hardware(before, now, self.app['auto_gpus'], integrated):
-            return
         if not self.var('auto_graphics', 'app').get():
+            return
+        if not hardware.new_hardware(before, now, self.app['auto_gpus'], integrated):
+            self.update_auto_settings()
             return
         chosen = self.recommended()
         if not chosen:
@@ -381,6 +390,25 @@ class SetupMixin:
         self.apply_profile(chosen[2])
         self.auto_note = _('New hardware detected: the graphics settings were adjusted to it.')
         self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
+
+    def update_auto_settings(self):
+        """Once after an update, on the same hardware: this version's recommendation for the settings that are
+        still what the launcher set (auto_applied), the player's own changes stay. Repairs the 30 FPS caps and
+        low settings earlier versions' ratings chose (R82), with an Undo on Picture & performance."""
+        applied = self.app.get('auto_applied') or {}
+        if not applied or self.app.get('auto_version') == L.VERSION:
+            return
+        self.app['auto_version'] = L.VERSION
+        now = self.current_settings()
+        chosen = self.recommended(hardware.resolution_class(now.get('output_res')))
+        if not chosen:
+            return
+        entries = [entry for entry in self.goal_entries(chosen[2]) if entry[1] in applied
+                   and same_setting(now.get(entry[1]), applied[entry[1]]) and not same_setting(now.get(entry[1]), entry[2])]
+        if entries:
+            self.apply_profile(entries)
+            self.auto_note = _('Update: the graphics settings the launcher had made were adjusted to this version.')
+            self.status.configure(text=self.auto_note, fg=theme.GOLD_LIGHT)
 
     def profile_card(self, parent):
         """System & performance: the settings for this PC next to the current ones, Apply, Undo and
@@ -2383,8 +2411,9 @@ class SetupGuide:
             app.app['ui_mode'] = self.mode.get()
             app.expert_var.set(self.mode.get() == 'expert')
             app.apply_mode()
-        if app.rating and not app.app.get('auto_hw'):  # skipped: the hardware as it is now, nothing changed
-            app.remember_hardware(hardware.signature(app.gpu_line, app.cpu, app.ram))
+        if app.rating and not app.app.get('auto_hw') and not app.app.get('auto_new'):
+            app.remember_hardware(hardware.signature(app.gpu_line, app.cpu, app.ram))  # skipped: as it is now
+        app.auto_settings()  # a new installation the guide made no settings for: now, or when the rating comes
         try:
             app.collect()
         except Exception:  # the launcher must never stay hidden behind the guide
@@ -2929,3 +2958,4 @@ class SetupGuide:
         if self.frame_gen.get() and r.frame_gen:
             entries = [e for e in entries if e[1] != 'frame_gen'] + [('ini', 'frame_gen', r.frame_gen, '')]
         app.apply_profile(entries, remember_undo=not self.first)  # repeated: Undo on Picture & performance
+        app.app['auto_new'] = False  # the player's choice: auto_settings leaves it
