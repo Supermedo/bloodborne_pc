@@ -16,12 +16,16 @@
 #include <vector>
 
 namespace {
+[[noreturn]] void Fail(const char* message,
+                      const std::source_location where = std::source_location::current()) {
+    std::fprintf(stderr, "FAIL: %s (%s:%u)\n", message, where.file_name(), where.line());
+    std::exit(EXIT_FAILURE);
+}
+
 void Require(bool condition, const char* message = "RCAS test check failed",
              const std::source_location where = std::source_location::current()) {
-    if (!condition) {
-        std::fprintf(stderr, "FAIL: %s (%s:%u)\n", message, where.file_name(), where.line());
-        std::exit(EXIT_FAILURE);
-    }
+    if (!condition)
+        Fail(message, where);
 }
 
 u32 ParseUnsigned(const char* value, u32 limit, const char* message) {
@@ -44,16 +48,17 @@ int main(int argc, char** argv) {
         {{1, 1}, {17, 11}, {2049, 7}, {1920, 1080}, {2560, 1440}, {3840, 2160}}};
     std::vector<u16> captured;
     if (argc != 1) {
-        Require(argc == 4);
+        Require(argc == 4, "Usage: fsr41-fused-output-test [<fp16.raw> <width> <height>]");
         const u32 width = ParseUnsigned(argv[2], 7680, "Invalid capture width");
         const u32 height = ParseUnsigned(argv[3], 4320, "Invalid capture height");
-        Require(width && height && width <= 7680 && height <= 4320);
+        Require(width && height, "Capture dimensions must be nonzero");
         sizes = {{width, height}};
         captured.resize(size_t(width) * height * 4);
         FILE* input_file = std::fopen(argv[1], "rb");
         Require(input_file, "Cannot open captured FP16 input");
-        Require(std::fread(captured.data(), sizeof(u16), captured.size(), input_file) == captured.size());
-        Require(std::fgetc(input_file) == EOF);
+        Require(std::fread(captured.data(), sizeof(u16), captured.size(), input_file) == captured.size(),
+                "Captured FP16 input is truncated");
+        Require(std::fgetc(input_file) == EOF, "Captured FP16 input has trailing data");
         std::fclose(input_file);
         std::printf("Captured FP16 input: %s (%ux%u)\n", argv[1], width, height);
     }
@@ -151,7 +156,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        std::abort();
+        Fail("No compatible Vulkan memory type");
     };
     const auto check = [](vk::Result result) { Require(result == vk::Result::eSuccess); };
     const auto finish = [&] {
@@ -397,9 +402,10 @@ int main(int argc, char** argv) {
                             if (differences < 4) {
                                 std::fprintf(stderr,
                                              "mismatch %ux%u p=%zu c=%zu pattern=%u "
-                                             "strength=%.2f old=%04x new=%04x\n",
-                                             w, h, i / 4, i % 4, pattern, strength, old_out[i],
-                                             new_out[i]);
+                                             "strength=%.2f old=%02x new=%02x\n",
+                                             w, h, i / 4, i % 4, pattern, strength,
+                                             static_cast<unsigned>(old_out[i]),
+                                             static_cast<unsigned>(new_out[i]));
                             }
                             ++differences;
                         }

@@ -303,7 +303,7 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool method_changed = (upscaler == BbSettings::UpscalerFsr411 ||
                                  upscaler == BbSettings::UpscalerFsr412) &&
                                 applied_fsr_backend != backend;
-    if (applied_upscaler != upscaler || method_changed) {
+    if (method_changed) {
         reported_sharpen_path = HostSharpenPath::Unknown;
     }
     const int output = settings.output_res.load();
@@ -321,6 +321,7 @@ bool TemporalUpscaler::OnFrameStart() {
                          jitter_on != last_jitter || applied_upscaler != upscaler || method_changed;
     if (applied_upscaler != upscaler) {
         // A failed provider keeps a fatal flag internally; a user retry gets a fresh context.
+        reported_sharpen_path = HostSharpenPath::Unknown; // Includes same-method context retries.
         scheduler.Finish();
         fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
         if (BbSettings::IsFsr4(upscaler)) BbSettings::Get().fsr4_problem = nullptr;
@@ -856,7 +857,7 @@ bool TemporalUpscaler::DirectSharpen(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Ima
 }
 
 bool TemporalUpscaler::FusedSharpenToUi(vk::CommandBuffer cmdbuf,
-                                       const Fsr4Upscaler::Image& produced) {
+                                        const Fsr4Upscaler::Image& produced) {
     const auto& settings = BbSettings::Get();
     const float strength = std::clamp(settings.sharpness.load(), 0.f, 2.f);
     // All FSR 4.1 providers expose the same FP16 host-sharpening contract.
@@ -928,7 +929,7 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
     if (!settings.sharpen || extra <= 0.0f) {
         if (host_sharpen) {
             ReportHostSharpenPath(settings.sharpen ? HostSharpenPath::Zero : HostSharpenPath::Off,
-                                 w, h);
+                                  w, h);
         }
         return;
     }
