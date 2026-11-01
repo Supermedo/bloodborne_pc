@@ -142,7 +142,7 @@ class DebugPatchTests(unittest.TestCase):
         self.assertIn((0x4736dc8, b'\x00\x00\x60\x11'), writes)  # GFX heap, 278 MiB
         self.assertIn((0x1d96b26, b'\x60\x03\x00\x00'), writes)  # 864 render commands
         offsets = {offset for offset, _ in writes}
-        for offset in (0x17bcb33, 0x17bcb59):  # NPC talk
+        for offset in (0x17bcb33, 0x17bcb59, 0x106800b, 0x1068040, 0x1068075):  # NPC talk, Laurence
             self.assertIn(offset, offsets)
         others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
         for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):

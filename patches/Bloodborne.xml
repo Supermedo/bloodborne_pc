@@ -343,6 +343,13 @@
             <Line Type="bytes" Address="0x01BBCB59" Value="EBDA90"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Laurence Cutscene Hang Fix" Note="The black screen that never ends at the start of the Laurence fight. A job function (0x1467F60) takes a context slot from a pool and gives it back only when its two calls succeed. Each failed job loses a slot, and once they are gone the main thread and the Havok workers spin forever. Failures now give the slot back." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes" Address="0x0146800B" Value="69000000"/>
+            <Line Type="bytes" Address="0x01468040" Value="37"/>
+            <Line Type="bytes" Address="0x01468075" Value="4531FF498BB6200100004C89E7E809E9FEFF4983A620010000000F1F00"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>
