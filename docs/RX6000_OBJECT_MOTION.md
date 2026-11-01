@@ -1,102 +1,21 @@
-# RX 6000 object motion through SSBOs
+# Object motion vectors on Radeon RX 6000
 
-With **Object motion vectors** enabled, recognized Navi21/22/23/24 devices
-automatically use ordinary Vulkan StorageBuffer descriptors for draw parameters
-and vertex-position history. The existing launcher and overlay controls apply;
-there is no additional user setting or required force parameter.
+**Object motion vectors** tracks moving models for temporal upscalers. On recognized
+Navi21/22/23/24 GPUs, bbport automatically uses bounded Vulkan storage buffers (SSBOs)
+to avoid device loss observed with the previous GPU-address access path. No extra
+setting or download is needed. Other GPUs retain their existing path.
 
-The previous raw GPU-address path could lose the device when loading the world
-on these cards, so bbport disabled object motion there. A parameter-only reader
-also reproduced the failure on RX 6800 XT / Adrenalin 26.10.1. Reading the same
-data through an ordinary SSBO worked. This supports the access-path workaround;
-the precise driver/compiler root cause is not established.
+The launcher and in-game overlay use the same **Object motion vectors** setting.
+**Motion-vector cache** is a separate optional setting, off by default. Required
+GPU features and the existing low-VRAM policy still apply. If unavailable, the
+displayed reason distinguishes GPU/driver, memory, feature and allocation limits;
+temporal upscaling continues with camera motion vectors.
 
-## Implementation
+If problems occur, turn **Object motion vectors** off and restart the game. Include
+the GPU, driver version, selected upscaler and BB Report ZIP when reporting an issue.
 
-- `motion_storage.h` identifies Navi2x devices by PCI vendor/device ID. Other
-  GPUs retain their existing path. Older AMD guards, required Vulkan features
-  and the existing low-VRAM policy remain.
-- Set1 binding0 is the readonly parameter buffer. Bindings1/2 reference fixed,
-  bounded views of the existing history buffer: 64 MiB + 16 bytes each. They do
-  not allocate additional history copies or require per-frame descriptor updates.
-- Parameter indices and history accesses are bounded; history indexing uses
-  64-bit arithmetic. Duplicate indexed vertex invocations use uint32 atomic
-  component stores. Existing frame barriers and parameter-ring waits remain.
-- This path uses motion varyings at locations24/25. Attribute collisions skip
-  object-motion instrumentation for that draw, retaining camera motion.
-- The native capability tool exposes `gpu.object_motion_ssbo` from the same
-  C++ device policy. The launcher uses that field to lift its RX6000 guard.
-  Missing/old metadata conservatively retains the guard. VRAM checks still apply.
-- **Motion-vector cache** remains optional and off by default. Its startup mode,
-  saved preference and launcher/overlay synchronization are unchanged.
+Short gameplay checks of an earlier combined prototype passed on RX 6800 XT with
+Adrenalin 26.10.1, with cache off/on and FSR 4.1.2 Vulkan/DX12. Further RX 6000 gameplay
+coverage is still needed; this does not establish reliability on every model/driver.
 
-This common renderer path is independent of the selected FSR version/backend.
-It does not alter AMD's upscaler shaders, models, exposure or frame generation.
-
-## Verification
-
-Native tests exercise the actual emitted shaders and ObjectMotion buffer owner:
-history bounds/readback, both history halves, parameter-ring reuse, previous GPU
-writes, duplicate indices, instancing, normal/push set0 layouts and direct/threaded
-recording. A private constructor overload allows the test to exercise SSBO on a
-different GPU; the production constructor always selects from the physical GPU.
-Cache pixel-readback tests cover both paths with caching off/on.
-
-On RX9070 / Adrenalin26.10.1, 56 history bounds/data cases and 48 native frames
-with two draws each passed, along with four cache cases. The SSBO tests have no
-Khronos core/synchronization validation errors. Eight backend modules (SSBO/BDA,
-vertex/fragment, motion/plain) passed standalone SPIR-V validation.
-
-On the earlier combined SDK2.4 prototype, an external RX6800XT /
-Adrenalin26.10.1 tester completed all four gameplay
-cases at 2560x1440/Quality, 60FPS, FG off:
-
-| FSR4.1.2 method | Motion-vector cache | Result |
-|---|---|---|
-| AMD Vulkan | Off | Active provider4.1.2, normal exit |
-| AMD DX12 | Off | Active provider4.1.2, normal exit |
-| AMD Vulkan | On | Active provider4.1.2, normal exit |
-| AMD DX12 | On | Active provider4.1.2, normal exit |
-
-All four reports identify the tested renderer, automatic SSBO selection and
-prepared previous-frame history. No device loss or upscaler fallback occurred.
-The tester reported no visual anomalies and judged overall image quality better
-than FSR3.1. This is subjective feedback from short runs on one GPU/driver.
-The gameplay reports contain no numerical GPU motion-vector readback or uncapped
-frame-time benchmark. Longer sessions, more GPUs, resolution changes and FG3.1
-remain useful beta coverage.
-
-The original SDK2.4 Vulkan shader findings documented in
-[the combined prototype report](https://github.com/rattensuppe/bloodborne_pc/blob/2a8ec7e435f3b22e031237a6a201fb572c83a411/docs/FSR24_UPSCALING.md#local-validation-findings-october-30-2026)
-remain separate from SSBO validation.
-
-Build the opt-in `motion-storage-test`, `motion-shader-test`,
-`motion-history-test` and `object-motion-cache-test` targets for regression checks.
-`test_motion_storage_launcher.py` checks the launcher guard without loading its UI.
-`motion-shader-test <output-directory> --gpu` runs the native SSBO readbacks;
-use private BB_USER_DIR/BB_GPU_USER_DIR test folders. Test-only
-BB_OMV_TEST_SET0_PUSH/BB_OMV_TEST_THREADED select the recording variants.
-These tests are excluded from normal application builds and never run in-game.
-
-## Standalone review scope
-
-This branch applies SSBO routing on the official Windows 1.9.7 base. It
-retains the original motion-target cache lifecycle and existing upscaling
-providers. SDK 2.4, RCAS fusion, LRU/deferred-release optimisation and the
-scaled debug view are separate changes. The RX6800XT feedback above is
-from the combined prototype; it is not a new hardware run of this branch.
-
-On the standalone 1.9.7 branch, the Windows renderer/capability tools and native
-tests build. RX9070 tests force the private SSBO fixture: 56 bounds cases,
-48 native history frames, direct/threaded recording and normal/push set0 layouts
-pass. Four original-cache readbacks (BDA/SSBO, off/on) have identical output;
-all eight emitted SPIR-V modules pass standalone validation. The five launcher
-metadata/guard tests pass.
-
-Khronos validation reports `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`
-in headless device creation. The unchanged upstream instance code enables
-`VK_KHR_swapchain` without a surface instance extension; a BDA-only control
-reproduces the same finding. No additional SSBO validation findings or
-synchronization hazards were reported. The separate headless correction in the
-combined prototype is intentionally not folded into this fix. There is no new
-RX6000 gameplay run or performance claim for this extracted branch.
+[Implementation and validation details](https://github.com/rattensuppe/bloodborne_pc/blob/fix/rx6000-object-motion/docs/development/RX6000_OBJECT_MOTION.md)
