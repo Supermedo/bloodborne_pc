@@ -111,6 +111,20 @@ class SetupMixin:
             return chosen, True, name
         return found, False, name
 
+    def unavailable_choices(self, key):
+        """Values of the upscaler or frame generation list this PC's card cannot run (hardware.unavailable);
+        none before the detection."""
+        if not self.hw_ready or not self.gpu_line:
+            return set()
+        gpu, _chosen, name = self.detected_gpu()
+        return hardware.unavailable(name, gpu)[key]
+
+    def recommended_choice(self, key):
+        """The value the automatic settings pick for this PC (recommended), or None before the rating."""
+        recommendation = self.recommended()
+        return next((value for _store, k, value, _why in recommendation[2] if k == key), None) \
+            if recommendation else None
+
     def update_rating(self, force=False):
         """Rates the PC again and redraws what shows it, when anything it depends on changed."""
         key = (self.hw_ready, self.gpu_line, self.var('gpu_override', 'app').get(),

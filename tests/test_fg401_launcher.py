@@ -110,6 +110,7 @@ class SelectionTests(unittest.TestCase):
         obj.tk=tk;obj.ttk=ttk;obj.root=self.root;obj.vars={}
         obj.ini=launcher.INI_DEFAULTS.copy();obj.app=launcher.APP_DEFAULTS.copy()
         obj.fg401_support=None;obj.fg401_refreshers=[]
+        obj.init_hardware()
         self.parent=ttk.Frame(self.root)
         obj.fg401_status=ttk.Label(self.parent)
         obj.fg401_status.grid(row=1,column=0)

@@ -33,7 +33,7 @@ KEYS = [
     "From FireBurn/Q2RTX on GitHub (built from AMD's MIT-licensed FidelityFX source), about 30 MB, into the fsr4_shaders folder of the port.",
     'Installed: {} files in {}.', '{} of {} files missing in {}.', 'Download failed: {}',
     'Detail', 'Model detail (LOD)', 'A game patch (game version 1.09).', 'Show the FPS counter',
-    'FSR 4 (best quality)', 'FSR 4.1.1 (needs fsr4_411 assets)', 'FSR 3.1 (every GPU)',
+    'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (needs fsr4_411 assets)', 'FSR 3.1 (every GPU)',
     'TAA (native resolution anti-aliasing)', 'Off',
     'Auto (by graphics card)', 'Off (faster)', 'On (change without restarting)',
     'As in the game', 'Highest (−2)', 'Lower (1)', 'Lowest (2)',
@@ -143,7 +143,7 @@ TRANSLATIONS = {
         'من FireBurn/Q2RTX على GitHub (مبنية من شيفرة AMD FidelityFX المرخصة MIT)، نحو 30 ميغابايت، إلى مجلد fsr4_shaders في المنفذ.',
         'مثبتة: {} ملفًا في {}.', 'ينقص {} من {} ملفًا في {}.', 'فشل التنزيل: {}',
         'التفاصيل', 'تفاصيل النماذج (LOD)', 'رقعة للعبة (الإصدار 1.09).', 'إظهار عدّاد الإطارات',
-        'FSR 4 (أفضل جودة)', 'FSR 4.1.1 (يحتاج ملفات fsr4_411)', 'FSR 3.1 (أي بطاقة)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (يحتاج ملفات fsr4_411)', 'FSR 3.1 (أي بطاقة)',
         'TAA (تنعيم بالدقة الأصلية)', 'إيقاف',
         'تلقائي (حسب البطاقة)', 'إيقاف (أسرع)', 'تشغيل (تغيير دون إعادة تشغيل)',
         'كما في اللعبة', 'الأعلى (−2)', 'أقل (1)', 'الأدنى (2)',
@@ -244,7 +244,7 @@ TRANSLATIONS = {
         'Desde FireBurn/Q2RTX en GitHub (compilados del código FidelityFX de AMD con licencia MIT), unos 30 MB, en la carpeta fsr4_shaders del port.',
         'Instalados: {} archivos en {}.', 'Faltan {} de {} archivos en {}.', 'La descarga falló: {}',
         'Detalle', 'Detalle de modelos (LOD)', 'Un parche del juego (versión 1.09).', 'Mostrar el contador de FPS',
-        'FSR 4 (mejor calidad)', 'FSR 4.1.1 (necesita archivos fsr4_411)', 'FSR 3.1 (cualquier GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (necesita archivos fsr4_411)', 'FSR 3.1 (cualquier GPU)',
         'TAA (antialiasing a resolución nativa)', 'Desactivado',
         'Automático (según la tarjeta)', 'Desactivado (más rápido)', 'Activado (cambiar sin reiniciar)',
         'Como en el juego', 'Máximo (−2)', 'Menor (1)', 'Mínimo (2)',
@@ -345,7 +345,7 @@ TRANSLATIONS = {
         'Do FireBurn/Q2RTX no GitHub (compilados do código FidelityFX da AMD, licença MIT), cerca de 30 MB, na pasta fsr4_shaders do port.',
         'Instalados: {} arquivos em {}.', 'Faltam {} de {} arquivos em {}.', 'Falha no download: {}',
         'Detalhe', 'Detalhe dos modelos (LOD)', 'Um patch do jogo (versão 1.09).', 'Mostrar o contador de FPS',
-        'FSR 4 (melhor qualidade)', 'FSR 4.1.1 (precisa dos arquivos fsr4_411)', 'FSR 3.1 (qualquer GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (precisa dos arquivos fsr4_411)', 'FSR 3.1 (qualquer GPU)',
         'TAA (anti-aliasing na resolução nativa)', 'Desligado',
         'Automático (pela placa de vídeo)', 'Desligado (mais rápido)', 'Ligado (mudar sem reiniciar)',
         'Como no jogo', 'Máximo (−2)', 'Menor (1)', 'Mínimo (2)',
@@ -446,7 +446,7 @@ TRANSLATIONS = {
         'Depuis FireBurn/Q2RTX sur GitHub (compilés à partir du code FidelityFX d’AMD sous licence MIT), environ 30 Mo, dans le dossier fsr4_shaders du portage.',
         'Installés : {} fichiers dans {}.', '{} fichiers sur {} manquants dans {}.', 'Échec du téléchargement : {}',
         'Détails', 'Détail des modèles (LOD)', 'Un patch du jeu (version 1.09).', 'Afficher le compteur de FPS',
-        'FSR 4 (meilleure qualité)', 'FSR 4.1.1 (fichiers fsr4_411 requis)', 'FSR 3.1 (tout GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (fichiers fsr4_411 requis)', 'FSR 3.1 (tout GPU)',
         'TAA (anticrénelage en résolution native)', 'Désactivé',
         'Auto (selon la carte)', 'Désactivé (plus rapide)', 'Activé (changer sans relancer)',
         'Comme dans le jeu', 'Maximal (−2)', 'Inférieur (1)', 'Minimal (2)',
@@ -547,7 +547,7 @@ TRANSLATIONS = {
         'Von FireBurn/Q2RTX auf GitHub (aus AMDs MIT-lizenziertem FidelityFX-Quellcode gebaut), etwa 30 MB, in den Ordner fsr4_shaders des Ports.',
         'Installiert: {} Dateien in {}.', '{} von {} Dateien fehlen in {}.', 'Download fehlgeschlagen: {}',
         'Details', 'Modelldetail (LOD)', 'Ein Spiel-Patch (Version 1.09).', 'FPS-Zähler anzeigen',
-        'FSR 4 (beste Qualität)', 'FSR 4.1.1 (braucht fsr4_411-Dateien)', 'FSR 3.1 (jede GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (braucht fsr4_411-Dateien)', 'FSR 3.1 (jede GPU)',
         'TAA (Kantenglättung in nativer Auflösung)', 'Aus',
         'Automatisch (nach Grafikkarte)', 'Aus (schneller)', 'An (ohne Neustart ändern)',
         'Wie im Spiel', 'Höchste (−2)', 'Niedriger (1)', 'Niedrigste (2)',
@@ -648,7 +648,7 @@ TRANSLATIONS = {
         'Da FireBurn/Q2RTX su GitHub (compilati dal codice FidelityFX di AMD con licenza MIT), circa 30 MB, nella cartella fsr4_shaders del port.',
         'Installati: {} file in {}.', 'Mancano {} file su {} in {}.', 'Download non riuscito: {}',
         'Dettaglio', 'Dettaglio modelli (LOD)', 'Una patch del gioco (versione 1.09).', 'Mostra il contatore FPS',
-        'FSR 4 (qualità migliore)', 'FSR 4.1.1 (richiede i file fsr4_411)', 'FSR 3.1 (qualsiasi GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (richiede i file fsr4_411)', 'FSR 3.1 (qualsiasi GPU)',
         'TAA (antialiasing a risoluzione nativa)', 'Disattivo',
         'Automatico (in base alla scheda)', 'Disattivo (più veloce)', 'Attivo (cambia senza riavviare)',
         'Come nel gioco', 'Massimo (−2)', 'Inferiore (1)', 'Minimo (2)',
@@ -749,7 +749,7 @@ TRANSLATIONS = {
         'Z FireBurn/Q2RTX na GitHub (zbudowane z kodu AMD FidelityFX na licencji MIT), około 30 MB, do folderu fsr4_shaders portu.',
         'Zainstalowano: {} plików w {}.', 'Brakuje {} z {} plików w {}.', 'Pobieranie nie powiodło się: {}',
         'Szczegóły', 'Szczegółowość modeli (LOD)', 'Łatka gry (wersja 1.09).', 'Pokazuj licznik FPS',
-        'FSR 4 (najlepsza jakość)', 'FSR 4.1.1 (wymaga plików fsr4_411)', 'FSR 3.1 (każde GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (wymaga plików fsr4_411)', 'FSR 3.1 (każde GPU)',
         'TAA (wygładzanie w natywnej rozdzielczości)', 'Wył.',
         'Automatycznie (wg karty)', 'Wył. (szybciej)', 'Wł. (zmiana bez restartu)',
         'Jak w grze', 'Najwyższa (−2)', 'Niższa (1)', 'Najniższa (2)',
@@ -850,7 +850,7 @@ TRANSLATIONS = {
         'GitHub’daki FireBurn/Q2RTX’ten (AMD’nin MIT lisanslı FidelityFX kaynağından derlenmiş), yaklaşık 30 MB, portun fsr4_shaders klasörüne.',
         'Kurulu: {} içinde {} dosya.', '{} dosyadan {} tanesi eksik: {}.', 'İndirme başarısız: {}',
         'Ayrıntı', 'Model ayrıntısı (LOD)', 'Bir oyun yaması (sürüm 1.09).', 'FPS sayacını göster',
-        'FSR 4 (en iyi kalite)', 'FSR 4.1.1 (fsr4_411 dosyaları gerekir)', 'FSR 3.1 (her GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (fsr4_411 dosyaları gerekir)', 'FSR 3.1 (her GPU)',
         'TAA (yerel çözünürlükte kenar yumuşatma)', 'Kapalı',
         'Otomatik (ekran kartına göre)', 'Kapalı (daha hızlı)', 'Açık (yeniden başlatmadan değiştir)',
         'Oyundaki gibi', 'En yüksek (−2)', 'Daha düşük (1)', 'En düşük (2)',
@@ -951,7 +951,7 @@ TRANSLATIONS = {
         '来自 GitHub 上的 FireBurn/Q2RTX（由 AMD 采用 MIT 许可的 FidelityFX 源码构建），约 30 MB，放入移植版的 fsr4_shaders 文件夹。',
         '已安装：{} 个文件，位于 {}。', '{} 中缺少 {} 个文件中的 {} 个。', '下载失败：{}',
         '细节', '模型细节 (LOD)', '游戏补丁（版本 1.09）。', '显示帧率计数器',
-        'FSR 4（最佳画质）', 'FSR 4.1.1（需要 fsr4_411 文件）', 'FSR 3.1（任何显卡）',
+        'FSR 4（Radeon RX 7000/9000）', 'FSR 4.1.1（需要 fsr4_411 文件）', 'FSR 3.1（任何显卡）',
         'TAA（原生分辨率抗锯齿）', '关闭',
         '自动（根据显卡）', '关闭（更快）', '开启（无需重启即可更改）',
         '与游戏相同', '最高 (−2)', '较低 (1)', '最低 (2)',
@@ -1050,7 +1050,7 @@ TRANSLATIONS = {
         'GitHub の FireBurn/Q2RTX から（AMD の MIT ライセンスの FidelityFX ソースからビルド）、約 30 MB、移植版の fsr4_shaders フォルダーへ。',
         'インストール済み：{} ファイル（{}）。', '{} 中 {} ファイルが {} にありません。', 'ダウンロードに失敗しました：{}',
         'ディテール', 'モデルの詳細度 (LOD)', 'ゲームパッチ（バージョン 1.09）。', 'FPS カウンターを表示',
-        'FSR 4（最高画質）', 'FSR 4.1.1（fsr4_411 ファイルが必要）', 'FSR 3.1（すべての GPU）',
+        'FSR 4（Radeon RX 7000/9000）', 'FSR 4.1.1（fsr4_411 ファイルが必要）', 'FSR 3.1（すべての GPU）',
         'TAA（ネイティブ解像度のアンチエイリアス）', 'オフ',
         '自動（グラフィックカードに応じて）', 'オフ（高速）', 'オン（再起動なしで変更）',
         'ゲームのまま', '最高 (−2)', '低め (1)', '最低 (2)',
@@ -1149,7 +1149,7 @@ TRANSLATIONS = {
         'GitHub의 FireBurn/Q2RTX에서 (AMD의 MIT 라이선스 FidelityFX 소스로 빌드), 약 30 MB, 포트의 fsr4_shaders 폴더로.',
         '설치됨: {}개 파일, 위치 {}.', '{}개 중 {}개 파일이 {}에 없음.', '다운로드 실패: {}',
         '디테일', '모델 디테일 (LOD)', '게임 패치 (버전 1.09).', 'FPS 카운터 표시',
-        'FSR 4 (최고 품질)', 'FSR 4.1.1 (fsr4_411 파일 필요)', 'FSR 3.1 (모든 GPU)',
+        'FSR 4 (Radeon RX 7000/9000)', 'FSR 4.1.1 (fsr4_411 파일 필요)', 'FSR 3.1 (모든 GPU)',
         'TAA (네이티브 해상도 안티에일리어싱)', '끔',
         '자동 (그래픽 카드에 따라)', '끔 (더 빠름)', '켬 (재시작 없이 변경)',
         '게임 그대로', '최고 (−2)', '낮게 (1)', '최저 (2)',
@@ -1244,6 +1244,7 @@ from bbport_fsr411 import TRANSLATIONS as FSR411_SUPPORT_TRANSLATIONS
 from bbport_lang_trophies import TRANSLATIONS as TROPHY_TRANSLATIONS
 from bbport_lang_exit import TRANSLATIONS as EXIT_TRANSLATIONS  # noqa: E402
 from bbport_lang_window import TRANSLATIONS as WINDOW_TRANSLATIONS  # noqa: E402
+from bbport_lang_upscalers import TRANSLATIONS as UPSCALER_TRANSLATIONS  # noqa: E402
 
 EXTRA_TRANSLATIONS = {
     'zh': {
@@ -1289,4 +1290,5 @@ def table(language):
         _tables[language].update(TROPHY_TRANSLATIONS.get(language, {}))
         _tables[language].update(EXIT_TRANSLATIONS.get(language, {}))
         _tables[language].update(WINDOW_TRANSLATIONS.get(language, {}))
+        _tables[language].update(UPSCALER_TRANSLATIONS.get(language, {}))
     return _tables[language]
