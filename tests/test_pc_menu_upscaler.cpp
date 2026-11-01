@@ -14,7 +14,51 @@ int main() {
         using namespace BbSettings;
         auto& s = Get();
         const auto start = Clock::time_point{};
+        unsigned route_cases = 0;
+        for (const int provider : {UpscalerFsr411, UpscalerFsr412}) {
+            const int row = provider == UpscalerFsr412;
+            for (unsigned mask = 0; mask != 4; ++mask) {
+                s.fsr41_backend_supported[row][0] = (mask & 1) != 0;
+                s.fsr41_backend_supported[row][1] = (mask & 2) != 0;
+                for (const int saved : {-1, 0, 1}) {
+                    SelectUpscaler(UpscalerFsr3);
+                    s.fsr411_backend = saved;
+                    const bool keep_saved = saved >= 0 && (mask & (1u << saved));
+                    const int expected = !mask ? -1 : keep_saved ? saved
+                        : provider == UpscalerFsr412 ? ((mask & 1) ? 0 : 1)
+                                                   : ((mask & 2) ? 1 : 0);
+                    Require(SupportedFsrBackend(provider) == expected,
+                            "PC menu backend choice differs from supported method order");
+                    Require(UpscalerSupported(provider) == bool(mask),
+                            "PC menu offers a version without a supported backend");
+                    const bool save = Apply(Line::Upscaler, provider);
+                    Require(save == bool(mask), "unavailable route unexpectedly requested a save");
+                    Require(s.upscaler == (mask ? provider : UpscalerFsr3),
+                            "unavailable selection replaced the saved upscaler");
+                    if (mask) Require(s.fsr411_backend == expected && s.fsr41_version == provider,
+                                      "PC menu did not synchronize the supported version/backend");
+                    else Require(Value(Line::Upscaler) == UpscalerFsr3 &&
+                                 applied[Line::Upscaler] == UpscalerFsr3,
+                                 "stale unsupported list was not reset");
+                    ++route_cases;
+                }
+            }
+            // A persisted unavailable choice stays intact and can explicitly retry that route.
+            SelectUpscaler(provider);
+            s.fsr411_backend = Fsr411Dx12;
+            s.fsr41_backend_supported[row][0] = false;
+            s.fsr41_backend_supported[row][1] = false;
+            UpscalerFailure(provider);
+            const auto request = s.upscaler_request.load();
+            Require(!Apply(Line::Upscaler, RetryUpscaler) &&
+                    s.upscaler_request == request + 1 && s.fsr411_backend == Fsr411Dx12,
+                    "explicit retry switched an unavailable persisted method");
+        }
         for (const int provider : {UpscalerFsr4, UpscalerFsr411, UpscalerFsr412}) {
+            if (provider != UpscalerFsr4) {
+                s.fsr41_backend_supported[provider == UpscalerFsr412][0] = true;
+                s.fsr41_backend_supported[provider == UpscalerFsr412][1] = true;
+            }
             SelectUpscaler(UpscalerFsr3);
             Require(Apply(Line::Upscaler, provider), "changed selection must request a save");
             Require(s.upscaler == provider, "PC menu selection did not reach shared settings");
@@ -54,6 +98,8 @@ int main() {
         Require(s.upscaler == UpscalerFsr3 && !s.UpscalerFallbackActive(),
                 "stale retry changed a non-FSR4 selection");
         std::puts("PASS: PC-menu shared selection, explicit retry, settle/cancel and sentinel cleanup");
+        std::printf("PASS: %u version/backend availability cases; stale list and persisted retry\n",
+                    route_cases);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());

@@ -277,6 +277,30 @@ void DefaultSettings(int32_t* out) {
     out[Restart] = 0;
 }
 
+int SupportedFsrBackend(int upscaler) {
+    const auto& s = BbSettings::Get();
+    const int saved = s.fsr411_backend.load();
+    if (saved >= 0 && saved <= 1 && s.FsrMethodSupported(upscaler, saved)) return saved;
+    // Match the family picker's version-specific order while preserving a usable choice.
+    const int first = upscaler == BbSettings::UpscalerFsr412
+                          ? BbSettings::Fsr411Vulkan : BbSettings::Fsr411Dx12;
+    for (const int backend : {first, 1 - first}) {
+        if (s.FsrMethodSupported(upscaler, backend)) return backend;
+    }
+    return -1;
+}
+
+bool UpscalerSupported(int upscaler) {
+    const auto& s = BbSettings::Get();
+    switch (upscaler) {
+    case BbSettings::UpscalerFsr4: return s.fsr4_supported.load();
+    case BbSettings::UpscalerFsr411:
+    case BbSettings::UpscalerFsr412: return SupportedFsrBackend(upscaler) >= 0;
+    case BbSettings::UpscalerDlss: return s.dlss_supported.load();
+    default: return true;
+    }
+}
+
 // One changed line to the port's settings. Returns true when bbport.ini should be written.
 bool Apply(Line line, int32_t v) {
     auto& s = BbSettings::Get();
@@ -290,7 +314,21 @@ bool Apply(Line line, int32_t v) {
             applied[Upscaler] = selected;
             return false;
         }
-        BbSettings::SelectUpscaler(std::clamp(v, 0, BbSettings::UpscalerCount - 1));
+        v = std::clamp(v, 0, BbSettings::UpscalerCount - 1);
+        if ((v == BbSettings::UpscalerFsr411 || v == BbSettings::UpscalerFsr412) &&
+            v != s.upscaler) {
+            const int backend = SupportedFsrBackend(v);
+            if (backend < 0) {
+                // A stale open list must not replace the saved choice with an unavailable route.
+                const int selected = s.upscaler.load();
+                SetValue(Upscaler, selected);
+                applied[Upscaler] = selected;
+                return false;
+            }
+            s.fsr411_backend = backend;
+            s.fsr41_version = v;
+        }
+        BbSettings::SelectUpscaler(v);
         return true;
     case Quality: s.preset = std::clamp(v, 0, BbSettings::PresetCount - 1); return true;
     case Sharpness:
@@ -376,9 +414,7 @@ void LineChoices(Line line, const int32_t* now, Choices& c) {
     switch (line) {
     case Upscaler:
         for (int u = 0; u < BbSettings::UpscalerCount; ++u) {
-            const bool supported = u == BbSettings::UpscalerFsr4 ? s.fsr4_supported.load()
-                                 : u == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                 : u == BbSettings::UpscalerDlss ? s.dlss_supported.load() : true;
+            const bool supported = UpscalerSupported(u);
             if (supported || u == now[Upscaler]) c.Add(u, UPSCALER_TEXT + u);
         }
         if (s.UpscalerFallbackActive()) c.Add(RetryUpscaler, RETRY_UPSCALER_TEXT);

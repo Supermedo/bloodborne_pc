@@ -57,6 +57,10 @@ another method or a new process can request another attempt. Resizing alone does
 not keep retrying failed dispatches. The PC action observes the existing 800 ms
 settle delay and never saves its sentinel. Native labels include FSR 4.1.2 and
 translated retry text. Other menu localization remains separate.
+The native list offers a new FSR 4.1 version only if a backend is supported.
+Selection retains a usable saved backend, otherwise chooses the version's
+supported preferred route. A saved unavailable choice stays visible; its explicit
+retry retains that exact route. A stale unavailable list cannot overwrite it.
 
 Repairing a missing SDK Vulkan DLL cannot add features to an existing logical
 device. If setup was skipped, **Restart required** retains the selected method.
