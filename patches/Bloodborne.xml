@@ -332,6 +332,11 @@
             <Line Type="bytes32" Address="0x04b36dc8" Value="0x11600000"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="More Render Commands" Note="The renderer's per-frame command list holds 216 commands. When it is full the game writes the next one through a null pointer (write access to 0x0 at guest offset 0x21b4bb4). This raises it to 864, in line with the 1 MiB heaps. Found reading the code, not seen in play." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02196b26" Value="0x00000360"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>

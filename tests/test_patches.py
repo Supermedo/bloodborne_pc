@@ -140,6 +140,7 @@ class DebugPatchTests(unittest.TestCase):
         self.assertIn((0x2195c0a, b'\x00\x00\x10\x00'), writes)
         self.assertIn((0x2195c47, b'\x00\x00\x10\x00'), writes)
         self.assertIn((0x4736dc8, b'\x00\x00\x60\x11'), writes)  # GFX heap, 278 MiB
+        self.assertIn((0x1d96b26, b'\x60\x03\x00\x00'), writes)  # 864 render commands
         others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
         for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):
             for fix, value in writes:
