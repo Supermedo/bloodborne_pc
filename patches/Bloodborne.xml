@@ -350,6 +350,11 @@
             <Line Type="bytes" Address="0x01468075" Value="4531FF498BB6200100004C89E7E809E9FEFF4983A620010000000F1F00"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Black Clear Colour" Note="The game clears the screen to grey (0.5, 0.5, 0.5). It shows as the grey screen before the title and through the top pixel row of the title art at 4K. This loads black instead." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02196aff" Value="0x02b7e3bd"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>

@@ -21,7 +21,8 @@ FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++'],'uncap':['Uncap FPS++']
 # mov edx,0x40000 at guest offsets 0x2195c09/0x2195c46) run out in a busy frame; the pool at
 # 0xe45560 then returns NULL and the caller copies into it (memcpy at guest offset 0x21d5b40).
 # The notes in the file say what the others are for.
-FIXES=['Larger Frame Heaps','More Render Commands','NPC Talk Crash Fix','Laurence Cutscene Hang Fix']
+FIXES=['Larger Frame Heaps','More Render Commands','NPC Talk Crash Fix','Laurence Cutscene Hang Fix',
+       'Black Clear Colour']
 # Upscaler presets (bbport.ini "preset", the in-game menu): output / render size ratio. The game
 # then renders at 1920x1080 / ratio and the port's temporal upscaler restores the output size.
 OUTPUT_SIZE=(1920,1080)
