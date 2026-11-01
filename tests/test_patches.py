@@ -137,7 +137,9 @@ class DebugPatchTests(unittest.TestCase):
 
     def test_fixes_raise_the_frame_heaps_without_touching_other_patches(self):
         writes = compile_patches(XML, FIXES, '01.09', SEGMENTS)
-        self.assertEqual(writes, [(0x2195c0a, b'\x00\x00\x10\x00'), (0x2195c47, b'\x00\x00\x10\x00')])
+        self.assertIn((0x2195c0a, b'\x00\x00\x10\x00'), writes)
+        self.assertIn((0x2195c47, b'\x00\x00\x10\x00'), writes)
+        self.assertIn((0x4736dc8, b'\x00\x00\x60\x11'), writes)  # GFX heap, 278 MiB
         others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
         for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):
             for fix, value in writes:
