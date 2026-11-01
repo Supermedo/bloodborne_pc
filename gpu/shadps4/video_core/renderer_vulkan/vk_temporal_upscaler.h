@@ -153,7 +153,7 @@ private:
     void CaptureHudless(VideoCore::ImageId color);
     void CaptureHudlessUi();
     void RunScaled();
-    void ShowScaledMotion(vk::CommandBuffer cmdbuf);
+    void ShowScaledMotion(vk::CommandBuffer cmdbuf, u32 render_width, u32 render_height);
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
     void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);

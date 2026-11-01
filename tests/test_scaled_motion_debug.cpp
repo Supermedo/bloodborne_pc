@@ -3,7 +3,10 @@
 #include "video_core/host_shaders/upscale_motion_debug_comp.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/texture_cache/image.h"
+#include "bbport_settings.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -17,7 +20,7 @@ extern "C" void runtime_restart() { std::abort(); }
 #endif
 
 namespace {
-void Need(bool condition, const char *message) {
+void Need(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
@@ -25,7 +28,7 @@ struct Staging {
     VmaAllocator allocator;
     VkBuffer buffer{};
     VmaAllocation allocation{};
-    void *mapped{};
+    void* mapped{};
     Staging(VmaAllocator a, size_t bytes) : allocator(a) {
         const VkBufferCreateInfo ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                     .size = bytes,
@@ -40,8 +43,8 @@ struct Staging {
     }
     ~Staging() { vmaDestroyBuffer(allocator, buffer, allocation); }
 };
-void Check(const Vulkan::Instance &instance, Vulkan::Scheduler &scheduler, u32 w, u32 h, u32 rw,
-           u32 rh, unsigned object_mode) {
+void RunCase(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler, u32 w, u32 h, u32 rw,
+             u32 rh, unsigned object_mode, unsigned pattern = 0) {
     const auto device = instance.GetDevice();
     const auto allocator = instance.GetAllocator();
     const u32 object_w = object_mode == 2 ? rw + 1 : object_mode == 3 ? rw - 1 : rw;
@@ -52,15 +55,20 @@ void Check(const Vulkan::Instance &instance, Vulkan::Scheduler &scheduler, u32 w
     const size_t object_offset = (motion_offset + motion_bytes + 15) & ~size_t(15);
     const size_t read_offset = object_offset + object_bytes;
     Staging staging(allocator, read_offset + rgba_bytes);
-    auto *bytes = static_cast<unsigned char *>(staging.mapped);
+    auto* bytes = static_cast<unsigned char*>(staging.mapped);
     for (size_t p = 0; p < size_t(w) * h; ++p) {
         const std::array<unsigned char, 4> color{51, 102, 153, 191};
         std::memcpy(bytes + p * 4, color.data(), 4);
     }
-    constexpr std::array<uint16_t, 3> halves{0x3c00, 0x4000, 0x4400}; // 1, 2, 4
+    constexpr std::array<std::array<uint16_t, 3>, 4> x_halves{{
+        {0x3c00, 0x4000, 0x4400}, {0xbc00, 0xc000, 0xc400},
+        {0xcc00, 0x4800, 0x5000}, {0, 0, 0}}};
+    constexpr std::array<std::array<uint16_t, 3>, 4> y_halves{{
+        {0xbc00, 0xc000, 0xc400}, {0x3c00, 0x4000, 0x4400},
+        {0, 0xc800, 0xd000}, {0, 0, 0}}};
     for (u32 y = 0; y < rh; ++y)
         for (u32 x = 0; x < rw; ++x) {
-            const std::array<uint16_t, 2> mv{halves[x % 3], uint16_t(halves[y % 3] | 0x8000)};
+            const std::array<uint16_t, 2> mv{x_halves[pattern][x % 3], y_halves[pattern][y % 3]};
             std::memcpy(bytes + motion_offset + (size_t(y) * rw + x) * 4, mv.data(), 4);
         }
     for (u32 y = 0; y < object_h; ++y)
@@ -174,20 +182,81 @@ void Check(const Vulkan::Instance &instance, Vulkan::Scheduler &scheduler, u32 w
     scheduler.Finish();
     Need(vmaInvalidateAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE) == VK_SUCCESS,
          "invalidate");
-    constexpr std::array<float, 3> motion{1, 2, 4};
+    constexpr std::array<std::array<float, 3>, 4> x_motion{{
+        {1, 2, 4}, {-1, -2, -4}, {-16, 8, 32}, {0, 0, 0}}};
+    constexpr std::array<std::array<float, 3>, 4> y_motion{{
+        {-1, -2, -4}, {1, 2, 4}, {0, -8, -32}, {0, 0, 0}}};
     for (u32 y = 0; y < h; ++y)
         for (u32 x = 0; x < w; ++x) {
             const u32 sx = x * rw / w, sy = y * rh / h;
             const std::array<float, 4> expected{
-                0.108f + motion[sx % 3] / 8.f, 0.108f + motion[sy % 3] / 8.f,
+                0.108f + std::min(std::abs(x_motion[pattern][sx % 3]) / 8.f, 1.f),
+                0.108f + std::min(std::abs(y_motion[pattern][sy % 3]) / 8.f, 1.f),
                 0.108f + (object_mode == 0 && sx % 5 == 0 ? 0.6f : 0.f), 191.f / 255.f};
             for (u32 c = 0; c < 4; ++c)
                 Need(std::abs(int(bytes[read_offset + (size_t(y) * w + x) * 4 + c]) -
-                              int(std::lround(expected[c] * 255.f))) <= 1,
+                              int(std::lround(std::clamp(expected[c], 0.f, 1.f) * 255.f))) <= 1,
                      "motion mapping, object coverage or alpha");
         }
-    std::printf("PASS scaled motion %ux%u <- %ux%u objects=%u; all pixels and alpha\n", w, h, rw,
-                rh, object_mode);
+    std::printf("PASS scaled motion %ux%u <- %ux%u objects=%u pattern=%u; all pixels and alpha\n",
+                w, h, rw, rh, object_mode, pattern);
+}
+
+void CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler) {
+    BbSettings::Get().object_motion = true;
+    BbSettings::Get().upscaler = BbSettings::UpscalerFsr3;
+    Vulkan::ObjectMotion motion(instance, scheduler);
+    Need(motion.Enabled(), "object motion unavailable for coverage test");
+    Need(!motion.CurrentView(7, 5), "new target has current coverage");
+    Staging staging(instance.GetAllocator(), 16);
+    const std::array<std::array<u32, 2>, 4> sizes{{{7, 5}, {7, 5}, {3, 2}, {7, 5}}};
+    for (const auto [w, h] : sizes) {
+        motion.OnFrameStart();
+        Need(!motion.CurrentView(w, h), "unwritten frame exposes coverage");
+        Vulkan::RenderState state{};
+        state.width = w;
+        state.height = h;
+        state.num_layers = 1;
+        motion.Attach(state, w, h);
+        // A real retained blue pixel, independent of whether it is used next frame.
+        state.color_attachments[7].clear_value = {0, 0, 0x3f800000, 0};
+        scheduler.BeginRendering(state);
+        scheduler.EndRendering();
+        auto cmd = scheduler.CommandBuffer();
+        bool valid = false;
+        motion.PrepareRead(cmd, w, h, valid);
+        Need(valid && motion.CurrentView(w, h) == motion.View(), "current target rejected");
+        Need(!motion.CurrentView(w + 1, h) && !motion.CurrentView(w, h + 1),
+             "wrong render size exposes coverage");
+        const auto previous_image = motion.Image(w, h);
+        const auto previous_view = motion.View();
+        motion.OnFrameStart();
+        Need(motion.View() == previous_view && !motion.CurrentView(w, h),
+             "retained previous-frame view accepted as current");
+        cmd = scheduler.CommandBuffer();
+        const vk::MemoryBarrier2 before{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead};
+        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &before});
+        const vk::BufferImageCopy copy{
+            .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+            .imageExtent = {1, 1, 1}};
+        cmd.copyImageToBuffer(previous_image, vk::ImageLayout::eGeneral, staging.buffer, copy);
+        const vk::MemoryBarrier2 host{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+            .dstAccessMask = vk::AccessFlagBits2::eHostRead};
+        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &host});
+        scheduler.Finish();
+        Need(vmaInvalidateAllocation(instance.GetAllocator(), staging.allocation, 0, VK_WHOLE_SIZE)
+                 == VK_SUCCESS, "coverage invalidate");
+        Need(static_cast<const u32*>(staging.mapped)[2] == 0x3f800000,
+             "stale-target test did not retain a blue pixel");
+        std::printf("PASS current-frame coverage %ux%u: current, wrong-size, retained stale pixel\n", w, h);
+    }
 }
 } // namespace
 int main() {
@@ -197,14 +266,17 @@ int main() {
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetDevice());
         Vulkan::Scheduler scheduler(instance);
         for (unsigned mode = 0; mode < 5; ++mode)
-            Check(instance, scheduler, 13, 9, 7, 5, mode);
-        Check(instance, scheduler, 2560, 1440, 1707, 960, 0);
-        Check(instance, scheduler, 3840, 2160, 2560, 1440, 0);
-        Check(instance, scheduler, 1920, 1080, 960, 540, 0); // smaller output/Performance
-        Check(instance, scheduler, 3840, 2160, 3840, 2160, 0); // Native AA after resize
-        Check(instance, scheduler, 13, 9, 13, 9, 0); // back to a small/native size
+            RunCase(instance, scheduler, 13, 9, 7, 5, mode);
+        RunCase(instance, scheduler, 2560, 1440, 1707, 960, 0);
+        RunCase(instance, scheduler, 3840, 2160, 2560, 1440, 0);
+        RunCase(instance, scheduler, 1920, 1080, 960, 540, 0);
+        RunCase(instance, scheduler, 3840, 2160, 3840, 2160, 0);
+        RunCase(instance, scheduler, 13, 9, 13, 9, 0);
+        for (unsigned pattern = 1; pattern < 4; ++pattern)
+            RunCase(instance, scheduler, 13, 9, 7, 5, 0, pattern);
+        CurrentFrameCoverage(instance, scheduler);
         return 0;
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL scaled motion: %s\n", e.what());
         return 1;
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Motion visualization after reconstruction/sharpening, before HUD rendering.
+// Keep the color mapping in sync with upscale_merge.comp (legacy 1080p path).
 #version 450
 #extension GL_EXT_samplerless_texture_functions : require
 layout(local_size_x = 8, local_size_y = 8) in;

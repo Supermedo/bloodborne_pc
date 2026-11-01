@@ -1297,7 +1297,7 @@ void TemporalUpscaler::Run() {
         const vk::DescriptorImageInfo mask_info{.imageView = *reactive_view,
                                                 .imageLayout = vk::ImageLayout::eGeneral};
         // Sampled for the debug view only; the object image falls back to the motion image.
-        const vk::ImageView objects = camera_motion.ObjectMotionView();
+        const vk::ImageView objects = camera_motion.ObjectMotionView(w, h);
         const vk::DescriptorImageInfo motion_info{.imageView = *motion_view,
                                                   .imageLayout = vk::ImageLayout::eGeneral};
         const vk::DescriptorImageInfo objects_info{
@@ -1796,9 +1796,10 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
     ui_depth = depth_id;
 }
 
-void TemporalUpscaler::ShowScaledMotion(vk::CommandBuffer cmdbuf) {
+void TemporalUpscaler::ShowScaledMotion(vk::CommandBuffer cmdbuf, u32 render_width, u32 render_height) {
     // RunScaled bypasses the legacy composite's debug branch. Do not allocate or
-    // dispatch anything in normal rendering. This storage view is SDR-only.
+    // dispatch anything in normal rendering. This view requires the RGBA8 UI image;
+    // the presenter's HDR/display conversion happens later.
     if (BbSettings::Get().debug_view != BbSettings::DebugMotion ||
         ui_format != vk::Format::eR8G8B8A8Unorm)
         return;
@@ -1831,7 +1832,7 @@ void TemporalUpscaler::ShowScaledMotion(vk::CommandBuffer cmdbuf) {
              .viewType = vk::ImageViewType::e2D,
              .format = vk::Format::eR8G8B8A8Unorm,
              .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}));
-    const auto objects = camera_motion.ObjectMotionView();
+    const auto objects = camera_motion.ObjectMotionView(render_width, render_height);
     const std::array<vk::DescriptorImageInfo, 3> images{
         {{.imageView = *ui_storage_view, .imageLayout = vk::ImageLayout::eGeneral},
          {.imageView = *motion_view, .imageLayout = vk::ImageLayout::eGeneral},
@@ -2026,7 +2027,7 @@ void TemporalUpscaler::RunScaled() {
                 }
             }
         }
-        if (ok4) ShowScaledMotion(cmdbuf);
+        if (ok4) ShowScaledMotion(cmdbuf, w, h);
         if (fsr4)
             fsr4->ReleaseOutput(cmdbuf);
         done_this_frame = true;
@@ -2105,7 +2106,7 @@ void TemporalUpscaler::RunScaled() {
 
     done_this_frame = true; // the UI is not jittered
     if (ok) {
-        ShowScaledMotion(cmdbuf);
+        ShowScaledMotion(cmdbuf, w, h);
         ui_phase = true;
         ui_color = ldr_target;
         ui_depth = camera_motion.Depth();
