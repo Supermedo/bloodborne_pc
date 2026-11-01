@@ -503,7 +503,7 @@ add_dependencies(fsr411-sharpen-test host_shaders)
 
 add_executable(fsr41-fused-output-test EXCLUDE_FROM_ALL ../tests/test_fsr41_fused_output.cpp)
 target_include_directories(fsr41-fused-output-test PRIVATE shim shadps4 ${SHADER_INCLUDE})
-target_compile_options(fsr41-fused-output-test PRIVATE -UNDEBUG -fPIC)
+target_compile_options(fsr41-fused-output-test PRIVATE -fPIC)
 target_link_libraries(fsr41-fused-output-test PRIVATE Vulkan::Vulkan)
 add_dependencies(fsr41-fused-output-test host_shaders)
 

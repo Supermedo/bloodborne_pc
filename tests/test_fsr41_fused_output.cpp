@@ -1,17 +1,38 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Compare pinned old RCAS -> FP16 -> real blit to RGBA8 with fused RCAS -> RGBA8.
+// Compare both historical and current direct RCAS -> FP16 -> real RGBA8 blit with fusion.
 #include "common/types.h"
 #include "reference_taa_sharpen_direct_comp.h"
 #include "video_core/host_shaders/taa_sharpen_fused_comp.h"
+#include "video_core/host_shaders/taa_sharpen_direct_comp.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include <algorithm>
 #include <array>
-#include <cassert>
+#include <cerrno>
+#include <source_location>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+
+namespace {
+void Require(bool condition, const char* message = "RCAS test check failed",
+             const std::source_location where = std::source_location::current()) {
+    if (!condition) {
+        std::fprintf(stderr, "FAIL: %s (%s:%u)\n", message, where.file_name(), where.line());
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+u32 ParseUnsigned(const char* value, u32 limit, const char* message) {
+    Require(value && value[0] >= '0' && value[0] <= '9', message);
+    char* end = nullptr;
+    errno = 0;
+    const auto result = std::strtoull(value, &end, 10);
+    Require(end && !*end && errno == 0 && result <= limit, message);
+    return static_cast<u32>(result);
+}
+} // namespace
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -19,6 +40,23 @@ int main(int argc, char** argv) {
     _set_error_mode(_OUT_TO_STDERR);
     _set_abort_behavior(0, _CALL_REPORTFAULT);
 #endif
+    std::vector<std::array<u32, 2>> sizes{
+        {{1, 1}, {17, 11}, {2049, 7}, {1920, 1080}, {2560, 1440}, {3840, 2160}}};
+    std::vector<u16> captured;
+    if (argc != 1) {
+        Require(argc == 4);
+        const u32 width = ParseUnsigned(argv[2], 7680, "Invalid capture width");
+        const u32 height = ParseUnsigned(argv[3], 4320, "Invalid capture height");
+        Require(width && height && width <= 7680 && height <= 4320);
+        sizes = {{width, height}};
+        captured.resize(size_t(width) * height * 4);
+        FILE* input_file = std::fopen(argv[1], "rb");
+        Require(input_file, "Cannot open captured FP16 input");
+        Require(std::fread(captured.data(), sizeof(u16), captured.size(), input_file) == captured.size());
+        Require(std::fgetc(input_file) == EOF);
+        std::fclose(input_file);
+        std::printf("Captured FP16 input: %s (%ux%u)\n", argv[1], width, height);
+    }
     static vk::detail::DynamicLoader loader;
     vk::detail::DispatchLoaderDynamic d;
     d.init(loader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
@@ -26,14 +64,50 @@ int main(int argc, char** argv) {
                                           .apiVersion = VK_API_VERSION_1_3};
     auto instance = vk::createInstanceUnique({.pApplicationInfo = &application}, nullptr, d).value;
     d.init(*instance);
-    const auto physical = instance->enumeratePhysicalDevices(d).value.at(0);
+    const auto devices = instance->enumeratePhysicalDevices(d).value;
+    Require(!devices.empty(), "No Vulkan GPU found");
+    const auto eligible = [&](vk::PhysicalDevice gpu) {
+        const auto properties = gpu.getProperties(d);
+        if (properties.apiVersion < VK_API_VERSION_1_3 ||
+            !gpu.getFeatures(d).shaderStorageImageExtendedFormats) return false;
+        const auto features = gpu.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                               vk::PhysicalDeviceVulkan13Features>(d);
+        if (!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2) return false;
+        const auto extensions = gpu.enumerateDeviceExtensionProperties(nullptr, d).value;
+        if (std::none_of(extensions.begin(), extensions.end(), [](const auto& extension) {
+                return std::strcmp(extension.extensionName.data(),
+                                   VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0;
+            })) return false;
+        const auto queues = gpu.getQueueFamilyProperties(d);
+        const auto flags = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
+        return std::any_of(queues.begin(), queues.end(), [&](const auto& queue) {
+            return (queue.queueFlags & flags) == flags;
+        });
+    };
+    u32 gpu_index = 0;
+    if (const char* selected = std::getenv("BB_TEST_GPU_INDEX")) {
+        gpu_index = ParseUnsigned(selected, static_cast<u32>(devices.size() - 1),
+                                  "Invalid BB_TEST_GPU_INDEX");
+        Require(eligible(devices[gpu_index]), "Selected GPU lacks required Vulkan features");
+    } else {
+        auto candidate = std::find_if(devices.begin(), devices.end(), [&](const auto& gpu) {
+            return gpu.getProperties(d).deviceType == vk::PhysicalDeviceType::eDiscreteGpu &&
+                   eligible(gpu);
+        });
+        if (candidate == devices.end()) candidate = std::find_if(devices.begin(), devices.end(), eligible);
+        Require(candidate != devices.end(), "No GPU supports this test's Vulkan requirements");
+        gpu_index = static_cast<u32>(candidate - devices.begin());
+    }
+    const auto physical = devices[gpu_index];
     const auto families = physical.getQueueFamilyProperties(d);
     uint32_t family = 0;
     while (family < families.size() &&
-           !(families[family].queueFlags & vk::QueueFlagBits::eGraphics)) {
+           (families[family].queueFlags & (vk::QueueFlagBits::eGraphics |
+                                          vk::QueueFlagBits::eCompute)) !=
+               (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) {
         ++family;
     }
-    assert(family < families.size());
+    Require(family < families.size());
     const float priority = 1.f;
     const vk::DeviceQueueCreateInfo qi{
         .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority};
@@ -79,15 +153,15 @@ int main(int argc, char** argv) {
         }
         std::abort();
     };
-    const auto check = [](vk::Result result) { assert(result == vk::Result::eSuccess); };
+    const auto check = [](vk::Result result) { Require(result == vk::Result::eSuccess); };
     const auto finish = [&] {
         check(cmd.end(d));
         const vk::SubmitInfo submit{.commandBufferCount = 1, .pCommandBuffers = &cmd};
         check(queue.submit(submit, *fence, d));
-        assert(device.waitForFences(*fence, true, UINT64_MAX, d) == vk::Result::eSuccess);
+        Require(device.waitForFences(*fence, true, UINT64_MAX, d) == vk::Result::eSuccess);
         check(device.resetFences(*fence, d));
     };
-    std::printf("RCAS GPU: %s\n", physical.getProperties(d).deviceName.data());
+    std::printf("RCAS GPU: index=%u %s\n", gpu_index, physical.getProperties(d).deviceName.data());
     std::fflush(stdout);
     std::array<vk::DescriptorSetLayoutBinding, 2> bindings{};
     for (u32 i = 0; i < 2; ++i) {
@@ -114,8 +188,10 @@ int main(int argc, char** argv) {
     auto old_shader =
         device
             .createShaderModuleUnique(
-                {.codeSize = sizeof(TAA_SHARPEN_DIRECT_COMP), .pCode = TAA_SHARPEN_DIRECT_COMP}, nullptr, d)
+                {.codeSize = sizeof(TAA_SHARPEN_REFERENCE_COMP), .pCode = TAA_SHARPEN_REFERENCE_COMP}, nullptr, d)
             .value;
+    auto current_shader = device.createShaderModuleUnique(
+        {.codeSize = sizeof(TAA_SHARPEN_DIRECT_COMP), .pCode = TAA_SHARPEN_DIRECT_COMP}, nullptr, d).value;
     auto new_shader = device
                           .createShaderModuleUnique({.codeSize = sizeof(TAA_SHARPEN_FUSED_COMP),
                                                      .pCode = TAA_SHARPEN_FUSED_COMP},
@@ -131,7 +207,8 @@ int main(int argc, char** argv) {
                                          nullptr, d)
             .value;
     };
-    auto old_pipeline = make_pipeline(*old_shader), new_pipeline = make_pipeline(*new_shader);
+    auto old_pipeline = make_pipeline(*old_shader), current_pipeline = make_pipeline(*current_shader);
+    auto new_pipeline = make_pipeline(*new_shader);
     const auto barrier = [&](vk::CommandBuffer cmd, vk::PipelineStageFlags2 src,
                              vk::AccessFlags2 sa, vk::PipelineStageFlags2 dst,
                              vk::AccessFlags2 da) {
@@ -141,23 +218,6 @@ int main(int argc, char** argv) {
     };
     u32 cases = 0;
     uint64_t total_components = 0;
-    std::vector<std::array<u32, 2>> sizes{
-        {{1, 1}, {17, 11}, {2049, 7}, {1920, 1080}, {2560, 1440}, {3840, 2160}}};
-    std::vector<u16> captured;
-    if (argc != 1) {
-        assert(argc == 4);
-        const u32 width = std::strtoul(argv[2], nullptr, 10);
-        const u32 height = std::strtoul(argv[3], nullptr, 10);
-        assert(width && height && width <= 7680 && height <= 4320);
-        sizes = {{width, height}};
-        captured.resize(size_t(width) * height * 4);
-        FILE* input_file = std::fopen(argv[1], "rb");
-        assert(input_file);
-        assert(std::fread(captured.data(), sizeof(u16), captured.size(), input_file) == captured.size());
-        assert(std::fgetc(input_file) == EOF);
-        std::fclose(input_file);
-        std::printf("Captured FP16 input: %s (%ux%u)\n", argv[1], width, height);
-    }
     for (const auto size : sizes) {
         const u32 w = size[0], h = size[1];
         const size_t pixels = size_t(w) * h, bytes = pixels * 8;
@@ -241,115 +301,118 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            for (const float strength : {0.f, .25f, .5f, 1.f, 2.f}) {
-                check(cmd.reset({}, d));
-                check(cmd.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}, d));
-                std::array<vk::ImageMemoryBarrier2, 4> transitions{};
-                for (u32 i = 0; i < 4; ++i) {
-                    transitions[i] = {
-                        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                        .srcAccessMask =
-                            vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
-                        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-                        .dstAccessMask =
-                            vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
-                        .oldLayout = vk::ImageLayout::eUndefined,
-                        .newLayout = vk::ImageLayout::eGeneral,
-                        .image = *images[i],
-                        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
-                }
-                cmd.pipelineBarrier2(
-                    {.imageMemoryBarrierCount = 4, .pImageMemoryBarriers = transitions.data()}, d);
-                const vk::BufferImageCopy upload{
-                    .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-                    .imageExtent = {w, h, 1}};
-                cmd.copyBufferToImage(*staging, *images[0], vk::ImageLayout::eGeneral, upload, d);
-                barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
-                        vk::AccessFlagBits2::eTransferWrite,
-                        vk::PipelineStageFlagBits2::eAllCommands,
-                        vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite);
-                const vk::ImageBlit blit{
-                    .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-                    .srcOffsets = std::array{vk::Offset3D{}, vk::Offset3D{s32(w), s32(h), 1}},
-                    .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-                    .dstOffsets = std::array{vk::Offset3D{}, vk::Offset3D{s32(w), s32(h), 1}}};
-                // Reference RCAS writes FP16 before the actual blit to RGBA8.
-                // This blit is recorded after dispatch below.
-                barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
-                        vk::AccessFlagBits2::eTransferWrite,
-                        vk::PipelineStageFlagBits2::eComputeShader,
-                        vk::AccessFlagBits2::eShaderStorageRead |
-                            vk::AccessFlagBits2::eShaderStorageWrite);
-                const auto dispatch = [&](u32 input_index, u32 output_index,
-                                          vk::Pipeline pipeline) {
-                    const std::array<vk::DescriptorImageInfo, 2> infos{
-                        {{.imageView = *views[input_index],
-                          .imageLayout = vk::ImageLayout::eGeneral},
-                         {.imageView = *views[output_index],
-                          .imageLayout = vk::ImageLayout::eGeneral}}};
-                    std::array<vk::WriteDescriptorSet, 2> writes{};
-                    for (u32 i = 0; i < 2; ++i) {
-                        writes[i] = {.dstBinding = i,
-                                     .descriptorCount = 1,
-                                     .descriptorType = vk::DescriptorType::eStorageImage,
-                                     .pImageInfo = &infos[i]};
+            for (const bool current_reference : {false, true}) {
+                for (const float strength : {0.f, .25f, .5f, 1.f, 2.f}) {
+                    check(cmd.reset({}, d));
+                    check(cmd.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}, d));
+                    std::array<vk::ImageMemoryBarrier2, 4> transitions{};
+                    for (u32 i = 0; i < 4; ++i) {
+                        transitions[i] = {
+                            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                            .srcAccessMask =
+                                vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+                            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                            .dstAccessMask =
+                                vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+                            .oldLayout = vk::ImageLayout::eUndefined,
+                            .newLayout = vk::ImageLayout::eGeneral,
+                            .image = *images[i],
+                            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
                     }
-                    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline, d);
-                    cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *layout, 0, writes,
-                                             d);
-                    cmd.pushConstants(*layout, vk::ShaderStageFlagBits::eCompute, 0,
-                                      sizeof(strength), &strength, d);
-                    cmd.dispatch((w + 7) / 8, (h + 7) / 8, 1, d);
-                };
-                dispatch(0, 1, *old_pipeline);
-                barrier(cmd, vk::PipelineStageFlagBits2::eComputeShader,
-                        vk::AccessFlagBits2::eShaderStorageWrite,
-                        vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
-                cmd.blitImage(*images[1], vk::ImageLayout::eGeneral, *images[2],
-                              vk::ImageLayout::eGeneral, blit, vk::Filter::eNearest, d);
-                dispatch(0, 3, *new_pipeline);
-                barrier(cmd, vk::PipelineStageFlagBits2::eComputeShader,
-                        vk::AccessFlagBits2::eShaderStorageWrite,
-                        vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
-                barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
-                        vk::AccessFlagBits2::eTransferWrite,
-                        vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
-                for (u32 i = 0; i < 3; ++i) {
-                    const vk::BufferImageCopy copy{
-                        .bufferOffset = bytes * (i + 1),
+                    cmd.pipelineBarrier2(
+                        {.imageMemoryBarrierCount = 4, .pImageMemoryBarriers = transitions.data()}, d);
+                    const vk::BufferImageCopy upload{
                         .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
                         .imageExtent = {w, h, 1}};
-                    cmd.copyImageToBuffer(*images[i == 2 ? 0 : i + 2], vk::ImageLayout::eGeneral,
-                                          *staging, copy, d);
-                }
-                barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
-                        vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eHost,
-                        vk::AccessFlagBits2::eHostRead);
-                finish();
-                const auto* base = static_cast<const char*>(mapped);
-                assert(!std::memcmp(base, base + bytes * 3, bytes));
-                const auto* old_out = reinterpret_cast<const u8*>(base + bytes);
-                const auto* new_out = reinterpret_cast<const u8*>(base + bytes * 2);
-                size_t differences = 0;
-                for (size_t i = 0; i < pixels * 4; ++i) {
-                    if (old_out[i] != new_out[i]) {
-                        if (differences < 4) {
-                            std::fprintf(stderr,
-                                         "mismatch %ux%u p=%zu c=%zu pattern=%u "
-                                         "strength=%.2f old=%04x new=%04x\n",
-                                         w, h, i / 4, i % 4, pattern, strength, old_out[i],
-                                         new_out[i]);
+                    cmd.copyBufferToImage(*staging, *images[0], vk::ImageLayout::eGeneral, upload, d);
+                    barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
+                            vk::AccessFlagBits2::eTransferWrite,
+                            vk::PipelineStageFlagBits2::eAllCommands,
+                            vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite);
+                    const vk::ImageBlit blit{
+                        .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                        .srcOffsets = std::array{vk::Offset3D{}, vk::Offset3D{s32(w), s32(h), 1}},
+                        .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                        .dstOffsets = std::array{vk::Offset3D{}, vk::Offset3D{s32(w), s32(h), 1}}};
+                    // Reference RCAS writes FP16 before the actual blit to RGBA8.
+                    // This blit is recorded after dispatch below.
+                    barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
+                            vk::AccessFlagBits2::eTransferWrite,
+                            vk::PipelineStageFlagBits2::eComputeShader,
+                            vk::AccessFlagBits2::eShaderStorageRead |
+                                vk::AccessFlagBits2::eShaderStorageWrite);
+                    const auto dispatch = [&](u32 input_index, u32 output_index,
+                                              vk::Pipeline pipeline) {
+                        const std::array<vk::DescriptorImageInfo, 2> infos{
+                            {{.imageView = *views[input_index],
+                              .imageLayout = vk::ImageLayout::eGeneral},
+                             {.imageView = *views[output_index],
+                              .imageLayout = vk::ImageLayout::eGeneral}}};
+                        std::array<vk::WriteDescriptorSet, 2> writes{};
+                        for (u32 i = 0; i < 2; ++i) {
+                            writes[i] = {.dstBinding = i,
+                                         .descriptorCount = 1,
+                                         .descriptorType = vk::DescriptorType::eStorageImage,
+                                         .pImageInfo = &infos[i]};
                         }
-                        ++differences;
+                        cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline, d);
+                        cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *layout, 0, writes,
+                                                 d);
+                        cmd.pushConstants(*layout, vk::ShaderStageFlagBits::eCompute, 0,
+                                          sizeof(strength), &strength, d);
+                        cmd.dispatch((w + 7) / 8, (h + 7) / 8, 1, d);
+                    };
+                    dispatch(0, 1, current_reference ? *current_pipeline : *old_pipeline);
+                    barrier(cmd, vk::PipelineStageFlagBits2::eComputeShader,
+                            vk::AccessFlagBits2::eShaderStorageWrite,
+                            vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
+                    cmd.blitImage(*images[1], vk::ImageLayout::eGeneral, *images[2],
+                                  vk::ImageLayout::eGeneral, blit, vk::Filter::eNearest, d);
+                    dispatch(0, 3, *new_pipeline);
+                    barrier(cmd, vk::PipelineStageFlagBits2::eComputeShader,
+                            vk::AccessFlagBits2::eShaderStorageWrite,
+                            vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
+                    barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
+                            vk::AccessFlagBits2::eTransferWrite,
+                            vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
+                    for (u32 i = 0; i < 3; ++i) {
+                        const vk::BufferImageCopy copy{
+                            .bufferOffset = bytes * (i + 1),
+                            .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                            .imageExtent = {w, h, 1}};
+                        cmd.copyImageToBuffer(*images[i == 2 ? 0 : i + 2], vk::ImageLayout::eGeneral,
+                                              *staging, copy, d);
                     }
+                    barrier(cmd, vk::PipelineStageFlagBits2::eTransfer,
+                            vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eHost,
+                            vk::AccessFlagBits2::eHostRead);
+                    finish();
+                    const auto* base = static_cast<const char*>(mapped);
+                    Require(!std::memcmp(base, base + bytes * 3, bytes));
+                    const auto* old_out = reinterpret_cast<const u8*>(base + bytes);
+                    const auto* new_out = reinterpret_cast<const u8*>(base + bytes * 2);
+                    size_t differences = 0;
+                    for (size_t i = 0; i < pixels * 4; ++i) {
+                        if (old_out[i] != new_out[i]) {
+                            if (differences < 4) {
+                                std::fprintf(stderr,
+                                             "mismatch %ux%u p=%zu c=%zu pattern=%u "
+                                             "strength=%.2f old=%04x new=%04x\n",
+                                             w, h, i / 4, i % 4, pattern, strength, old_out[i],
+                                             new_out[i]);
+                            }
+                            ++differences;
+                        }
+                    }
+                    std::printf("FUSED_OUTPUT_COMPARE reference=%s %ux%u pattern=%u strength=%.2f "
+                                "components=%zu differences=%zu input_preserved=1\n",
+                                current_reference ? "current" : "historical",
+                                w, h, pattern, strength, pixels * 4, differences);
+                    std::fflush(stdout);
+                    Require(differences == 0);
+                    ++cases;
+                    total_components += pixels * 4;
                 }
-                std::printf("FUSED_OUTPUT_COMPARE %ux%u pattern=%u strength=%.2f "
-                            "components=%zu differences=%zu input_preserved=1\n",
-                            w, h, pattern, strength, pixels * 4, differences);
-                std::fflush(stdout);
-                assert(differences == 0);
-                ++cases;
-                total_components += pixels * 4;
             }
         }
         device.unmapMemory(*staging_memory, d);
