@@ -164,8 +164,14 @@ static void describe_address(char *out, size_t size, uintptr_t address) {
     snprintf(out,size,"%p",(void *)address);
 }
 static int fatal_reported;
+static DWORD fatal_thread;
 static LONG fatal_exception(EXCEPTION_POINTERS *info) {
-    if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) { Sleep(INFINITE); }
+    if (__atomic_exchange_n(&fatal_reported,1,__ATOMIC_ACQ_REL)) {
+        /* A fault in the report itself would wait for itself: what is written is all there will be. */
+        if (__atomic_load_n(&fatal_thread,__ATOMIC_ACQUIRE)==GetCurrentThreadId()) TerminateProcess(GetCurrentProcess(),3);
+        Sleep(INFINITE);
+    }
+    __atomic_store_n(&fatal_thread,GetCurrentThreadId(),__ATOMIC_RELEASE);
     const EXCEPTION_RECORD *record=info->ExceptionRecord;
     const CONTEXT *c=info->ContextRecord;
     char where[MAX_PATH+64];
@@ -180,14 +186,17 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
             c->Rax,c->Rbx,c->Rcx,c->Rdx,c->Rsi,c->Rdi,c->Rbp,c->Rsp);
     if (gpu_enabled) bbgpu_dump_guest_writes(info);
     /* Return addresses near the top of the stack: system libraries (the C runtime's memcpy)
-     * keep no frame pointers, so the rbp chain below can skip their caller. */
-    for (int slot=0, shown=0; slot<64 && shown<6; ++slot) {
+     * keep no frame pointers, so the rbp chain below can skip their caller. Code of every module
+     * and far down: a fault in a graphics driver (rbp 0) showed nothing when only this
+     * program's frames counted within 512 bytes, and the driver's own frames say which call it was. */
+    for (int slot=0, shown=0; slot<1024 && shown<24; ++slot) {
         uintptr_t value=0;
         SIZE_T got=0;
         if (!ReadProcessMemory(GetCurrentProcess(),(void *)(uintptr_t)(c->Rsp+slot*8),&value,sizeof(value),&got) || got!=sizeof(value)) break;
-        HMODULE owner=NULL;
+        MEMORY_BASIC_INFORMATION memory;
         int code_ref=(image && value-(uintptr_t)image<0x20000000) ||
-                     (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)value,&owner) && owner==GetModuleHandleA(NULL));
+                     (VirtualQuery((void *)value,&memory,sizeof(memory))==sizeof(memory) && memory.Type==MEM_IMAGE &&
+                      (memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)));
         if (!code_ref) continue;
         describe_address(where,sizeof(where),value);
         fprintf(stderr,"  [rsp+0x%x] %s\n",slot*8,where);
@@ -202,6 +211,16 @@ static LONG fatal_exception(EXCEPTION_POINTERS *info) {
         describe_address(where,sizeof(where),frame[1]);
         fprintf(stderr,"  #%d %s\n",depth,where);
         rbp=frame[0];
+    }
+    /* Last: it allocates, and the heap may be what broke. Windows 10 1607 on. */
+    {
+        typedef HRESULT (WINAPI *ThreadDescription)(HANDLE,PWSTR *);
+        ThreadDescription description=(ThreadDescription)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"GetThreadDescription");
+        PWSTR name=NULL;
+        if (description && SUCCEEDED(description(GetCurrentThread(),&name)) && name) {
+            fprintf(stderr,"  thread name: %ls\n",name);
+            LocalFree(name);
+        }
     }
     fflush(NULL);
     TerminateProcess(GetCurrentProcess(),3);
