@@ -74,7 +74,13 @@ private:
     bool text_requested{}, text_active{};
     int text_state{};
     std::string text, text_prompt, base_title;
+    std::string text_editing; // the IME's composition not yet committed (a Hangul syllable being typed)
     void UpdateTextTitle();
+    /// bbport, window thread: hands SDL the text dialog's typed line, next to which the IME
+    /// shows its candidate list (Hanja, kanji); text_area is the last one handed (x, y, w, h,
+    /// cursor).
+    void UpdateTextInputArea();
+    int text_area[5]{};
     SDL_Window* window{};
     WindowSystemInfo window_info{};
 
