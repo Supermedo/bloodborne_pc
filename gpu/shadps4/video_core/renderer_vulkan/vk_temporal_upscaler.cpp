@@ -303,6 +303,9 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool method_changed = (upscaler == BbSettings::UpscalerFsr411 ||
                                  upscaler == BbSettings::UpscalerFsr412) &&
                                 applied_fsr_backend != backend;
+    if (applied_upscaler != upscaler || method_changed) {
+        reported_sharpen_path = HostSharpenPath::Unknown;
+    }
     const int output = settings.output_res.load();
     // Ultrawide outputs apply after a restart (startup patch), not live.
     const bool output_changed = !scaled_session && applied_output != output &&
@@ -752,6 +755,20 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     taa_next = 1 - taa_next;
 }
 
+void TemporalUpscaler::ReportHostSharpenPath(HostSharpenPath path, u32 width, u32 height) {
+    if (reported_sharpen_path == path && reported_sharpen_width == width &&
+        reported_sharpen_height == height) {
+        return;
+    }
+    constexpr std::array names{"unknown", "off", "zero strength", "fused to RGBA8 UI",
+                               "direct FP16", "separate FP32 copy"};
+    std::printf("Upscaler: host RCAS %s, %ux%u\n", names[static_cast<size_t>(path)], width,
+                height);
+    reported_sharpen_path = path;
+    reported_sharpen_width = width;
+    reported_sharpen_height = height;
+}
+
 bool TemporalUpscaler::DirectSharpen(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image& produced) {
     const auto& settings = BbSettings::Get();
     const float strength = std::clamp(settings.sharpness.load(), 0.0f, 2.0f);
@@ -834,11 +851,12 @@ bool TemporalUpscaler::DirectSharpen(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Ima
     cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &after});
     produced = {vk::Image(direct_sharpen_image), *direct_sharpen_view, w, h,
                 vk::Format::eR16G16B16A16Sfloat};
+    ReportHostSharpenPath(HostSharpenPath::DirectFp16, w, h);
     return true;
 }
 
 bool TemporalUpscaler::FusedSharpenToUi(vk::CommandBuffer cmdbuf,
-                                         const Fsr4Upscaler::Image& produced) {
+                                       const Fsr4Upscaler::Image& produced) {
     const auto& settings = BbSettings::Get();
     const float strength = std::clamp(settings.sharpness.load(), 0.f, 2.f);
     // All FSR 4.1 providers expose the same FP16 host-sharpening contract.
@@ -853,7 +871,8 @@ bool TemporalUpscaler::FusedSharpenToUi(vk::CommandBuffer cmdbuf,
     }
     if (!ui_storage_view) {
         ui_storage_view = Check(instance.GetDevice().createImageViewUnique({
-            .image = vk::Image(ui_image), .viewType = vk::ImageViewType::e2D,
+            .image = vk::Image(ui_image),
+            .viewType = vk::ImageViewType::e2D,
             .format = vk::Format::eR8G8B8A8Unorm,
             .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}));
     }
@@ -882,9 +901,9 @@ bool TemporalUpscaler::FusedSharpenToUi(vk::CommandBuffer cmdbuf,
                      .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &images[i]};
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *taa_sharpen_fused_pipeline);
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,
-                               *taa_sharpen_pipeline_layout, 0, writes);
+                                *taa_sharpen_pipeline_layout, 0, writes);
     cmdbuf.pushConstants(*taa_sharpen_pipeline_layout, vk::ShaderStageFlagBits::eCompute,
-                        0, sizeof(strength), &strength);
+                         0, sizeof(strength), &strength);
     cmdbuf.dispatch((ui_width + 7) / 8, (ui_height + 7) / 8, 1);
     const vk::ImageMemoryBarrier2 after{
         .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -896,6 +915,7 @@ bool TemporalUpscaler::FusedSharpenToUi(vk::CommandBuffer cmdbuf,
         .image = vk::Image(ui_image),
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
     cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &after});
+    ReportHostSharpenPath(HostSharpenPath::FusedUi, ui_width, ui_height);
     return true;
 }
 
@@ -906,6 +926,10 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
     const bool host_sharpen = BbSettings::UsesHostSharpen(settings.upscaler, UseFsr4());
     const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - (host_sharpen ? 0.0f : 1.0f);
     if (!settings.sharpen || extra <= 0.0f) {
+        if (host_sharpen) {
+            ReportHostSharpenPath(settings.sharpen ? HostSharpenPath::Zero : HostSharpenPath::Off,
+                                 w, h);
+        }
         return;
     }
     const auto device = instance.GetDevice();
@@ -989,6 +1013,9 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target, 
     cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
     image_barrier(target, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                   vk::AccessFlagBits2::eShaderStorageWrite, all, rw);
+    if (host_sharpen) {
+        ReportHostSharpenPath(HostSharpenPath::CopyFp32, w, h);
+    }
 }
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
@@ -1950,7 +1977,7 @@ void TemporalUpscaler::RunScaled() {
     }
     last_frame = now;
 
-    // bbport: FSR 4 writes its HDR-format output, copied into the output-size UI image.
+    // Compose the provider's FP16 output into the UI image, fusing host RCAS when applicable.
     if (UseFsr4() || UseDlss() || BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
         barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
                 vk::ImageLayout::eUndefined, all, vk::AccessFlagBits2::eNone,
@@ -1974,13 +2001,15 @@ void TemporalUpscaler::RunScaled() {
                 w, h, ow, oh, frame_ms, false, &produced);
         }
         if (ok4) {
-            if (!FusedSharpenToUi(cmdbuf, produced)) {
+            const bool fused_sharpen = FusedSharpenToUi(cmdbuf, produced);
+            if (!fused_sharpen) {
                 if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa &&
                     !DirectSharpen(cmdbuf, produced)) {
                     ExtraSharpen(cmdbuf, produced.image, false, ow, oh, produced.view);
                 }
-                barrier(produced.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral, all,
-                        rw, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eBlit,
+                barrier(produced.image, vk::ImageAspectFlagBits::eColor,
+                        vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                        vk::PipelineStageFlagBits2::eBlit,
                         vk::AccessFlagBits2::eTransferRead);
                 barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
                         vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
@@ -2007,6 +2036,14 @@ void TemporalUpscaler::RunScaled() {
                            {{color_image, source_width, source_height, 4, "input", "rgba"},
                             {vk::Image(motion_image), w, h, 4, "motion", "rg16f"},
                             {produced.image, ow, oh, 8, "output", "rgba16f"}});
+                if (fused_sharpen) {
+                    // `output` is the unsharpened provider image on this path. Keep the
+                    // composed result separately, before the HUD is drawn.
+                    DumpImages(instance, scheduler, cmdbuf, dump,
+                               {{vk::Image(ui_image), ow, oh, 4, "output_sdr", "rgba"}});
+                    std::printf("Dump: output=provider FP16; output_sdr=post-RCAS RGBA8 UI, "
+                                "before HUD\n");
+                }
                 DumpImages(instance, scheduler, cmdbuf, dump,
                            {{depth_image, source_width, source_height, 4, "depth", "f32",
                              vk::ImageAspectFlagBits::eDepth}});
