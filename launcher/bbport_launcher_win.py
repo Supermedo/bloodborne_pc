@@ -3402,6 +3402,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         # server from here with its own boxes; once made, it is the account in use. Its own settings,
         # not the shadNet boxes (a co-op tool writes those).
         npid_var, password_var = self.var('supermedo_npid', 'app'), self.var('supermedo_pass', 'app')
+        npid_var.trace_add('write', lambda *_a: self.app.pop('offline_asked_npid', None))
         self.section(f, _('SuperMedo account'))
         signed = ttk.Label(f, text='', justify='left')
         buttons = ttk.Frame(f)
@@ -5357,20 +5358,25 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.status.configure(text=_('The game is running.', 'Игра запущена.'), fg=GOLD)
             return
         online, npid = self.var('online', 'app'), self.var('online_npid', 'app')
-        if not online.get() and self.account_name():
+        account = self.account_name()
+        # Once a No per account: a player signed in who plays offline on purpose was asked at every Play. A new
+        # sign-in asks again (the Online page clears it), and "npid" keeps the name out of a report (bbport_help.SECRET).
+        if not online.get() and account and self.app.get('offline_asked_npid') != account:
             choice = self.messagebox.askyesnocancel(
                 'Bloodborne', _('An online account is filled in, but "Play online" is off.\n\n'
                                 'Yes: play online.   No: play offline.'))
             if choice is None:
                 return
             online.set(bool(choice))
+            if not choice:
+                self.app['offline_asked_npid'] = account
         pool_name = self.var('online_pool', 'app').get()
         hunters_dream = pool_name == 'huntersdream'
         if online.get() and hunters_dream and not self.var('thd_token', 'app').get():
             if self.messagebox.askyesno(
                     'Bloodborne', _("To play online with The Hunter's Dream, sign in with Discord first.") + '\n\n' +
                     _('Sign in now? (No: play offline this time.)')):
-                self.show('online')
+                self.show_online_to_sign_in()
                 return
             online.set(False)
         if online.get() and pool_name == 'supermedo' and not self.account_name():
