@@ -90,8 +90,8 @@ class PoolTests(unittest.TestCase):
     def test_supermedo_server_first_and_the_hunters_dream_the_previous_server(self):
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
         page = source[source.index('    def build_online(self):'):source.index('    def build_mods(self):')]
-        self.assertLess(page.index("value='supermedo'"), page.index("value='huntersdream'"))
-        self.assertLess(page.index("value='huntersdream'"), page.index("value='shadnet'"))
+        self.assertLess(page.index("tabs.append(('supermedo'"), page.index("tabs.append(('huntersdream'"))
+        self.assertLess(page.index("tabs.append(('huntersdream'"), page.index("tabs.append(('shadnet'"))
         self.assertIn('_("The Hunter\'s Dream (previous server)")', page)
         self.assertIn("_('Switch to SuperMedo Server')", page)
 

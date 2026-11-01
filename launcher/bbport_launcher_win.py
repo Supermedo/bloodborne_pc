@@ -290,6 +290,7 @@ import bbport_help  # noqa: E402
 import bbport_search  # noqa: E402
 import bbport_setup  # noqa: E402
 import bbport_news  # noqa: E402
+import bbport_seamless  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
 import bbport_theme as theme  # noqa: E402
 import bbport_tls  # noqa: E402 (every HTTPS request: no expired certificates of the stores, Windows' trust)
@@ -453,6 +454,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'test_mode': 'performance', 'test_scenario': 'hunters-view', 'test_compare': 'preset',
                 'test_repeats': '1', 'test_minutes': '10', 'test_saves': {}}  # the last check of eboot.bin (bbport_help), kept while the file is unchanged
 # bbbridge's own app reads and writes the online_* keys above: keep their names.
+APP_DEFAULTS.update(bbport_seamless.DEFAULTS)  # Seamless co-op's difficulty and options
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -1430,6 +1432,7 @@ def game_environment(s, graphics=None):
             env['BB_COMMUNITY_SERVER'] = SEAMLESS_GAME_SERVER
             env['BB_PROBE'] = str(BBSC_LAUNCH)
             env['BBSC_EMULATOR'] = str(PORT_DIR / 'bin' / 'bb-probe.exe')
+            env.update(bbport_seamless.environment(s))  # the difficulty and options chosen on the Online page
         if s.get('online_pool') == 'huntersdream' and HUNTERS_DREAM_POOL:
             # The engine's Hunter's Dream backend with the Discord-linked account (run.py sets
             # the game server and the backend's addresses).
@@ -3325,35 +3328,61 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         # SuperMedo Server first (the default), The Hunter's Dream (the previous server) for the time being. An own
         # server only for Seamless co-op's own start (settled_pool): other servers confused players about where
         # they played. Each keeps its own account (pool_account): switching back and forth signs none out.
-        pools = ttk.Frame(f)
-        ttk.Radiobutton(pools, text=_('SuperMedo Server (recommended)') if HUNTERS_DREAM_POOL else
-                        _('SuperMedo Server'), variable=pool, value='supermedo').pack(side='left', padx=(0, 16))
-        if BBSC_LAUNCH.exists():
-            ttk.Radiobutton(pools, text=_('SuperMedo Seamless co-op (beta)'), variable=pool,
-                            value='seamless').pack(side='left', padx=(0, 16))
-        elif pool.get() == 'seamless':
+        # Each server is a tab: choosing one shows only its settings (show_pool below).
+        tabs = []
+        if not BBSC_LAUNCH.exists() and pool.get() == 'seamless':
             pool.set('supermedo')
-        if HUNTERS_DREAM_POOL:
-            ttk.Radiobutton(pools, text=_("The Hunter's Dream (previous server)"), variable=pool,
-                            value='huntersdream').pack(side='left', padx=(0, 16))
-        elif pool.get() == 'huntersdream':
+        if not HUNTERS_DREAM_POOL and pool.get() == 'huntersdream':
             pool.set('supermedo')
         bbsc = started_by_bbsc()
-        if bbsc:
-            ttk.Radiobutton(pools, text=_("Own server (Seamless co-op, a friend's)"), variable=pool,
-                            value='shadnet').pack(side='left')
-        elif pool.get() == 'shadnet':
+        if not bbsc and pool.get() == 'shadnet':
             pool.set('supermedo')
+        tabs.append(('supermedo', _('SuperMedo Server'),
+                     _("SuperMedo Server (recommended): supermedo.com's own servers, with a free account made below.")))
+        if BBSC_LAUNCH.exists():
+            tabs.append(('seamless', _('SuperMedo Seamless co-op (beta)'),
+                         _('SuperMedo Seamless co-op (beta): BBSC seamless co-op (up to 5 hunters through deaths, '
+                           'lamps and areas) on its own SuperMedo server, with the same account. Everyone in a '
+                           'session picks it.')))
+        if HUNTERS_DREAM_POOL:
+            tabs.append(('huntersdream', _("The Hunter's Dream (previous server)"),
+                         _("The Hunter's Dream: the previous server, still here for now; connections there often "
+                           'drop.')))
+        if bbsc:
+            tabs.append(('shadnet', _("Own server (Seamless co-op, a friend's)"),
+                         _("Own server: Seamless co-op's or a friend's private server, with its address and "
+                           'account.')))
+        tk, px = self.tk, self.px
+        pools = tk.Frame(f, bg=theme.BG)
+        pools.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
+        strip = tk.Frame(pools, bg=theme.BG)
+        strip.pack(fill='x')
+        tk.Frame(pools, bg=theme.BORDER, height=1).pack(fill='x')
+        about = ttk.Label(f, text='', style='Muted.TLabel', justify='left')
+        self.wrap_within(about, 640).grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(8), 0))
+        tab_widgets = {}
+        for value, title, _hint in tabs:
+            holder = tk.Frame(strip, bg=theme.BG, cursor='hand2')
+            holder.pack(side='left', padx=(0, px(6)))
+            label = tk.Label(holder, text=title, bg=theme.BG, font=(theme.BODY_SEMI, 11), padx=px(14), pady=px(8),
+                             cursor='hand2')
+            label.pack()
+            bar = tk.Frame(holder, height=px(3), bg=theme.BG)
+            bar.pack(fill='x')
+            for widget in (holder, label):
+                widget.bind('<Button-1>', lambda _e, v=value: pool.set(v))
+            tab_widgets[value] = (label, bar)
+
+        def show_tabs(*_a):
+            for value, (label, bar) in tab_widgets.items():
+                on = pool.get() == value
+                label.configure(fg=theme.GOLD_LIGHT if on else theme.MUTED)
+                bar.configure(bg=theme.GOLD if on else theme.BG)
+            about.configure(text=next((hint for value, _t, hint in tabs if value == pool.get()), ''))
+        pool.trace_add('write', show_tabs)
+        show_tabs()
         pools.setting_key = 'online_pool'  # the search's words (bbport_search.WORDS)
-        self.row(f, _('Play with'), pools, ' '.join(
-            [_("SuperMedo Server (recommended): supermedo.com's own servers, with a free account made below.")] +
-            ([_('SuperMedo Seamless co-op (beta): BBSC seamless co-op (up to 5 hunters through deaths, lamps and '
-                'areas) on its own SuperMedo server, with the same account. Everyone in a session picks it.')]
-             if BBSC_LAUNCH.exists() else []) +
-            ([_("The Hunter's Dream: the previous server, still here for now; connections there often drop.")]
-             if HUNTERS_DREAM_POOL else []) +
-            ([_("Own server: Seamless co-op's or a friend's private server, with its address and account.")]
-             if bbsc else [])))
+        self.index_entry(pools, _('Play with'), ' '.join(hint for _v, _t, hint in tabs), 'online_pool')
         self.hunters_line = ttk.Label(f, text='', style='Muted.TLabel')
         self.hunters_line.grid(row=self.next_row(f), column=1, sticky='w', pady=(2, 0))
         # Each pool shows only its own settings (show_pool below).
@@ -3537,8 +3566,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         button = self.row(f, '', ttk.Button(f, text=_('Create account'), command=create_account))
         self.index_entry(button, _('Create account'), _('New SuperMedo account'), key='button:create_account')
         sign_up.grid(row=self.next_row(f), column=1, sticky='we', pady=(6, 0))
-        self.build_party(f, npid_var, password_var)
         group('supermedo')
+        self.build_party(f, npid_var, password_var)
+        group('party')
+        if BBSC_LAUNCH.exists():
+            bbport_seamless.build(self, f)
+        group('seamless')
         self.section(f, _('Game server (messages, bloodstains, ghosts)'))
         community = self.var('online_community', 'app')
         self.row(f, _('Game server'), ttk.Entry(f, textvariable=community, width=40),
@@ -3600,8 +3633,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         show_code()  # hidden until a sign-in shows one; its row stays reserved (rows are counted above)
         shown = {'shadnet': {'account', 'shadnet', 'servers', 'upnp'},
                  'huntersdream': {'huntersdream', 'upnp'},
-                 'supermedo': {'supermedo', 'upnp'},
-                 'seamless': {'supermedo', 'upnp'}}
+                 'supermedo': {'supermedo', 'party', 'upnp'},
+                 'seamless': {'supermedo', 'seamless', 'upnp'}}
 
         def show_pool(*_args):
             if pool.get() == 'huntersdream' and not HUNTERS_DREAM_POOL:
@@ -3627,7 +3660,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         # which pool they need and marks "Play with". An own server's only while it can be chosen.
         only = {'supermedo': _('only with SuperMedo Server'),
                 'huntersdream': _("only with The Hunter's Dream") if HUNTERS_DREAM_POOL else None,
-                'shadnet': _('only with an own server') if bbsc else None}
+                'shadnet': _('only with an own server') if bbsc else None,
+                'seamless': _('only with SuperMedo Seamless co-op')}
         for name, widgets in groups.items():
             choices = [p for p, wanted in shown.items() if name in wanted]  # (pools is the "Play with" frame)
             if len(choices) == 1 and only[choices[0]]:
@@ -6892,6 +6926,7 @@ class _ThisModule:
 
 bbport_setup.bind(_ThisModule())
 bbport_news.bind(_ThisModule())
+bbport_seamless.bind(_ThisModule())
 bbport_help.bind(_ThisModule())
 bbport_search.bind(_ThisModule())
 bbport_pad.bind(_ThisModule())
