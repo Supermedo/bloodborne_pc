@@ -352,6 +352,10 @@ if (WIN32)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
+add_executable(hang-snapshot-test EXCLUDE_FROM_ALL ../tests/test_hang_snapshot.cpp)
+target_compile_options(hang-snapshot-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(hang-snapshot-test PRIVATE ..)
+
 add_executable(fsr411-requirements-test EXCLUDE_FROM_ALL ../tests/test_fsr411_requirements.cpp)
 target_include_directories(fsr411-requirements-test PRIVATE shim)
 target_link_libraries(fsr411-requirements-test PRIVATE Vulkan::Headers)

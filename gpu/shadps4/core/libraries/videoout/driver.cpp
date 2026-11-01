@@ -11,6 +11,7 @@
 #include <sys/resource.h>
 #endif
 #include "common/assert.h"
+#include "bbport_hang.h"
 #include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -292,6 +293,7 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
 }
 
 void VideoOutDriver::Flip(const Request& req) {
+    BbHang::OnFlip(); // bbport: thread snapshots while no frame is shown
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
         presenter->SetHDR(hdr);
