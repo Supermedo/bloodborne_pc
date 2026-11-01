@@ -39,8 +39,8 @@ and help text is shared in the 13 launcher languages.
 The 4.1.2 methods use the public SDK API, with separate effect libraries under
 `bin/fsr24`. They do not use the previous internal driver ABI or import lookup
 adjustment. [SDK pinning, loading and verification](FSR24_UPSCALING.md).
-Installed-driver discovery and the existing `BB_TEST_AMD_*` overrides remain
-separate for frame generation. Existing profile, data-directory, save and cache
+Installed-driver discovery contributes to support-cache invalidation; the
+SDK can also expose official driver-provided versions. Existing profile, data-directory, save and cache
 conventions remain unchanged. Actual support still depends on the selected GPU
 and its driver.
 Both ML-FG 4.0.1 and 4.0.2 remain separate choices with their existing RX 9000,
