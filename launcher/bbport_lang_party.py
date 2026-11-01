@@ -22,6 +22,8 @@ KEYS = (
     'offline',
     'Kick',
     'SuperMedo Server said: {}',
+    'IN THE PARTY  {}/{}',
+    'Level {}',
 )
 TEXTS = {
     'ru': (
@@ -45,6 +47,8 @@ TEXTS = {
         'не в сети',
         'Исключить',
         'Ответ SuperMedo Server: {}',
+        'В ОТРЯДЕ  {}/{}',
+        'Уровень {}',
     ),
     'ar': (
         'فريق (اللعب مع الأصدقاء)',
@@ -67,6 +71,8 @@ TEXTS = {
         'غير متصل',
         'طرد',
         'رد SuperMedo Server: {}',
+        'في الفريق  {}/{}',
+        'المستوى {}',
     ),
     'es': (
         'Grupo (jugar con amigos)',
@@ -89,6 +95,8 @@ TEXTS = {
         'desconectado',
         'Expulsar',
         'SuperMedo Server respondió: {}',
+        'EN EL GRUPO  {}/{}',
+        'Nivel {}',
     ),
     'pt': (
         'Grupo (jogar com amigos)',
@@ -111,6 +119,8 @@ TEXTS = {
         'offline',
         'Expulsar',
         'SuperMedo Server respondeu: {}',
+        'NO GRUPO  {}/{}',
+        'Nível {}',
     ),
     'fr': (
         'Groupe (jouer entre amis)',
@@ -133,6 +143,8 @@ TEXTS = {
         'hors ligne',
         'Exclure',
         'Réponse de SuperMedo Server : {}',
+        'DANS LE GROUPE  {}/{}',
+        'Niveau {}',
     ),
     'de': (
         'Gruppe (mit Freunden spielen)',
@@ -155,6 +167,8 @@ TEXTS = {
         'offline',
         'Entfernen',
         'SuperMedo Server meldet: {}',
+        'IN DER GRUPPE  {}/{}',
+        'Stufe {}',
     ),
     'it': (
         'Gruppo (gioca con gli amici)',
@@ -177,6 +191,8 @@ TEXTS = {
         'offline',
         'Espelli',
         'SuperMedo Server ha risposto: {}',
+        'NEL GRUPPO  {}/{}',
+        'Livello {}',
     ),
     'pl': (
         'Drużyna (gra ze znajomymi)',
@@ -199,6 +215,8 @@ TEXTS = {
         'offline',
         'Wyrzuć',
         'SuperMedo Server odpowiedział: {}',
+        'W DRUŻYNIE  {}/{}',
+        'Poziom {}',
     ),
     'tr': (
         'Grup (arkadaşlarla oyna)',
@@ -221,6 +239,8 @@ TEXTS = {
         'çevrimdışı',
         'Çıkar',
         'SuperMedo Server yanıtı: {}',
+        'GRUPTA  {}/{}',
+        'Seviye {}',
     ),
     'zh': (
         '小队（与好友一起玩）',
@@ -242,6 +262,8 @@ TEXTS = {
         '离线',
         '踢出',
         'SuperMedo Server 回复：{}',
+        '队伍成员  {}/{}',
+        '等级 {}',
     ),
     'ja': (
         'パーティ（フレンドと遊ぶ）',
@@ -264,6 +286,8 @@ TEXTS = {
         'オフライン',
         '外す',
         'SuperMedo Server の応答：{}',
+        'パーティー  {}/{}',
+        'レベル {}',
     ),
     'ko': (
         '파티 (친구와 함께 플레이)',
@@ -286,6 +310,8 @@ TEXTS = {
         '오프라인',
         '내보내기',
         'SuperMedo Server 응답: {}',
+        '파티원  {}/{}',
+        '레벨 {}',
     ),
 }
 TRANSLATIONS = {language: dict(zip(KEYS, texts, strict=True)) for language, texts in TEXTS.items()}

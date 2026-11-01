@@ -3642,6 +3642,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.row(f, _('Party code'), code_row,
                  _('Send this code to your friends. A new code stops the old one; friends already in stay.'),
                  key='party_key')
+        first_row = int(code_row.grid_info()['row'])
         members = ttk.Frame(f)
         self.row(f, '', members)
         join_row = ttk.Frame(f)
@@ -3650,6 +3651,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk.Button(join_row, text=_('Join'), command=lambda: act('join', {'code': typed.get().strip()})).pack(
             side='left', padx=(8, 0))
         self.row(f, _('Join a party'), join_row, _('Paste the code a friend sent you (SM-XXXX-XXXX).'), key='party_key')
+        # Right of the code and the join field: the party's hunters with their levels.
+        roster = self.tk.Frame(f, bg=theme.SURFACE, highlightthickness=1, highlightbackground=theme.BORDER_STRONG)
+        roster.grid(row=first_row, column=2, rowspan=int(join_row.grid_info()['row']) - first_row + 2, sticky='nw',
+                    padx=(self.px(24), 0), pady=(self.px(6), 0))
+        roster.grid_remove()
         buttons = ttk.Frame(f)
         ttk.Button(buttons, text=_('Make party code'), command=lambda: act('host')).pack(side='left')
         leave = ttk.Button(buttons, text=_('Leave party'), command=lambda: act('leave'))
@@ -3659,6 +3665,26 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         said = ttk.Label(f, text='', style='Muted.TLabel', justify='left', wraplength=self.px(560))
         said.grid(row=self.next_row(f), column=1, sticky='w', pady=(4, 0))
 
+        def show_roster(party):
+            for child in roster.winfo_children():
+                child.destroy()
+            tk, hunters = self.tk, party.get('members', [])
+            tk.Label(roster, text=_('IN THE PARTY  {}/{}').format(len(hunters), party.get('size', 4)), bg=theme.SURFACE,
+                     fg=theme.GOLD, font=(theme.HEAD, 8)).grid(row=0, column=0, columnspan=3, sticky='w',
+                                                               padx=self.px(12), pady=(self.px(8), self.px(4)))
+            for i, m in enumerate(hunters, start=1):
+                last = i == len(hunters)
+                pady = (0, self.px(10) if last else self.px(2))
+                tk.Label(roster, text='●', bg=theme.SURFACE, fg=theme.GOLD_LIGHT if m.get('online') else theme.BORDER_HOVER,
+                         font=(theme.BODY, 9)).grid(row=i, column=0, sticky='w', padx=(self.px(12), self.px(6)), pady=pady)
+                name = m['name'] + ('  ★' if m.get('host') else '')
+                tk.Label(roster, text=name, bg=theme.SURFACE, fg=theme.TEXT_STRONG if m.get('online') else theme.TEXT_SOFT,
+                         font=(theme.BODY_SEMI, 10)).grid(row=i, column=1, sticky='w', pady=pady)
+                tk.Label(roster, text=_('Level {}').format(m['level']) if m.get('level') else '–', bg=theme.SURFACE,
+                         fg=theme.MUTED, font=(theme.BODY, 9)).grid(row=i, column=2, sticky='e',
+                                                                   padx=(self.px(18), self.px(12)), pady=pady)
+            roster.grid()
+
         def show(answer):
             party = answer.get('party')
             for child in members.winfo_children():
@@ -3666,9 +3692,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if not party:
                 line.configure(text=_('Not in a party.'))
                 code_row.grid_remove()
+                roster.grid_remove()
                 leave.state(['disabled'])
                 return
             line.configure(text=party_line(party))
+            show_roster(party)
             leave.state(['!disabled'])
             if party.get('code'):  # the host's: copy it, and kick a hunter
                 code.configure(text=party['code'])
@@ -3680,12 +3708,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             else:
                 code_row.grid_remove()
 
-        def act(call, body=None):
+        def act(call, body=None, quiet=False):
             name, password = npid_var.get().strip(), password_var.get()
             if not name or not password:
-                said.configure(text=_('Sign in to your SuperMedo account first (above).'))
+                if not quiet:
+                    said.configure(text=_('Sign in to your SuperMedo account first (above).'))
                 return
-            said.configure(text=_('Checking…'))
+            if not quiet:
+                said.configure(text=_('Checking…'))
             stored = key.get()
 
             def work():
@@ -3700,16 +3730,23 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                     if status != 200:
                         raise ValueError(answer.get('error', status))
                 except (OSError, ValueError) as error:
-                    self.ui_calls.put(lambda e=error: said.configure(text=_('SuperMedo Server said: {}').format(e)))
+                    if not quiet:
+                        self.ui_calls.put(lambda e=error: said.configure(text=_('SuperMedo Server said: {}').format(e)))
                     return
-                self.ui_calls.put(lambda: (show(answer), said.configure(text='')))
+                self.ui_calls.put(lambda: (show(answer), quiet or said.configure(text='')))
             threading.Thread(target=work, daemon=True).start()
+
+        def poll():  # while the party box is on screen: friends who join or leave show up by themselves
+            if roster.winfo_ismapped() and key.get():
+                act('status', quiet=True)
+            self.root.after(15000, poll)
 
         code_row.grid_remove()
         leave.state(['disabled'])
         npid_var.trace_add('write', lambda *_a: key.set(''))  # another account: its own key
         if npid_var.get().strip() and password_var.get() and key.get():
             self.root.after(500, lambda: act('status'))
+        self.root.after(15000, poll)
 
     def build_mods(self):
         f = self.scrolled_page('mods', _('Mods & patches', 'Моды и патчи'),
