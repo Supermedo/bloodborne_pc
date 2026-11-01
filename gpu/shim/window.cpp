@@ -141,6 +141,12 @@ int WindowSDL::PollTextInput(std::string& out) {
     return text_state;
 }
 
+void WindowSDL::CancelTextInput() {
+    std::scoped_lock lock{text_mutex};
+    text_requested = false;
+    text_cancel_requested = true;
+}
+
 void WindowSDL::UpdateTextTitle() {
     const std::string shown = text + text_editing;
     const std::string title = text_active ? base_title + " \u2014 " + text_prompt + ": " + shown + "_  (Enter = OK, Esc = cancel)"
@@ -171,6 +177,18 @@ void WindowSDL::UpdateTextInputArea() {
 bool WindowSDL::PollEvents() {
     {
         std::scoped_lock lock{text_mutex};
+        // bbport: the game closed the dialog (sceImeDialogAbort); the box stayed until Esc.
+        // Before a new request, which may follow at once. text_state is left alone: the runtime
+        // has finished the closed dialog already, and a new one's state is BeginTextInput's.
+        if (text_cancel_requested) {
+            text_cancel_requested = false;
+            if (text_active) {
+                text_active = false;
+                text_editing.clear();
+                SDL_StopTextInput(window);
+                UpdateTextTitle();
+            }
+        }
         if (text_requested) { // SDL text input must be toggled from the window thread
             text_requested = false;
             text_active = true;

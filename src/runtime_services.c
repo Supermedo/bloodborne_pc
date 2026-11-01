@@ -344,7 +344,16 @@ static ABI int32_t ime_result(uint32_t *result) {
     if (result) *result=(uint32_t)ime.end_status;
     return 0;
 }
-static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* bbport: sceImeDialogAbort reset the state like Term and left the box on screen until Esc.
+ * The dialog finishes as aborted (end status 2) and the box closes; Term closes one still open. */
+static ABI int32_t ime_abort(void) {
+    if (!ime.running) return 0;
+    bbgpu_text_input_cancel();
+    ime.end_status=2; ime.finished=1; ime.running=0;
+    printf("Runtime: ImeDialog aborted by the game\n");
+    return 0;
+}
+static ABI int32_t ime_term(void) { if (ime.running) bbgpu_text_input_cancel(); memset(&ime,0,sizeof(ime)); return 0; }
 
 /* ---- Trophies: accepted locally, recorded in the log ---- */
 static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
@@ -545,7 +554,7 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogInitialize",commerce_init}, {"sceNpCommerceDialogOpen",commerce_open},
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
-    {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_abort},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",trophy_register}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
