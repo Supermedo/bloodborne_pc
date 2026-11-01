@@ -45,7 +45,7 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 VERSION = '1.9.8'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
-BETA = 2
+BETA = 3
 VERSION_TEXT = f'{VERSION} beta {BETA}' if BETA else VERSION
 BETA_PAGE = 'https://github.com/Bloodborne-Port-supermedo/bbport-supermedo/releases/tag/v1.9.8-beta.2'
 # The port's Discord application (discord.com/developers: its Application ID; an art asset named
