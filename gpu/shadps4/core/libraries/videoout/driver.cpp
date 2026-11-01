@@ -727,7 +727,14 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 FRAME_END;
             }
         }
-        std::this_thread::sleep_until(tick_deadline);
+        // bbport: a flip's slot soon after this tick: the wait for the tick is precise too. A plain
+        // sleep woke up to ~1 ms past the slot, more than the slack next_slot forgives, and that time
+        // was lost: 118.5 FPS at a cap of 120. Other ticks may sleep as they did.
+        if (next_flip > tick_deadline && next_flip - tick_deadline < vblank_period) {
+            Common::PreciseSleepUntil(tick_deadline);
+        } else {
+            std::this_thread::sleep_until(tick_deadline);
+        }
     }
 }
 
