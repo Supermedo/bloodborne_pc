@@ -35,6 +35,16 @@ def hunters_dream_notice():
 
 
 NOTES = {
+    '1.9.8 beta 5': (
+        None,
+        [('Online', [
+            "Seamless co-op: BBSC's own direct channel between players works now. The port refused it, so warps, "
+            "world sync and the host's progress went the long way through the server's relay, late.",
+            'Seamless co-op settings on the Online page: the difficulty (how much stronger enemies and bosses get '
+            "for every guest) and BBSC's main options. The host's settings count for the whole session.",
+            "Seamless co-op's bells are given once you reach the Hunter's Dream, not at the very start.",
+            "Looking up another player by name no longer fails on SuperMedo's servers.",
+        ])]),
     '1.9.8 beta 4': (
         None,
         [('Online', [
