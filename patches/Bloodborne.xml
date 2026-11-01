@@ -337,6 +337,12 @@
             <Line Type="bytes32" Address="0x02196b26" Value="0x00000360"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="NPC Talk Crash Fix" Note="An event and NPC talk routine looks up its talk targets and calls a method on each without checking the lookup found one (read access to 0x0 at guest offset 0x17bcb59). A missing target now counts as not matching and the loop goes on." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes" Address="0x01BBCB33" Value="EB0B4885C07406488B08EB1D90"/>
+            <Line Type="bytes" Address="0x01BBCB59" Value="EBDA90"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x02CF83E0" Value="c3"/>
