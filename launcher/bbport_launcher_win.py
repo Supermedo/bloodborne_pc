@@ -1878,7 +1878,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             refresh()
 
     def next_row(self, parent):
-        return parent.grid_size()[1]
+        """A row of its own: grid_size() does not count a widget that grid_remove() took away, and the next one
+        lay on it once it was shown again (a heading on the Picture page's settings, a fold's two notes)."""
+        row = max(getattr(parent, 'rows_used', 0), parent.grid_size()[1])
+        parent.rows_used = row + 1
+        return row
 
     def motion_cache_check(self, parent):
         upscaler = self.var('upscaler', 'ini')
@@ -1981,15 +1985,19 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk = self.ttk
         var = self.var(key, 'app')
         holder = ttk.Frame(parent)
-        ttk.Entry(holder, textvariable=var, width=54).pack(side='left')
+        entry = ttk.Entry(holder, textvariable=var, width=54)
 
         def browse():
             chosen = self.filedialog.askdirectory(title=prompt, initialdir=var.get() or str(PORT_DIR))
             if chosen:
                 var.set(str(Path(chosen)))
-        ttk.Button(holder, text=_('Browse…', 'Обзор…'), command=browse).pack(side='left', padx=(6, 0))
-        ttk.Button(holder, text=_('Open', 'Открыть'), command=lambda: self.open_path(var.get(), key)).pack(
-            side='left', padx=(6, 0))
+        browse_button = ttk.Button(holder, text=_('Browse…', 'Обзор…'), command=browse)
+        open_button = ttk.Button(holder, text=_('Open', 'Открыть'), command=lambda: self.open_path(var.get(), key))
+        # Packed from the right, the field last: in a narrow window the field gives way, not the buttons (Open was cut
+        # off and Browse lost its text at the smallest size). Created in this order for the Tab key.
+        open_button.pack(side='right', padx=(6, 0))
+        browse_button.pack(side='right', padx=(6, 0))
+        entry.pack(side='left', fill='x', expand=True)
         if on_change:
             var.trace_add('write', lambda *_a: on_change())
         holder.setting_key = key
@@ -2625,6 +2633,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                          if (e.width, e.height) != getattr(self, 'banner_size', None) else None)
         self.banner.bind('<Button-1>', lambda e: self.banner_spot(e) and self.show('game'))
         self.banner.bind('<Motion>', lambda e: self.banner.configure(cursor='hand2' if self.banner_spot(e) else ''))
+
+        def fit_banner(event):
+            # A window made short, not only a short screen (compact): this page does not scroll, and under the tall
+            # banner the sign-in warning and the Play online switch were cut off at the smallest size.
+            height = px(200 if event.height < px(760) else 286)
+            if event.widget is self.root and int(self.banner['height']) != height:
+                self.banner.configure(height=height)
+        self.root.bind('<Configure>', fit_banner, add='+')
         body = ttk.Frame(page, padding=(px(28), 0, px(28), px(22)))
         body.pack(fill='both', expand=True)
         body.columnconfigure(0, weight=1, uniform='cards')
@@ -3960,13 +3976,15 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         table = ttk.Frame(f)
         table.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
         for c in range(1, SLOTS + 1):
-            table.columnconfigure(c, uniform='slot', minsize=self.px(150))
+            table.columnconfigure(c, uniform='slot', minsize=self.px(138))
         for (group, group_ru), actions in ACTION_GROUPS:
             ttk.Label(table, text=_(group, group_ru), style='Section.TLabel').grid(
                 row=table.grid_size()[1], column=0, columnspan=SLOTS + 2, sticky='w', pady=(14, 4))
             for output, (label, label_ru) in actions:
                 r = table.grid_size()[1]
-                ttk.Label(table, text=_(label, label_ru)).grid(row=r, column=0, sticky='w', padx=(0, 18), pady=2)
+                # Wrapped, with the slots a little narrower: the third slot was cut off at the smallest size.
+                ttk.Label(table, text=_(label, label_ru), wraplength=self.px(220), justify='left').grid(
+                    row=r, column=0, sticky='w', padx=(0, 18), pady=2)
                 buttons = []
                 for slot in range(SLOTS):
                     btn = ttk.Button(table, style='Slot.TButton',

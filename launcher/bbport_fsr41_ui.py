@@ -69,7 +69,7 @@ def upscaler_choice(app, parent, options, width, translate):
     value = app.var('upscaler', 'ini')
     frame = ttk.Frame(parent)
     frame.setting_key = 'upscaler'
-    frame.button = ttk.Menubutton(frame, width=-width)
+    frame.button = ttk.Menubutton(frame, width=-width, style='Fsr411.TMenubutton')
     frame.button.pack(anchor='w')
     frame.menu = tk.Menu(frame.button, tearoff=False, background=theme.CARD, foreground=theme.TEXT,
         activebackground=theme.BLOOD, activeforeground=theme.TEXT, disabledforeground=theme.MUTED)
