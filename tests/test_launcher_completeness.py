@@ -230,7 +230,14 @@ class LiveTests(unittest.TestCase):
             self.assertTrue(button.instate(['disabled']))
             password.set('secret')  # what "Sign in with Discord" and "Create account" set
             self.assertFalse(button.instate(['disabled']))
-            button.invoke()
+            button.invoke()  # Sign out asks first, and setUpClass answers no: still signed in
+            self.assertEqual((npid.get(), password.get()), ('Hunter', 'secret'))
+            asked = self.app.messagebox.askyesno
+            self.app.messagebox.askyesno = lambda *a, **k: True
+            try:
+                button.invoke()
+            finally:
+                self.app.messagebox.askyesno = asked
             self.assertEqual((npid.get(), password.get()), ('', ''))
             self.assertTrue(button.instate(['disabled']))
         finally:

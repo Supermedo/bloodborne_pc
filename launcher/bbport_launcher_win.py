@@ -3418,28 +3418,35 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         password_var.trace_add('write', show_signed)
 
         def sign_out():
+            if not self.messagebox.askyesno('Bloodborne', _('Sign out of {}? An account made with Discord signs in again with Discord; one made here needs '
+                                                           'its Online ID and password.').format(npid_var.get().strip())):
+                return
             npid_var.set('')
             password_var.set('')
-            self.collect()
+            self.save_settings()
         discord_line = self.wrap_within(ttk.Label(f, text='', style='Muted.TLabel', justify='left', anchor='w'), 560)
 
         def sign_in_discord():
+            # The last press owns the line below: one left open in the browser must not write over a later one's
+            # messages. A sign-in that finishes counts, whichever press started it.
+            run = self.discord_run = object()
             discord_line.configure(text=_('Starting the sign-in…'))
 
             def on_page(page):
                 webbrowser.open(page)
-                self.ui_calls.put(lambda: discord_line.configure(
+                self.ui_calls.put(lambda: self.discord_run is run and discord_line.configure(
                     text=_('Sign in with Discord in the page that opened, then come back here.')))
 
             def work():
                 try:
                     npid, password = discord_sign_in(COMMUNITY_SERVER, on_page)
                 except Exception as error:  # a broken reply too (BadStatusLine): the line always answers
-                    self.ui_calls.put(lambda e=connection_error(error, COMMUNITY_SERVER): discord_line.configure(
-                        text=_('Sign-in failed: {}').format(e)))
+                    self.ui_calls.put(lambda e=connection_error(error, COMMUNITY_SERVER): (
+                        self.discord_run is run and discord_line.configure(text=_('Sign-in failed: {}').format(e))))
                     return
                 self.ui_calls.put(lambda: (npid_var.set(npid), password_var.set(password),
-                                           discord_line.configure(text=''), self.collect()))
+                                           self.discord_run is run and discord_line.configure(text=''),
+                                           self.collect()))
             threading.Thread(target=work, daemon=True).start()
         self.row(f, _('Account'), signed, key='supermedo_npid')
         button = ttk.Button(buttons, text=_('Sign in with Discord'), command=sign_in_discord)

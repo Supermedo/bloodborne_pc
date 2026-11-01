@@ -25,6 +25,7 @@ KEYS = (
     'SuperMedo Server could not be reached: {}',
     "SuperMedo Server: supermedo.com's own servers, with a free account made below. "
     'shadNet: a shadNet server of your choice and its account.',
+    'Sign out of {}? An account made with Discord signs in again with Discord; one made here needs its Online ID and password.',
 )
 TEXTS = {
     'ru': (
@@ -49,6 +50,7 @@ TEXTS = {
         'Войдите через Discord на открывшейся странице, затем вернитесь сюда.',
         'Не удалось связаться с сервером SuperMedo: {}',
         'Сервер SuperMedo: собственные серверы supermedo.com, с бесплатным аккаунтом (создаётся ниже). shadNet: сервер shadNet на ваш выбор и его аккаунт.',
+        'Выйти из аккаунта {}? Аккаунт, созданный через Discord, снова входит через Discord; для созданного здесь нужны Online ID и пароль.',
     ),
     'ar': (
         'الرسائل وبقع الدم والأشباح تأتي من خادم اللعبة؛ أما الأجراس والاستدعاءات فتمرّ عبر خادم shadNet.',
@@ -72,6 +74,7 @@ TEXTS = {
         'سجّل الدخول عبر Discord في الصفحة التي فُتحت، ثم عد إلى هنا.',
         'تعذّر الوصول إلى خادم SuperMedo: {}',
         'خادم SuperMedo: خوادم supermedo.com الخاصة، مع حساب مجاني تنشئه أدناه. shadNet: خادم shadNet من اختيارك وحسابه.',
+        'هل تريد تسجيل الخروج من {}؟ الحساب المنشأ عبر Discord يسجّل الدخول عبر Discord مرة أخرى، والحساب المنشأ هنا يحتاج إلى Online ID وكلمة المرور.',
     ),
     'es': (
         'Los mensajes, las manchas de sangre y los fantasmas vienen del servidor del juego; las campanas y las '
@@ -96,6 +99,7 @@ TEXTS = {
         'Inicia sesión con Discord en la página que se abrió y luego vuelve aquí.',
         'No se pudo conectar con el servidor SuperMedo: {}',
         'Servidor SuperMedo: los servidores propios de supermedo.com, con una cuenta gratuita que se crea abajo. shadNet: un servidor shadNet a tu elección y su cuenta.',
+        '¿Cerrar sesión de {}? Una cuenta creada con Discord vuelve a iniciar sesión con Discord; una creada aquí necesita su Online ID y su contraseña.',
     ),
     'pt': (
         'Mensagens, manchas de sangue e fantasmas vêm do servidor do jogo; sinos e invocações passam por um '
@@ -120,6 +124,7 @@ TEXTS = {
         'Entre com o Discord na página que abriu e depois volte aqui.',
         'Não foi possível acessar o servidor SuperMedo: {}',
         'Servidor SuperMedo: os servidores próprios do supermedo.com, com uma conta gratuita criada abaixo. shadNet: um servidor shadNet à sua escolha e a conta dele.',
+        'Sair de {}? Uma conta criada com o Discord entra de novo com o Discord; uma criada aqui precisa do Online ID e da senha.',
     ),
     'fr': (
         'Les messages, les taches de sang et les fantômes viennent du serveur de jeu ; les cloches et les '
@@ -144,6 +149,7 @@ TEXTS = {
         'Connectez-vous avec Discord dans la page qui s’est ouverte, puis revenez ici.',
         'Impossible de joindre le serveur SuperMedo : {}',
         'Serveur SuperMedo : les serveurs de supermedo.com, avec un compte gratuit créé ci-dessous. shadNet : un serveur shadNet de votre choix et son compte.',
+        'Se déconnecter de {} ? Un compte créé avec Discord se reconnecte avec Discord ; un compte créé ici a besoin de son Online ID et de son mot de passe.',
     ),
     'de': (
         'Nachrichten, Blutflecken und Geister kommen vom Spielserver; Glocken und Beschwörungen laufen über einen '
@@ -168,6 +174,7 @@ TEXTS = {
         'Melde dich auf der geöffneten Seite mit Discord an und komm dann hierher zurück.',
         'SuperMedo-Server nicht erreichbar: {}',
         'SuperMedo-Server: die eigenen Server von supermedo.com, mit einem kostenlosen Konto, das unten angelegt wird. shadNet: ein shadNet-Server deiner Wahl und dessen Konto.',
+        'Von {} abmelden? Ein mit Discord erstelltes Konto meldet sich wieder mit Discord an; ein hier erstelltes braucht seine Online-ID und sein Passwort.',
     ),
     'it': (
         'Messaggi, macchie di sangue e fantasmi arrivano dal server di gioco; campane ed evocazioni passano da un '
@@ -192,6 +199,7 @@ TEXTS = {
         'Accedi con Discord nella pagina che si è aperta, poi torna qui.',
         'Impossibile raggiungere il server SuperMedo: {}',
         'Server SuperMedo: i server di supermedo.com, con un account gratuito creato qui sotto. shadNet: un server shadNet a tua scelta e il suo account.',
+        'Uscire da {}? Un account creato con Discord accede di nuovo con Discord; uno creato qui richiede Online ID e password.',
     ),
     'pl': (
         'Wiadomości, plamy krwi i duchy pochodzą z serwera gry; dzwony i przywołania idą przez serwer shadNet.',
@@ -215,6 +223,7 @@ TEXTS = {
         'Zaloguj się przez Discord na otwartej stronie, a potem wróć tutaj.',
         'Nie można połączyć się z serwerem SuperMedo: {}',
         'Serwer SuperMedo: własne serwery supermedo.com, z darmowym kontem zakładanym poniżej. shadNet: wybrany serwer shadNet i jego konto.',
+        'Wylogować z {}? Konto utworzone przez Discord loguje się ponownie przez Discord; utworzone tutaj wymaga Online ID i hasła.',
     ),
     'tr': (
         'Mesajlar, kan lekeleri ve hayaletler oyun sunucusundan gelir; çanlar ve çağırmalar bir shadNet '
@@ -239,6 +248,7 @@ TEXTS = {
         'Açılan sayfada Discord ile giriş yap, sonra buraya geri dön.',
         'SuperMedo Sunucusuna ulaşılamadı: {}',
         'SuperMedo Sunucusu: supermedo.com’un kendi sunucuları, aşağıda oluşturulan ücretsiz bir hesapla. shadNet: seçtiğin bir shadNet sunucusu ve onun hesabı.',
+        '{} hesabından çıkılsın mı? Discord ile oluşturulan hesap yine Discord ile girer; burada oluşturulan hesap Online ID ve şifresini ister.',
     ),
     'zh': (
         '讯息、血迹和幽灵来自游戏服务器；铃铛与召唤经由 shadNet 服务器。',
@@ -261,6 +271,7 @@ TEXTS = {
         '请在打开的页面中用 Discord 登录，然后回到这里。',
         '无法连接 SuperMedo 服务器：{}',
         'SuperMedo 服务器：supermedo.com 自己的服务器，账户免费，在下方创建。shadNet：你选择的 shadNet 服务器及其账户。',
+        '要退出 {} 吗？用 Discord 创建的账户可再次用 Discord 登录；在这里创建的账户需要 Online ID 和密码。',
     ),
     'ja': (
         'メッセージ、血痕、幻影はゲームサーバーから届きます。鐘と召喚は shadNet サーバーを経由します。',
@@ -284,6 +295,7 @@ TEXTS = {
         '開いたページで Discord にサインインしてから、ここに戻ってください。',
         'SuperMedo サーバーに接続できません：{}',
         'SuperMedo サーバー：supermedo.com 独自のサーバーで、無料のアカウントは下で作成します。shadNet：お好みの shadNet サーバーとそのアカウント。',
+        '{} からサインアウトしますか？Discord で作成したアカウントは再び Discord でサインインします。ここで作成したアカウントには Online ID とパスワードが必要です。',
     ),
     'ko': (
         '메시지, 혈흔, 유령은 게임 서버에서 옵니다. 종과 소환은 shadNet 서버를 거칩니다.',
@@ -307,6 +319,7 @@ TEXTS = {
         '열린 페이지에서 Discord로 로그인한 뒤 여기로 돌아오세요.',
         'SuperMedo 서버에 연결할 수 없습니다: {}',
         'SuperMedo 서버: supermedo.com 자체 서버이며, 무료 계정은 아래에서 만듭니다. shadNet: 원하는 shadNet 서버와 그 계정.',
+        '{} 계정에서 로그아웃할까요? Discord로 만든 계정은 다시 Discord로 로그인하고, 여기서 만든 계정은 온라인 ID와 비밀번호가 필요합니다.',
     ),
 }
 TRANSLATIONS = {language: dict(zip(KEYS, texts, strict=True)) for language, texts in TEXTS.items()}
