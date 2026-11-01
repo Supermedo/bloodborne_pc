@@ -789,6 +789,7 @@ void NpHandler::ResolveOnlineId(
         std::lock_guard lock(m_mutex_pending_lookup);
         PendingLookupRequest pending;
         pending.user_id = user_id;
+        pending.online_id = online_id;
         pending.on_result = std::move(on_result);
         m_pending_lookup.emplace(pkt_id, std::move(pending));
     }
@@ -798,12 +799,14 @@ void NpHandler::ResolveOnlineId(
 void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_id,
                               ShadNet::ErrorType error, const std::vector<u8>& body) {
     std::function<void(s32, u64, const std::string&)> on_result;
+    std::string online_id;
     {
         std::lock_guard lock(m_mutex_pending_lookup);
         auto it = m_pending_lookup.find(pkt_id);
         if (it == m_pending_lookup.end()) {
             return; // no waiter (already flushed by a disconnect, or a stray reply)
         }
+        online_id = std::move(it->second.online_id);
         on_result = std::move(it->second.on_result);
         m_pending_lookup.erase(it);
     }
@@ -818,6 +821,13 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
     }
     if (error == ShadNet::ErrorType::InvalidInput) {
         on_result(ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT, 0, {});
+        return;
+    }
+    if (error == ShadNet::ErrorType::Invalid && !online_id.empty()) {
+        // bbport: SuperMedo's shadNet has no lookup (an unknown command: every lookup failed,
+        // 2026-11-01). An Online ID is its own NpId there, so it is answered from the ID itself,
+        // as BBSC's build of the port did (no account id).
+        on_result(ORBIS_OK, 0, online_id);
         return;
     }
     if (error != ShadNet::ErrorType::NoError) {
