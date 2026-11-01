@@ -17,6 +17,7 @@ import webbrowser
 from pathlib import Path
 
 import bbport_theme as theme
+import bbport_lang_motion as motion_text
 
 L = None  # bbport_launcher_win, set by bind()
 DISCORD = 'https://discord.gg/WtYT4fXhEN'  # the community Discord (bbport.de); the old invite expired
@@ -150,6 +151,10 @@ TOPICS = {
         ['All graphics (expert view): Quality preset Balanced or Performance (DLSS on GeForce RTX cards).',
          'Model detail (LOD) "As in the game", object motion vectors off.',
          'Close your browser and other programs while playing.']),
+    'omv_rx6000': (
+        motion_text.HELP_KEYS['Title'],
+        motion_text.HELP_KEYS['Context'],
+        [motion_text.HELP_KEYS[key] for key in ('Disable', 'Repeat', 'Report')]),
     'driver': (
         'The graphics driver stopped (device lost)',
         'The game needs Vulkan 1.3 and a current driver; an old or crashed driver ends the game with '
@@ -305,9 +310,25 @@ NOTICE_INTROS = {'shadnet_rejected': 'Online play was off this time. Its log nam
                  'steam_layout': "The controller's input was doubled this time. Its log names the cause:"}
 
 
+def ssbo_device_loss(text):
+    """Track the active path at device loss; this is context, not a cause diagnosis."""
+    active = False
+    for line in (text or '').splitlines():
+        if 'Object motion: storage path ' in line:
+            active = bool(re.search(r'Object motion: storage path SSBO\b', line))
+        elif re.search(r'Object motion: (?:off\b|.*(?:unsupported|failed), off\b)', line):
+            active = False
+        if active and re.search(r'ErrorDeviceLost|\bdevice lost\b', line):
+            return True
+    return False
+
+
 def hints_in_log(text):
     """The topics whose messages the log has, in the order of LOG_HINTS."""
-    return [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+    topics = [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+    if 'driver' in topics and ssbo_device_loss(text):
+        topics.insert(topics.index('driver'), 'omv_rx6000')
+    return topics
 
 
 def hints_for_game(text, game_dir):
@@ -1173,8 +1194,9 @@ class HelpMixin:
                                                          'help.').format(shown))
             return
         title, why, _steps = TOPICS[topics[0]]
-        if self.messagebox.askyesno('Bloodborne', _('The game ended with an error (code {}). Its log names the '
-                                                    'cause:').format(shown) +'\n\n' + _(title) + '\n' + _(why) +
+        intro = (motion_text.HELP_KEYS['Intro'] if topics[0] == 'omv_rx6000' else
+                 'The game ended with an error (code {}). Its log names the cause:')
+        if self.messagebox.askyesno('Bloodborne', _(intro).format(shown) +'\n\n' + _(title) + '\n' + _(why) +
                                     '\n\n' + _('Show the fix?')):
             self.open_topic(topics[0])
 

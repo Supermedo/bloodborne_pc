@@ -46,6 +46,32 @@ class LogHintTests(unittest.TestCase):
             self.assertIn(topic, help_.TOPICS)
         self.assertEqual(sorted(help_.TOPIC_ORDER), sorted(help_.TOPICS))
 
+    def test_ssbo_device_loss_suggests_a_manual_comparison(self):
+        for failure in ('ErrorDeviceLost', 'GPU: device lost (submit)'):
+            with self.subTest(failure=failure):
+                log = 'Object motion: storage path SSBO (automatic GPU selection)\n' + failure
+                self.assertEqual(help_.hints_in_log(log), ['omv_rx6000', 'driver'])
+
+    def test_other_paths_and_unrelated_failures_keep_existing_advice(self):
+        for log in ('ErrorDeviceLost\nObject motion: storage path SSBO',
+                    'Object motion: storage path BDA\nErrorDeviceLost',
+                    'Object motion: storage path SSBO\nObject motion: storage path BDA\nErrorDeviceLost',
+                    'Object motion: storage path SSBO\nObject motion: off (disabled)\nErrorDeviceLost',
+                    'Object motion: storage path SSBO\nObject motion: SSBO limits unsupported, off\nErrorDeviceLost',
+                    'Object motion: storage path SSBO\nObject motion: buffer creation failed, off\nErrorDeviceLost',
+                    'Object motion: storage path SSBO\nFault: read at amdvlk64.dll'):
+            with self.subTest(log=log):
+                self.assertEqual(help_.hints_in_log(log), ['driver'])
+        self.assertEqual(help_.hints_in_log('Object motion: storage path SSBO\nnormal exit'), [])
+
+    def test_cache_off_does_not_disable_object_motion_context(self):
+        log = 'Object motion: storage path SSBO\nObject motion: target cache off\nErrorDeviceLost'
+        self.assertEqual(help_.hints_in_log(log), ['omv_rx6000', 'driver'])
+
+    def test_memory_failure_keeps_priority_over_object_motion_suggestion(self):
+        log = 'Object motion: storage path SSBO\nErrorOutOfDeviceMemory\nErrorDeviceLost'
+        self.assertEqual(help_.hints_in_log(log), ['vram', 'omv_rx6000', 'driver'])
+
 
 class MemoryTests(unittest.TestCase):
     """The check before PLAY: the game reserves its memory in one block at the start."""
@@ -328,6 +354,27 @@ class AfterExitTests(unittest.TestCase):
         shown, opened = self.run_after('GPU: device lost (submit)\n', 1, always=True)
         self.assertEqual([kind for kind, _t in shown], ['ask'])
         self.assertEqual(opened, ['driver'])
+
+    def test_ssbo_context_does_not_claim_a_proven_cause(self):
+        log = 'Object motion: storage path SSBO\nErrorDeviceLost\n'
+        shown, opened = self.run_after(log, 1, always=True)
+        self.assertEqual(opened, ['omv_rx6000'])
+        self.assertIn('Its log suggests this check:', shown[0][1])
+        self.assertIn('The cause is not identified.', shown[0][1])
+        self.assertNotIn('Its log names the cause:', shown[0][1])
+        self.assertEqual(self.run_after(log, 0, always=True), ([], []))
+
+    def test_ssbo_hint_does_not_modify_preferences(self):
+        from types import MappingProxyType
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'last_run.log').write_text('Object motion: storage path SSBO\nErrorDeviceLost')
+            window = help_.HelpMixin()
+            window.app = MappingProxyType({'user_dir': tmp, 'game_dir': '', 'object_motion': 'on'})
+            window.messagebox = mock.Mock()
+            window.messagebox.askyesno.return_value = False
+            window.after_exit(1)
+            self.assertEqual(window.app['object_motion'], 'on')
+            window.messagebox.askyesno.assert_called_once()
 
     def test_a_full_size_eboot_is_not_called_cut_off(self):
         with tempfile.TemporaryDirectory() as game, mock.patch.object(help_, 'EBOOT_SIZE', 4096):

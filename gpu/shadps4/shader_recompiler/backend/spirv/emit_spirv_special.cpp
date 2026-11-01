@@ -185,6 +185,8 @@ static void EmitVertexMotion(EmitContext& ctx) {
         return EmitVertexMotionSsbo(ctx);
     // Existing BDA path: parameters and history are addressed through GPU pointers.
     // RX 6000 uses bounded SSBO views above; keep BDA shader generation unchanged.
+    // Disabled history loads/stores are skipped by the branches below.
+    // Duplicate invocations can target the same slot; SSBO uses atomic stores above.
     const Id u32_type = ctx.U32[1];
     const Id position = ctx.OpLoad(ctx.F32[4], ctx.output_position);
     const Id param_ptr = ctx.OpAccessChain(ctx.TypePointer(spv::StorageClass::PushConstant, u32_type),
