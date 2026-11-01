@@ -258,8 +258,9 @@ import bbport_lang_audit8  # noqa: E402,F401 (sharpening with FSR 4, achievement
 import bbport_lang_news  # noqa: E402,F401 (the What's new window)
 import bbport_lang_thd  # noqa: E402,F401 (1.9.7: The Hunter's Dream no longer offered)
 import bbport_lang_readouts  # noqa: E402,F401 (the FPS counter's lines)
-# Last of the texts: it builds bbport_lang's tables (table()) to add its own, so a module registering
-# EXTRA_TRANSLATIONS after it would not be in them.
+import bbport_lang_ko  # noqa: E402,F401 (Korean over the other tables)
+# Last of the texts: this and bbport_lang_ko build bbport_lang's tables (table()) to add their own, so a module
+# registering EXTRA_TRANSLATIONS after them would not be in them.
 import bbport_fsr41_translations  # noqa: E402,F401
 import bbport_hardware as hardware  # noqa: E402
 import bbport_frame  # noqa: E402
@@ -764,6 +765,19 @@ def game_info(folder):
         return 'Bloodborne', '?'
 
 
+def game_names(app):
+    """The game's own words (bbport_character.names) for the launcher's character cards: its Korean in a Korean
+    launcher, also when the game's text language is another one (a Korean mod over the English texts); else in that
+    text language."""
+    return character.names(app.var('game_dir', 'app').get(), '9' if LANG == 'ko' else app.var('language', 'app').get())
+
+
+def key_text(name):
+    """A key or a button by its name, as the player's language has it. Not Delete: as a text it is the command, here
+    it is what is written on the key."""
+    return name if name == 'Delete' else _(name)
+
+
 def monitor_options(chosen=''):
     """(value, (label,)) of the game monitor choice: '' (Windows' main monitor) first, then the
     others; a chosen monitor that is not connected stays listed."""
@@ -1008,6 +1022,7 @@ def server_check(server, webapi, community):
 HUNTERS_DREAM_POOL = os.environ.get('BB_HUNTERS_DREAM', '0') == '1'
 
 
+SIGN_IN_TOO_LONG = 'the sign-in took too long; start it again'  # Korean only, kept out of _('...') for the translation test
 SHADNET_ERRORS = {3: 'The name or the email address is not valid.', 4: 'Too soon: try again in a minute.',
                   11: 'This name is taken.', 12: 'This email provider is not allowed.',
                   13: 'An account with this email address exists already.', 23: 'Sign-up is closed.'}
@@ -1039,7 +1054,7 @@ def shadnet_register(address, npid, password, email, timeout=15):
                 raise OSError('the server closed the connection')
             data += chunk
         return data
-    host, _, port = address.rpartition(':')
+    host, _sep, port = address.rpartition(':')
     proto = text(1, npid) + text(2, password) + text(4, email)
     payload = struct.pack('<I', len(proto)) + proto
     with socket.create_connection((host, int(port)), timeout=timeout) as sock:
@@ -1048,7 +1063,7 @@ def shadnet_register(address, npid, password, email, timeout=15):
         sock.sendall(struct.pack('<BHIQ', 0, 2, 15 + len(payload), 1) + payload)
         reply = read(sock, 16)
     error = reply[15]
-    return None if error == 0 else SHADNET_ERRORS.get(error, f'The server said no (error {error}).')
+    return None if error == 0 else _(SHADNET_ERRORS.get(error, 'The server said no (error {}).')).format(error)
 
 
 def thd_open(request):
@@ -1071,10 +1086,10 @@ def discord_sign_in(server, on_page, timeout=600):
         if reply.get('status') == 'done':
             return reply['npid'], reply['password']
         if reply.get('status') == 'failed':
-            raise ValueError(reply.get('message') or 'the sign-in failed')
+            raise ValueError(_(reply.get('message') or 'the sign-in failed'))
         if reply.get('status') == 'expired':
             break
-    raise ValueError('the sign-in took too long; start it again')
+    raise ValueError(_(SIGN_IN_TOO_LONG))
 
 
 def thd_call(url, body, tries=3):
@@ -1449,6 +1464,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def __init__(self, root, tk, ttk, filedialog, messagebox):
         self.tk, self.ttk, self.filedialog, self.messagebox = tk, ttk, filedialog, messagebox
         self.root = root
+        saves.LANGUAGE = LANG  # the dates it shows (bbport_saves.date_format)
         saved = load_settings()
         self.app = {**APP_DEFAULTS, **saved}
         if 'thehuntersdream' in str(self.app.get('online_community', '')):  # the game server is supermedo.com's
@@ -3195,7 +3211,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk.Combobox(body, textvariable=chosen, values=labels, state='readonly', width=36).grid(
             row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
         # the attributes as the game names them in its text language (as on the Saves page)
-        words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
+        words = game_names(self)
         values = {a: tk.IntVar() for a in respec.ATTRIBUTES}
         for row, a in enumerate(respec.ATTRIBUTES, start=1):
             ttk.Label(body, text=words.attribute(a)).grid(row=row, column=0, sticky='w', padx=(0, 16), pady=2)
@@ -4186,7 +4202,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         conflicts = controller_conflicts(current)
         for output, (btn, warn) in self.controller_rows.items():
             name = current[output]
-            text = controller_display_name(name, LANG == 'ru') if name else '—'
+            text = _(controller_display_name(name, LANG == 'ru')) if name else '—'
             btn.configure(text=text + ('  ⚠' if output in conflicts else ''), style='Slot.TButton')
             others = conflicts.get(output, [])
             warn.configure(text='⚠ ' + _('also {}', 'также {}').format(
@@ -4327,7 +4343,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             marked = conflicts.get(o, {})
             for i, btn in enumerate(buttons):
                 key = values[i] if i < len(values) else None
-                text = ' + '.join(display_name(p, russian) for p in binding_parts(key)) if key else '—'
+                text = ' + '.join(key_text(display_name(p, russian)) for p in binding_parts(key)) if key else '—'
                 btn.configure(text=text + ('  ⚠' if i in marked else ''), style='Slot.TButton')
                 mark = self.remap_clear_marks.get((o, i))
                 if mark is not None:
@@ -4439,7 +4455,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if name in MODIFIER_NAMES:
                 if name not in modifiers and len(modifiers) < MAX_COMBO - 1:
                     modifiers.append(name)
-                    key_label.configure(text=' + '.join(display_name(m, LANG == 'ru') for m in modifiers) + ' + …')
+                    key_label.configure(text=' + '.join(key_text(display_name(m, LANG == 'ru')) for m in modifiers) + ' + …')
                 return  # wait: another input makes a combination, a release binds it alone
             apply(name)
 
@@ -4875,7 +4891,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         info = game_info(self.var('game_dir', 'app').get())
         if info and info[1] != PATCH_VERSION:
             fps = ('30 FPS',)
-        upscaler = dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0]
+        upscaler = _(dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0])
         selected = self.var('upscaler', 'ini').get()
         if selected in ('fsr411', 'fsr412'):
             upscaler += ' · ' + ('DX12' if self.var('fsr411_backend', 'ini').get() == 'dx12'
@@ -6225,7 +6241,7 @@ def connection_error(error, url):
                      'Time & language > Date & time, "Set time automatically".',
                      'Дата на вашем ПК неверна ({}), поэтому защищённые соединения не работают. Установите дату в '
                      'Windows: Параметры > Время и язык > Дата и время, «Установить время автоматически».').format(
-                time.strftime('%d.%m.%Y'))
+                time.strftime(saves.date_format(clock=False)))
     return error_text(error)
 
 
@@ -6694,6 +6710,7 @@ class _ThisModule:
             raise AttributeError(name) from None
 
 
+character.TRANSLATE = _
 bbport_setup.bind(_ThisModule())
 bbport_news.bind(_ThisModule())
 bbport_help.bind(_ThisModule())

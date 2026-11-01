@@ -51,6 +51,20 @@ SKIP = {'dvdroot_ps4', 'sce_module', 'cache', 'shader', 'shader_cache', 'fsr4_sh
 BENCHMARK_SAVE = 'savedata.benchmark'
 
 
+LANGUAGE = ''  # the launcher's language (Launcher.__init__), for the dates it shows
+
+
+def date_format(clock=True):
+    """The strftime format of a date the player reads, in a dialog or on a page. Never for a file name or a text
+    that is read back: those keep %Y-%m-%d."""
+    day = '%Y. %m. %d.' if LANGUAGE == 'ko' else '%d.%m.%Y'
+    return f'{day} %H:%M' if clock else day
+
+
+def date_text(moment, clock=True):
+    return moment.strftime(date_format(clock))
+
+
 def benchmark_save(name):
     """True for a (lower-case) folder name restore_benchmark_backup gives the test's save. Not for
     savedata.benchmark-backup: that one holds the player's own save while a test runs or after it broke off."""
@@ -93,7 +107,7 @@ class SaveSet:
         return PROFILE in names and any(slot in names for slot in SLOTS)
 
     def when(self):
-        return datetime.datetime.fromtimestamp(self.modified).strftime('%d.%m.%Y %H:%M') if self.modified else '?'
+        return date_text(datetime.datetime.fromtimestamp(self.modified)) if self.modified else '?'
 
 
 def used(path):

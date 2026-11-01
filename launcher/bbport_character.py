@@ -128,7 +128,7 @@ def read_file(path):
 # ---- the game's own names (msg/<language>/item.msgbnd.dcx and menu.msgbnd.dcx) ----------------
 # The game's text language (BB_LANGUAGE, the PS4 system language) and its folder.
 MSG_FOLDERS = {'0': 'jpnjp', '1': 'engus', '2': 'frafr', '3': 'spaes', '4': 'deude', '5': 'itait', '8': 'rusru',
-               '17': 'porbr'}
+               '9': 'korkr', '17': 'porbr'}
 WEAPON_NAMES, NPC_NAMES, MENU_TEXTS, COMMON_TEXTS = 11, 18, 200, 76  # the FMGs in the archives
 # Menu texts: the level, the echoes, the insight, the play time, the six attributes and the title
 # menu's Continue and Load Game as the game writes them
@@ -138,6 +138,7 @@ ATTRIBUTE_TEXTS = dict(zip((key for key, _ in ATTRIBUTES), range(10400, 10406), 
 ENGLISH = {LEVEL_TEXT: 'Level', ECHOES_TEXT: 'Blood Echoes', INSIGHT_TEXT: 'Insight', PLAY_TIME_TEXT: 'Play Time',
            CONTINUE_TEXT: 'Continue', LOAD_GAME_TEXT: 'Load Game', 10400: 'Vitality', 10401: 'Endurance',
            10402: 'Strength', 10403: 'Skill', 10404: 'Bloodtinge', 10405: 'Arcane'}
+TRANSLATE = str  # the launcher's _ (set by it), for the words of its cards: a table has the game's own word
 
 
 def unpack_dcx(data):
@@ -195,7 +196,9 @@ class Names:
         return self.npcs.get(npc)
 
     def word(self, text):
-        return self.menu.get(text) or ENGLISH.get(text, '')
+        word = self.menu.get(text) or ENGLISH.get(text, '')
+        # The title menu's two words stay as that menu writes them: the launcher quotes them.
+        return word if text in (CONTINUE_TEXT, LOAD_GAME_TEXT) else TRANSLATE(word)
 
     def attribute(self, key):
         return self.word(ATTRIBUTE_TEXTS[key])

@@ -175,9 +175,9 @@ class NewsPanel:
                            spacing1=px(10), spacing3=px(4))
         text.tag_configure('item', lmargin1=px(4), lmargin2=px(20))
         for index, (section, items) in enumerate(sections):
-            text.insert('end', ('\n' if index else '') + section + '\n', 'section')
+            text.insert('end', ('\n' if index else '') + _(section) + '\n', 'section')
             for item in items:
-                text.insert('end', '•  ' + item + '\n', 'item')
+                text.insert('end', '•  ' + _(item) + '\n', 'item')
         text.configure(state='disabled')  # read only (still scrolls and selects)
 
         for key in ('<Escape>', '<Return>'):  # on the panel, which has the focus: the launcher's own stay
