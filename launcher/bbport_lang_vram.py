@@ -1,137 +1,95 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Shared launcher/overlay video-memory and object-motion messages."""
+"""The video memory warning's switch (Advanced > Performance, beside the low-VRAM profile) and why object
+motion vectors are unavailable on a card (Advanced > Upscaling), in every
+language besides English and Russian (Russian is in the code). Keyed by the English text like
+bbport_lang; merged into its tables on import."""
 import bbport_lang
 
 KEYS = [
     'Warn when video memory runs low',
-    'Off: no "Video memory is running low" banner in the game. Memory is freed as before; the log still says when it ran short.',
-    'Object motion unavailable for this GPU/driver.',
+    'Off: no "Video memory is running low" banner in the game. Memory is freed as before; the log still says '
+    'when it ran short.',
+    'Not available on RX 6000 and older Radeon cards: they lose the device with it.',
     'Not available under 6 GB of video memory: textures need it more.',
-    'Object motion unavailable: vertex shader stores/atomics missing.',
-    'Object motion unavailable: required SSBO limits not met.',
-    'Object motion unavailable: GPU buffer allocation failed.',
 ]
 TEXTS = {
-    'en': [
-        'Warn when video memory runs low',
-        'Off: no "Video memory is running low" banner in the game. Memory is freed as before; the log still says when it ran short.',
-        'Object motion unavailable for this GPU/driver.',
-        'Not available under 6 GB of video memory: textures need it more.',
-        'Object motion unavailable: vertex shader stores/atomics missing.',
-        'Object motion unavailable: required SSBO limits not met.',
-        'Object motion unavailable: GPU buffer allocation failed.',
-    ],
-    'ru': [
-        'Предупреждать, когда заканчивается видеопамять',
-        'Выкл.: без сообщения «Заканчивается видеопамять» в игре. Память освобождается как прежде; нехватка по-прежнему отмечается в журнале.',
-        'Векторы движения объектов недоступны для этой видеокарты/драйвера.',
-        'Недоступно при видеопамяти меньше 6 ГБ: она нужнее текстурам.',
-        'Векторы движения объектов недоступны: нет записи/атомарных операций в вершинном шейдере.',
-        'Векторы движения объектов недоступны: недостаточные лимиты SSBO.',
-        'Векторы движения объектов недоступны: не удалось выделить буферы GPU.',
-    ],
     'ar': [
         'التحذير عند انخفاض ذاكرة الفيديو',
         'إيقاف: لا تظهر لافتة "ذاكرة الفيديو منخفضة" في اللعبة. تُحرَّر الذاكرة كما من قبل، ويذكر السجل متى نقصت.',
-        'متجهات حركة الأجسام غير متاحة لهذه البطاقة/التعريف.',
+        'غير متاح على بطاقات Radeon RX 6000 والأقدم: يفقد الجهاز اتصاله معه.',
         'غير متاح مع أقل من 6 غيغابايت من ذاكرة الفيديو: القوام أحوج إليها.',
-        'متجهات حركة الأجسام غير متاحة: عمليات الكتابة/العمليات الذرية في مظلل الرؤوس غير مدعومة.',
-        'متجهات حركة الأجسام غير متاحة: حدود SSBO المطلوبة غير مستوفاة.',
-        'متجهات حركة الأجسام غير متاحة: فشل تخصيص مخازن GPU.',
     ],
     'es': [
         'Avisar cuando quede poca memoria de vídeo',
-        'Desactivado: sin el aviso "Queda poca memoria de vídeo" en el juego. La memoria se libera como antes; el registro sigue indicando cuándo faltó.',
-        'Vectores de movimiento de objetos no disponibles para esta GPU/controlador.',
+        'Desactivado: sin el aviso "Queda poca memoria de vídeo" en el juego. La memoria se libera como antes; el '
+        'registro sigue indicando cuándo faltó.',
+        'No disponible en Radeon RX 6000 y anteriores: con él se pierde el dispositivo.',
         'No disponible con menos de 6 GB de memoria de vídeo: las texturas la necesitan más.',
-        'Vectores de movimiento de objetos no disponibles: faltan escrituras/atómicas del shader de vértices.',
-        'Vectores de movimiento de objetos no disponibles: límites SSBO insuficientes.',
-        'Vectores de movimiento de objetos no disponibles: falló la asignación de búferes GPU.',
     ],
     'pt': [
         'Avisar quando a memória de vídeo estiver baixa',
-        'Desligado: sem o aviso "A memória de vídeo está baixa" no jogo. A memória é liberada como antes; o log continua dizendo quando faltou.',
-        'Vetores de movimento de objetos indisponíveis para esta GPU/driver.',
+        'Desligado: sem o aviso "A memória de vídeo está baixa" no jogo. A memória é liberada como antes; o log '
+        'continua dizendo quando faltou.',
+        'Indisponível em Radeon RX 6000 e anteriores: com ele o dispositivo é perdido.',
         'Indisponível com menos de 6 GB de memória de vídeo: as texturas precisam mais dela.',
-        'Vetores de movimento de objetos indisponíveis: faltam escritas/atômicas no shader de vértices.',
-        'Vetores de movimento de objetos indisponíveis: limites SSBO insuficientes.',
-        'Vetores de movimento de objetos indisponíveis: falha ao alocar buffers da GPU.',
     ],
     'fr': [
         'Avertir quand la mémoire vidéo est presque pleine',
-        'Désactivé : plus de bandeau « La mémoire vidéo est presque pleine » en jeu. La mémoire est libérée comme avant ; le journal indique toujours quand elle a manqué.',
-        'Vecteurs de mouvement des objets indisponibles pour ce GPU/pilote.',
+        'Désactivé : plus de bandeau « La mémoire vidéo est presque pleine » en jeu. La mémoire est libérée comme '
+        'avant ; le journal indique toujours quand elle a manqué.',
+        'Indisponible sur les Radeon RX 6000 et plus anciennes : le périphérique est perdu avec.',
         'Indisponible sous 6 Go de mémoire vidéo : les textures en ont plus besoin.',
-        'Vecteurs de mouvement des objets indisponibles : écritures/atomiques du vertex shader absentes.',
-        'Vecteurs de mouvement des objets indisponibles : limites SSBO insuffisantes.',
-        'Vecteurs de mouvement des objets indisponibles : allocation des tampons GPU échouée.',
     ],
     'de': [
         'Warnen, wenn der Videospeicher knapp wird',
-        'Aus: kein Hinweis „Videospeicher wird knapp“ im Spiel. Speicher wird wie bisher freigegeben; das Protokoll nennt weiterhin, wann er knapp war.',
-        'Objektbewegungsvektoren für diese GPU/diesen Treiber nicht verfügbar.',
+        'Aus: kein Hinweis „Videospeicher wird knapp“ im Spiel. Speicher wird wie bisher freigegeben; das Protokoll '
+        'nennt weiterhin, wann er knapp war.',
+        'Nicht verfügbar auf Radeon RX 6000 und älter: Das Gerät geht damit verloren.',
         'Nicht verfügbar unter 6 GB Videospeicher: Texturen brauchen ihn dringender.',
-        'Objektbewegungsvektoren nicht verfügbar: Vertex-Shader-Schreibzugriffe/Atomics fehlen.',
-        'Objektbewegungsvektoren nicht verfügbar: erforderliche SSBO-Limits nicht erfüllt.',
-        'Objektbewegungsvektoren nicht verfügbar: GPU-Puffer konnten nicht angelegt werden.',
     ],
     'it': [
         'Avvisa quando la memoria video sta per esaurirsi',
-        'Disattivato: nessun avviso "La memoria video sta per esaurirsi" nel gioco. La memoria viene liberata come prima; il registro indica comunque quando è mancata.',
-        'Vettori di movimento degli oggetti non disponibili per questa GPU/driver.',
+        'Disattivato: nessun avviso "La memoria video sta per esaurirsi" nel gioco. La memoria viene liberata come '
+        'prima; il registro indica comunque quando è mancata.',
+        'Non disponibile su Radeon RX 6000 e precedenti: con esso il dispositivo viene perso.',
         'Non disponibile sotto i 6 GB di memoria video: servono di più alle texture.',
-        'Vettori di movimento degli oggetti non disponibili: scritture/atomiche del vertex shader mancanti.',
-        'Vettori di movimento degli oggetti non disponibili: limiti SSBO insufficienti.',
-        'Vettori di movimento degli oggetti non disponibili: allocazione dei buffer GPU non riuscita.',
     ],
     'pl': [
         'Ostrzegaj, gdy kończy się pamięć wideo',
-        'Wyłączone: brak komunikatu „Kończy się pamięć wideo” w grze. Pamięć jest zwalniana jak dotąd; dziennik nadal podaje, kiedy jej zabrakło.',
-        'Wektory ruchu obiektów niedostępne dla tego GPU/sterownika.',
+        'Wyłączone: brak komunikatu „Kończy się pamięć wideo” w grze. Pamięć jest zwalniana jak dotąd; dziennik '
+        'nadal podaje, kiedy jej zabrakło.',
+        'Niedostępne na Radeon RX 6000 i starszych: urządzenie zostaje z nim utracone.',
         'Niedostępne poniżej 6 GB pamięci wideo: bardziej potrzebują jej tekstury.',
-        'Wektory ruchu obiektów niedostępne: brak zapisów/atomik w shaderze wierzchołków.',
-        'Wektory ruchu obiektów niedostępne: niewystarczające limity SSBO.',
-        'Wektory ruchu obiektów niedostępne: nie udało się przydzielić buforów GPU.',
     ],
     'tr': [
         'Video belleği azaldığında uyar',
-        'Kapalı: oyunda "Video belleği azalıyor" uyarısı çıkmaz. Bellek eskisi gibi boşaltılır; günlük yine ne zaman yetmediğini yazar.',
-        'Bu GPU/sürücü için nesne hareket vektörleri kullanılamıyor.',
+        'Kapalı: oyunda "Video belleği azalıyor" uyarısı çıkmaz. Bellek eskisi gibi boşaltılır; günlük yine ne zaman '
+        'yetmediğini yazar.',
+        'Radeon RX 6000 ve daha eski kartlarda kullanılamaz: onunla cihaz kaybolur.',
         '6 GB altı video belleğinde kullanılamaz: dokuların ona daha çok ihtiyacı var.',
-        'Nesne hareket vektörleri kullanılamıyor: köşe gölgelendiricisinde yazma/atomik işlemler eksik.',
-        'Nesne hareket vektörleri kullanılamıyor: gerekli SSBO sınırları karşılanmıyor.',
-        'Nesne hareket vektörleri kullanılamıyor: GPU tamponları ayrılamadı.',
     ],
     'zh': [
         '显存不足时发出警告',
         '关闭：游戏中不再显示“显存即将不足”横幅。显存仍照常释放；日志仍会记录何时不足。',
-        '此 GPU/驱动不支持物体运动矢量。',
+        '在 Radeon RX 6000 及更早的显卡上不可用：开启后会丢失设备。',
         '显存低于 6 GB 时不可用：纹理更需要这部分显存。',
-        '物体运动矢量不可用：缺少顶点着色器写入/原子操作支持。',
-        '物体运动矢量不可用：未满足所需的 SSBO 限制。',
-        '物体运动矢量不可用：GPU 缓冲区分配失败。',
     ],
     'ja': [
         'ビデオメモリが不足しそうなときに警告する',
-        'オフ：ゲーム内に「ビデオメモリが不足しています」のバナーを表示しません。メモリは従来どおり解放され、不足した時はログに記録されます。',
-        'この GPU/ドライバーではオブジェクトのモーションベクトルを利用できません。',
+        'オフ：ゲーム内に「ビデオメモリが不足しています」のバナーを表示しません。メモリは従来どおり解放され、'
+        '不足した時はログに記録されます。',
+        'Radeon RX 6000 以前のカードでは使用できません：有効にするとデバイスが失われます。',
         'ビデオメモリが 6 GB 未満では使用できません：テクスチャに必要です。',
-        'オブジェクトのモーションベクトルを利用不可：頂点シェーダーの書き込み/アトミック操作に非対応。',
-        'オブジェクトのモーションベクトルを利用不可：必要な SSBO の上限を満たしていません。',
-        'オブジェクトのモーションベクトルを利用不可：GPU バッファーの確保に失敗。',
     ],
     'ko': [
         '비디오 메모리가 부족할 때 경고',
-        '끄기: 게임에서 "비디오 메모리가 부족합니다" 배너를 표시하지 않습니다. 메모리는 전처럼 해제되며, 부족했던 때는 로그에 계속 기록됩니다.',
-        '이 GPU/드라이버에서 오브젝트 모션 벡터를 사용할 수 없습니다.',
+        '끄기: 게임에서 "비디오 메모리가 부족합니다" 배너를 표시하지 않습니다. 메모리는 전처럼 해제되며, 부족했던 때는 '
+        '로그에 계속 기록됩니다.',
+        'Radeon RX 6000 및 이전 카드에서는 사용할 수 없습니다: 켜면 장치가 손실됩니다.',
         '비디오 메모리가 6GB 미만이면 사용할 수 없습니다: 텍스처에 더 필요합니다.',
-        '오브젝트 모션 벡터 사용 불가: 버텍스 셰이더 쓰기/원자 연산 미지원.',
-        '오브젝트 모션 벡터 사용 불가: 필요한 SSBO 한도 미충족.',
-        '오브젝트 모션 벡터 사용 불가: GPU 버퍼 할당 실패.',
     ],
 }
 
 for _language, _texts in TEXTS.items():
-    if len(_texts) != len(KEYS):
-        raise ValueError(f"Invalid video-memory translations: {_language}")
+    assert len(_texts) == len(KEYS), (_language, len(_texts), len(KEYS))
     bbport_lang.EXTRA_TRANSLATIONS.setdefault(_language, {}).update(zip(KEYS, _texts))

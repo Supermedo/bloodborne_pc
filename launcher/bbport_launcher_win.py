@@ -246,6 +246,7 @@ import bbport_lang_195  # noqa: E402,F401 (the 1.9.5 texts: the shadNet server t
 import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts with The Hunter's Dream back)
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
+import bbport_lang_motion  # noqa: E402,F401 (shared object-motion reasons and troubleshooting)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
 import bbport_lang_gpu  # noqa: E402,F401 (a graphics card Windows has and Vulkan does not see)
 import bbport_lang_ready  # noqa: E402,F401 (the start's other prerequisites: runtime, folders, firewall)
