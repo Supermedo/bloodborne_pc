@@ -63,5 +63,7 @@ before the HUD; display/HDR conversion happens later.
 Compare colors at the same render resolution, camera movement and similar frame
 times. This view helps diagnose inputs; it does not identify a ghosting cause by itself.
 
+## Integration notes
+
 Regression fixtures cover failed loader retries, concurrent initialization, missing
 API callbacks, provider-independent host sharpening and package validation.

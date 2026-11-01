@@ -31,7 +31,7 @@ public:
 
     using DrawInfo = Motion::Draw;
     /// Current-frame coverage at the requested render size, after PrepareRead.
-    /// View()/Image() also record late-read lifetime when the target cache uses it.
+    /// Route reads through View()/Image() for compatibility with cache lifetime tracking.
     [[nodiscard]] vk::ImageView CurrentView(u32 width, u32 height) noexcept {
         return enabled && Image(width, height) ? View() : vk::ImageView{};
     }

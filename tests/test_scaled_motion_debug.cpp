@@ -5,6 +5,10 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/texture_cache/image.h"
+#include "shader_recompiler/runtime_info.h"
+#if __has_include("shader_recompiler/motion_storage.h")
+#include "shader_recompiler/motion_storage.h"
+#endif
 #include "bbport_settings.h"
 #include <algorithm>
 #include <array>
@@ -202,11 +206,57 @@ void RunCase(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler, u32
                 w, h, rw, rh, object_mode, pattern);
 }
 
-void CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler) {
+const char* CoverageSkipReason(bool vertex_stores, bool guarded_gpu, bool discrete, u64 vram,
+                               bool forced) {
+    // Match ObjectMotion's pre-allocation guards; setup/allocation failures must fail.
+    if (!vertex_stores)
+        return "vertex shader stores/atomics unavailable";
+    if (!forced && guarded_gpu)
+        return "existing GPU/driver guard";
+    if (!forced && discrete && vram < (6ull << 30) - (256ull << 20))
+        return "existing low-VRAM policy";
+    return nullptr;
+}
+
+void TestCoveragePolicy() {
+    constexpr u64 enough = 8ull << 30, low = 4ull << 30;
+    Need(CoverageSkipReason(false, false, true, enough, true) != nullptr, "missing stores must skip");
+    Need(CoverageSkipReason(true, true, true, enough, false) != nullptr, "guarded GPU must skip");
+    Need(!CoverageSkipReason(true, true, true, enough, true), "explicit GPU override ignored");
+    Need(CoverageSkipReason(true, false, true, low, false) != nullptr, "low VRAM must skip");
+    Need(!CoverageSkipReason(true, false, true, low, true), "explicit VRAM override ignored");
+    Need(!CoverageSkipReason(true, false, false, low, false), "integrated GPU incorrectly guarded");
+    Need(!CoverageSkipReason(true, false, true, enough, false), "supported GPU must run coverage");
+    constexpr u64 threshold = (6ull << 30) - (256ull << 20);
+    Need(!CoverageSkipReason(true, false, true, threshold, false), "VRAM boundary must run coverage");
+    Need(CoverageSkipReason(true, false, true, threshold - 1, false) != nullptr, "VRAM below boundary must skip");
+    std::puts("PASS current-frame coverage policy: features, guards, VRAM and overrides");
+}
+
+bool CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler) {
     BbSettings::Get().object_motion = true;
     BbSettings::Get().upscaler = BbSettings::UpscalerFsr3;
+    const auto physical = instance.GetPhysicalDevice();
+    const auto props = physical.getProperties();
+    bool guarded_gpu = props.vendorID == 0x1002 && props.deviceID < 0x7440;
+#if __has_include("shader_recompiler/motion_storage.h")
+    // The independent RX6000 fix lifts this guard for its automatic SSBO path.
+    guarded_gpu &= !Shader::MotionStorage::UsesSsbo(props.vendorID, props.deviceID);
+#endif
+    const auto& memory = instance.GetMemoryProperties();
+    u64 vram = 0;
+    for (u32 heap = 0; heap < memory.memoryHeapCount; ++heap)
+        if (memory.memoryHeaps[heap].flags & vk::MemoryHeapFlagBits::eDeviceLocal)
+            vram = std::max<u64>(vram, memory.memoryHeaps[heap].size);
+    const char* forced = std::getenv("BB_OBJECT_MOTION");
+    if (const char* reason = CoverageSkipReason(physical.getFeatures().vertexPipelineStoresAndAtomics,
+            guarded_gpu, props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu, vram,
+            forced && forced[0] == '1')) {
+        std::printf("SKIP current-frame coverage: %s\n", reason);
+        return false;
+    }
     Vulkan::ObjectMotion motion(instance, scheduler);
-    Need(motion.Enabled(), "object motion unavailable for coverage test");
+    Need(motion.Enabled(), "object motion unexpectedly unavailable after policy checks (buffer/setup failure)");
     Need(!motion.CurrentView(7, 5), "new target has current coverage");
     Staging staging(instance.GetAllocator(), 16);
     const std::array<std::array<u32, 2>, 4> sizes{{{7, 5}, {7, 5}, {3, 2}, {7, 5}}};
@@ -219,7 +269,7 @@ void CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& s
         state.num_layers = 1;
         motion.Attach(state, w, h);
         // A real retained blue pixel, independent of whether it is used next frame.
-        state.color_attachments[7].clear_value = {0, 0, 0x3f800000, 0};
+        state.color_attachments[Shader::MotionVectors::Output].clear_value = {0, 0, 0x3f800000, 0};
         scheduler.BeginRendering(state);
         scheduler.EndRendering();
         auto cmd = scheduler.CommandBuffer();
@@ -257,10 +307,14 @@ void CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& s
              "stale-target test did not retain a blue pixel");
         std::printf("PASS current-frame coverage %ux%u: current, wrong-size, retained stale pixel\n", w, h);
     }
+    return true;
 }
 } // namespace
-int main() {
+int main(int argc, char** argv) {
     try {
+        TestCoveragePolicy();
+        if (argc == 2 && std::strcmp(argv[1], "--policy-only") == 0)
+            return 0;
         Vulkan::Instance instance(0, std::getenv("BB_TEST_VULKAN_VALIDATION") != nullptr);
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetInstance());
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetDevice());
@@ -274,7 +328,9 @@ int main() {
         RunCase(instance, scheduler, 13, 9, 13, 9, 0);
         for (unsigned pattern = 1; pattern < 4; ++pattern)
             RunCase(instance, scheduler, 13, 9, 7, 5, 0, pattern);
-        CurrentFrameCoverage(instance, scheduler);
+        const bool coverage = CurrentFrameCoverage(instance, scheduler);
+        std::puts(coverage ? "PASS scaled motion: shader and current-frame coverage complete"
+                           : "PASS scaled motion: shader cases complete; current-frame coverage SKIPPED");
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FAIL scaled motion: %s\n", e.what());
