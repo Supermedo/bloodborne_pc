@@ -172,7 +172,12 @@ if [[ ${running:-0} != 0 ]]; then
     echo "dist/bbport-windows is in use ($running processes): not refreshed; the zip is ready." >&2
 else
     mkdir -p "$play"
-    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini \
+    # BBSC writes its own data beside its program (the save backups before it changes a character, logs,
+    # its world state): kept too, only its program files are replaced.
+    if [[ -d $play/bbsc ]]; then
+        find "$play/bbsc" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
+    fi
+    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini ! -name bbsc \
         ! -name fsr4vk ! -name input.ini ! -name mods.json ! -name patches.json ! -name last_run.log -exec rm -rf {} +
     cp -r "$dest/." "$play/"
 fi

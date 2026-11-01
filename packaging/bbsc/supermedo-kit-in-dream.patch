@@ -1,0 +1,16 @@
+diff --git a/emulator/src/core/bloodborne_re.cpp b/emulator/src/core/bloodborne_re.cpp
+index 6c278c3..6a4e7e3 100644
+--- a/emulator/src/core/bloodborne_re.cpp
++++ b/emulator/src/core/bloodborne_re.cpp
+@@ -14476,6 +14476,11 @@ void TickBbscDuelBellGive() {
+         ReadValue<u8>(global, 0x08) != 0) {
+         return; // not in the game yet, dead, or loading
+     }
++    // SuperMedo (2026-11-01): the kit comes in the Hunter's Dream, not at the start - a new hunter gets
++    // the first weapons there, and the kit changed the carried items before that.
++    if (GetCurrentPackedMap() != BbscHuntersDreamMap) {
++        return;
++    }
+     const u64 carried = BbscCarriedInventory();
+     const u64 storage = BbscStorageInventory();
+     if (carried == 0 || storage == 0) {
