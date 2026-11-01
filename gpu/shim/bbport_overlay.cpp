@@ -588,7 +588,7 @@ void Menu() {
     }
     if (BbSettings::IsFsr4(s.upscaler)) {
         if (s.upscaler == BbSettings::UpscalerFsr412) {
-            Hint("FSR 4.1.2 uses the original AMD Vulkan driver or AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
+            Hint("FSR 4.1.2 uses AMD SDK 2.4 through Vulkan or the AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
         } else if (s.upscaler == BbSettings::UpscalerFsr411) {
 #ifdef _WIN32
             Hint("FSR 4.1.1 temporal upscaling uses the method selected above. AMD DX12 is included in the Windows package; Vulkan assets can be downloaded in the launcher. Quality presets and sharpening apply to both methods.");

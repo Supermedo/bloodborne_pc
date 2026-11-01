@@ -131,6 +131,15 @@ int main() {
         text = Frame();
         assert(text.find(Fsr41Ui::Text(Fsr41Ui::Files)) != std::string::npos);
         assert(text.find(Fsr41Ui::Text(Fsr41Ui::Driver)) != std::string::npos);
+        const int kept_version = s.upscaler, kept_backend = s.fsr411_backend;
+        for (const auto& route : BbOverlay::Fsr41Routes) {
+            g.NavWindow = popup;
+            g.NavId = ImHashStr("(i)", 0, ImHashStr(route.title, 0, popup->GetID("FSR41Methods")));
+            text = Frame();
+            assert(text.find(Fsr41Ui::Text(route.hint)) != std::string::npos);
+            assert(s.upscaler == kept_version && s.fsr411_backend == kept_backend);
+        }
+        g.NavId = 0;
         Frame(popup->GetID(Fsr41Ui::Text(Fsr41Ui::Close)), popup);
     }
     _putenv_s("BB_UI_LANGUAGE", "en");
