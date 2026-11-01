@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Full readback/validity regression across alternating sizes and cache
-// eviction.
+// Full readback/validity regression across alternating sizes and cache eviction.
 #include "bbport_settings.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -29,7 +28,6 @@ extern "C" void runtime_restart() { std::abort(); }
 
 namespace Vulkan {
 struct ObjectMotionCacheTest {
-    static u64 LastTick(const ObjectMotion& motion) { return motion.image_last_tick; }
     static vk::Image RawImage(const ObjectMotion& motion) { return vk::Image(motion.image); }
     static size_t Retired(const ObjectMotion& motion) { return motion.retired_images.size(); }
     static u64 RetiredBytes(const ObjectMotion& motion) { return motion.retired_bytes; }
@@ -57,6 +55,11 @@ struct ObjectMotionCacheTest {
 void Require(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
+}
+
+bool CacheEnabled() {
+    const char* setting = std::getenv("BB_OBJECT_MOTION_CACHE");
+    return setting && std::strcmp(setting, "1") == 0;
 }
 
 u32 Allocations(const Instance& instance) {
@@ -106,8 +109,7 @@ public:
                 Require(this->device.signalSemaphore({.semaphore = *semaphore, .value = 1}) ==
                             vk::Result::eSuccess,
                         "gate signal failed");
-                // Exercise error propagation after safely releasing any queued GPU
-                // work.
+                // Exercise error propagation after safely releasing queued GPU work.
                 Require(!fail_after_signal, "injected gate reporting failure");
             } catch (...) {
                 signal_error = std::current_exception();
@@ -153,9 +155,8 @@ void SpecialCase(const std::string& kind, Instance& instance, Scheduler& schedul
                 Require(ObjectMotionCacheTest::Retired(motion) == 0,
                         "frame start did not collect retired images");
             }
-            // 'destruct' leaves the current work unsubmitted: the destructor must
-            // finish it before releasing both the resident targets and the retirement
-            // queue.
+            // 'destruct' leaves current work unsubmitted: finish it before releasing
+            // both the resident targets and the retirement queue.
         } else if (kind == "lru") {
             for (auto [w, h] : std::vector<std::pair<u32, u32>>{
                      {128, 72}, {96, 54}, {64, 36}, {48, 27}, {128, 72}, {32, 18}})
@@ -186,8 +187,7 @@ void SpecialCase(const std::string& kind, Instance& instance, Scheduler& schedul
             Gate gate(instance.GetDevice());
             gate.Submit(scheduler);
             Require(!scheduler.IsFree(held), "gate did not hold GPU work");
-            // A gets a new use in the current submission; B is now the oldest
-            // inactive size.
+            // A gets a new use in the current submission; B is the oldest inactive size.
             AttachSize(motion, scheduler, 128, 72);
             const u64 current = scheduler.CurrentTick();
             AttachSize(motion, scheduler, 32, 18);
@@ -212,18 +212,16 @@ void SpecialCase(const std::string& kind, Instance& instance, Scheduler& schedul
                             "two pending images expected");
                     Require(Allocations(instance) == initial + 6,
                             "pending allocation accounting differs");
-                    AttachSize(motion, scheduler, 8,
-                               4); // the count cap must await the older submission
+                    // The count cap must await the older submission.
+                    AttachSize(motion, scheduler, 8, 4);
                     Require(scheduler.IsFree(held), "retirement count cap did not wait");
-                    // D was stashed in the current tick after A was revisited. Its
-                    // conservative bound must survive even though the older B/C
-                    // completed.
+                    // D was stashed in the current tick after A was revisited.
+                    // Its bound must survive even though the older B/C completed.
                     Require(ObjectMotionCacheTest::Retired(motion) == 1,
                             "current-tick retirement was not retained");
                 }
             }
-            // A full Finish would submit the current work too; the narrow wait must
-            // not.
+            // A full Finish would submit current work too; the narrow wait must not.
             Require(scheduler.CurrentTick() == current,
                     "eviction drained/submitted current GPU work");
             ObjectMotionCacheTest::Limits(motion);
@@ -281,8 +279,8 @@ void SplitWriteCase(Instance& instance, Scheduler& scheduler) {
         state.color_attachments[Shader::MotionVectors::Output].clear_value = expected;
         scheduler.BeginRendering(state);
         scheduler.EndRendering();
-        // Use the raw image: PrepareRead/Image/View would refresh its tick and mask
-        // K1.
+        // Read the recorded attachment directly: adding PrepareRead's barrier would
+        // change the layout instead of exercising the delayed attachment use alone.
         auto cmd = scheduler.CommandBuffer();
         const vk::ImageMemoryBarrier2 to_copy{
             .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
@@ -361,17 +359,12 @@ void LateReadCase(bool view_read, Instance& instance, Scheduler& scheduler) {
         const auto read_tick = scheduler.CurrentTick();
         Require(old_tick != read_tick && scheduler.IsFree(old_tick),
                 "test needs two distinct GPU ticks");
-        Require(!motion.Image(129, 72), "wrong-sized image accepted");
-        Require(ObjectMotionCacheTest::LastTick(motion) == old_tick,
-                "invalid read incorrectly extended lifetime");
+        const ObjectMotion& read_only_motion = motion;
+        Require(!read_only_motion.Image(129, 72), "wrong-sized image accepted");
         if (view_read)
-            Require(bool(motion.View()), "debug view missing");
+            Require(bool(read_only_motion.View()), "debug view missing");
         else
-            Require(bool(motion.Image(128, 72)), "dump image missing");
-        // Check before queueing work: the old implementation fails without risking
-        // a freed GPU read.
-        Require(ObjectMotionCacheTest::LastTick(motion) == read_tick,
-                "late read did not update last GPU tick");
+            Require(bool(read_only_motion.Image(128, 72)), "dump image missing");
         VkBuffer staging{};
         VmaAllocation allocation{};
         VkBufferCreateInfo buffer{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -393,11 +386,15 @@ void LateReadCase(bool view_read, Instance& instance, Scheduler& scheduler) {
             .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
             .imageExtent = {128, 72, 1}};
         cmd.copyImageToBuffer(image, vk::ImageLayout::eGeneral, staging, region);
+        AttachSize(motion, scheduler, 32, 18);
+        // Check the real lifetime bound before evicting this in-flight target.
+        Require(ObjectMotionCacheTest::CachedTick(motion, 128, 72) == read_tick,
+                "stashed target lost the late-read GPU tick");
         {
             Gate gate(device);
             gate.Submit(scheduler);
             for (const auto [w, h] :
-                 std::array<std::pair<u32, u32>, 4>{{{32, 18}, {16, 9}, {8, 4}, {4, 2}}})
+                 std::array<std::pair<u32, u32>, 3>{{{16, 9}, {8, 4}, {4, 2}}})
                 AttachSize(motion, scheduler, w, h);
             Require(!scheduler.IsFree(read_tick), "late-read gate released too soon");
             Require(ObjectMotionCacheTest::Retired(motion) == 1,
@@ -452,24 +449,18 @@ int main(int argc, char** argv) {
             throw std::runtime_error("gate error was not propagated");
         }
         if (kind == "split-write") {
-            Require(std::getenv("BB_OBJECT_MOTION_CACHE") &&
-                        std::string(std::getenv("BB_OBJECT_MOTION_CACHE")) == "1",
-                    "split-write needs cache on");
+            Require(CacheEnabled(), "split-write needs cache on");
             SplitWriteCase(instance, scheduler);
             return 0;
         }
         if (kind == "late-view" || kind == "late-image") {
-            Require(std::getenv("BB_OBJECT_MOTION_CACHE") &&
-                        std::string(std::getenv("BB_OBJECT_MOTION_CACHE")) == "1",
-                    "late reads need cache on");
+            Require(CacheEnabled(), "late reads need cache on");
             LateReadCase(kind == "late-view", instance, scheduler);
             return 0;
         }
         if (kind == "lru" || kind == "deferred" || kind == "budget" || kind == "oversized" ||
             kind == "drain" || kind == "destruct") {
-            Require(std::getenv("BB_OBJECT_MOTION_CACHE") &&
-                        std::string(std::getenv("BB_OBJECT_MOTION_CACHE")) == "1",
-                    "special cases need cache on");
+            Require(CacheEnabled(), "special cases need cache on");
             SpecialCase(kind, instance, scheduler);
             return 0;
         }
@@ -492,8 +483,7 @@ int main(int argc, char** argv) {
             ObjectMotion motion(instance, scheduler);
             if (!motion.Enabled())
                 throw std::runtime_error("object motion unavailable");
-            const char* cache_setting = std::getenv("BB_OBJECT_MOTION_CACHE");
-            const bool cache = cache_setting && std::strcmp(cache_setting, "1") == 0;
+            const bool cache = CacheEnabled();
             VmaTotalStatistics initial_stats{};
             vmaCalculateStatistics(instance.GetAllocator(), &initial_stats);
             std::set<std::pair<u32, u32>> observed_sizes;
@@ -538,8 +528,7 @@ int main(int argc, char** argv) {
                     .bufferOffset = i * stride,
                     .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
                     .imageExtent = {w, h, 1}};
-                // PrepareRead exposes shader reads; this fixture also performs a
-                // transfer read.
+                // PrepareRead exposes shader reads; the fixture also performs a transfer read.
                 const vk::MemoryBarrier2 readback_barrier{
                     .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
                     .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,

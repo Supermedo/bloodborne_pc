@@ -253,7 +253,6 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
     if (image && width == image_width && height == image_height) {
         if (cache_enabled) {
             image_last_use = ++cache_clock;
-            image_last_tick = scheduler.CurrentTick();
         }
         return;
     }
@@ -265,11 +264,12 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
             std::swap(image_height, cached.height);
             std::swap(image_layout, cached.layout);
             std::swap(image_last_use, cached.last_use);
-            std::swap(image_last_tick, cached.last_tick);
             // Attach can precede an upload-triggered submission; the actual draw then
             // belongs to a newer tick. Stashing bounds every use recorded before this
             // size change, including that delayed draw and late image/view reads.
-            if (cached.image) cached.last_tick = scheduler.CurrentTick();
+            if (cached.image) {
+                cached.last_tick = scheduler.CurrentTick();
+            }
             // Legacy resize discards the previous contents, even when returning to a size
             // used earlier in this frame. Preserve the existing clear/read behavior.
             written = false;
@@ -278,7 +278,6 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
             if (cached.image && cached.width == width && cached.height == height) {
                 swap_target(cached);
                 image_last_use = ++cache_clock;
-                image_last_tick = scheduler.CurrentTick();
                 return;
             }
         }
@@ -329,7 +328,6 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
             CollectRetiredImages();
         }
         image_last_use = ++cache_clock;
-        image_last_tick = scheduler.CurrentTick();
     } else {
         image.Create(create_info);
     }
@@ -377,17 +375,17 @@ void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
     state.num_color_attachments = std::max<u16>(state.num_color_attachments, slot + 1);
 }
 
-vk::ImageView ObjectMotion::View() noexcept {
-    if (!view) return {};
-    // Debug/dump reads can follow a provider Finish(), in a newer submission
-    // than PrepareRead(). Keep the attachment alive through the actual last read.
-    if (cache_enabled) image_last_tick = scheduler.CurrentTick();
+vk::ImageView ObjectMotion::View() const noexcept {
+    if (!view) {
+        return {};
+    }
     return *view;
 }
 
-vk::Image ObjectMotion::Image(u32 width, u32 height) noexcept {
-    if (!written || width != image_width || height != image_height) return {};
-    if (cache_enabled) image_last_tick = scheduler.CurrentTick();
+vk::Image ObjectMotion::Image(u32 width, u32 height) const noexcept {
+    if (!written || width != image_width || height != image_height) {
+        return {};
+    }
     return vk::Image(image);
 }
 

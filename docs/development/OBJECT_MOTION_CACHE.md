@@ -12,9 +12,10 @@ An outgoing target is stamped with the scheduler's current tick when stashed.
 `Rasterizer::Draw` attaches a target before resolving pending vertex/index
 uploads. An upload wait can submit that attachment barrier; the rendering
 commands then use the target in a later submission. The stash tick conservatively
-bounds those already-recorded uses. Valid `Image()` and `View()` reads still
-refresh the active tick, including reads after an earlier provider submission.
-The bound can retain an image longer than its exact last use.
+bounds those already-recorded uses, including reads after an earlier provider
+submission. `Image()` and `View()` are read-only accessors; their recorded uses
+are covered by the stash tick. The bound can retain an image longer than its
+exact last use.
 
 Eviction moves the allocation and view into a retirement queue if that tick
 has not completed. Collection destroys the view before its image. The queue
@@ -38,6 +39,14 @@ Build `bb-probe`, `object-motion-cache-test`, `ui-composition-test`,
 `BB_CACHE_TEST_THREADED=0|1` chooses direct/deferred command recording in the
 fixture; `BB_OBJECT_MOTION_CACHE` selects its normal startup cache policy.
 
+The commands below run a focused 30-case subset. The full 78-case matrix is:
+
+| Group | Combinations | Runs |
+|---|---|---|
+| Pixel/validity | 2 recording modes × selectors 1/2/3/6 × cache 0/1 × tiny/game/churn | 48 |
+| Startup defaults | 2 recording modes × cache unset/invalid/true × tiny/churn | 12 |
+| Lifetime/pressure | 2 recording modes × the 9 named special cases below, cache on | 18 |
+
 ```bash
 for threaded in 0 1; do
     for mode in 0 1; do
@@ -56,7 +65,9 @@ done
 Enable the Khronos validation layer and synchronization validation in the local
 Vulkan layer configuration. The fixture checks every readback pixel, validity
 flags, VMA allocation counts, LRU, blocked submissions, count/byte limits,
-oversized targets, collection, teardown and late reads. The `split-write` case
+oversized targets, collection, teardown and late reads. The late-read cases
+also call `Image()`/`View()` through a const reference and verify the stash tick
+after the first size change, before evicting the target. The `split-write` case
 submits the attachment barrier before the actual rendering clear/readback,
 checks the stash tick before eviction, then holds that work with a real timeline
 semaphore while evicting its size. This detects the old bound without freeing
@@ -78,8 +89,6 @@ Per-size content preservation and selecting a different cached size during
 eviction, alternate pixel formats and enabling the cache by default are also
 separate decisions. Existing sewer measurements describe the original cache,
 not a new performance claim for LRU/retirement.
-
-
 ## Validation on November 1, 2026
 
 RX9070 / Adrenalin 26.10.1: the complete native renderer/capability build and
@@ -94,7 +103,7 @@ recording modes at the metadata check before eviction. Restoring it passes.
 Two injected watchdog-reporting failures exit with code 1 through the normal
 error handler. These controls run with NDEBUG, without assertion dialogs.
 
-A private combination with current PR141 (`b3bd49d`) passes 26 additional forced
+A private combination with current PR141 (`fc8158a`) passes 26 additional forced
 SSBO-owner cache/readback/lifetime cases, including both split-write modes.
 Renderer implementation and header merge automatically. The test fixture needs
 the union of its lifetime helpers with PR141's private SSBO constructor helper.
@@ -110,15 +119,7 @@ synchronization hazards occur. No game, area-transition, frame-pacing or FPS
 benchmark is claimed by these isolated checks. Actual allocation failure is
 reviewed, not forced by exhausting VRAM.
 
-The existing launcher cache suite has a stale shortcut mock (it intercepts the
-old 4.1.1 query instead of the family query). Its original standalone review
-reproduced one error on pristine files and passed all eight checks with a private
-corrected mock. Launcher behavior and that test are outside this topic.
-
-
 The standard Windows ZIP passes manifest/CRC, exact player-guide content and
 actual frozen-launcher runtime checks (TLS, Pillow, Tk/Tcl and windowed startup).
 The concise existing cache guide remains packaged; this technical report is
-excluded. The package script is unchanged from the official base. Cached DLSS
-files are preserved. Installation, original saves/settings and releases remain
-untouched.
+excluded. The package script is unchanged from the official base.

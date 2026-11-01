@@ -262,8 +262,8 @@ the image, view, dimensions and layout together. A size change can reuse its
 resident target. LRU eviction retains an image/view until its last GPU submission
 completes. Pending retirements are bounded to two images and 128 MiB of actual
 image allocations; pressure can require a targeted wait. Teardown retains its
-completion wait. Per-size-change
-clear and validity behavior is preserved: returning to a cached size clears it
+completion wait. Per-size-change clear and validity behavior is preserved:
+returning to a cached size clears it
 according to the existing rules. Existing image barriers and motion shader math remain.
 This renderer is shared by upscalers using object-motion vectors, including
 FSR 3.1 and the older FSR 4. **Motion-vector cache (experimental)** in Graphics
