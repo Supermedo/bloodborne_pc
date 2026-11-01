@@ -357,6 +357,10 @@ target_include_directories(fsr411-requirements-test PRIVATE shim)
 target_link_libraries(fsr411-requirements-test PRIVATE Vulkan::Headers)
 target_compile_options(fsr411-requirements-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -Wno-missing-field-initializers)
 
+add_executable(copy-shader-test EXCLUDE_FROM_ALL ../tests/test_copy_shader.cpp)
+target_compile_options(copy-shader-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(copy-shader-test PRIVATE ..)
+
 add_executable(command-buffer-test EXCLUDE_FROM_ALL ../tests/test_command_buffers.cpp)
 target_compile_options(command-buffer-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(command-buffer-test PRIVATE ..)

@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "video_core/renderer_vulkan/vk_shader_hle.h"
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -1143,6 +1144,13 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
                   : std::ranges::find(program->modules, spec, &Program::Module::spec);
     if (it != program->modules.end()) {
         program->last_used = std::distance(program->modules.begin(), it);
+    }
+    // bbport: a module that never runs needs no permutation of its own. Buffers that are not the
+    // copy shader's made one on the way to a dispatch that does not run it either,
+    // and compiling for such formats can stop the game by itself (LowerBufferFormatToRaw,
+    // IREmitter::Pack/Unpack: asserts on the combinations a real buffer does not have).
+    if (it == program->modules.end() && IsShaderHLE(params.hash)) {
+        it = std::ranges::find_if(program->modules, [](const auto& m) { return bool(m.module); });
     }
     if (it == program->modules.end()) {
         auto new_info = Shader::Info(hw_stage, sw_stage, params);

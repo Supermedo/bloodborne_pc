@@ -104,6 +104,10 @@ inline const AmdGpu::ComputeProgram& Rasterizer::CsRegs() const {
     return stage_cs ? *stage_cs : liverpool->GetCsRegs();
 }
 
+s32 Rasterizer::CsQueue() const {
+    return stage_cs ? stage_queue : liverpool->CurrentQueue();
+}
+
 inline AmdGpu::CbDbExtent Rasterizer::DbExtent() const {
     return stage_regs ? pipe_db_extent : liverpool->last_db_extent;
 }
@@ -372,6 +376,7 @@ struct DrawPacket {
     std::array<AmdGpu::CbDbExtent, AmdGpu::NUM_COLOR_BUFFERS> cb_extent;
     AmdGpu::CbDbExtent db_extent;
     u64 ring_end; ///< constant ring position after this packet's copies
+    s32 queue;    ///< the queue being decoded
 };
 struct PacketStage {
     const Shader::Info* info;
@@ -639,6 +644,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     packet.cb_extent = liverpool->last_cb_extent;
     packet.db_extent = liverpool->last_db_extent;
     packet.ring_end = constant_ring ? constant_ring->Position() : 0;
+    packet.queue = liverpool->CurrentQueue();
     out += sizeof(DrawPacket);
     std::memcpy(out, blocks.data(), num_blocks * sizeof(u16));
     out += AlignPacket(num_blocks * sizeof(u16));
@@ -825,6 +831,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
         self.FilterDraw();
     } else if (cs) {
         stage_cs = cs;
+        stage_queue = packet.queue;
         const auto* pipeline = static_cast<const ComputePipeline*>(packet.pipeline);
         if (indirect) {
             self.DispatchIndirectRecord(pipeline, indirect->args, indirect->stride);
