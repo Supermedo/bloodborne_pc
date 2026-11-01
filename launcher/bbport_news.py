@@ -35,14 +35,18 @@ def hunters_dream_notice():
 
 
 NOTES = {
-    '1.9.8 beta 3': (
+    '1.9.8 beta 4': (
         None,
         [('Online', [
-            'Seamless co-op plays your normal characters now: the backups before every start, Restore and the '
-            'Saves page work for it as for any other game. Characters you made in Seamless co-op with beta 2 are '
-            'on the Saves page to bring over.',
+            'Seamless co-op has its own characters again. Beta 3 played your normal ones, and Seamless co-op '
+            'swaps their bells for its own items: back in the normal game they showed as "?GoodsName?" and the '
+            'bells were gone. If that happened to you, put back a backup from before you played Seamless co-op '
+            '(Saves page).',
+            'The Saves page follows your choice: with Seamless co-op chosen it shows, backs up and restores '
+            "Seamless co-op's characters, and offers your normal characters to copy in.",
             "Parties: a box beside the party code shows who is in your party, with each hunter's level and who "
             'is online. It updates by itself.',
+            'Test connection no longer says the Seamless co-op game server is not reachable.',
         ])]),
     '1.9.8 beta 2': (
         None,
