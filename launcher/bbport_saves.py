@@ -114,16 +114,25 @@ NAME = re.compile('(?<=\x00\x00\x00\x00)([0-9A-Za-zÀ-ɏͰ-ӿ぀-ヿ一-鿿'
 def character_name(slot):
     """The name of the character in a slot file (best effort; '' when not found)."""
     try:
-        with open(slot, 'rb') as stream:
-            data = stream.read(0x20000)
+        data = Path(slot).read_bytes()
     except OSError:
         return ''
     return name_in(data)
 
 
 def name_in(data):
-    """The character's name in the first bytes of a slot ('' when not found)."""
-    match = NAME.search(data.decode('utf-16-le', errors='replace'))
+    """The character's name in a slot's bytes ('' when not found)."""
+    # bbport: first where the game keeps it (bbport_character, as restoring a character reads
+    # it). The search below took another field's bytes for the name when the eight bytes before
+    # the name were not all zero, and a backup was named with CJK and accented letters for a
+    # character with a plain Latin name. It is left for a slot that reader cannot read.
+    try:
+        info = character.read(data)
+    except (IndexError, ValueError, struct.error):
+        info = None
+    if info:
+        return info.name
+    match = NAME.search(data[:0x20000].decode('utf-16-le', errors='replace'))
     if not match:
         return ''
     name = match.group(1)
@@ -505,7 +514,7 @@ class Backup:
                     for slot in SLOTS:
                         if slot in files['save']:
                             with zipped.open(files['save'][slot]) as stream:
-                                data = stream.read(0x20000)
+                                data = stream.read()
                             name = name_in(data) if any(data[:4096]) else ''
                             names += [name] if name else []
         except (OSError, ValueError, KeyError):
@@ -628,7 +637,7 @@ def add_backup_file(path, user_dir):
     names = []
     for member, data in packed:
         if member.rsplit('/', 1)[-1] in SLOTS and any(data[:4096]):
-            name = name_in(data[:0x20000])
+            name = name_in(data)
             names += [name] if name else []
     created = datetime.datetime.now()
     detail = Path(path).stem[:60]

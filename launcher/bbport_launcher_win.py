@@ -1878,7 +1878,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             refresh()
 
     def next_row(self, parent):
-        return parent.grid_size()[1]
+        """A row of its own: grid_size() does not count a widget that grid_remove() took away, and the next one
+        lay on it once it was shown again (a heading on the Picture page's settings, a fold's two notes)."""
+        row = max(getattr(parent, 'rows_used', 0), parent.grid_size()[1])
+        parent.rows_used = row + 1
+        return row
 
     def motion_cache_check(self, parent):
         upscaler = self.var('upscaler', 'ini')
@@ -1981,15 +1985,19 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk = self.ttk
         var = self.var(key, 'app')
         holder = ttk.Frame(parent)
-        ttk.Entry(holder, textvariable=var, width=54).pack(side='left')
+        entry = ttk.Entry(holder, textvariable=var, width=54)
 
         def browse():
             chosen = self.filedialog.askdirectory(title=prompt, initialdir=var.get() or str(PORT_DIR))
             if chosen:
                 var.set(str(Path(chosen)))
-        ttk.Button(holder, text=_('Browse…', 'Обзор…'), command=browse).pack(side='left', padx=(6, 0))
-        ttk.Button(holder, text=_('Open', 'Открыть'), command=lambda: self.open_path(var.get(), key)).pack(
-            side='left', padx=(6, 0))
+        browse_button = ttk.Button(holder, text=_('Browse…', 'Обзор…'), command=browse)
+        open_button = ttk.Button(holder, text=_('Open', 'Открыть'), command=lambda: self.open_path(var.get(), key))
+        # Packed from the right, the field last: in a narrow window the field gives way, not the buttons (Open was cut
+        # off and Browse lost its text at the smallest size). Created in this order for the Tab key.
+        open_button.pack(side='right', padx=(6, 0))
+        browse_button.pack(side='right', padx=(6, 0))
+        entry.pack(side='left', fill='x', expand=True)
         if on_change:
             var.trace_add('write', lambda *_a: on_change())
         holder.setting_key = key
@@ -2625,6 +2633,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                          if (e.width, e.height) != getattr(self, 'banner_size', None) else None)
         self.banner.bind('<Button-1>', lambda e: self.banner_spot(e) and self.show('game'))
         self.banner.bind('<Motion>', lambda e: self.banner.configure(cursor='hand2' if self.banner_spot(e) else ''))
+
+        def fit_banner(event):
+            # A window made short, not only a short screen (compact): this page does not scroll, and under the tall
+            # banner the sign-in warning and the Play online switch were cut off at the smallest size.
+            height = px(200 if event.height < px(760) else 286)
+            if event.widget is self.root and int(self.banner['height']) != height:
+                self.banner.configure(height=height)
+        self.root.bind('<Configure>', fit_banner, add='+')
         body = ttk.Frame(page, padding=(px(28), 0, px(28), px(22)))
         body.pack(fill='both', expand=True)
         body.columnconfigure(0, weight=1, uniform='cards')
@@ -3386,6 +3402,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         # server from here with its own boxes; once made, it is the account in use. Its own settings,
         # not the shadNet boxes (a co-op tool writes those).
         npid_var, password_var = self.var('supermedo_npid', 'app'), self.var('supermedo_pass', 'app')
+        npid_var.trace_add('write', lambda *_a: self.app.pop('offline_asked_npid', None))
         self.section(f, _('SuperMedo account'))
         signed = ttk.Label(f, text='', justify='left')
         buttons = ttk.Frame(f)
@@ -3401,28 +3418,35 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         password_var.trace_add('write', show_signed)
 
         def sign_out():
+            if not self.messagebox.askyesno('Bloodborne', _('Sign out of {}? An account made with Discord signs in again with Discord; one made here needs '
+                                                           'its Online ID and password.').format(npid_var.get().strip())):
+                return
             npid_var.set('')
             password_var.set('')
-            self.collect()
+            self.save_settings()
         discord_line = self.wrap_within(ttk.Label(f, text='', style='Muted.TLabel', justify='left', anchor='w'), 560)
 
         def sign_in_discord():
+            # The last press owns the line below: one left open in the browser must not write over a later one's
+            # messages. A sign-in that finishes counts, whichever press started it.
+            run = self.discord_run = object()
             discord_line.configure(text=_('Starting the sign-in…'))
 
             def on_page(page):
                 webbrowser.open(page)
-                self.ui_calls.put(lambda: discord_line.configure(
+                self.ui_calls.put(lambda: self.discord_run is run and discord_line.configure(
                     text=_('Sign in with Discord in the page that opened, then come back here.')))
 
             def work():
                 try:
                     npid, password = discord_sign_in(COMMUNITY_SERVER, on_page)
                 except Exception as error:  # a broken reply too (BadStatusLine): the line always answers
-                    self.ui_calls.put(lambda e=connection_error(error, COMMUNITY_SERVER): discord_line.configure(
-                        text=_('Sign-in failed: {}').format(e)))
+                    self.ui_calls.put(lambda e=connection_error(error, COMMUNITY_SERVER): (
+                        self.discord_run is run and discord_line.configure(text=_('Sign-in failed: {}').format(e))))
                     return
                 self.ui_calls.put(lambda: (npid_var.set(npid), password_var.set(password),
-                                           discord_line.configure(text=''), self.collect()))
+                                           self.discord_run is run and discord_line.configure(text=''),
+                                           self.collect()))
             threading.Thread(target=work, daemon=True).start()
         self.row(f, _('Account'), signed, key='supermedo_npid')
         button = ttk.Button(buttons, text=_('Sign in with Discord'), command=sign_in_discord)
@@ -3960,13 +3984,15 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         table = ttk.Frame(f)
         table.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
         for c in range(1, SLOTS + 1):
-            table.columnconfigure(c, uniform='slot', minsize=self.px(150))
+            table.columnconfigure(c, uniform='slot', minsize=self.px(138))
         for (group, group_ru), actions in ACTION_GROUPS:
             ttk.Label(table, text=_(group, group_ru), style='Section.TLabel').grid(
                 row=table.grid_size()[1], column=0, columnspan=SLOTS + 2, sticky='w', pady=(14, 4))
             for output, (label, label_ru) in actions:
                 r = table.grid_size()[1]
-                ttk.Label(table, text=_(label, label_ru)).grid(row=r, column=0, sticky='w', padx=(0, 18), pady=2)
+                # Wrapped, with the slots a little narrower: the third slot was cut off at the smallest size.
+                ttk.Label(table, text=_(label, label_ru), wraplength=self.px(220), justify='left').grid(
+                    row=r, column=0, sticky='w', padx=(0, 18), pady=2)
                 buttons = []
                 for slot in range(SLOTS):
                     btn = ttk.Button(table, style='Slot.TButton',
@@ -5339,20 +5365,25 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.status.configure(text=_('The game is running.', 'Игра запущена.'), fg=GOLD)
             return
         online, npid = self.var('online', 'app'), self.var('online_npid', 'app')
-        if not online.get() and self.account_name():
+        account = self.account_name()
+        # Once a No per account: a player signed in who plays offline on purpose was asked at every Play. A new
+        # sign-in asks again (the Online page clears it), and "npid" keeps the name out of a report (bbport_help.SECRET).
+        if not online.get() and account and self.app.get('offline_asked_npid') != account:
             choice = self.messagebox.askyesnocancel(
                 'Bloodborne', _('An online account is filled in, but "Play online" is off.\n\n'
                                 'Yes: play online.   No: play offline.'))
             if choice is None:
                 return
             online.set(bool(choice))
+            if not choice:
+                self.app['offline_asked_npid'] = account
         pool_name = self.var('online_pool', 'app').get()
         hunters_dream = pool_name == 'huntersdream'
         if online.get() and hunters_dream and not self.var('thd_token', 'app').get():
             if self.messagebox.askyesno(
                     'Bloodborne', _("To play online with The Hunter's Dream, sign in with Discord first.") + '\n\n' +
                     _('Sign in now? (No: play offline this time.)')):
-                self.show('online')
+                self.show_online_to_sign_in()
                 return
             online.set(False)
         if online.get() and pool_name == 'supermedo' and not self.account_name():
@@ -5360,7 +5391,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if self.messagebox.askyesno(
                     'Bloodborne', _('To play online with SuperMedo Server, sign in with Discord or make a free '
                                     'account first.') + '\n\n' + _('Sign in now? (No: play offline this time.)')):
-                self.show('online')
+                self.show_online_to_sign_in()
                 return
             online.set(False)
         if online.get() and pool_name == 'shadnet' and '@' in npid.get():
@@ -5432,6 +5463,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.root.after(5000, lambda: self.process and self.close())
         elif self.setting('on_play') == 'minimize':
             self.root.after(5000, lambda: self.process and self.root.state() == 'normal' and self.minimize())
+
+    def show_online_to_sign_in(self):
+        """The Online page in view: at a version's first start What's new lies over the whole window (a start from
+        Steam asks over it)."""
+        if getattr(self, 'news_panel', None):
+            self.news_panel.close()
+        self.show('online')
 
     def auto_backup(self):
         """Before a start: the saves backed up when they changed since the last backup (never in the way)."""
@@ -6235,6 +6273,10 @@ def error_text(error, kind=False):
     of the reply) or where `kind` asks for it (a Log page line about an error nobody expected); never empty. A text
     that says what happened stays as it is: "FetchError: " or "BadZipFile: " in front of it read worse to players."""
     import http.client
+    import urllib.error
+    # URLError's own text is "<urlopen error why>": the why, as the player can read it.
+    if isinstance(error, urllib.error.URLError) and not isinstance(error, urllib.error.HTTPError) and error.reason:
+        error = error.reason if isinstance(error.reason, BaseException) else OSError(str(error.reason))
     name, text = type(error).__name__, str(error).strip()
     if not text or text in ("''", '""'):
         return name

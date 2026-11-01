@@ -55,6 +55,8 @@ BOSSES = (
     (453000, 23102, 0x80),  # Orphan of Kos
 )
 DLC_BOSSES = 5
+# bbport: how far past the event flags' start the boss bits reach, for read()'s length check.
+BOSS_FLAGS = max(offset for _npc, offset, _bits in BOSSES) + 1
 
 # A weapon's id: its kind (a multiple of 100000), Uncanny (+10000) or Lost (+20000), its level
 # (x 100). Trick weapons first, then the firearms, shields and torches of the left hand.
@@ -83,7 +85,9 @@ def read(data):
     """The Character in a slot file's bytes; None when it holds none, or one this cannot read."""
     face = data.find(b'FACE', 0xF000)
     at = face - FACE_TO_NAME
-    if face < 0 or at < 0x80 or at + FLAGS + DEATHS + 4 > len(data) or at + JOURNEY >= len(data):
+    # bbport: the length check covers the boss bits too (they lie past the deaths counter): a slot
+    # cut short before them raised IndexError instead of reading as none.
+    if face < 0 or at < 0x80 or at + FLAGS + max(DEATHS + 4, BOSS_FLAGS) > len(data) or at + JOURNEY >= len(data):
         return None
     name = data[at:at + NAME_BYTES].decode('utf-16-le', errors='replace').split('\0')[0].strip()
 

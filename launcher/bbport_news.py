@@ -188,5 +188,5 @@ class NewsPanel:
     def close(self):
         self.frame.destroy()
         self.app.news_panel = None
-        self.app.collect()  # the seen version saved now, not only when the launcher closes
+        self.app.save_settings()  # the seen version saved now, not only when the launcher closes
         self.app.refresh_status()
