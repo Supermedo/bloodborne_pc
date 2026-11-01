@@ -18,6 +18,7 @@
 #include <errno.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
 #else
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -135,24 +136,34 @@ static void region_insert(size_t at, HostRegion r) {
 static void region_erase(size_t at, size_t n) {
     memmove(regions+at,regions+at+n,(region_count-at-n)*sizeof(*regions)); region_count-=n;
 }
-/* What already holds part of the PS4 range (a DLL, often one an antivirus or overlay injects,
- * or its memory): printed when the range cannot be reserved. */
-static void report_range_users(void) {
+/* What already holds part of the PS4 range in a process (a DLL, often one an antivirus or
+ * overlay injects, or its memory): printed when the range cannot be reserved there. */
+static void report_range_users(HANDLE process, const char *where) {
     int shown=0;
     for (uintptr_t at=USER_MIN; at<USER_MAX && shown<16;) {
         MEMORY_BASIC_INFORMATION mi;
-        if (!VirtualQuery((void *)at,&mi,sizeof(mi)) || !mi.RegionSize) break;
+        if (!VirtualQueryEx(process,(void *)at,&mi,sizeof(mi)) || !mi.RegionSize) break;
         const uintptr_t end=(uintptr_t)mi.BaseAddress+mi.RegionSize;
         if (mi.State!=MEM_FREE) {
             char name[MAX_PATH]="";
-            if (mi.Type==MEM_IMAGE) GetModuleFileNameA((HMODULE)mi.AllocationBase,name,sizeof(name));
-            fprintf(stderr,"Runtime: in the PS4 range: %p, %" PRIu64 " KiB, %s%s%s\n",mi.BaseAddress,
-                    (uint64_t)mi.RegionSize/1024,mi.Type==MEM_IMAGE ? "module " : mi.Type==MEM_MAPPED ? "mapped file" : "memory",
+            if (mi.Type==MEM_IMAGE || mi.Type==MEM_MAPPED) K32GetMappedFileNameA(process,mi.BaseAddress,name,sizeof(name));
+            fprintf(stderr,"Runtime: in the PS4 range%s: %p, %" PRIu64 " KiB, %s%s%s\n",where,mi.BaseAddress,
+                    (uint64_t)mi.RegionSize/1024,mi.Type==MEM_IMAGE ? "module " : mi.Type==MEM_MAPPED ? "mapped file " : "memory",
                     name,mi.State==MEM_RESERVE ? " (reserved)" : "");
             ++shown;
         }
         at=end;
     }
+}
+/* BB_TEST_RANGE_TAKEN=N (tests): 16 MiB of private memory near 0xF7B7400000, where a driver
+ * that injects into every new process put it on one PC, is placed in this process and in
+ * the first N restarted ones before the range is reserved there. */
+static int range_taken_tests(void) {
+    const char *e=getenv("BB_TEST_RANGE_TAKEN");
+    return e ? atoi(e) : 0;
+}
+static void take_range_for_test(HANDLE process) {
+    VirtualAlloc2(process,(void *)UINT64_C(0xF7B7400000),16<<20,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE,NULL,0);
 }
 /* Something took part of the range before main() (DLLs load first): this program starts again
  * suspended, the range is reserved in the new process before any DLL is in it, and that
@@ -160,20 +171,31 @@ static void report_range_users(void) {
 static int restarted; /* this is the restarted process: never once more */
 static void restart_with_range(void) {
     if (restarted) return;
-    SetEnvironmentVariableA("BB_RANGE_RESERVED","1");
+    /* Such memory can be in the new process as well (a driver puts it into every new process,
+     * not always at the same place): that process is ended and another one started. */
+    enum { RESTART_TRIES=8 };
+    const int taken_tests=range_taken_tests();
     STARTUPINFOW si={.cb=sizeof(si),.dwFlags=STARTF_USESTDHANDLES,.hStdInput=GetStdHandle(STD_INPUT_HANDLE),
                      .hStdOutput=GetStdHandle(STD_OUTPUT_HANDLE),.hStdError=GetStdHandle(STD_ERROR_HANDLE)};
     PROCESS_INFORMATION pi;
-    wchar_t *line=_wcsdup(GetCommandLineW());
-    const BOOL started=line && CreateProcessW(NULL,line,NULL,NULL,TRUE,CREATE_SUSPENDED,NULL,NULL,&si,&pi);
-    free(line);
-    SetEnvironmentVariableA("BB_RANGE_RESERVED",NULL);
-    if (!started) return;
-    if (!VirtualAlloc2(pi.hProcess,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0)) {
-        fprintf(stderr,"Runtime: the restarted game could not reserve the PS4 range either (error %lu)\n",GetLastError());
+    for (int attempt=1;; ++attempt) {
+        SetEnvironmentVariableA("BB_RANGE_RESERVED","1");
+        wchar_t *line=_wcsdup(GetCommandLineW());
+        const BOOL started=line && CreateProcessW(NULL,line,NULL,NULL,TRUE,CREATE_SUSPENDED,NULL,NULL,&si,&pi);
+        free(line);
+        SetEnvironmentVariableA("BB_RANGE_RESERVED",NULL);
+        if (!started) return;
+        if (attempt<=taken_tests) take_range_for_test(pi.hProcess);
+        if (VirtualAlloc2(pi.hProcess,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0))
+            break;
+        const DWORD error=GetLastError();
+        fprintf(stderr,"Runtime: the restarted game (try %d of %d) could not reserve the PS4 range either (error %lu)\n",
+                attempt,RESTART_TRIES,error);
+        report_range_users(pi.hProcess," of the restarted game");
         TerminateProcess(pi.hProcess,21);
+        WaitForSingleObject(pi.hProcess,5000);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-        return;
+        if (attempt==RESTART_TRIES) return;
     }
     /* The new process ends with this one (the launcher's Stop, run.py ending). */
     HANDLE job=CreateJobObjectA(NULL,NULL);
@@ -206,9 +228,10 @@ void runtime_memory_reserve(void) {
             return;
         }
     }
+    if (range_taken_tests()) take_range_for_test(GetCurrentProcess());
     if (!VirtualAlloc2(NULL,(void *)USER_MIN,USER_MAX-USER_MIN,MEM_RESERVE|MEM_RESERVE_PLACEHOLDER,PAGE_NOACCESS,NULL,0)) {
         const DWORD error=GetLastError();
-        report_range_users();
+        report_range_users(GetCurrentProcess(),"");
         restart_with_range();
         SetLastError(error);
         win_fail("reserving the PS4 address range (link with --disable-high-entropy-va)",USER_MIN,USER_MAX-USER_MIN);
