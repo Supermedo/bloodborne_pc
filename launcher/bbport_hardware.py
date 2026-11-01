@@ -783,6 +783,22 @@ def vendor_of(name):
             'intel' if 'intel' in name or ' arc' in f' {name}' else '')
 
 
+def unavailable(name, gpu=None):
+    """{'upscaler': values, 'frame_gen': values} this graphics card cannot run: DLSS without a GeForce RTX
+    (it became FSR 3.1 without a word), DLSS frame generation without an RTX 40/50. `gpu` is the table
+    entry, `name` the card Vulkan reports; nothing while neither tells the maker."""
+    vendor = gpu.vendor if gpu else vendor_of(name or '')
+    if not vendor:
+        return {'upscaler': set(), 'frame_gen': set()}
+    if gpu:
+        dlss, frame_gen = gpu.dlss, bool(gpu.frame_gen)
+    else:  # a GeForce missing from the table: its name tells the series
+        rtx = re.search(r'RTX\s*(\d)0', name)
+        dlss = vendor == 'nvidia' and 'RTX' in name.upper()
+        frame_gen = dlss and (not rtx or int(rtx.group(1)) >= 4)
+    return {'upscaler': set() if dlss else {'dlss'}, 'frame_gen': set() if frame_gen else {'dlss'}}
+
+
 def signature(gpu_line, cpu, ram):
     """The hardware the automatic settings are made for, as detected (never a card chosen by hand):
     'NVIDIA GeForce RTX 4070 12 GB|AMD Ryzen 7 5800X 8-Core Processor|32'; '' when the graphics

@@ -86,22 +86,35 @@ def upscaler_choice(app, parent, options, width, translate):
     def refresh(*_args):
         frame.menu.delete(0, 'end')
         family = value.get() in ('fsr411', 'fsr412')
+        # DLSS without a GeForce RTX became FSR 3.1 without a word: shown greyed out with the reason,
+        # as FSR 4.1 is; the upscaler the automatic settings pick is marked.
+        unavailable = app.unavailable_choices('upscaler') if hasattr(app, 'unavailable_choices') else set()
+        recommended = app.recommended_choice('upscaler') if hasattr(app, 'recommended_choice') else None
+        recommended = 'fsr41' if recommended in ('fsr411', 'fsr412') else recommended
+
+        def label(key, text):
+            note = translate('not on this graphics card') if key in unavailable else \
+                translate('recommended for this PC') if key == recommended else ''
+            return f'{text} — {note}' if note else text
         added = False
         for key, text in options:
             if key in ('fsr411', 'fsr412'):
                 if added: continue
                 added = True
-                frame.menu.add_radiobutton(label=translate('FSR 4.1 (experimental)'), value='fsr41',
+                frame.menu.add_radiobutton(label=label('fsr41', translate('FSR 4.1 (experimental)')), value='fsr41',
                     variable=frame.selection, command=choose_family,
                     state='normal' if any(s['supported'] for s in statuses(app)) else 'disabled')
             else:
-                frame.menu.add_radiobutton(label=translate(*text), value=key, variable=frame.selection,
-                    command=lambda key=key: value.set(key))
+                frame.menu.add_radiobutton(label=label(key, translate(*text)), value=key, variable=frame.selection,
+                    command=lambda key=key: value.set(key), state='disabled' if key in unavailable else 'normal')
         frame.selection.set('fsr41' if family else value.get())
         frame.button.configure(text=translate('FSR 4.1 (experimental)') if family else
-                               translate(*dict(options).get(value.get(), ('Off',))))
+                               translate(*dict(options).get(value.get(), ('Off',))) +
+                               (' — ' + translate('not on this graphics card') if value.get() in unavailable else ''))
 
     watch(app, frame, refresh, [value, app.var('fsr411_backend', 'ini')])
+    if hasattr(app, 'rating_views'):
+        app.rating_views.append(refresh)  # the card is known a moment after the window opens
     return frame
 
 

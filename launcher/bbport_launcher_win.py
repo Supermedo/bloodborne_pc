@@ -437,7 +437,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
 # bbbridge's own app reads and writes the online_* keys above: keep their names.
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
-             ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
+             ('fsr4', ('FSR 4 (Radeon RX 7000/9000)',)),
              ('fsr412', ('FSR 4.1.2 (experimental)',)),
              ('fsr411', ('FSR 4.1.1 (experimental)', 'FSR 4.1.1 (экспериментально)')),
              ('fsr3', ('FSR 3.1 (every GPU)', 'FSR 3.1 (любая видеокарта)')),
@@ -1671,14 +1671,17 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def fg401_choice(self, parent, width=52):
         var = self.var('frame_gen', 'ini')
         box = self.ttk.Combobox(parent, state='readonly', width=width)
-        values = []
+        values, unavailable = [], []
         def refresh(*_args):
             def ready(value):
                 status = bbport_fg401.status_for(self.fg401_support, value)
                 return bool(status and status.get('supported'))
             options = [(v,t) for v,t in FRAME_GENERATION if v not in ('fsr401','fsr402') or ready(v)]
             values[:] = [v for v,t in options]
-            box.configure(values=[_(*t) for v,t in options])
+            # DLSS frame generation without an RTX 40/50 stays listed with the reason but cannot be picked.
+            unavailable[:] = self.unavailable_choices('frame_gen')
+            texts = [_(*t) + (' — ' + _('not on this graphics card') if v in unavailable else '') for v,t in options]
+            box.configure(values=texts, width=max([width] + [len(text) + 2 for text in texts]))
             if var.get() in ('fsr401','fsr402') and not ready(var.get()):
                 # Display the saved choice without offering it as a new unsupported choice.
                 version = '4.0.2' if var.get() == 'fsr402' else '4.0.1'
@@ -1687,9 +1690,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             else:
                 box.current(values.index(var.get()) if var.get() in values else values.index('off'))
             self.refresh_fg401_status()
-        box.bind('<<ComboboxSelected>>', lambda _e: var.set(values[box.current()]))
+        def choose(_e):
+            value = values[box.current()]
+            var.set(value) if value not in unavailable else refresh()
+        box.bind('<<ComboboxSelected>>', choose)
         var.trace_add('write', refresh)
         self.fg401_refreshers.append(refresh)
+        self.rating_views.append(refresh)  # the card is known a moment after the window opens
         refresh()
         box.setting_key = 'frame_gen'  # for the search (row() indexes it)
         return box
