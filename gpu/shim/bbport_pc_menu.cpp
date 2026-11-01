@@ -56,6 +56,8 @@ constexpr int ON = 40300, OFF = 40301;        // the game's own On / Off
 // Text ids (scripts/pc_menu.py writes the same): the pages (System line, title, help), each
 // line (name and help), then each line's choice labels.
 constexpr int PAGE_TEXT = 119001, LINE_BASE = 119010;
+constexpr int RETRY_UPSCALER_TEXT = 119109;
+constexpr int RetryUpscaler = BbSettings::UpscalerCount;
 // The opener's Defaults button and its question (the game's), Restart Game on the PC page.
 constexpr int DEFAULTS = 40330, DEFAULTS_QUESTION = 40300, RESTART = 119009;
 constexpr int UPSCALER_TEXT = 119100, PRESET_TEXT = 119110, SHARPNESS_TEXT = 119120,
@@ -276,7 +278,17 @@ void DefaultSettings(int32_t* out) {
 bool Apply(Line line, int32_t v) {
     auto& s = BbSettings::Get();
     switch (line) {
-    case Upscaler: s.upscaler = std::clamp(v, 0, BbSettings::UpscalerCount - 1); return true;
+    case Upscaler:
+        if (v == RetryUpscaler) {
+            const int selected = s.upscaler.load();
+            if (s.UpscalerFallbackActive()) BbSettings::SelectUpscaler(selected);
+            // The retry is an action, never an INI value or a repeating selection.
+            SetValue(Upscaler, selected);
+            applied[Upscaler] = selected;
+            return false;
+        }
+        BbSettings::SelectUpscaler(std::clamp(v, 0, BbSettings::UpscalerCount - 1));
+        return true;
     case Quality: s.preset = std::clamp(v, 0, BbSettings::PresetCount - 1); return true;
     case Sharpness:
         s.sharpen = v > 0;
@@ -315,9 +327,21 @@ bool Apply(Line line, int32_t v) {
 // dropdown writes its value as its cursor moves, before it is confirmed (and back on cancel):
 // a value is applied once it has stayed for a while, else browsing the frame generation list
 // created and destroyed providers frame by frame and crashed the driver.
+using Clock = std::chrono::steady_clock;
+constexpr auto Settle = std::chrono::milliseconds(800);
+
+bool ApplySettled(Line line, int32_t value, Clock::time_point now,
+                  int32_t& seen, Clock::time_point& seen_since) {
+    if (value != seen) {
+        seen = value;
+        seen_since = now;
+    }
+    if (value == applied[line] || now - seen_since < Settle) return false;
+    applied[line] = value;
+    return Apply(line, value);
+}
+
 void Applier() {
-    using Clock = std::chrono::steady_clock;
-    constexpr auto Settle = std::chrono::milliseconds(800);
     bool dirty = false;
     auto last_change = Clock::now();
     int32_t seen[LineCount];
@@ -331,13 +355,7 @@ void Applier() {
         const auto now = Clock::now();
         for (int line = 0; line < LineCount; ++line) {
             const int32_t v = Value(line);
-            if (v != seen[line]) {
-                seen[line] = v;
-                seen_since[line] = now;
-            }
-            if (v == applied[line] || now - seen_since[line] < Settle) continue;
-            applied[line] = v;
-            if (Apply(Line(line), v)) {
+            if (ApplySettled(Line(line), v, now, seen[line], seen_since[line])) {
                 dirty = true;
                 last_change = now;
             }
@@ -360,6 +378,7 @@ void LineChoices(Line line, const int32_t* now, Choices& c) {
                                  : u == BbSettings::UpscalerDlss ? s.dlss_supported.load() : true;
             if (supported || u == now[Upscaler]) c.Add(u, UPSCALER_TEXT + u);
         }
+        if (s.UpscalerFallbackActive()) c.Add(RetryUpscaler, RETRY_UPSCALER_TEXT);
         break;
     case Quality:
         for (int p = 0; p < BbSettings::PresetCount; ++p) c.Add(p, PRESET_TEXT + p);

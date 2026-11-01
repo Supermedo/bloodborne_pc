@@ -486,6 +486,10 @@ target_include_directories(shared-graphics-test PRIVATE shim)
 target_compile_options(shared-graphics-test PRIVATE -UNDEBUG)
 
 if (WIN32)
+    add_executable(pc-menu-upscaler-test EXCLUDE_FROM_ALL ../tests/test_pc_menu_upscaler.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(pc-menu-upscaler-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(pc-menu-upscaler-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     add_executable(shared-graphics-overlay-test EXCLUDE_FROM_ALL ../tests/test_shared_graphics_overlay.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(shared-graphics-overlay-test PRIVATE .. ../src shim shadps4

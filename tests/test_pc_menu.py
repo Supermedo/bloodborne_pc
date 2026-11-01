@@ -1,4 +1,5 @@
 from paths import ROOT
+from pathlib import Path
 import re
 import struct
 import sys
@@ -61,6 +62,33 @@ class PcMenuTests(unittest.TestCase):
                          len(pc_menu.LINES))
         for constant, value in re.findall(r'(\w+_TEXT) = (\d+)', source):
             self.assertIn(int(value), names, constant)
+
+    def test_retry_label_and_fsr412_are_available_in_each_game_language(self):
+        self.assertTrue(set(quit_menu.TEXTS) <= set(pc_menu.RETRY_UPSCALER))
+        for language in pc_menu.RETRY_UPSCALER:
+            names = pc_menu.texts(language)[200]
+            self.assertEqual(names[119106], 'FSR 4.1.2')
+            self.assertEqual(names[119109], pc_menu.RETRY_UPSCALER[language])
+        self.assertEqual(pc_menu.texts('unknown')[200][119109], 'Retry FSR')
+
+    def test_text_layer_selects_retry_translation_per_archive(self):
+        import tempfile
+        from test_quit_menu import menu_archive, fmgs_of
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game, out = root / 'game', root / 'out'
+            archive = menu_archive({200: {42: 'retained'}, 201: {}, 204: {}})
+            for language in quit_menu.TEXTS:
+                source = game / 'dvdroot_ps4/msg' / language / 'menu.msgbnd.dcx'
+                source.parent.mkdir(parents=True)
+                source.write_bytes(archive)
+            quit_menu.write_text_layer(game, out, pc_menu.texts)
+            for language in quit_menu.TEXTS:
+                target = out / 'dvdroot_ps4/msg' / language / 'menu.msgbnd.dcx'
+                names = fmgs_of(target.read_bytes())[200]
+                self.assertEqual(names[42], 'retained')
+                self.assertEqual(names[119109], pc_menu.RETRY_UPSCALER[language])
+                self.assertEqual(names[119106], 'FSR 4.1.2')
 
 
 if __name__ == '__main__':
