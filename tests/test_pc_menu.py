@@ -71,6 +71,19 @@ class PcMenuTests(unittest.TestCase):
             self.assertEqual(names[119109], pc_menu.RETRY_UPSCALER[language])
         self.assertEqual(pc_menu.texts('unknown')[200][119109], 'Retry FSR')
 
+    def test_upscaler_text_blocks_match_native_ids_and_leave_room_for_retry(self):
+        source = (ROOT / 'gpu/shim/bbport_pc_menu.cpp').read_text(encoding='utf-8')
+        ids = {name: int(value) for name, value in
+               re.findall(r'(\w+_TEXT) = (\d+)', source)}
+        self.assertEqual(ids['RETRY_UPSCALER_TEXT'], pc_menu.RETRY_UPSCALER_TEXT)
+        labels = dict(pc_menu.LABELS)
+        header = (ROOT / 'gpu/shim/bbport_settings.h').read_text(encoding='utf-8')
+        choices = re.search(r'enum Upscaler : int \{(.*?)UpscalerCount', header, re.S).group(1)
+        count = len(re.findall(r'\bUpscaler\w+', choices))
+        self.assertEqual(len(labels[ids['UPSCALER_TEXT']]), count)
+        self.assertLessEqual(ids['UPSCALER_TEXT'] + count, ids['RETRY_UPSCALER_TEXT'])
+        self.assertLess(ids['RETRY_UPSCALER_TEXT'], ids['PRESET_TEXT'])
+
     def test_text_layer_selects_retry_translation_per_archive(self):
         import tempfile
         from test_quit_menu import menu_archive, fmgs_of

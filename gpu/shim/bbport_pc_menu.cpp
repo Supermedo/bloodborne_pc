@@ -64,6 +64,9 @@ constexpr int UPSCALER_TEXT = 119100, PRESET_TEXT = 119110, SHARPNESS_TEXT = 119
               FRAME_GEN_TEXT = 119140, MULTIPLIER_TEXT = 119150, OUTPUT_TEXT = 119160,
               FRAME_RATE_TEXT = 119180, FRAME_CAP_TEXT = 119190, FOV_TEXT = 119200,
               LOD_TEXT = 119220, HUD_TEXT = 119230, PROMPTS_TEXT = 119250, RESTART_TEXT = 119260;
+static_assert(UPSCALER_TEXT + BbSettings::UpscalerCount <= RETRY_UPSCALER_TEXT &&
+              RETRY_UPSCALER_TEXT < PRESET_TEXT,
+              "Upscaler/retry text IDs overlap the PC-menu choice blocks");
 
 enum Line : int {
     Upscaler, Quality, Sharpness, FrameGen, Multiplier, Output, FrameRate, FrameCap,
