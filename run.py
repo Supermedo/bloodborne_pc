@@ -81,6 +81,7 @@ def online_overrides(env, user_dir):
         if '://' not in community:
             community = 'https://' + community
         scheme, host = community.split('://', 1)
+        host = host.split('/', 1)[0].rsplit(':', 1)[0] if re.search(r':\d+$', host) else host  # its API port below
         # The game's own server functions (messages, bloodstains, summon signs) go over HTTP to
         # the game server only, as bbhost and Awaken's port send them; never through a shadNet
         # WebAPI (Metr1k, The Hunter's Dream). Play logs go to its API port instead of
@@ -433,15 +434,24 @@ def thermal_watch(stop):
 SAVE_BACKUPS_KEPT = 10
 
 
-# Up to 1.9.8 beta 2 Seamless co-op played its own saves in <user>/seamless-coop: backups, Restore and the
-# Saves page never saw them. It plays the normal characters now (backed up before every start like any
-# other); the Saves page offers the old ones to bring over (bbport_saves.sources).
+# Seamless co-op's own saves: <user>/seamless-coop is the game's user folder while BBSC plays
+# (its saves, its rebirth targets), so co-op never writes the player's normal characters: BBSC swaps the
+# game's bells for its own items in the character it plays, which the game without BBSC cannot name
+# ("?GoodsName?"), and takes the bells out (1.9.8 beta 3 played the normal saves and showed it). The
+# launcher's Saves page follows the chosen mode (bbport_setup.save_user_dir).
 COOP_SAVES = 'seamless-coop'
 
 
-def coop_saves(env, user_dir, game):
-    """A BBSC start plays the normal saves: BBSC is told where the character's save is (it otherwise looks
-    in <working folder>/user, not the launcher's saves folder)."""
+def coop_user_dir(env, user_dir, game):
+    """The user folder for a BBSC start. The GPU caches stay in the normal one, the DLC the normal
+    one has is reported installed here too, and BBSC is told where the character's save is (it
+    otherwise looks in <working folder>/user, the normal saves)."""
+    coop = user_dir / COOP_SAVES
+    coop.mkdir(parents=True, exist_ok=True)
+    if not env.get('BB_DLC_DIR'):
+        titles = sorted(p for p in (user_dir / 'addcont').glob('*') if p.is_dir() and any(p.iterdir()))
+        if titles:
+            env['BB_DLC_DIR'] = str(titles[0])  # its <label> folders, as the launcher's DLC folder
     title = 'CUSA00207'
     try:
         sys.path.insert(0, str(PORT / 'scripts'))
@@ -452,8 +462,9 @@ def coop_saves(env, user_dir, game):
             title = found
     except (OSError, ValueError, ImportError, TypeError):
         pass
-    env.setdefault('BBSC_SAVE_DIR', str(Path(user_dir) / 'savedata' / '1' / title / 'SPRJ0005'))
-    print(f'Seamless co-op: plays your normal saves ({env["BBSC_SAVE_DIR"]})')
+    env.setdefault('BBSC_SAVE_DIR', str(coop / 'savedata' / '1' / title / 'SPRJ0005'))
+    print(f'Seamless co-op: its own saves in {coop} (the normal saves are not used)')
+    return coop
 
 
 def backup_saves(user_dir, keep=SAVE_BACKUPS_KEPT, now=None):
@@ -842,9 +853,7 @@ def main():
         # The in-game restart starts this script again once this process is gone.
         # GPU caches (shaders, pipelines) beside the saves; read before main(), so set here.
         user_dir = user_folders(env, data)
-        saves_dir = user_dir
-        if seamless_coop(env):
-            coop_saves(env, user_dir, original_game)
+        saves_dir = coop_user_dir(env, user_dir, original_game) if seamless_coop(env) else user_dir
         writable_saves(saves_dir)
         if env.get('BB_SAVE_BACKUPS') == '1' and not restarted:  # not again for an in-game restart
             backup_saves(saves_dir)

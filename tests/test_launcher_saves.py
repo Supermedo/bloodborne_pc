@@ -72,14 +72,16 @@ class SaveTests(unittest.TestCase):
             found = saves.scan(self.root / 'port', exclude=[mine])
         self.assertEqual(sorted(s.source for s in found), ['bbhost', 'bbport (BB.Other)', 'shadPS4', 'shadPS4'])
 
-    def test_seamless_coops_old_saves_are_offered(self):
-        """Up to 1.9.8 beta 2 Seamless co-op played its own saves (user/seamless-coop): offered to bring over."""
-        mine = make_save(saves.target_dir(self.user))
-        old = make_save(self.user / 'seamless-coop' / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005', 'Coop')
+    def test_seamless_coops_own_characters_stay_apart(self):
+        """BBSC changes the items of the characters it plays: its own (user/seamless-coop) are never offered to
+        the normal saves, and Seamless co-op is offered the normal characters, first, to copy in."""
+        normal = make_save(saves.target_dir(self.user), 'Normal')
+        coop = make_save(saves.target_dir(self.user / saves.COOP_SAVES), 'Coop')
         with mock.patch.dict(os.environ, {'APPDATA': '', 'LOCALAPPDATA': ''}):
-            found = saves.scan(self.root / 'port', exclude=[mine], user_dir=self.user)
-        self.assertEqual([(s.source, s.folder) for s in found],
-                         [('Seamless co-op (its own saves before 1.9.8 beta 3)', old)])
+            self.assertEqual(saves.scan(self.root / 'port', exclude=[normal]), [])
+            found = saves.scan(self.root / 'port', exclude=[coop], extra=[('Your normal characters', normal)])
+            self.assertEqual(saves.misplaced(self.root / 'empty'), ([], []))
+        self.assertEqual([(s.source, s.folder) for s in found], [('Your normal characters', normal)])
 
     def test_benchmark_characters_are_not_offered(self):
         """A port build's bundled benchmark character (benchmark/savedata/…) and recorded test routes are
@@ -451,7 +453,7 @@ class ImportWindowTests(unittest.TestCase):
                                                showerror=lambda title, text: said.append(text))
 
             def var(self, key, store):
-                return types.SimpleNamespace(get=lambda: {'user_dir': str(user), 'game_dir': ''}[key])
+                return types.SimpleNamespace(get=lambda: {'user_dir': str(user), 'game_dir': '', 'online': False, 'online_pool': 'supermedo'}[key])
 
             def trophies_changed(self, new, announce=True):
                 changed.append((new, announce))

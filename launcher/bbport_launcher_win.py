@@ -65,6 +65,18 @@ SUPERMEDO_SERVER, SUPERMEDO_WEBAPI = 'np.supermedo.com:31313', 'http://np.superm
 SEAMLESS_SERVER, SEAMLESS_WEBAPI = 'seamless.supermedo.com:31313', 'http://seamless.supermedo.com:31315'
 SEAMLESS_GAME_SERVER = 'http://seamless.supermedo.com:20443'
 BBSC_LAUNCH = PORT_DIR / 'bbsc' / 'bbsc-launch.exe'
+
+
+def plays_seamless(s):
+    """A start with these settings plays SuperMedo Seamless co-op (BBSC: game_environment sets its BB_PROBE)."""
+    return bool(s.get('online')) and s.get('online_pool') == 'seamless' and BBSC_LAUNCH.exists()
+
+
+def saves_user_dir(s):
+    """The folder whose saves a start with these settings plays and the Saves page shows: Seamless co-op keeps
+    its own characters (run.py COOP_SAVES), apart from the normal ones it would change."""
+    user = Path(s.get('user_dir') or DATA_DIR / 'user')
+    return user / saves.COOP_SAVES if plays_seamless(s) else user
 RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
 # The community site (install guide, FAQ, forum), linked from the side bar.
@@ -991,7 +1003,9 @@ def server_check(server, webapi, community):
     import socket
     lines = []
     try:
-        with bbport_tls.urlopen(community + ':20443/bb-eu/ss.info', timeout=6) as reply:
+        # The game's port, unless the address names its own (Seamless co-op's game server does).
+        base = community if re.search(r':\d+$', community.split('://', 1)[-1]) else community + ':20443'
+        with bbport_tls.urlopen(base + '/bb-eu/ss.info', timeout=6) as reply:
             reply.read(64)
         lines.append(_('Game server {0}: reachable').format(community))
     except Exception as error:
@@ -4796,7 +4810,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 'Windows': platform.version(), 'Game': ' '.join(game_info(self.var('game_dir', 'app').get()) or ())}
         folder = self.tests_dir() / (clock.strftime('%Y-%m-%d_%H%M%S') + '_benchmark')
         settings = {**self.app, 'online': False, 'fullscreen': True}
-        self.bench = bench.Test(PORT_DIR, run_command(), game_environment(settings), self.save_user_dir(),
+        self.bench = bench.Test(PORT_DIR, run_command(), game_environment(settings), self.normal_user_dir(),
                                 self.var('game_dir', 'app').get(),
                                 ini_path().read_text(encoding='utf-8') if ini_path().is_file() else '',
                                 scenario, bench.Variants({}, [('benchmark', {})]), folder,
@@ -6592,7 +6606,7 @@ def play_without_window(settings):
                      'Online play page to play online')
     if settings.get('auto_backup', True):
         try:
-            saves.auto_backup(Path(settings.get('user_dir') or DATA_DIR / 'user'), settings['game_dir'], notes=notes)
+            saves.auto_backup(saves_user_dir(settings), settings['game_dir'], notes=notes)
         except OSError:
             pass  # never in the way of a start
     placer = display.Placer(settings, display.parse_size(values.get('output_res')) or (1920, 1080)).start()

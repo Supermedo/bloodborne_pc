@@ -782,7 +782,7 @@ class SetupMixin:
                 'Settings': self.diagnostics().split('Settings: ', 1)[-1].split('\n', 1)[0]}
         folder = self.tests_dir() / (clock.strftime('%Y-%m-%d_%H%M%S') + '_' + mode)
         settings = {**self.app, 'online': False, 'fullscreen': True}
-        test = bench.Test(L.PORT_DIR, L.run_command(), L.game_environment(settings), self.save_user_dir(),
+        test = bench.Test(L.PORT_DIR, L.run_command(), L.game_environment(settings), self.normal_user_dir(),
                           self.var('game_dir', 'app').get(),
                           L.ini_path().read_text(encoding='utf-8') if L.ini_path().is_file() else '',
                           scenario, plan, folder,
@@ -938,8 +938,16 @@ class SetupMixin:
         self.result_buttons(folder)
 
     # ---- saves from other versions -------------------------------------------------------------
-    def save_user_dir(self):
+    def normal_user_dir(self):
         return Path(self.var('user_dir', 'app').get() or L.DATA_DIR / 'user')
+
+    def plays_seamless(self):
+        return L.plays_seamless({'online': self.var('online', 'app').get(),
+                                 'online_pool': self.var('online_pool', 'app').get()})
+
+    def save_user_dir(self):
+        """The saves the next start plays: Seamless co-op's own while it is chosen (L.saves_user_dir)."""
+        return self.normal_user_dir() / saves.COOP_SAVES if self.plays_seamless() else self.normal_user_dir()
 
     def save_target(self):
         return saves.target_dir(self.save_user_dir(), self.var('game_dir', 'app').get())
@@ -952,11 +960,15 @@ class SetupMixin:
         if getattr(self, 'save_searching', False):
             return
         self.save_searching = True
-        port, game, mine, user = L.PORT_DIR, self.var('game_dir', 'app').get(), self.save_target(), self.save_user_dir()
+        port, game, mine = L.PORT_DIR, self.var('game_dir', 'app').get(), self.save_target()
+        # Seamless co-op is offered the normal characters to copy in (never the other way: BBSC changes the
+        # items of the characters it plays).
+        normal = saves.target_dir(self.normal_user_dir(), game) if self.plays_seamless() else None
 
         def work():
             try:
-                found = saves.scan(port, game, exclude=[mine], user_dir=user)
+                found = saves.scan(port, game, exclude=[mine],
+                                   extra=[(_('Your normal characters'), normal)] if normal else ())
             except Exception:  # a search must never take the launcher down
                 found = []
 
@@ -1129,6 +1141,10 @@ class SetupMixin:
 
     def refresh_saves(self, only_if_changed=False):
         """The characters and the backups drawn anew (on a page change only when the files changed)."""
+        if getattr(self, 'saves_mode', None) is not None and self.saves_mode.winfo_exists():
+            self.saves_mode.configure(text=_('Seamless co-op is chosen (Online play): these are its own characters, '
+                                             'apart from your normal ones. Bring a normal character in below.')
+                                      if self.plays_seamless() else '')
         made_from = (str(self.save_target()), L.folder_entries(self.save_target()),
                      L.folder_entries(saves.backup_dir(self.save_user_dir())), self.var('game_dir', 'app').get(),
                      self.var('language', 'app').get())
@@ -1850,6 +1866,8 @@ class SetupMixin:
         f = self.scrolled_page('saves', _('Saves'),
                                _('Your characters: bring them from another version, back them up, put a backup back.'))
         self.section(f, _('Your characters'), top=4)
+        self.saves_mode = self.ttk.Label(f, text='', style='Muted.TLabel', justify='left', wraplength=px(640))
+        self.saves_mode.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
         self.characters_view = self.characters_card(f)
         self.characters_view.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
         self.index_entry(self.characters_view, _('Your characters'), _('Saves'), 'characters')
