@@ -6273,6 +6273,10 @@ def error_text(error, kind=False):
     of the reply) or where `kind` asks for it (a Log page line about an error nobody expected); never empty. A text
     that says what happened stays as it is: "FetchError: " or "BadZipFile: " in front of it read worse to players."""
     import http.client
+    import urllib.error
+    # URLError's own text is "<urlopen error why>": the why, as the player can read it.
+    if isinstance(error, urllib.error.URLError) and not isinstance(error, urllib.error.HTTPError) and error.reason:
+        error = error.reason if isinstance(error.reason, BaseException) else OSError(str(error.reason))
     name, text = type(error).__name__, str(error).strip()
     if not text or text in ("''", '""'):
         return name
