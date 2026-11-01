@@ -14,7 +14,7 @@ from test_launcher_search_questions import MORE_QUESTIONS, QUESTIONS  # noqa: E4
 
 # Settings without a row of their own: internal state, or a part of another setting's row.
 INTERNAL = {'setup_done', 'auto_hw', 'bench_goal', 'test_compare', 'test_mode', 'test_scenario', 'thd_token',
-            'supermedo_pass', 'online_custom_servers',
+            'supermedo_pass', 'party_key', 'online_custom_servers',
             'output_display', 'window_custom', 'eboot_check', 'seen_version', 'ui_mode', 'auto_undo', 'test_saves',
             'test_repeats', 'test_minutes', 'last_measure', 'window_last'}
 

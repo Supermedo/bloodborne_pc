@@ -69,6 +69,7 @@ class PoolTests(unittest.TestCase):
     time being, a shadNet server of the player's choice."""
 
     def test_supermedo_server_by_default(self):
+        """Since 1.9.7 beta 1 The Hunter's Dream is off unless BB_HUNTERS_DREAM=1."""
         self.assertEqual(L.APP_DEFAULTS['online_pool'], 'supermedo')
         self.assertFalse(L.HUNTERS_DREAM_POOL)  # not offered since 1.9.7 (BB_HUNTERS_DREAM=1 shows it)
 
@@ -144,6 +145,9 @@ class PoolTests(unittest.TestCase):
             for settings, asks in cases:
                 self.assertEqual(L.needs_sign_in({'online': True, **settings}), asks, settings)
                 self.assertFalse(L.needs_sign_in({'online': False, **settings}))
+        self.assertTrue(L.needs_sign_in({'online': True, 'online_pool': 'seamless'}))
+        self.assertFalse(L.needs_sign_in({'online': True, 'online_pool': 'seamless', 'supermedo_npid': 'n',
+                                          'supermedo_pass': 'p'}))
 
     def test_each_service_keeps_its_own_account(self):
         """SuperMedo Server's account was in the shadNet boxes, which Seamless co-op writes too: one overwrote the
@@ -164,6 +168,24 @@ class PoolTests(unittest.TestCase):
             for pool, name in (('supermedo', 'medo'), ('huntersdream', 'hunter'), ('shadnet', 'seamless')):
                 self.assertEqual(L.pool_account({**settings, 'online_pool': pool}), name)
         self.assertEqual(L.pool_account({**L.APP_DEFAULTS, 'online_npid': 'seamless'}), '')
+
+    def test_seamless_co_op_plays_through_bbsc_with_the_supermedo_account(self):
+        """SuperMedo Seamless co-op: the seamless server with the SuperMedo account, started through BBSC's
+        bbsc-launch.exe (bbsc next to the launcher) with the port's own bb-probe.exe, and BBSC's game server."""
+        settings = {**L.APP_DEFAULTS, 'online': True, 'online_pool': 'seamless', 'supermedo_npid': 'medo',
+                    'supermedo_pass': 'mp'}
+        env = L.game_environment(settings)
+        self.assertEqual((env['BB_SHADNET_SERVER'], env['BB_SHADNET_WEBAPI'], env['BB_SHADNET_NPID'],
+                          env['BB_SHADNET_PASSWORD'], env['BB_COMMUNITY_SERVER']),
+                         ('seamless.supermedo.com:31313', 'http://seamless.supermedo.com:31315', 'medo', 'mp',
+                          'http://seamless.supermedo.com:20443'))
+        self.assertEqual(env['BB_PROBE'], str(L.PORT_DIR / 'bbsc' / 'bbsc-launch.exe'))
+        self.assertEqual(env['BBSC_EMULATOR'], str(L.PORT_DIR / 'bin' / 'bb-probe.exe'))
+        self.assertEqual(L.pool_account(settings), 'medo')
+        with mock.patch.object(L, 'BBSC_LAUNCH', mock.Mock(exists=lambda: True)):
+            self.assertEqual(L.settled_pool(settings), 'seamless')
+        with mock.patch.object(L, 'BBSC_LAUNCH', mock.Mock(exists=lambda: False)):  # a build without BBSC
+            self.assertEqual(L.settled_pool(settings), 'supermedo')
 
     def test_the_supermedo_account_leaves_the_shadnet_boxes_once(self):
         """Saved on SuperMedo Server up to beta 8: its account was in the shadNet boxes. Other pools' boxes are

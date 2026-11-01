@@ -35,6 +35,17 @@ def hunters_dream_notice():
 
 
 NOTES = {
+    '1.9.8 beta 2': (
+        None,
+        [('Online', [
+            "SuperMedo Seamless co-op (beta): BBSC's seamless co-op on SuperMedo's own seamless server, with your "
+            'SuperMedo account. Choose it on the Online page; everyone in a session picks it.',
+            'Parties: make a party code on the Online page and send it to your friends. While you are in a party, '
+            "your summon signs and your Beckoning Bell find only your party's hunters, with no level limit.",
+            'Back online by itself after a dropped connection, within a minute.',
+        ]), ('Fixes', [
+            'Two rare freezes fixed (the game could hang for good while loading areas or adding new shaders).',
+        ])]),
     '1.9.7': (
         hunters_dream_notice,
         [('Online', [

@@ -45,9 +45,9 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 VERSION = '1.9.8'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
-BETA = 1
+BETA = 2
 VERSION_TEXT = f'{VERSION} beta {BETA}' if BETA else VERSION
-BETA_PAGE = 'https://github.com/Bloodborne-Port-supermedo/demo-repository/releases/tag/v1.9.8-beta.1'
+BETA_PAGE = 'https://github.com/Bloodborne-Port-supermedo/bbport-supermedo/releases/tag/v1.9.8-beta.2'
 # The port's Discord application (discord.com/developers: its Application ID; an art asset named
 # "bloodborne" is the picture). Empty: no Discord status, and its setting is not shown.
 DISCORD_APPLICATION_ID = '1563260197835907232'
@@ -59,6 +59,12 @@ HUNTERS_DREAM_SERVER = 'https://thehuntersdream.com'
 # SuperMedo Server: the shadNet server (accounts, bells and summons) and the game server above,
 # both supermedo.com's own.
 SUPERMEDO_SERVER, SUPERMEDO_WEBAPI = 'np.supermedo.com:31313', 'http://np.supermedo.com:31315'
+# SuperMedo Seamless co-op (beta): BBSC's seamless co-op on supermedo.com's own seamless server, with the same
+# SuperMedo account (both servers share one account database). The game starts through BBSC's bbsc-launch.exe
+# (bbsc\ next to the launcher), which runs bin\bb-probe.exe with its mod; its game server speaks HTTP.
+SEAMLESS_SERVER, SEAMLESS_WEBAPI = 'seamless.supermedo.com:31313', 'http://seamless.supermedo.com:31315'
+SEAMLESS_GAME_SERVER = 'http://seamless.supermedo.com:20443'
+BBSC_LAUNCH = PORT_DIR / 'bbsc' / 'bbsc-launch.exe'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
 # The community site (install guide, FAQ, forum), linked from the side bar.
@@ -396,7 +402,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
                 'check_updates': True, 'save_backups': False, 'online': False, 'online_server': 'srv.shadps4.net:31313',
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
-                'online_custom_servers': False, 'supermedo_npid': '', 'supermedo_pass': '',
+                'online_custom_servers': False, 'supermedo_npid': '', 'supermedo_pass': '', 'party_key': '',
                 'online_community': COMMUNITY_SERVER, 'online_pool': 'supermedo', 'bridge_live_map': False,
                 'thd_online_id': '', 'thd_token': '',
                 # The setup guide ran (or the launcher was set up before it existed); a graphics card
@@ -857,6 +863,8 @@ def game_server(s):
         return community_address(s.get('online_community', ''))
     if s.get('online_pool') == 'huntersdream' and HUNTERS_DREAM_POOL:
         return HUNTERS_DREAM_SERVER
+    if s.get('online_pool') == 'seamless':
+        return SEAMLESS_GAME_SERVER
     return COMMUNITY_SERVER
 
 
@@ -892,6 +900,8 @@ def settled_pool(s, env=None):
     keeps its shadNet server."""
     pool = s.get('online_pool')
     if pool == 'huntersdream' and HUNTERS_DREAM_POOL:
+        return pool
+    if pool == 'seamless' and BBSC_LAUNCH.exists():
         return pool
     if started_by_bbsc(env) and ((pool == 'shadnet' and s.get('online_custom_servers')) or bbsc_server_saved(s, env)):
         return 'shadnet'
@@ -935,7 +945,7 @@ def pool_account(s):
     pool = chosen_pool(s)
     if pool == 'huntersdream':
         return str(s.get('thd_online_id', '')).strip() if s.get('thd_token') else ''
-    if pool == 'supermedo':
+    if pool in ('supermedo', 'seamless'):  # one account for both SuperMedo servers
         return str(s.get('supermedo_npid', '')).strip() if s.get('supermedo_pass') else ''
     return str(s.get('online_npid', '')).strip()
 
@@ -953,7 +963,7 @@ def signed_out_server(s):
 # the SuperMedo Server and The Hunter's Dream sign-ins are the launcher's own.
 SHADNET_KEYS = ('online_server', 'online_webapi', 'online_community', 'online_npid', 'online_password',
                 'online_custom_servers')
-OWN_ONLINE_KEYS = ('online_pool', 'supermedo_npid', 'supermedo_pass', 'thd_online_id', 'thd_token')
+OWN_ONLINE_KEYS = ('online_pool', 'supermedo_npid', 'supermedo_pass', 'party_key', 'thd_online_id', 'thd_token')
 
 
 def outside_online_changes(written, on_disk):
@@ -1053,6 +1063,30 @@ def shadnet_register(address, npid, password, email, timeout=15):
 
 def thd_open(request):
     return bbport_tls.urlopen(request, timeout=10)
+
+
+def party_call(call, body=None, key=''):
+    """A call to SuperMedo Server's parties (/party/v1/<call>): (HTTP status, its JSON answer). The key
+    comes from signin (the SuperMedo account) and stays in the settings (party_key)."""
+    request = urllib.request.Request(COMMUNITY_SERVER + '/party/v1/' + call, data=json.dumps(body or {}).encode(),
+                                     method='POST', headers={'Content-Type': 'application/json',
+                                                             'Authorization': 'Bearer ' + key,
+                                                             'User-Agent': f'bbport-launcher/{VERSION}'})
+    try:
+        with bbport_tls.urlopen(request, timeout=20) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, json.loads(error.read())
+        except ValueError:
+            return error.code, {'error': str(error)}
+
+
+def party_line(party):
+    """The party's hunters for the Online page: 'Alice (host, online) · Bob (offline)'."""
+    return ' · '.join('{} ({})'.format(m['name'], ', '.join(
+        ([_('host')] if m.get('host') else []) + [_('online') if m.get('online') else _('offline')]))
+        for m in party.get('members', []))
 
 
 def discord_sign_in(server, on_page, timeout=600):
@@ -1374,6 +1408,14 @@ def game_environment(s, graphics=None):
             env['BB_SHADNET_WEBAPI'] = SUPERMEDO_WEBAPI
             env['BB_SHADNET_NPID'] = str(s.get('supermedo_npid', '')).strip()
             env['BB_SHADNET_PASSWORD'] = str(s.get('supermedo_pass', ''))
+        if s.get('online_pool') == 'seamless':  # BBSC with the SuperMedo account on the seamless server
+            env['BB_SHADNET_SERVER'] = SEAMLESS_SERVER
+            env['BB_SHADNET_WEBAPI'] = SEAMLESS_WEBAPI
+            env['BB_SHADNET_NPID'] = str(s.get('supermedo_npid', '')).strip()
+            env['BB_SHADNET_PASSWORD'] = str(s.get('supermedo_pass', ''))
+            env['BB_COMMUNITY_SERVER'] = SEAMLESS_GAME_SERVER
+            env['BB_PROBE'] = str(BBSC_LAUNCH)
+            env['BBSC_EMULATOR'] = str(PORT_DIR / 'bin' / 'bb-probe.exe')
         if s.get('online_pool') == 'huntersdream' and HUNTERS_DREAM_POOL:
             # The engine's Hunter's Dream backend with the Discord-linked account (run.py sets
             # the game server and the backend's addresses).
@@ -3272,6 +3314,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         pools = ttk.Frame(f)
         ttk.Radiobutton(pools, text=_('SuperMedo Server (recommended)') if HUNTERS_DREAM_POOL else
                         _('SuperMedo Server'), variable=pool, value='supermedo').pack(side='left', padx=(0, 16))
+        if BBSC_LAUNCH.exists():
+            ttk.Radiobutton(pools, text=_('SuperMedo Seamless co-op (beta)'), variable=pool,
+                            value='seamless').pack(side='left', padx=(0, 16))
+        elif pool.get() == 'seamless':
+            pool.set('supermedo')
         if HUNTERS_DREAM_POOL:
             ttk.Radiobutton(pools, text=_("The Hunter's Dream (previous server)"), variable=pool,
                             value='huntersdream').pack(side='left', padx=(0, 16))
@@ -3286,6 +3333,9 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         pools.setting_key = 'online_pool'  # the search's words (bbport_search.WORDS)
         self.row(f, _('Play with'), pools, ' '.join(
             [_("SuperMedo Server (recommended): supermedo.com's own servers, with a free account made below.")] +
+            ([_('SuperMedo Seamless co-op (beta): BBSC seamless co-op (up to 5 hunters through deaths, lamps and '
+                'areas) on its own SuperMedo server, with the same account. Everyone in a session picks it.')]
+             if BBSC_LAUNCH.exists() else []) +
             ([_("The Hunter's Dream: the previous server, still here for now; connections there often drop.")]
              if HUNTERS_DREAM_POOL else []) +
             ([_("Own server: Seamless co-op's or a friend's private server, with its address and account.")]
@@ -3473,6 +3523,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         button = self.row(f, '', ttk.Button(f, text=_('Create account'), command=create_account))
         self.index_entry(button, _('Create account'), _('New SuperMedo account'), key='button:create_account')
         sign_up.grid(row=self.next_row(f), column=1, sticky='we', pady=(6, 0))
+        self.build_party(f, npid_var, password_var)
         group('supermedo')
         self.section(f, _('Game server (messages, bloodstains, ghosts)'))
         community = self.var('online_community', 'app')
@@ -3499,6 +3550,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             pool_name = pool.get()
             own = custom.get()
             address, webapi = (SUPERMEDO_SERVER, SUPERMEDO_WEBAPI) if pool_name == 'supermedo' else \
+                (SEAMLESS_SERVER, SEAMLESS_WEBAPI) if pool_name == 'seamless' else \
                 shadnet_servers({**values, 'online_custom_servers': own})
             game = game_server({**values, 'online_pool': pool_name, 'online_custom_servers': own})
             supermedo_name = npid_var.get().strip() if password_var.get() else ''
@@ -3514,7 +3566,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                         _('Not signed in: use "Sign in with Discord" above.'))
                     else:
                         text = server_check(address, webapi, game)
-                    if pool_name == 'supermedo':
+                    if pool_name in ('supermedo', 'seamless'):
                         text += '\n' + (_('Signed in as {}').format(supermedo_name) if supermedo_name else
                                         _('Not signed in: sign in with Discord, or create an account below.'))
                     if pool_name == 'shadnet' and own and values['online_webapi'].strip() \
@@ -3534,7 +3586,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         show_code()  # hidden until a sign-in shows one; its row stays reserved (rows are counted above)
         shown = {'shadnet': {'account', 'shadnet', 'servers', 'upnp'},
                  'huntersdream': {'huntersdream', 'upnp'},
-                 'supermedo': {'supermedo', 'upnp'}}
+                 'supermedo': {'supermedo', 'upnp'},
+                 'seamless': {'supermedo', 'upnp'}}
 
         def show_pool(*_args):
             if pool.get() == 'huntersdream' and not HUNTERS_DREAM_POOL:
@@ -3565,6 +3618,98 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             choices = [p for p, wanted in shown.items() if name in wanted]  # (pools is the "Play with" frame)
             if len(choices) == 1 and only[choices[0]]:
                 self.index_only(widgets, only[choices[0]], 'online_pool')
+
+    def build_party(self, f, npid_var, password_var):
+        """Party (play with friends): a party code from SuperMedo Server (parties.go there). While in a party,
+        the hunter's signs and Beckoning Bell find only the party's hunters (the server gives them the party's
+        summon password)."""
+        ttk = self.ttk
+        key = self.var('party_key', 'app')
+        self.section(f, _('Party (play with friends)'))
+        line = ttk.Label(f, text=_('Not in a party.'), justify='left', wraplength=self.px(560))
+        self.row(f, _('Your party'), line,
+                 _("While you are in a party, your summon signs and your Beckoning Bell find only your party's "
+                   'hunters, with no level limit. Up to 4 hunters.'), key='party_key')
+        code_row = ttk.Frame(f)
+        code = ttk.Label(code_row, text='', style='Code.TLabel')
+        code.pack(side='left')
+
+        def copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(code.cget('text'))
+        ttk.Button(code_row, text=_('Copy'), command=copy).pack(side='left', padx=(14, 0))
+        ttk.Button(code_row, text=_('New code'), command=lambda: act('new_code')).pack(side='left', padx=(8, 0))
+        self.row(f, _('Party code'), code_row,
+                 _('Send this code to your friends. A new code stops the old one; friends already in stay.'),
+                 key='party_key')
+        members = ttk.Frame(f)
+        self.row(f, '', members)
+        join_row = ttk.Frame(f)
+        typed = self.tk.StringVar(value='')
+        ttk.Entry(join_row, textvariable=typed, width=16).pack(side='left')
+        ttk.Button(join_row, text=_('Join'), command=lambda: act('join', {'code': typed.get().strip()})).pack(
+            side='left', padx=(8, 0))
+        self.row(f, _('Join a party'), join_row, _('Paste the code a friend sent you (SM-XXXX-XXXX).'), key='party_key')
+        buttons = ttk.Frame(f)
+        ttk.Button(buttons, text=_('Make party code'), command=lambda: act('host')).pack(side='left')
+        leave = ttk.Button(buttons, text=_('Leave party'), command=lambda: act('leave'))
+        leave.pack(side='left', padx=(8, 0))
+        ttk.Button(buttons, text=_('Refresh'), command=lambda: act('status')).pack(side='left', padx=(8, 0))
+        self.row(f, '', buttons)
+        said = ttk.Label(f, text='', style='Muted.TLabel', justify='left', wraplength=self.px(560))
+        said.grid(row=self.next_row(f), column=1, sticky='w', pady=(4, 0))
+
+        def show(answer):
+            party = answer.get('party')
+            for child in members.winfo_children():
+                child.destroy()
+            if not party:
+                line.configure(text=_('Not in a party.'))
+                code_row.grid_remove()
+                leave.state(['disabled'])
+                return
+            line.configure(text=party_line(party))
+            leave.state(['!disabled'])
+            if party.get('code'):  # the host's: copy it, and kick a hunter
+                code.configure(text=party['code'])
+                code_row.grid()
+                for m in party.get('members', []):
+                    if not m.get('host'):
+                        ttk.Button(members, text=_('Kick') + ' ' + m['name'],
+                                   command=lambda n=m['name']: act('kick', {'member': n})).pack(side='left', padx=(0, 8))
+            else:
+                code_row.grid_remove()
+
+        def act(call, body=None):
+            name, password = npid_var.get().strip(), password_var.get()
+            if not name or not password:
+                said.configure(text=_('Sign in to your SuperMedo account first (above).'))
+                return
+            said.configure(text=_('Checking…'))
+            stored = key.get()
+
+            def work():
+                try:
+                    status, answer = party_call(call, body, stored) if stored else (401, {})
+                    if status == 401:  # no key yet, or an old one: sign in with the account once
+                        status, signed = party_call('signin', {'name': name, 'password': password})
+                        if status != 200:
+                            raise ValueError(signed.get('error', status))
+                        self.ui_calls.put(lambda k=signed['key']: (key.set(k), self.collect()))
+                        status, answer = party_call(call, body, signed['key'])
+                    if status != 200:
+                        raise ValueError(answer.get('error', status))
+                except (OSError, ValueError) as error:
+                    self.ui_calls.put(lambda e=error: said.configure(text=_('SuperMedo Server said: {}').format(e)))
+                    return
+                self.ui_calls.put(lambda: (show(answer), said.configure(text='')))
+            threading.Thread(target=work, daemon=True).start()
+
+        code_row.grid_remove()
+        leave.state(['disabled'])
+        npid_var.trace_add('write', lambda *_a: key.set(''))  # another account: its own key
+        if npid_var.get().strip() and password_var.get() and key.get():
+            self.root.after(500, lambda: act('status'))
 
     def build_mods(self):
         f = self.scrolled_page('mods', _('Mods & patches', 'Моды и патчи'),
@@ -5355,7 +5500,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.show('online')
                 return
             online.set(False)
-        if online.get() and pool_name == 'supermedo' and not self.account_name():
+        if online.get() and pool_name in ('supermedo', 'seamless') and not self.account_name():
             # Online without an account was offline without a word (a new player, the setup's default).
             if self.messagebox.askyesno(
                     'Bloodborne', _('To play online with SuperMedo Server, sign in with Discord or make a free '
@@ -6273,7 +6418,7 @@ def needs_sign_in(settings):
     game would stay offline without a word. A start from Steam or a shortcut opens the launcher, whose Play asks."""
     if not settings.get('online') or pool_account(settings):
         return False
-    return chosen_pool(settings) in ('supermedo', 'huntersdream')
+    return chosen_pool(settings) in ('supermedo', 'huntersdream', 'seamless')
 
 
 def custom_output(size, settings):

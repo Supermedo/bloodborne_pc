@@ -1238,6 +1238,8 @@ from bbport_lang_cpu import TRANSLATIONS as CPU_TRANSLATIONS  # noqa: E402
 from bbport_lang_messages import TRANSLATIONS as MESSAGES_TRANSLATIONS  # noqa: E402
 from bbport_lang_tls import TRANSLATIONS as TLS_TRANSLATIONS  # noqa: E402
 from bbport_lang_supermedo import TRANSLATIONS as SUPERMEDO_TRANSLATIONS  # noqa: E402
+from bbport_lang_seamless import TRANSLATIONS as SEAMLESS_TRANSLATIONS  # noqa: E402
+from bbport_lang_party import TRANSLATIONS as PARTY_TRANSLATIONS  # noqa: E402
 from bbport_lang_sharp_ui import TRANSLATIONS as SHARP_UI_TRANSLATIONS  # noqa: E402
 from bbport_fg401 import TRANSLATIONS as FG401_TRANSLATIONS  # noqa: E402
 from bbport_fsr411 import TRANSLATIONS as FSR411_SUPPORT_TRANSLATIONS
@@ -1283,6 +1285,8 @@ def table(language):
         _tables[language].update(MESSAGES_TRANSLATIONS.get(language, {}))
         _tables[language].update(TLS_TRANSLATIONS.get(language, {}))
         _tables[language].update(SUPERMEDO_TRANSLATIONS.get(language, {}))
+        _tables[language].update(SEAMLESS_TRANSLATIONS.get(language, {}))
+        _tables[language].update(PARTY_TRANSLATIONS.get(language, {}))
         _tables[language].update(SHARP_UI_TRANSLATIONS.get(language, {}))
         _tables[language].update(FG401_TRANSLATIONS.get(language, {}))
         _tables[language].update(FSR411_SUPPORT_TRANSLATIONS.get(language, {}))

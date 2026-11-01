@@ -106,6 +106,9 @@ mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
+# BBSC (seamless co-op, github.com/Classmg22/BBSC, GPL-2.0): its launcher, mod and notices from out/bbsc,
+# for the Online page's SuperMedo Seamless co-op; left out when out/bbsc isn't there.
+if [[ -f out/bbsc/bbsc-launch.exe ]]; then cp -r out/bbsc "$dest/bbsc"; fi
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
 # (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
