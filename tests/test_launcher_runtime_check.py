@@ -1,6 +1,7 @@
 """The packaging gate must reject broken bundles, including with Python -O."""
 from paths import ROOT
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
@@ -101,8 +102,55 @@ class RuntimeCheckTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'did not complete'):
                 C.check_launcher(exe, SCRIPT)
             run.side_effect = subprocess.TimeoutExpired([], 30)
-            with self.assertRaises(subprocess.TimeoutExpired):
+            with self.assertRaisesRegex(RuntimeError, 'timed out after 30 seconds'):
                 C.check_launcher(exe, SCRIPT)
+
+    def test_launcher_timeout_keeps_partial_output_and_command(self):
+        exe = self.other / 'Bloodborne.exe'
+        exe.write_bytes(b'fixture')
+        for stdout, stderr in ((b'partial stdout\n', b'partial stderr \xff'),
+                               ('text stdout\n', 'text stderr'), (None, None)):
+            with self.subTest(stdout=stdout), mock.patch.object(C, 'check'), \
+                    mock.patch.object(C.subprocess, 'run') as run:
+                run.side_effect = subprocess.TimeoutExpired(['launcher'], 2, output=stdout, stderr=stderr)
+                with self.assertRaisesRegex(RuntimeError, 'timed out after 2 seconds') as error:
+                    C.check_launcher(exe, SCRIPT, timeout=2)
+                message = str(error.exception)
+                self.assertIn('An error dialog may be blocking startup', message)
+                self.assertIn('rerun the command manually', message)
+                self.assertIsInstance(error.exception.__cause__, subprocess.TimeoutExpired)
+                self.assertEqual(error.exception.__cause__.cmd, ['launcher'])
+                if stdout:
+                    self.assertIn('stdout', message)
+                    self.assertIn('stderr', message)
+                if isinstance(stderr, bytes):
+                    self.assertIn('\ufffd', message)
+
+    def test_windows_launcher_gets_only_windows_tools_on_path(self):
+        exe = self.other / 'Bloodborne.exe'
+        exe.write_bytes(b'fixture')
+        windows = self.own / 'Windows'
+        original_path = 'compiler-and-python-tools'
+        with mock.patch.object(C, 'check'), mock.patch.object(C.subprocess, 'run') as run, \
+                mock.patch.object(C.sys, 'platform', 'win32'), \
+                mock.patch.dict(os.environ, {'SystemRoot': str(windows), 'PATH': original_path,
+                                             'RUNTIME_CHECK_TEST': 'preserved'}):
+            run.return_value = subprocess.CompletedProcess([], 0, C.PASS + '\n', '')
+            C.check_launcher(exe, SCRIPT)
+            child = run.call_args.kwargs['env']
+            self.assertEqual(child['PATH'].split(os.pathsep), [str(windows / 'System32'), str(windows)])
+            self.assertEqual(child['RUNTIME_CHECK_TEST'], 'preserved')
+            self.assertEqual(os.environ['PATH'], original_path)
+
+    def test_non_windows_launcher_preserves_path(self):
+        exe = self.other / 'Bloodborne.exe'
+        exe.write_bytes(b'fixture')
+        with mock.patch.object(C, 'check'), mock.patch.object(C.subprocess, 'run') as run, \
+                mock.patch.object(C.sys, 'platform', 'linux'), \
+                mock.patch.dict(os.environ, {'PATH': 'system-tools:build-tools'}):
+            run.return_value = subprocess.CompletedProcess([], 0, C.PASS + '\n', '')
+            C.check_launcher(exe, SCRIPT)
+            self.assertEqual(run.call_args.kwargs['env']['PATH'], os.environ['PATH'])
 
     def test_actual_launcher_success_and_missing_inputs(self):
         exe = self.other / 'Bloodborne.exe'
@@ -114,7 +162,7 @@ class RuntimeCheckTests(unittest.TestCase):
         with mock.patch.object(C, 'check') as check, mock.patch.object(C.subprocess, 'run') as run:
             run.return_value = subprocess.CompletedProcess([], 0, C.PASS + '\n', '')
             C.check_launcher(exe, SCRIPT)
-            check.assert_called_once_with(exe.parent / '_internal')
+            check.assert_called_once_with(exe.resolve().parent / '_internal')
             self.assertEqual(run.call_args.kwargs['timeout'], 30)
             self.assertEqual(run.call_args.args[0], [str(exe.resolve()), '--script', str(SCRIPT.resolve())])
 

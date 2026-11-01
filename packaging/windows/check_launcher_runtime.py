@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Frozen console smoke check. No network, launcher window or saved settings."""
 from pathlib import Path
+import os
 import subprocess
 import sys
 import traceback
@@ -88,9 +89,22 @@ def check_launcher(executable, script, timeout=30):
     require(executable.is_file(), 'Launcher executable missing')
     require(script.is_file(), 'Runtime check script missing')
     check(executable.parent / '_internal')
-    result = subprocess.run([str(executable), '--script', str(script)], cwd=executable.parent,
-                            capture_output=True, text=True, encoding='utf-8', errors='replace',
-                            timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    env = os.environ.copy()
+    if sys.platform == 'win32':
+        # The launcher must work without MSYS2 or the build PC's Python on PATH.
+        windows = Path(os.environ['SystemRoot'])
+        env['PATH'] = os.pathsep.join((str(windows / 'System32'), str(windows)))
+    try:
+        result = subprocess.run([str(executable), '--script', str(script)], cwd=executable.parent,
+                                capture_output=True, encoding='utf-8', errors='replace', env=env,
+                                timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired as exc:
+        output = ''.join(part.decode('utf-8', errors='replace') if isinstance(part, bytes) else part or ''
+                         for part in (exc.stdout, exc.stderr))
+        raise RuntimeError(f'Actual launcher runtime check timed out after {timeout} seconds. '
+                           'An error dialog may be blocking startup; '
+                           'rerun the command manually to inspect it.'
+                           f'\nCaptured output:\n{output}') from exc
     require(result.returncode == 0,
             f'Actual launcher runtime check failed ({result.returncode}): {result.stdout}{result.stderr}')
     require(PASS in result.stdout.splitlines(), 'Actual launcher did not complete its runtime check')
