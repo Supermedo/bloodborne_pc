@@ -6,7 +6,8 @@
 // a ring of 9 files. The one taken when frames stopped keeps its file until frames stop again
 // (NextSnapshotFile); the others take the remaining 8 in turn. The log gets a line when frames
 // stop and when they come back. BB_HANG_SNAPSHOTS=0 turns it off, =2 also writes a snapshot every
-// 20 s, to compare a hang with.
+// 20 s, to compare a hang with. Once a minute the log gets the frames shown, the longest gap between
+// two of them and how many gaps were over 33 ms.
 
 #include "bbport_hang.h"
 
@@ -27,6 +28,8 @@ using Clock = std::chrono::steady_clock;
 
 std::atomic<Clock::rep> last_flip{0};
 std::atomic<unsigned long long> flips{0};
+std::atomic<Clock::rep> worst_gap{0};
+std::atomic<unsigned> long_gaps{0};
 std::atomic<std::uintptr_t> image_base{0};
 std::atomic<std::uint64_t> image_size{0};
 
@@ -72,7 +75,8 @@ std::string Write(const char* reason, bool stopped) {
 
 void Watch() {
     using namespace std::chrono_literals;
-    auto periodic = Clock::now();
+    auto periodic = Clock::now(), minute = periodic;
+    unsigned long long minute_flips = flips.load(std::memory_order_relaxed);
     const char* setting = std::getenv("BB_HANG_SNAPSHOTS");
     const bool periodic_stacks = setting && setting[0] == '2';
     Clock::time_point hang_snapshot{};
@@ -103,6 +107,17 @@ void Watch() {
             Write("periodic", false);
             periodic = Clock::now();
         }
+        if (const auto now = Clock::now(); now - minute >= 60s) {
+            const unsigned long long shown = flips.load(std::memory_order_relaxed);
+            const double seconds = std::chrono::duration<double>(now - minute).count();
+            const auto worst = Clock::duration(worst_gap.exchange(0, std::memory_order_relaxed));
+            std::printf("Frames: %llu in %.0f s (%.1f FPS), worst %.1f ms, %u over 33 ms\n",
+                        shown - minute_flips, seconds, double(shown - minute_flips) / seconds,
+                        std::chrono::duration<double, std::milli>(worst).count(),
+                        long_gaps.exchange(0, std::memory_order_relaxed));
+            minute = now;
+            minute_flips = shown;
+        }
     }
 }
 #endif
@@ -110,7 +125,17 @@ void Watch() {
 
 namespace BbHang {
 void OnFlip() {
-    last_flip.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+    const Clock::rep now = Clock::now().time_since_epoch().count();
+    const Clock::rep before = last_flip.exchange(now, std::memory_order_relaxed);
+    if (before) {
+        const Clock::rep gap = now - before;
+        if (gap > worst_gap.load(std::memory_order_relaxed)) {
+            worst_gap.store(gap, std::memory_order_relaxed);
+        }
+        if (Clock::duration(gap) > std::chrono::milliseconds(33)) {
+            long_gaps.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     flips.fetch_add(1, std::memory_order_relaxed);
 #ifdef _WIN32
     std::call_once(started, [] {
