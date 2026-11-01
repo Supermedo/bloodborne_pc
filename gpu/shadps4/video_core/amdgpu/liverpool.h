@@ -251,6 +251,7 @@ private:
         u32 ce_compare_count{};
         u32 ce_count{};
         u32 de_count{};
+        bool ce_waits_for_de{}; ///< the constant engine is in WaitOnDeCounterDiff
         static std::array<u8, 48_KB> constants_heap;
     } cblock{};
 

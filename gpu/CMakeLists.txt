@@ -371,6 +371,10 @@ target_include_directories(fsr4vk-post-test PRIVATE shadps4)
 target_compile_options(fsr4vk-post-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(fsr4vk-post-test PRIVATE PkgConfig::XXHASH)
 
+add_executable(flip-tail-test EXCLUDE_FROM_ALL ../tests/test_flip_tail.cpp)
+target_compile_options(flip-tail-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(flip-tail-test PRIVATE ..)
+
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)
