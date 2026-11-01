@@ -444,12 +444,14 @@ class SearchMixin:
         entry.bind('<Return>', lambda _e: self.search_go())
         entry.bind('<Escape>', lambda _e: (self.search_var.set(''), self.search_close(), self.root.focus_set()))
         self.root.bind_all('<Control-f>', self.search_focus)
+        self.root.bind_all('<Control-F>', self.search_focus)  # with Caps Lock on
         box.configure(bg=theme.BORDER)
 
     def search_focus(self, _event=None):
         """Ctrl+F: the search field; not while a key is being bound on the Controls page (Ctrl+F
-        can be a binding) or while the setup guide covers the window."""
-        if getattr(self, 'remap_listening', False) or getattr(self, 'guide', None):
+        can be a binding) or while the setup guide or What's new covers the window."""
+        if getattr(self, 'remap_listening', False) or getattr(self, 'guide', None) or \
+                getattr(self, 'news_panel', None):
             return None
         self.search_field.focus_set()
         self.search_field.select_range(0, 'end')

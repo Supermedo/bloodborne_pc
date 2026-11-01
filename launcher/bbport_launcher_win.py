@@ -5391,7 +5391,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if self.messagebox.askyesno(
                     'Bloodborne', _('To play online with SuperMedo Server, sign in with Discord or make a free '
                                     'account first.') + '\n\n' + _('Sign in now? (No: play offline this time.)')):
-                self.show('online')
+                self.show_online_to_sign_in()
                 return
             online.set(False)
         if online.get() and pool_name == 'shadnet' and '@' in npid.get():
@@ -5463,6 +5463,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.root.after(5000, lambda: self.process and self.close())
         elif self.setting('on_play') == 'minimize':
             self.root.after(5000, lambda: self.process and self.root.state() == 'normal' and self.minimize())
+
+    def show_online_to_sign_in(self):
+        """The Online page in view: at a version's first start What's new lies over the whole window (a start from
+        Steam asks over it)."""
+        if getattr(self, 'news_panel', None):
+            self.news_panel.close()
+        self.show('online')
 
     def auto_backup(self):
         """Before a start: the saves backed up when they changed since the last backup (never in the way)."""
