@@ -13,7 +13,7 @@ public:
     ~Fsr412Driver();
     bool Record(Fsr4Upscaler::Frame&);
     const std::string& Error() const;
-    /// Queries the original provider on this device without allocating an FSR context.
+    /// Queries the public SDK provider on this device without allocating an FSR context.
     static bool Available(const Instance&, int* status = nullptr);
     static std::filesystem::path RuntimeDirectory();
 private:

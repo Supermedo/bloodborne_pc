@@ -53,9 +53,7 @@ struct Fsr412Driver::Impl {
         create.flags |= f.hdr ? FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE : FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
         create.maxRenderSize = {f.render_width, f.render_height}; create.maxUpscaleSize = {f.output.width, f.output.height};
         FsrSdk24::ConfigureDiagnostics(create);
-        const auto rc = api->functions.CreateContext(&context, &create.header, nullptr);
-        if (rc || !context) throw std::runtime_error("SDK 2.4 Vulkan context returned " + std::to_string(rc));
-        selected = FsrSdk24::Verify(*api, &context, selected);
+        selected = FsrSdk24::CreateVerified(*api, context, &create.header, selected);
         FsrSdk24::LogMemory(*api, &context, "AMD Vulkan");
         out_width=f.output.width;out_height=f.output.height;context_rw=f.render_width;context_rh=f.render_height;context_hdr=f.hdr;
         std::printf("FSR 4.1.2 AMD Vulkan: ACTIVE %s, %ux%u -> %ux%u, %s; SDK 2.4 public API\n",
@@ -237,7 +235,7 @@ struct Fsr412Driver::Impl {
             while(ticks.size()>=3){scheduler.Wait(ticks.front());ticks.pop_front();}
             auto f=Prepare(input);
             if(f.motion.width!=f.render_width||f.motion.height!=f.render_height)
-                throw std::runtime_error("AMD Vulkan prototype requires render-sized motion vectors");
+                throw std::runtime_error("FSR 4.1.2 AMD Vulkan requires render-sized motion vectors");
             ffxDispatchDescUpscale d{};d.header.type=FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
             d.commandList=reinterpret_cast<void*>(VkCommandBuffer(f.cmdbuf));
             d.color=Resource(f.color,FFX_API_SURFACE_FORMAT_R16G16B16A16_FLOAT);
@@ -254,7 +252,7 @@ struct Fsr412Driver::Impl {
             Transition(f.cmdbuf,f,false);
             if(rc)throw std::runtime_error("AMD Vulkan 4.1.2 dispatch returned "+std::to_string(rc));
             ticks.push_back(scheduler.CurrentTick());error.clear();return true;
-        }catch(const std::exception&e){error=e.what();std::printf("FSR 4.1.2 Vulkan driver: %s\n",error.c_str());return false;}
+        }catch(const std::exception&e){error=e.what();std::printf("FSR 4.1.2 AMD Vulkan SDK: %s\n",error.c_str());return false;}
     }
 };
 Fsr412Driver::Fsr412Driver(const Instance&i,Scheduler&s):impl(std::make_unique<Impl>(i,s)){}

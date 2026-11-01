@@ -6,6 +6,17 @@
 
 namespace {
 int mode{};
+int create_mode{}, creates{}, destroys{};
+ffxReturnCode_t Create(ffxContext* context, ffxCreateContextDescHeader*, const ffxAllocationCallbacks*) {
+    ++creates;
+    *context = create_mode == 1 || create_mode == 3 ? nullptr : reinterpret_cast<void*>(1);
+    return create_mode >= 2 ? FFX_API_RETURN_ERROR : FFX_API_RETURN_OK;
+}
+ffxReturnCode_t Destroy(ffxContext* context, const ffxAllocationCallbacks*) {
+    ++destroys;
+    *context = nullptr;
+    return FFX_API_RETURN_OK;
+}
 ffxReturnCode_t Query(ffxContext* context, ffxQueryDescHeader* desc) {
     if (context) {
         if (desc->type == FFX_API_QUERY_DESC_TYPE_UPSCALE_GPU_MEMORY_USAGE) {
@@ -77,5 +88,29 @@ int main(int argc, char** argv) {
     for (mode = 1; mode <= 2; ++mode) Reject([&]{ FsrSdk24::Select(api, nullptr); });
     for (mode = 3; mode <= 4; ++mode) Reject([&]{ FsrSdk24::Verify(api, &context, selected); });
     mode = 5; Reject([&]{ FsrSdk24::Select(api, nullptr); });
+    api.functions.CreateContext = Create;
+    api.functions.DestroyContext = Destroy;
+    ffxCreateContextDescHeader description{};
+    context = nullptr;
+    mode = 0;
+    assert(FsrSdk24::CreateVerified(api, context, &description, selected).id == selected.id);
+    assert(context && creates == 1 && destroys == 0);
+    Reject([&]{ FsrSdk24::CreateVerified(api, context, &description, selected); });
+    assert(creates == 1 && destroys == 0); // Never replace a live context.
+    Destroy(&context, nullptr);
+    for (int failure_mode : {3, 4}) {
+        mode = failure_mode;
+        const int before = destroys;
+        Reject([&]{ FsrSdk24::CreateVerified(api, context, &description, selected); });
+        assert(!context && destroys == before + 1); // Wrong ID/name: destroy before publishing.
+    }
+    mode = 0;
+    for (int failure_mode : {1, 2, 3}) {
+        create_mode = failure_mode;
+        const int before = destroys;
+        Reject([&]{ FsrSdk24::CreateVerified(api, context, &description, selected); });
+        assert(!context && destroys == before + (create_mode == 2 ? 1 : 0));
+    }
+    std::puts("PASS: verified context publication, rejected live replacement and failure cleanup");
     std::puts("PASS: SDK provider IDs, names, bounded enumeration and context verification");
 }

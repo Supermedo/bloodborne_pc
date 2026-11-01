@@ -69,7 +69,7 @@ struct NativeFsr411::Impl {
     ffxContext context{};
     const FsrSdk24::Api* sdk24{};
     FsrSdk24::Version sdk_selected{};
-    // Public SDK contract: Create descriptor pointers remain live until DestroyContext.
+    // Keep the creation chain together; descriptor pointers are needed through CreateContext.
     ffxCreateBackendDX12Desc sdk_backend{};
     ffxOverrideVersion sdk_override{};
     ffxCreateContextDescUpscaleVersion sdk_version{};
@@ -274,11 +274,10 @@ struct NativeFsr411::Impl {
             sdk_selected = FsrSdk24::Verify(*sdk24, &context, sdk_selected);
             FsrSdk24::LogMemory(*sdk24, &context, "AMD DX12");
             provider.versionName = sdk_selected.name.c_str();
-            std::printf("FSR 4.1.2 AMD DX12: SDK 2.4 public API; provider %s\n", provider.versionName);
         }
-        std::printf("FSR %s native: ACTIVE %s, %ux%u -> %ux%u, %s\n",driver412?"4.1.2":"4.1.1", provider.versionName,
+        std::printf("FSR %s native: ACTIVE %s, %ux%u -> %ux%u, %s%s\n",driver412?"4.1.2":"4.1.1", provider.versionName,
                     config.render_width, config.render_height, config.output_width, config.output_height,
-                    config.hdr ? "HDR" : "sRGB");
+                    config.hdr ? "HDR" : "sRGB", driver412 ? "; SDK 2.4 public API" : "");
         formats = {DXGI_FORMAT(config.color_format), DXGI_FORMAT(config.depth_format),
                    DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
         for (unsigned i = 0; i < textures.size(); ++i) {

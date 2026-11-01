@@ -12,6 +12,14 @@
 #include "ffx_api_loader.h"
 #include "ffx_upscale.h"
 
+#ifndef FFX_API_EFFECT_COUNT
+#error "sdk24_upscaling.h requires the SDK 2.4 headers in gpu/fsr24/sdk"
+#endif
+static_assert(FFX_API_BACKEND_ID_DX12 == 0x00000000u &&
+              FFX_API_BACKEND_ID_VK == 0x01000000u &&
+              FFX_API_BACKEND_ID_XBOX == 0x02000000u,
+              "SDK 2.4 backend IDs required; check translation-unit include paths");
+
 // Public FFX exports from the unmodified SDK 2.4 upscaler DLL. Load the effect
 // explicitly: the central loader reuses an already loaded DLL with the same
 // name, which could be our retained 4.1.1 runtime. Never use internal driver ABI.
@@ -83,6 +91,11 @@ inline const Api& Runtime(bool dx12) {
         throw Error("runtime", "SDK 2.4 upscaler API exports missing");
     }
     api = {module, functions, path}; // Contexts may outlive callers; retain verified modules until exit.
+    const auto override_path = _wgetenv(L"BB_TEST_FSR24_DIR");
+    const auto utf8 = path.u8string();
+    const std::string module_path(utf8.begin(), utf8.end());
+    std::printf("FSR SDK 2.4 runtime: %s, source=%s, module=%s\n", dx12 ? "AMD DX12" : "AMD Vulkan",
+        override_path && *override_path ? "BB_TEST_FSR24_DIR" : "package", module_path.c_str());
     return api;
 }
 inline Version Select(const Api& api, void* device) {
@@ -113,6 +126,25 @@ inline Version Verify(const Api& api, ffxContext* context, const Version& select
         !Is412(query.versionName) || query.versionId != selected.id)
         throw Error("provider", "SDK 2.4 context did not select the requested FSR 4.1.2 provider");
     return {query.versionId, query.versionName};
+}
+// Publish only a verified, newly created context. No dispatch has used it yet,
+// so failure cleanup here needs no wait on previously recorded GPU work.
+inline Version CreateVerified(const Api& api, ffxContext& destination,
+                              ffxCreateContextDescHeader* description,
+                              const Version& selected) {
+    if (destination) throw Error("runtime", "SDK 2.4 context is already initialized");
+    ffxContext created{};
+    try {
+        const auto rc = api.functions.CreateContext(&created, description, nullptr);
+        if (rc != FFX_API_RETURN_OK || !created)
+            throw Error("runtime", "SDK 2.4 context creation returned " + std::to_string(rc));
+        auto verified = Verify(api, &created, selected);
+        destination = created;
+        return verified;
+    } catch (...) {
+        if (created) api.functions.DestroyContext(&created, nullptr);
+        throw;
+    }
 }
 inline void LogMemory(const Api& api, ffxContext* context, const char* backend) {
     FfxApiEffectMemoryUsage memory{};
