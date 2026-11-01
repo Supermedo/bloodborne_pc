@@ -109,16 +109,44 @@ Dlss* Dlss::Get() {
     return dlss;
 }
 
+// Why Windows did not load the bridge, for the log and the launcher's Help: Smart App Control or an app
+// control policy (4551, 4556-4559), an antivirus (225, 226), or a file missing beside it (2, 126).
+static std::string LoadProblem(DWORD error) {
+    const char* cause = "bbport_dlss.dll could not be loaded";
+    if (error == 4551 || (error >= 4556 && error <= 4559)) {
+        cause = "Windows blocked bbport_dlss.dll (Smart App Control or an app control policy)";
+    } else if (error == 225 || error == 226) {
+        cause = "an antivirus blocked bbport_dlss.dll";
+    } else if (error == 2 || error == 126) {
+        cause = "bbport_dlss.dll or a file it needs is missing";
+    } else if (error == 193) {
+        cause = "bbport_dlss.dll is damaged or not a 64-bit program";
+    }
+    char text[160];
+    std::snprintf(text, sizeof(text), "%s, error %lu", cause, static_cast<unsigned long>(error));
+    return text;
+}
+
 Dlss::Dlss() : impl{std::make_unique<Impl>()} {
     const auto directory = ExecutableDirectory();
-    impl->module = LoadLibraryW((directory / BridgeName).c_str());
+    // BB_TEST_DLSS_LOAD_ERROR=N: a test start as if Windows refused the bridge with error N.
+    const char* test_error = std::getenv("BB_TEST_DLSS_LOAD_ERROR");
+    if (test_error && test_error[0]) {
+        SetLastError(static_cast<DWORD>(std::strtoul(test_error, nullptr, 10)));
+    } else {
+        impl->module = LoadLibraryW((directory / BridgeName).c_str());
+    }
+    if (!impl->module) {
+        impl->Disable(LoadProblem(GetLastError()));
+        return;
+    }
     const auto get_api =
         impl->module ? reinterpret_cast<BbDlssGetApiFn>(GetProcAddress(impl->module, "BbDlssGetApi"))
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
     // ABI 1 bridges (DLSS only) still work; Frame Generation needs ABI 2.
     if (!impl->api || impl->api->abi < 1 || impl->api->abi > BBPORT_DLSS_BRIDGE_ABI) {
-        impl->Disable("bbport_dlss.dll is missing or from another version");
+        impl->Disable("bbport_dlss.dll is from another version");
         return;
     }
     // NGX writes its logs and model updates here: beside the saves and shader caches.

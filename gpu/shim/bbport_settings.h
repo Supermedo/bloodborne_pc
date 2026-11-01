@@ -166,6 +166,10 @@ struct Values {
     /// DLSS (bbport_dlss.dll, NVIDIA RTX) is ready, or why not (null before the device exists).
     std::atomic<bool> dlss_supported{false};
     std::atomic<const char*> dlss_problem{nullptr};
+    /// DLSS (upscaler, frame generation) was chosen but this start runs FSR 3.1 instead: Save()
+    /// keeps DLSS in bbport.ini until the player picks another one in the menu, so a start with
+    /// the DLL blocked or missing does not lose the choice for good.
+    std::atomic<bool> dlss_upscaler_fallback{false}, dlss_frame_gen_fallback{false};
     /// Frame generation and the frames per game frame (2x with FSR 3.1, up to 4x with DLSS on
     /// RTX 50). dlssg_max_multiplier: 1 without DLSS Frame Generation.
     std::atomic<int> frame_gen{FrameGenOff};

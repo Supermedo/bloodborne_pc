@@ -264,6 +264,7 @@ void ConfigureFg401Support(bool available, const char* problem, int provider) {
 void SelectFrameGen(int provider) {
     auto& v = Get();
     v.frame_gen = provider;
+    v.dlss_frame_gen_fallback = false;
     v.fg401_fallback = -1;
     v.fg401_fallback_source = -1;
     v.frame_gen_problem = nullptr;
@@ -285,6 +286,7 @@ void FrameGenFailure(int provider, const char* problem) {
         static std::string kept;
         kept = problem ? problem : "Frame generation failed.";
         v.frame_gen_problem = kept.c_str();
+        if (provider == FrameGenDlss && v.frame_gen == FrameGenDlss) v.dlss_frame_gen_fallback = true;
         v.frame_gen = provider == FrameGenDlss ? FrameGenFsr3 : FrameGenOff;
     }
 }
@@ -299,6 +301,7 @@ void ConfigureDlssSupport(bool available, const char* problem) {
         std::printf("Upscaler: DLSS unavailable (%s); falling back to FSR 3.1\n",
                     kept.empty() ? "bbport_dlss.dll or nvngx_dlss.dll missing" : kept.c_str());
         v.upscaler = UpscalerFsr3;
+        v.dlss_upscaler_fallback = true;
     }
 }
 
@@ -336,6 +339,9 @@ bool FsrSettingsNeedRestart() {
 
 void Save() {
     const auto& v = Get();
+    // The DLSS choice of a start that runs FSR 3.1 instead (ConfigureDlssSupport, FrameGenFailure).
+    const int upscaler = v.dlss_upscaler_fallback && v.upscaler == UpscalerFsr3 ? int(UpscalerDlss) : v.upscaler.load();
+    const int frame_gen = v.dlss_frame_gen_fallback && v.frame_gen == FrameGenFsr3 ? int(FrameGenDlss) : v.frame_gen.load();
     FILE* file = std::fopen(Path(), "w");
     if (!file) {
         std::printf("Settings: cannot write %s\n", Path());
@@ -346,7 +352,7 @@ void Save() {
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
                  "debug_view=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
-                 UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
+                 UpscalerName(upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
@@ -365,7 +371,7 @@ void Save() {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
     std::fprintf(file, "frame_gen=%s\nframe_gen_multiplier=%d\nframe_gen_fit_display=%d\n",
-                 FrameGenName(v.frame_gen), v.frame_gen_multiplier.load(),
+                 FrameGenName(frame_gen), v.frame_gen_multiplier.load(),
                  int(v.frame_gen_fit_display.load()));
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
