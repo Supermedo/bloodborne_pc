@@ -276,7 +276,10 @@ void DefaultSettings(int32_t* out) {
 bool Apply(Line line, int32_t v) {
     auto& s = BbSettings::Get();
     switch (line) {
-    case Upscaler: s.upscaler = std::clamp(v, 0, BbSettings::UpscalerCount - 1); return true;
+    case Upscaler:
+        s.upscaler = std::clamp(v, 0, BbSettings::UpscalerCount - 1);
+        s.dlss_upscaler_fallback = false;  // the player's own pick from now on
+        return true;
     case Quality: s.preset = std::clamp(v, 0, BbSettings::PresetCount - 1); return true;
     case Sharpness:
         s.sharpen = v > 0;

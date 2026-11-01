@@ -47,13 +47,40 @@ class PackageFilesTests(unittest.TestCase):
         self.assertEqual(help_.hints_in_log(note), ['mixed_versions'])
         self.assertEqual(help_.hints_in_log('ERROR: bad patch entry'), ['mixed_versions'])
 
-    def test_what_a_player_may_change_or_what_a_start_does_not_need(self):
+    def test_what_a_player_may_change(self):
         (self.port / 'bin' / 'nvngx_dlss.dll').write_bytes(b'a newer DLSS')  # not in the list
-        (self.port / 'bin' / 'SDL3.dll').write_bytes(b'other')  # in the list, but not read at every start
         self.assertEqual(P.check(self.port, quick=True), ('1.9.4', []))
-        self.assertEqual(P.check(self.port), ('1.9.4', ['bin/SDL3.dll']))
         (self.port / 'scripts' / 'patches.py').unlink()
         self.assertEqual(P.check(self.port, quick=True), ('1.9.4', ['scripts/patches.py']))
+
+    def test_every_start_checks_every_listed_file(self):
+        # R80: bbport_dlss.dll of another version made DLSS fail while the start check passed.
+        (self.port / 'bin' / 'bbport_dlss.dll').write_bytes(b'bridge 1.9.4')
+        P.write(self.port, '1.9.4')
+        (self.port / 'bin' / 'bbport_dlss.dll').write_bytes(b'bridge 1.9.3 longer')
+        self.assertEqual(P.check(self.port, quick=True), ('1.9.4', ['bin/bbport_dlss.dll']))
+        (self.port / 'bin' / 'SDL3.dll').write_bytes(b'SDL')  # same size, other bytes
+        self.assertEqual(P.check(self.port, quick=True), ('1.9.4', ['bin/SDL3.dll', 'bin/bbport_dlss.dll']))
+
+    def test_a_start_reads_only_changed_files(self):
+        from unittest import mock
+        self.assertEqual(P.check(self.port, quick=True), ('1.9.4', []))
+        self.assertTrue((self.port / P.CACHE).is_file())
+        with mock.patch.object(P, 'digest', side_effect=AssertionError('read again')):
+            self.assertEqual(P.check(self.port, quick=True), ('1.9.4', []))
+        (self.port / 'run.py').write_text('RUN')
+        read = []
+        real = P.digest
+        with mock.patch.object(P, 'digest', side_effect=lambda path: read.append(Path(path).name) or real(path)):
+            self.assertEqual(P.check(self.port, quick=True), ('1.9.4', ['run.py']))
+        self.assertEqual(read, ['run.py'])
+
+    def test_a_list_without_sizes(self):
+        manifest = json.loads((self.port / P.MANIFEST).read_text(encoding='utf-8'))
+        del manifest['sizes']
+        (self.port / P.MANIFEST).write_text(json.dumps(manifest), encoding='utf-8')
+        (self.port / 'bin' / 'SDL3.dll').write_bytes(b'other')
+        self.assertEqual(P.check(self.port, quick=True), ('1.9.4', ['bin/SDL3.dll']))
 
     def test_a_build_from_the_sources_has_no_list(self):
         (self.port / P.MANIFEST).unlink()

@@ -511,6 +511,7 @@ void Menu() {
             const bool family = i == BbSettings::UpscalerFsr412;
             if (ImGui::Selectable(family ? Fsr41Ui::Text(Fsr41Ui::Family) : upscalers[i],
                                   family ? IsFsr41(upscaler) : i == upscaler)) {
+                s.dlss_upscaler_fallback = false;  // the player's own pick: saved as it is
                 if (family) {
                     if (!IsFsr41(upscaler)) {
                         bool restored=false;
@@ -536,6 +537,10 @@ void Menu() {
                 } else if (i == BbSettings::UpscalerFsr411) {
                     ImGui::TextDisabled("- unavailable");
                     if (const char* problem = s.fsr411_problem.load()) Hint(problem);
+                } else if (i == BbSettings::UpscalerDlss && s.dlss_problem.load()) {
+                    // Why: Windows or an antivirus refused the bridge on an RTX card too (R80).
+                    ImGui::TextDisabled("- unavailable");
+                    Hint(s.dlss_problem.load());
                 } else {
                     ImGui::TextDisabled("- unsupported by this GPU");
                 }

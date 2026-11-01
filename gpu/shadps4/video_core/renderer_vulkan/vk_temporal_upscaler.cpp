@@ -170,8 +170,10 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     {
         const Dlss* dlss = Dlss::Get();
         static std::string problem;
-        problem = !dlss ? "bbport_dlss.dll and nvngx_dlss.dll are not installed"
-                        : dlss->Problem();
+        const char* off = std::getenv("BB_DLSS");
+        problem = dlss ? dlss->Problem()
+            : off && off[0] == '0' ? "turned off for this start (BB_DLSS=0; the launcher says why)"
+                                   : "bbport_dlss.dll and nvngx_dlss.dll are not installed";
         BbSettings::ConfigureDlssSupport(dlss && dlss->Available(), problem.c_str());
     }
     // Available unless BB_UPSCALER=none; on/off and the parameters are the menu's settings.

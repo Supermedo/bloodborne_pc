@@ -5325,6 +5325,24 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 {'enabled': sorted(enabled), 'disabled': sorted(disabled)}, indent=2))
 
     # ---- game process ------------------------------------------------------------------------
+    def dlss_check(self, env):
+        """The start's environment, with DLSS off when Windows refuses bbport_dlss.dll (Smart App Control, an
+        antivirus): this start plays with FSR 3.1 (FSR 4.1 is slow on GeForce cards) and DLSS stays chosen in
+        bbport.ini; the reason in the log, and in a window once per error (R80)."""
+        if 'dlss' not in (self.ini.get('upscaler'), self.ini.get('frame_gen')):
+            return env
+        blocked = bbport_help.dlss_problem(PORT_DIR)
+        if blocked:
+            error, why = blocked
+            text = (_('DLSS cannot start (Windows error {}).').format(error) + ' ' + _(why) + '\n' +
+                    _('This start uses FSR 3.1 instead; DLSS stays chosen for the next start.'))
+            self.append(text + '\n')
+            env['BB_DLSS'] = '0'
+            if self.app.get('dlss_blocked_told') != error:
+                self.app['dlss_blocked_told'] = error
+                self.messagebox.showwarning('Bloodborne', text)
+        return env
+
     def play(self):
         if self.process or self.fsr411_downloading or self.update_installing():
             return
@@ -5410,8 +5428,9 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                                      'instead.') + '\n\n' + encrypted)
         self.auto_backup()
         self.remember_game_start()
+        env = self.dlss_check(game_environment(self.app, self.ini))
         try:
-            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(self.app, self.ini),
+            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=env,
                                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         except OSError as error:

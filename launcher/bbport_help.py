@@ -711,6 +711,40 @@ def files_check(port_dir, quick=False):
     return check(port_dir, quick)
 
 
+DLSS_BLOCKED = (
+    ((4551, 4556, 4557, 4558, 4559), 'Windows blocked bbport_dlss.dll (Smart App Control or an app control policy).'),
+    ((225, 226), 'An antivirus blocked bbport_dlss.dll: allow the port folder in it.'),
+    ((2, 126), 'bbport_dlss.dll or a file it needs is missing: install the port again.'),
+)
+
+
+def dlss_problem(port_dir):
+    """(Windows error, why) when bin\\bbport_dlss.dll would not load, tried the way the game loads it but without
+    running it (DONT_RESOLVE_DLL_REFERENCES); None when it loads, or without it. Smart App Control, an app control
+    policy or an antivirus refused it: the game then ran DLSS's fallback without a word on why (R80).
+    BB_TEST_DLSS_LOAD_ERROR=N: a test as if Windows answered error N."""
+    if not port_dir or not (Path(port_dir) / 'bin' / 'bbport_dlss.dll').is_file():
+        return None
+    try:
+        error = int(os.environ.get('BB_TEST_DLSS_LOAD_ERROR') or 0)
+        if not error:
+            if os.name != 'nt':
+                return None
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.LoadLibraryExW.restype = ctypes.c_void_p
+            kernel.LoadLibraryExW.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_ulong)
+            kernel.FreeLibrary.argtypes = (ctypes.c_void_p,)
+            module = kernel.LoadLibraryExW(str(Path(port_dir) / 'bin' / 'bbport_dlss.dll'), None, 0x1)
+            if module:
+                kernel.FreeLibrary(module)
+                return None
+            error = ctypes.get_last_error()
+    except (OSError, ValueError, AttributeError):
+        return None
+    why = next((text for codes, text in DLSS_BLOCKED if error in codes), 'Windows could not load bbport_dlss.dll.')
+    return error, why
+
+
 def files_text(differ):
     return ', '.join(name.replace('/', '\\') for name in differ[:3]) + (' …' if len(differ) > 3 else '')
 
