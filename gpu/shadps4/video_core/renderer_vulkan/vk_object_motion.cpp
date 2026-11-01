@@ -17,6 +17,17 @@ namespace Vulkan {
 
 namespace {
 
+// UniqueImage's upstream move operations omit ownership metadata. Keep the image,
+// allocation owner and accounting together until that separate issue is resolved.
+void SwapImage(VideoCore::UniqueImage& a, VideoCore::UniqueImage& b) noexcept {
+    std::swap(a.device, b.device);
+    std::swap(a.allocator, b.allocator);
+    std::swap(a.allocation, b.allocation);
+    std::swap(a.image, b.image);
+    std::swap(a.image_ci, b.image_ci);
+    std::swap(a.size_bytes, b.size_bytes);
+}
+
 bool CreateBuffer(const Instance& instance, vk::DeviceSize size, bool host, vk::Buffer& buffer,
                   VmaAllocation& allocation, void** mapped, u64& address) {
     const VkBufferCreateInfo buffer_ci{
@@ -229,14 +240,7 @@ void ObjectMotion::RetireCachedImage(CachedImage& cached) {
         // Allocate bookkeeping while cached still owns every live Vulkan resource.
         retired_images.push_back({std::move(storage), cached.last_tick});
         auto& retired = *retired_images.back().target;
-        // UniqueImage's upstream move constructor loses device/size_bytes. Preserve every
-        // ownership field explicitly, as in the existing active/cache swap below.
-        std::swap(retired.image.device, cached.image.device);
-        std::swap(retired.image.allocator, cached.image.allocator);
-        std::swap(retired.image.allocation, cached.image.allocation);
-        std::swap(retired.image.image, cached.image.image);
-        std::swap(retired.image.image_ci, cached.image.image_ci);
-        std::swap(retired.image.size_bytes, cached.image.size_bytes);
+        SwapImage(retired.image, cached.image);
         retired.view.swap(cached.view);
         retired_bytes += bytes;
     }
@@ -255,20 +259,17 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
     }
     if (cache_enabled) {
         const auto swap_target = [&](CachedImage &cached) {
-            // Swap every UniqueImage field explicitly: its upstream move constructor omits
-            // device/size_bytes, which are still kept consistent here.
-            std::swap(image.device, cached.image.device);
-            std::swap(image.allocator, cached.image.allocator);
-            std::swap(image.allocation, cached.image.allocation);
-            std::swap(image.image, cached.image.image);
-            std::swap(image.image_ci, cached.image.image_ci);
-            std::swap(image.size_bytes, cached.image.size_bytes);
+            SwapImage(image, cached.image);
             view.swap(cached.view);
             std::swap(image_width, cached.width);
             std::swap(image_height, cached.height);
             std::swap(image_layout, cached.layout);
             std::swap(image_last_use, cached.last_use);
             std::swap(image_last_tick, cached.last_tick);
+            // Attach can precede an upload-triggered submission; the actual draw then
+            // belongs to a newer tick. Stashing bounds every use recorded before this
+            // size change, including that delayed draw and late image/view reads.
+            if (cached.image) cached.last_tick = scheduler.CurrentTick();
             // Legacy resize discards the previous contents, even when returning to a size
             // used earlier in this frame. Preserve the existing clear/read behavior.
             written = false;

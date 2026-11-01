@@ -59,7 +59,6 @@ public:
     [[nodiscard]] vk::Image Image(u32 width, u32 height) noexcept;
 
 private:
-    friend struct ObjectMotionCacheTest;
     void EnsureImage(u32 width, u32 height);
     void CollectRetiredImages();
 
@@ -98,6 +97,7 @@ private:
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
         u64 last_use{}, last_tick{};
     };
+    friend struct ObjectMotionCacheTest;
     void RetireCachedImage(CachedImage& cached);
     struct RetiredImage {
         std::unique_ptr<CachedImage> target;
