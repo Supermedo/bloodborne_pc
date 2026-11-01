@@ -72,6 +72,15 @@ class SaveTests(unittest.TestCase):
             found = saves.scan(self.root / 'port', exclude=[mine])
         self.assertEqual(sorted(s.source for s in found), ['bbhost', 'bbport (BB.Other)', 'shadPS4', 'shadPS4'])
 
+    def test_seamless_coops_old_saves_are_offered(self):
+        """Up to 1.9.8 beta 2 Seamless co-op played its own saves (user/seamless-coop): offered to bring over."""
+        mine = make_save(saves.target_dir(self.user))
+        old = make_save(self.user / 'seamless-coop' / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005', 'Coop')
+        with mock.patch.dict(os.environ, {'APPDATA': '', 'LOCALAPPDATA': ''}):
+            found = saves.scan(self.root / 'port', exclude=[mine], user_dir=self.user)
+        self.assertEqual([(s.source, s.folder) for s in found],
+                         [('Seamless co-op (its own saves before 1.9.8 beta 3)', old)])
+
     def test_benchmark_characters_are_not_offered(self):
         """A port build's bundled benchmark character (benchmark/savedata/…) and recorded test routes are
         not a player's save."""

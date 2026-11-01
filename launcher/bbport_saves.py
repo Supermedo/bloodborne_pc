@@ -165,6 +165,8 @@ def _toml_value(path, section, key):
 def label_for(folder):
     """Which version a save folder belongs to, from where it is."""
     parts = [p.lower() for p in Path(folder).parts]
+    if COOP_SAVES in parts:
+        return 'Seamless co-op (its own saves before 1.9.8 beta 3)'
     if 'saves' in parts and parts[-1] == SAVE_DIR.lower():
         return 'bbhost'
     if 'apollo' in parts:
@@ -251,7 +253,12 @@ def walk(roots, depth=9, limit=30000):
     return found
 
 
-def scan(port_dir, game_dir='', exclude=()):
+# Seamless co-op's own saves up to 1.9.8 beta 2 (run.py COOP_SAVES), in the saves folder: offered to bring over,
+# now that it plays the normal characters.
+COOP_SAVES = 'seamless-coop'
+
+
+def scan(port_dir, game_dir='', exclude=(), user_dir=None):
     """[SaveSet] of every complete save on this PC that is not this port's own, newest first."""
     seen = set()
     for path in exclude:
@@ -259,7 +266,10 @@ def scan(port_dir, game_dir='', exclude=()):
             seen.add(os.path.normcase(str(Path(path).resolve())))
         except OSError:
             pass
-    folders = [Path(name) for pattern in sources(port_dir, game_dir) for name in glob.glob(pattern)]
+    patterns = sources(port_dir, game_dir)
+    for user in {Path(user_dir or Path(port_dir) / 'user'), Path(port_dir) / 'user'}:
+        patterns.append(os.path.join(glob.escape(str(user / COOP_SAVES / 'savedata')), '*', '*', SAVE_DIR))
+    folders = [Path(name) for pattern in patterns for name in glob.glob(pattern)]
     folders += walk([Path(port_dir).parent] + ([Path(game_dir).parent] if game_dir else []))
     sets = []
     for folder in folders:

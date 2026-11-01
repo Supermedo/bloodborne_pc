@@ -1,4 +1,4 @@
-"""Seamless co-op (BBSC) with this port: its own saves, and BBSC's left-over game server redirect."""
+"""Seamless co-op (BBSC) with this port: the normal saves, and BBSC's left-over game server redirect."""
 from paths import ROOT
 import contextlib
 import importlib.util
@@ -48,16 +48,14 @@ class CoopTests(unittest.TestCase):
         (self.user / 'host_overrides.custom.json').write_text(json.dumps(mine), encoding='utf-8')
         self.assertEqual(self.overrides({}), mine)
 
-    def test_bbsc_plays_its_own_saves(self):
-        (self.user / 'addcont' / 'CUSA03173' / 'SPEXPANSIONDLC03').mkdir(parents=True)
+    def test_bbsc_plays_the_normal_saves(self):
         env = {'BB_PROBE': BBSC}
         self.assertTrue(run.seamless_coop(env))
         self.assertFalse(run.seamless_coop({'BB_PROBE': r'C:\port\bin\bb-probe.exe'}))
         with contextlib.redirect_stdout(io.StringIO()):
-            coop = run.coop_user_dir(env, self.user, self.game)
-        self.assertEqual(coop, self.user / 'seamless-coop')
-        self.assertEqual(env['BBSC_SAVE_DIR'], str(coop / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005'))
-        self.assertEqual(env['BB_DLC_DIR'], str(self.user / 'addcont' / 'CUSA03173'))
+            run.coop_saves(env, self.user, self.game)
+        self.assertEqual(env['BBSC_SAVE_DIR'], str(self.user / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005'))
+        self.assertFalse((self.user / 'seamless-coop').exists())
 
 
 class ItsScriptTests(unittest.TestCase):

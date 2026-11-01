@@ -952,11 +952,11 @@ class SetupMixin:
         if getattr(self, 'save_searching', False):
             return
         self.save_searching = True
-        port, game, mine = L.PORT_DIR, self.var('game_dir', 'app').get(), self.save_target()
+        port, game, mine, user = L.PORT_DIR, self.var('game_dir', 'app').get(), self.save_target(), self.save_user_dir()
 
         def work():
             try:
-                found = saves.scan(port, game, exclude=[mine])
+                found = saves.scan(port, game, exclude=[mine], user_dir=user)
             except Exception:  # a search must never take the launcher down
                 found = []
 
