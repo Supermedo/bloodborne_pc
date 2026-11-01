@@ -523,3 +523,4 @@ endforeach()
 
 add_executable(motion-storage-test EXCLUDE_FROM_ALL ../tests/test_motion_storage.cpp)
 target_include_directories(motion-storage-test PRIVATE shadps4)
+target_compile_options(motion-storage-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

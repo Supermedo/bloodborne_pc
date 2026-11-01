@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "bbport_toggles.h"
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -22,6 +23,7 @@
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/info.h"
+#include "shader_recompiler/motion_varyings.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -781,8 +783,32 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                 }
             }
         }
+        // Keep the old broad path available for visual A/B tests.
+        static const bool all_motion = [] {
+            const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
+            return value && value[0] == '1';
+        }();
+        if (all_motion) {
+            sel.motion = true;
+        }
+        const bool ssbo_candidate = sel.motion && Shader::MotionVectors::storage_buffers;
+        bool varying_fallback = false;
+        if (ssbo_candidate) {
+            const auto* fs = sel.infos[static_cast<u32>(Shader::SwStage::Fragment)];
+            varying_fallback = !vs || !fs || !Shader::MotionVaryings::SsboVaryingsAvailable(
+                *vs, sel.runtime_infos[static_cast<u32>(Shader::SwStage::Fragment)].hw.fs, profile);
+            if (varying_fallback)
+                sel.motion = false;
+        }
+        if (sel.motion && !RefreshGraphicsStages(sel)) {
+            return false;
+        }
+        if (ssbo_candidate && BbStats::enabled) {
+            (varying_fallback ? motion_varying_fallbacks : motion_selections)
+                .fetch_add(1, std::memory_order_relaxed);
+        }
         // BB_MOTION_SELECT_LOG=1: each G-buffer vertex shader once, with its buffer sizes
-        // and the selection, to find animated models that the size rule leaves out.
+        // and the final selection, to find animated models that the size rule leaves out.
         static const bool select_log = [] {
             const char* value = std::getenv("BB_MOTION_SELECT_LOG");
             return value && value[0] == '1';
@@ -797,38 +823,14 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             static std::mutex log_mutex;
             static std::unordered_set<u64> logged;
             std::scoped_lock lock{log_mutex};
-            if (logged.insert(vs->pgm_hash ^ std::hash<std::string>{}(sizes)).second) {
-                std::printf("Motion select: vs %016llx %s, buffers (size/stride):%s\n",
+            if (logged.insert(vs->pgm_hash ^ std::hash<std::string>{}(sizes) ^ (u64(sel.motion) << 63) ^
+                              (u64(varying_fallback) << 62)).second) {
+                std::printf("Motion select: vs %016llx %s%s, buffers (size/stride):%s\n",
                             static_cast<unsigned long long>(vs->pgm_hash),
-                            sel.motion ? "ON " : "off", sizes.c_str());
+                            sel.motion ? "ON " : "off",
+                            varying_fallback ? " (SSBO varying location reserved/unavailable)" : "",
+                            sizes.c_str());
             }
-        }
-        // Keep the old broad path available for visual A/B tests.
-        static const bool all_motion = [] {
-            const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
-            return value && value[0] == '1';
-        }();
-        if (all_motion) {
-            sel.motion = true;
-        }
-        if (sel.motion && Shader::MotionVectors::storage_buffers) {
-            // Reserve the SSBO varyings and room for builtins. A collision
-            // falls back to camera vectors instead of overwriting a game varying.
-            const auto* fs = sel.infos[static_cast<u32>(Shader::SwStage::Fragment)];
-            if (!vs || !fs)
-                sel.motion = false;
-            for (u32 i = Shader::MotionVectors::SafeCurrentLocation; i < 32 && sel.motion; ++i) {
-                const auto attr = Shader::IR::Attribute::Param0 + i;
-                if (vs->stores.GetAny(attr) || fs->loads.GetAny(attr))
-                    sel.motion = false;
-            }
-            if (sel.motion && profile.needs_clip_distance_emulation &&
-                fs->loads.GetAny(Shader::IR::Attribute::Param0 +
-                                 (Shader::MotionVectors::SafeCurrentLocation - 1)))
-                sel.motion = false;
-        }
-        if (sel.motion && !RefreshGraphicsStages(sel)) {
-            return false;
         }
     }
 
@@ -1211,6 +1213,17 @@ std::string PipelineCache::GetShaderName(Shader::HwStage stage, u64 hash,
         return fmt::format("{}_{:#018x}_{}", stage, hash, *perm);
     }
     return fmt::format("{}_{:#018x}", stage, hash);
+}
+
+void PipelineCache::NoteMotionFrame() {
+    if (!BbStats::enabled || !Shader::MotionVectors::storage_buffers || ++motion_frames % 600)
+        return;
+    // Selection attempts include draw-preparation workers, not just submitted GPU draws.
+    const auto selected = motion_selections.exchange(0, std::memory_order_relaxed);
+    const auto fallback = motion_varying_fallbacks.exchange(0, std::memory_order_relaxed);
+    std::printf("Object motion SSBO: %llu selected, %llu varying fallbacks "
+                "(selection attempts, 600 frames)\n",
+                static_cast<unsigned long long>(selected), static_cast<unsigned long long>(fallback));
 }
 
 void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwStage stage,

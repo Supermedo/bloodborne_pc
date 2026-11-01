@@ -7,6 +7,7 @@
 #include <setjmp.h>
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "test_motion_varyings.h"
 
 int MotionGpuTest(const std::filesystem::path& dir);
 
@@ -75,6 +76,7 @@ void WriteMotionShaders(const std::filesystem::path& dir, uint64_t params_addres
 }
 
 int main(int argc, char** argv) {
+    TestMotionVaryings();
     const std::filesystem::path dir = argc > 1 ? argv[1] : ".";
     if (argc > 2 && std::string(argv[2]) == "--gpu")
         return MotionGpuTest(dir);

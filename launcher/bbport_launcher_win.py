@@ -1214,8 +1214,8 @@ def object_motion_unavailable(gpu, gpu_line, extra_env=''):
     gpu = gpu or {}
     if gpu.get('vendor_id') == 0x1002 and isinstance(gpu.get('device_id'), int) and gpu['device_id'] < 0x7440 \
             and gpu.get('object_motion_ssbo') is not True:
-        return _('Not available on RX 6000 and older Radeon cards: they lose the device with it.',
-                 'Недоступно на Radeon RX 6000 и более старых: с ним видеокарта теряет устройство.')
+        return _('Object motion unavailable for this GPU/driver.',
+                 'Векторы движения объектов недоступны для этой видеокарты/драйвера.')
     parts = [part.strip() for part in str(gpu_line or '').split(',')]
     vram = next((int(m.group(1)) for part in parts for m in [re.match(r'(\d+) MiB', part)] if m), 0)
     if 'discrete' in parts and 0 < vram < 6144 - 256:

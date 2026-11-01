@@ -4,15 +4,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vk_mem_alloc.h>
 
 #include "bbport_settings.h"
+#include "bbport_motion_ui.h"
 #include "bbport_toggles.h"
 #include "shader_recompiler/motion_storage.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_motion_parameters.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include <vk_mem_alloc.h>
 
 namespace Vulkan {
 
@@ -63,6 +64,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
 ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, bool ssbo)
     : instance{instance_}, scheduler{scheduler_} {
     Shader::MotionVectors::storage_buffers = false;
+    BbSettings::Get().object_motion_unavailable = nullptr;
     // Pipeline selection limits the extra attachment and vertex stores to likely
     // animated draws. A setting or environment override can still disable the path.
     if (!BbSettings::Get().object_motion ||
@@ -72,6 +74,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
     }
     const auto& features = instance.GetPhysicalDevice().getFeatures();
     if (!features.vertexPipelineStoresAndAtomics) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Features);
         std::printf("Object motion: vertexPipelineStoresAndAtomics unsupported, off\n");
         return;
     }
@@ -85,14 +88,14 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
          props.limits.maxPerStageDescriptorStorageBuffers < 3 ||
          props.limits.maxBoundDescriptorSets < 2 ||
          props.limits.maxStorageBufferRange < vk::DeviceSize(PositionsPerFrame) * 16 + 16)) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Limits);
         std::puts("Object motion: SSBO limits unsupported, off");
         return;
     }
     if (props.vendorID == 0x1002 && props.deviceID < 0x7440 && !ssbo &&
         !(forced && forced[0] == '1')) {
-        BbSettings::Get().object_motion_unavailable = "Not available on RX 6000 and older Radeon cards: "
-                                                       "they lose the device with it.";
-        std::printf("Object motion: off on this AMD GPU (RX 6000 and older lose the device with it; "
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Gpu);
+        std::printf("Object motion: off on this AMD GPU (existing GPU/driver guard; "
                     "BB_OBJECT_MOTION=1 turns it on)\n");
         return;
     }
@@ -107,8 +110,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
     }
     if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu && vram < (6ull << 30) - (256ull << 20) &&
         !(forced && forced[0] == '1')) {
-        BbSettings::Get().object_motion_unavailable = "Not available under 6 GB of video memory: "
-                                                       "textures need it more.";
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Vram);
         std::printf("Object motion: off with %llu MiB of VRAM (under 6 GB the memory goes to "
                     "textures; BB_OBJECT_MOTION=1 turns it on)\n",
                     (unsigned long long)(vram >> 20));
@@ -120,6 +122,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
                       params_buffer, params_allocation, &mapped, params_address) ||
         !CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 16, false,
                       positions_buffer, positions_allocation, nullptr, positions_address, ssbo)) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Buffers);
         std::printf("Object motion: buffer creation failed, off\n");
         return;
     }

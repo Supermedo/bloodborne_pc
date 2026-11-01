@@ -14,6 +14,9 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
         Buffer history(allocator, Bytes,
                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         Buffer indices(allocator, 3072 * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        Buffer indirect(allocator, sizeof(VkDrawIndexedIndirectCommand), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+        *static_cast<VkDrawIndexedIndirectCommand*>(indirect.mapped) = {3072, 2, 0, 0, 0};
+        Buffer dummy_buffer(allocator, 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         Buffer pixels(allocator, 64 * 64 * 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         BbSettings::Get().object_motion = true;
         BbSettings::Get().upscaler = BbSettings::UpscalerFsr3;
@@ -53,6 +56,40 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
                                                                .pushConstantRangeCount = 1,
                                                                .pPushConstantRanges = &range});
         Need(lr == vk::Result::eSuccess, "full SSBO pipeline layout");
+        // A different set0 layout disturbs a previously bound set1. Exercise the
+        // explicit rebind required after BindResources, for push and ordinary sets.
+        const vk::DescriptorSetLayoutBinding changed{8, vk::DescriptorType::eStorageBuffer, 1,
+                                                     vk::ShaderStageFlagBits::eVertex};
+        auto [cr, changed_set0] = device.createDescriptorSetLayoutUnique(
+            {.flags = push0 ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
+                            : vk::DescriptorSetLayoutCreateFlags{},
+             .bindingCount = 1, .pBindings = &changed});
+        Need(cr == vk::Result::eSuccess, "different set0 layout");
+        const vk::DescriptorSetLayout changed_raw = *changed_set0;
+        auto [clr, changed_layout] = device.createPipelineLayoutUnique(
+            {.setLayoutCount = 1, .pSetLayouts = &changed_raw});
+        Need(clr == vk::Result::eSuccess, "different pipeline layout");
+        vk::UniqueDescriptorPool set0_pool;
+        std::vector<vk::DescriptorSet> set0_sets;
+        const vk::DescriptorBufferInfo dummy_info{vk::Buffer(dummy_buffer.buffer), 0, 32};
+        if (!push0) {
+            const vk::DescriptorPoolSize size{vk::DescriptorType::eStorageBuffer, 2};
+            auto [r, pool] = device.createDescriptorPoolUnique(
+                {.maxSets = 2, .poolSizeCount = 1, .pPoolSizes = &size});
+            Need(r == vk::Result::eSuccess, "set0 pool");
+            set0_pool = std::move(pool);
+            const std::array allocate_layouts{*empty, *changed_set0};
+            auto [a, sets] = device.allocateDescriptorSets({.descriptorPool = *set0_pool,
+                .descriptorSetCount = 2, .pSetLayouts = allocate_layouts.data()});
+            Need(a == vk::Result::eSuccess, "set0 allocation");
+            set0_sets = std::move(sets);
+            for (unsigned i = 0; i < 2; ++i) {
+                const vk::WriteDescriptorSet write{.dstSet = set0_sets[i], .dstBinding = 7 + i,
+                    .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &dummy_info};
+                device.updateDescriptorSets(write, {});
+            }
+        }
         const std::array stages{
             vk::PipelineShaderStageCreateInfo{
                 .stage = vk::ShaderStageFlagBits::eVertex, .module = *modules[0], .pName = "main"},
@@ -100,11 +137,26 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
         const std::array<std::array<float, 4>, 3> positions{
             {{-1, -1, 0, 1}, {3, -1, 0, 1}, {-1, 3, 0, 1}}};
         const auto execute = [&](const Shader::PushData& data, bool upload,
-                                 const Shader::PushData* second = nullptr) {
+                                 const Shader::PushData* second = nullptr, bool draw_indirect = false) {
             const bool twice = second != nullptr;
             const Shader::PushData next = second ? *second : Shader::PushData{};
             motion.BindParameters(*layout);
-            scheduler.Record([&, data, upload, twice, next](vk::CommandBuffer cmd) {
+            scheduler.Record([&](vk::CommandBuffer cmd) {
+                for (bool incompatible : {true, false}) {
+                    const auto current = incompatible ? *changed_layout : *layout;
+                    if (push0) {
+                        const vk::WriteDescriptorSet write{.dstBinding = incompatible ? 8u : 7u,
+                            .descriptorCount = 1, .descriptorType = vk::DescriptorType::eStorageBuffer,
+                            .pBufferInfo = &dummy_info};
+                        cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, current, 0, write);
+                    } else {
+                        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, current, 0,
+                                               set0_sets[incompatible ? 1 : 0], {});
+                    }
+                }
+            });
+            motion.BindParameters(*layout);
+            scheduler.Record([&, data, upload, twice, next, draw_indirect](vk::CommandBuffer cmd) {
                 if (upload) {
                     const vk::BufferCopy copy{0, 0, Bytes};
                     cmd.copyBuffer(vk::Buffer(history.buffer), native, copy);
@@ -143,7 +195,11 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
                 cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
                 cmd.bindIndexBuffer(vk::Buffer(indices.buffer), 0, vk::IndexType::eUint32);
                 cmd.pushConstants(*layout, range.stageFlags, 0, sizeof(data), &data);
-                cmd.drawIndexed(3072, 2, 0, 0, 0);
+                if (draw_indirect)
+                    cmd.drawIndexedIndirect(vk::Buffer(indirect.buffer), 0, 1,
+                                             sizeof(VkDrawIndexedIndirectCommand));
+                else
+                    cmd.drawIndexed(3072, 2, 0, 0, 0);
                 if (twice) {
                     cmd.pushConstants(*layout, range.stageFlags, 0, sizeof(next), &next);
                     cmd.drawIndexed(3072, 2, 0, 0, 0);
@@ -191,6 +247,16 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
                  "SSBO validity readback mismatch");
             Need(std::abs(pixel[0] - dx) < .001f, "SSBO motion vector readback mismatch");
         };
+        // Indirect draws have no validated geometry/history range and use entry zero.
+        // They must still bind set1 and produce camera-only fallback without writes.
+        std::memset(parameters, 0, Shader::MotionVectors::ParamSlots * 32);
+        std::memset(history.mapped, 0xcd, Bytes);
+        execute(Shader::PushData{}, true, nullptr, true);
+        check_pixel(false, 0.f);
+        const auto* zero_history = static_cast<const uint32_t*>(history.mapped);
+        for (size_t word = 0; word < Bytes / 4; ++word)
+            Need(zero_history[word] == 0xcdcdcdcd, "indirect zero record wrote history");
+        std::puts("PASS SSBO indirect zero parameter after incompatible set0 layout/rebind");
         for (unsigned test = 0; test < 14; ++test) {
             std::memset(parameters, 0, Shader::MotionVectors::ParamSlots * 32);
             std::memset(history.mapped, 0xcd, Bytes);

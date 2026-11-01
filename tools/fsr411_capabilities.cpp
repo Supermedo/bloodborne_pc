@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "../gpu/shadps4/shader_recompiler/motion_storage.h"
-#include "ffx_upscale.h"
 #include "fsr411_support.h"
 #include "fsr411_vulkan_support.h"
+#include "ffx_upscale.h"
 #include "driver_provider.h"
 #include <cstdio>
 #include <stdexcept>

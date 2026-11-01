@@ -982,6 +982,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         }
         camera_motion->SetJitter(upscaler->Jitter());
         object_motion->OnFrameStart();
+        pipeline_cache.NoteMotionFrame();
         NoteFrameStart();
         static const char* scene_debug = std::getenv("BB_SCENE_DEBUG");
         scene_debug_frame = scene_debug && std::remove(scene_debug) == 0;
@@ -1262,6 +1263,10 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     }
     SetProjectionJitter(push_data, Regs(), draw_jitter);
     pipeline->BindResources(set_writes, push_data);
+    // Indirect motion draws use the zero parameter record (camera-only fallback),
+    // but the SSBO shader still requires its parameter/history descriptors.
+    if (pipeline->GetGraphicsKey().motion_vectors)
+        object_motion->BindParameters(pipeline->GetLayout());
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
