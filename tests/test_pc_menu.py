@@ -11,6 +11,15 @@ import rebirth  # noqa: E402
 
 
 class PcMenuTests(unittest.TestCase):
+    def test_korean_only_for_the_korean_folder(self):
+        english = pc_menu.texts()
+        korean = pc_menu.texts('korkr')
+        self.assertEqual(english, pc_menu.texts('engus'))
+        self.assertEqual(korean[200][pc_menu.RESTART], pc_menu.KOREAN['Restart Game'])
+        used = {text for strings in english.values() for text in strings.values()}
+        self.assertEqual(set(pc_menu.KOREAN) - used, set(), 'a Korean text no line uses any more')
+        self.assertRegex(pc_menu.KOREAN['PC Graphics'], '[가-힣]')
+
     def test_code_fits_its_page_and_leaves_the_other_menus_alone(self):
         writes = dict(pc_menu.code_writes())
         cave = writes[pc_menu.CAVE]

@@ -444,6 +444,10 @@ extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
     return state;
 }
 
+extern "C" void bbgpu_text_input_cancel(void) {
+    if (g_window) g_window->CancelTextInput();
+}
+
 extern "C" void bbgpu_mouse_take(BbMouseInput* out) {
     if (!out) return;
     if (!g_window) { std::memset(out, 0, sizeof(*out)); return; }

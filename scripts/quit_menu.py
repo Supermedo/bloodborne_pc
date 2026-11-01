@@ -622,7 +622,8 @@ def write_text_layer(game, out, extra=None):
     sources = [source for source in sources if source.is_file()]
 
     def texts_for(source):
-        return menu_texts(source.read_bytes(), TEXTS.get(source.parent.name.casefold(), TEXTS['engus']), extra)
+        language = source.parent.name.casefold()
+        return menu_texts(source.read_bytes(), TEXTS.get(language, TEXTS['engus']), extra(language) if extra else None)
     written = 0
     for archive, source in zip(in_parallel(texts_for, sources), sources):
         target = out / 'dvdroot_ps4' / 'msg' / source.parent.name / source.name
@@ -642,7 +643,7 @@ def main():
     extra = None
     if a.pc:
         import pc_menu
-        extra = pc_menu.texts()
+        extra = pc_menu.texts
     write_text_layer(a.game, a.out, extra)
     write_row_layer(a.game, a.out, quit=not a.no_quit, pc=a.pc)
 

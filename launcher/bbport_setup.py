@@ -1160,7 +1160,7 @@ class SetupMixin:
                 self.state_line(body, 'info', _('No characters yet. The game makes them, or bring yours from another '
                                                 'version (below).'), theme.CARD, wrap=640).pack(fill='x')
             else:
-                words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
+                words = L.game_names(self)
                 items = [b for b in saves.backups(self.save_user_dir()) if b.ok]
                 for index, slot in enumerate(mine.slots):
                     if index:
@@ -1198,7 +1198,7 @@ class SetupMixin:
             tk.Label(head, text=f'{words.word(character.LEVEL_TEXT)} {info.level}', bg=theme.CARD, fg=theme.GOLD_LIGHT,
                      font=(theme.BODY_SEMI, 13)).pack(side='right')
         try:
-            when = datetime.datetime.fromtimestamp(path.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+            when = saves.date_text(datetime.datetime.fromtimestamp(path.stat().st_mtime))
         except OSError:
             when = '?'
         facts = [_('Slot {}').format(int(path.name[-4:]) + 1), _('saved {}').format(when)]
@@ -1275,7 +1275,7 @@ class SetupMixin:
             restore.bind('<Button-1>', lambda _e, i=item, t=then: self.restore_character(i, slot, t, words))
             restore.bind('<Enter>', lambda _e, w=restore: w.configure(fg=theme.TEXT))
             restore.bind('<Leave>', lambda _e, w=restore: w.configure(fg=theme.MUTED))
-            tk.Label(line, text=item.created.strftime('%d.%m.%Y %H:%M') + '  ·  ' + self.backup_title(item), bg=bg,
+            tk.Label(line, text=saves.date_text(item.created) + '  ·  ' + self.backup_title(item), bg=bg,
                      fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 9)).pack(side='left')
             if then.summary() == now.summary():
                 tk.Label(line, text=_('same as now'), bg=bg, fg=theme.MUTED, font=(theme.BODY, 9)).pack(
@@ -1395,11 +1395,10 @@ class SetupMixin:
                                       font=(theme.BODY_SEMI, 10), anchor='w', justify='left'), 520).pack(fill='x')
         size = item.size / 1024
         size = f'{size / 1024:.1f} MB' if size >= 1024 else f'{max(1, round(size))} KB'
-        level = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get()).word(
-            character.LEVEL_TEXT)
+        level = L.game_names(self).word(character.LEVEL_TEXT)
         found = saves.backup_characters(item).values()
         who = ', '.join(f'{c.name} ({level} {c.level})' for c in found) if found else ', '.join(item.names)
-        self.wrap_within(tk.Label(words, text='  ·  '.join([item.created.strftime('%d.%m.%Y %H:%M'),
+        self.wrap_within(tk.Label(words, text='  ·  '.join([saves.date_text(item.created),
                                                             who or _('no characters'), size]),
                                   bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 9), anchor='w', justify='left'),
                          520).pack(fill='x', pady=(px(1), 0))
@@ -1438,7 +1437,7 @@ class SetupMixin:
         here = self.save_target()
         mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
         question = _('Put this backup back?') + '\n\n' + self.backup_title(item) + '\n' + '  ·  '.join(
-            [item.created.strftime('%d.%m.%Y %H:%M'), ', '.join(item.names) or _('no characters')])
+            [saves.date_text(item.created), ', '.join(item.names) or _('no characters')])
         if len(item.names) > 1:
             question += '\n\n' + _('Every character in this backup goes back to this state.')
         if mine:
@@ -1462,7 +1461,7 @@ class SetupMixin:
             return
         question = '\n'.join([
             _('Put {} back to this state?').format(then.name), '',
-            item.created.strftime('%d.%m.%Y %H:%M') + '  ·  ' + self.backup_title(item),
+            saves.date_text(item.created) + '  ·  ' + self.backup_title(item),
             f'{words.word(character.LEVEL_TEXT)} {then.level}  ·  ' + _('Bosses') + f' {len(then.bosses)}/'
             f'{len(character.BOSSES)}', '',
             _('Only this character changes; your other characters stay as they are. Its current state is backed '
@@ -1508,7 +1507,7 @@ class SetupMixin:
 
     def delete_backup(self, item):
         if not self.messagebox.askyesno('Bloodborne', _('Delete this backup? It goes to the Recycle Bin.') + '\n\n' +
-                                        self.backup_title(item) + '  ·  ' + item.created.strftime('%d.%m.%Y %H:%M')):
+                                        self.backup_title(item) + '  ·  ' + saves.date_text(item.created)):
             return
         if not saves.to_recycle_bin(item.path):
             self.messagebox.showerror('Bloodborne', _('Could not move the backup to the Recycle Bin.'))
@@ -1751,7 +1750,7 @@ class SetupMixin:
         def draw():
             chosen = self.recommended()
             get = lambda key, store='ini': self.var(key, store).get()
-            upscaler = dict(L.UPSCALERS).get(get('upscaler'), ('?',))[0].split(' (')[0]
+            upscaler = _(dict(L.UPSCALERS).get(get('upscaler'), ('?',))[0].split(' (')[0])
             preset = dict(L.PRESETS).get(get('preset'), ('',))[0].split(' (')[0]
             fps = _(*dict(L.FPS_MODES).get(get('fps_mode', 'app'), ('?',))).split(' (')[0]
             effects = sum(bool(get(k)) for k in ('effect_ssao', 'effect_dynamic_shadows', 'object_motion'))
@@ -2813,7 +2812,7 @@ class SetupGuide:
         grid.columnconfigure(1, weight=1)
         get = lambda key, store: app.var(key, store).get()
         info = L.game_info(get('game_dir', 'app'))
-        upscaler = dict(L.UPSCALERS).get(get('upscaler', 'ini'), ('?',))[0].split(' (')[0]
+        upscaler = _(dict(L.UPSCALERS).get(get('upscaler', 'ini'), ('?',))[0].split(' (')[0])
         preset = dict(L.PRESETS).get(get('preset', 'ini'), ('',))[0].split(' (')[0]
         fps = dict(L.FPS_MODES).get(get('fps_mode', 'app'), ('?',))
         goal = app.goal_name(get('goal', 'app'))

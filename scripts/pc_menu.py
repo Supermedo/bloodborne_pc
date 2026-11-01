@@ -118,8 +118,92 @@ PAGE_TITLES = {119001: 'PC Graphics', 119002: 'PC Effects', 119003: 'PC Options'
 RESTART = 119009                     # the Restart Game button: name (200), help (201), question (204)
 
 
-def texts():
-    """{FMG id: {text id: text}} for menu.msgbnd.dcx: 200 names, titles and labels, 201 help."""
+# The menu's texts in Korean, by the English text. Other languages show the English.
+KOREAN = {
+    'PC Graphics': 'PC 그래픽',
+    'PC Effects': 'PC 효과',
+    'PC Options': 'PC 옵션',
+    'Upscaling, frame generation, resolution and frame rate.': '업스케일링, 프레임 생성, 해상도, 프레임 속도를 설정합니다.',
+    'Model detail, shadows, reflections and post-processing effects.': '모델 디테일, 그림자, 반사, 후처리 효과를 설정합니다.',
+    'Camera, HUD, button prompts and other PC options.': '카메라, HUD, 버튼 표시 등 PC 옵션을 설정합니다.',
+    'Upscaler': '업스케일러',
+    'Smooths edges and rebuilds detail at the output resolution.': '가장자리를 다듬고 출력 해상도에 맞게 디테일을 되살립니다.',
+    'Upscaler Quality': '업스케일러 품질',
+    'Scene resolution: Native is sharpest, Performance is fastest.': '장면 해상도입니다. "네이티브"가 가장 선명하고 "성능"이 가장 빠릅니다.',
+    'Sharpness': '선명화 강도',
+    'Sharpens the upscaled image.': '업스케일한 화면을 선명하게 합니다.',
+    'Frame Generation': '프레임 생성',
+    "Adds generated frames between the game's frames.": '게임 프레임 사이에 생성한 프레임을 넣습니다.',
+    'Generated Frames': '생성 프레임 수',
+    'Frames shown per game frame (DLSS on RTX 50 up to 4x).': '게임 프레임 하나당 보여 주는 프레임 수입니다(RTX 50의 DLSS는 4x까지).',
+    'Output Resolution': '출력 해상도',
+    'Final image size. Ultrawide sizes apply after restart.': '최종 화면 크기입니다. 울트라와이드 크기는 재시작 후 적용됩니다.',
+    'Frame Rate': '프레임 속도',
+    "The game's frame rate. Applies after restart.": '게임의 프레임 속도입니다. 재시작 후 적용됩니다.',
+    'Frame Cap': 'FPS 상한',
+    'Limit of the unlocked frame rate. Applies after restart.': '프레임 속도가 "제한 없음"일 때의 상한입니다. 재시작 후 적용됩니다.',
+    'Model Detail': '모델 디테일',
+    'Detail of distant models. Applies after restart.': '먼 모델의 디테일입니다. 재시작 후 적용됩니다.',
+    'Ambient Occlusion': '앰비언트 오클루전',
+    'Contact shadows in corners. Applies after restart.': '모서리의 접촉 그림자입니다. 재시작 후 적용됩니다.',
+    'Dynamic Shadows': '동적 그림자',
+    'Shadows of moving lights. Applies after restart.': '움직이는 조명의 그림자입니다. 재시작 후 적용됩니다.',
+    'Reflections': '반사',
+    'Screen-space reflections on wet ground. Applies after restart.': '젖은 바닥의 화면 공간 반사입니다. 재시작 후 적용됩니다.',
+    'Anti-Aliasing': '안티 앨리어싱',
+    "The game's own edge smoothing. Applies after restart.": '게임 자체의 가장자리 다듬기입니다. 재시작 후 적용됩니다.',
+    'Motion Blur': '모션 블러',
+    'Blurs fast movement. Applies after restart.': '빠른 움직임을 흐리게 합니다. 재시작 후 적용됩니다.',
+    'Depth of Field': '피사계 심도',
+    'Blurs what is out of focus. Applies after restart.': '초점 밖을 흐리게 합니다. 재시작 후 적용됩니다.',
+    'Chromatic Aberration': '색수차',
+    'Colour fringes at the screen edges. Applies after restart.': '화면 가장자리의 색 번짐입니다. 재시작 후 적용됩니다.',
+    'Field of View': '시야각',
+    'Camera field of view in degrees. Applies after restart.': '카메라 시야각(단위: 도)입니다. 재시작 후 적용됩니다.',
+    'Camera Distance': '카메라 거리',
+    'Places the camera further back. Applies after restart.': '카메라를 더 뒤로 둡니다. 재시작 후 적용됩니다.',
+    'Auto Camera Rotation': '카메라 자동 회전',
+    'Camera turns by itself while moving. Applies after restart.': '이동할 때 카메라가 저절로 돌아갑니다. 재시작 후 적용됩니다.',
+    'HUD Position': 'HUD 위치',
+    'Ultrawide: moves the HUD toward the edges. Applies after restart.': '울트라와이드: HUD를 화면 가장자리 쪽으로 옮깁니다. 재시작 후 적용됩니다.',
+    'FPS Counter': 'FPS 카운터',
+    'Shows the frame rate in a corner of the screen.': '화면 모서리에 프레임 속도를 표시합니다.',
+    'Button Prompts': '버튼 아이콘',
+    'Which buttons the game shows.': '게임에서 보여 줄 버튼 모양입니다.',
+    'Mute in Background': '백그라운드 음소거',
+    'Silences the game while another window is active.': '다른 창을 쓰는 동안 게임 소리를 끕니다.',
+    'Skip Intro': '인트로 건너뛰기',
+    'Skips the logos and opening movie. Applies after restart.': '로고와 오프닝 영상을 건너뜁니다. 재시작 후 적용됩니다.',
+    'Restart Game': '게임 재시작',
+    'Restarts the game now to apply the changes marked for restart.': '지금 게임을 재시작하여 재시작이 필요한 변경 사항을 적용합니다.',
+    'Restarts the game to apply the changes marked for restart.': '게임을 재시작하여 재시작이 필요한 변경 사항을 적용합니다.',
+    'Restart the game now\nto apply the changes?': '지금 게임을 재시작하여\n변경 사항을 적용하시겠습니까?',
+    'Off': 'OFF',
+    'Native': '네이티브',
+    'Quality': '품질',
+    'Balanced': '균형',
+    'Performance': '성능',
+    'Ultra Performance': '초고성능',
+    'Unlocked': '제한 없음',
+    'Auto (display, max 120)': '자동(주사율, 최대 120)',
+    'No limit': '제한 없음',
+    '43 (default)': '43(기본)',
+    'Highest': '최고',
+    'High': '높음',
+    'Default': '기본',
+    'Low': '낮음',
+    'Lowest': '최저',
+    '100% (edges)': '100% (가장자리)',
+    'Auto': '자동',
+    'Keyboard & Mouse': '키보드 및 마우스',
+    'Restart Now': '지금 재시작',
+    'AMD ML': 'AMD ML',
+}
+
+
+def texts(language=''):
+    """{FMG id: {text id: text}} for menu.msgbnd.dcx: 200 names, titles and labels, 201 help. `language`
+    is the game's message folder."""
     names, help_texts = dict(PAGE_TITLES), dict(PAGE_HELP)
     names[RESTART] = 'Restart Game'
     help_texts[RESTART] = 'Restarts the game to apply the changes marked for restart.'
@@ -130,7 +214,10 @@ def texts():
     for first, labels in LABELS:
         for i, label in enumerate(labels):
             names[first + i] = label
-    return {200: names, 201: help_texts, 204: questions}
+    table = {200: names, 201: help_texts, 204: questions}
+    if language.casefold() == 'korkr':
+        return {fmg: {i: KOREAN.get(text, text) for i, text in strings.items()} for fmg, strings in table.items()}
+    return table
 
 
 def check_original(read):
