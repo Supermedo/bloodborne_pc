@@ -444,6 +444,10 @@ add_executable(pad-use-test EXCLUDE_FROM_ALL ../tests/test_pad_use.cpp)
 target_include_directories(pad-use-test PRIVATE shim)
 target_compile_options(pad-use-test PRIVATE -UNDEBUG)
 
+add_executable(motion-storage-test EXCLUDE_FROM_ALL ../tests/test_motion_storage.cpp)
+target_include_directories(motion-storage-test PRIVATE shadps4)
+target_compile_options(motion-storage-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+
 # bbport: when the video memory banner comes up: ninja -C out/gpu vram-warning-test, then run it.
 # No GPU.
 add_executable(vram-warning-test EXCLUDE_FROM_ALL ../tests/test_vram_warning.cpp)
@@ -520,7 +524,3 @@ foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)
     set_property(TARGET ${dependency} PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${normalized}")
   endif()
 endforeach()
-
-add_executable(motion-storage-test EXCLUDE_FROM_ALL ../tests/test_motion_storage.cpp)
-target_include_directories(motion-storage-test PRIVATE shadps4)
-target_compile_options(motion-storage-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
