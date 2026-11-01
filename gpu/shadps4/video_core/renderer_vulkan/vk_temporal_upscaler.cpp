@@ -166,7 +166,13 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     // Reject unsupported shaders before allocating resources or recording a frame.
     BbSettings::ConfigureUpscalerSupport(instance.IsFsr4Int8Supported(),
                                          instance.IsFsr411Supported(), instance.Fsr411Problem());
+    // Discovery already initializes this selection. A user change during the
+    // queries is still detected on frame start, without a redundant initial owner.
+    const int initial_upscaler = BbSettings::Get().upscaler.load();
+    const unsigned initial_request = BbSettings::Get().upscaler_request.load();
     fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
+    applied_upscaler = initial_upscaler;
+    applied_upscaler_request = initial_request;
     {
         const Dlss* dlss = Dlss::Get();
         static std::string problem;
