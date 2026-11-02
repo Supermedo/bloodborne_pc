@@ -605,8 +605,9 @@ if ((Setting 'online') -eq $true -and $pool195) {
         Hint "Online is on, but the launcher is not signed in to ${server}, so the game can't play online: it says it can't connect to the Bloodborne network (1.9.7 and newer start it offline instead).$seen On the launcher's Online play page sign in (Sign in with Discord, or New SuperMedo account), then start the game again." 1 }
 }
 # The server closing the co-op connection (SuperMedo Server, 29.10.2026): the port reconnects at once, but a summon
-# in between fails.
-$drops = if ($logText) { ([regex]::Matches($logText, 'Reader header recv failed')).Count } else { 0 }
+# in between fails. Only real drops count: the server closing (recv 0), a reset (10054) or a timeout (10060). Error
+# 10038 is the port closing its own socket, e.g. after a refused login (code 6), never the server (R92, 1.11.2026).
+$drops = if ($logText) { ([regex]::Matches($logText, 'Reader header recv failed \((recv 0, error 0|recv -1, error (10054|10060))\)')).Count } else { 0 }
 if ($drops -ge 3) {
     Hint "Online: the server closed the co-op connection $drops times during this game (the port reconnected each time). Summons that fail now and then come from that: it is on the server's side, not this PC - nothing to change here." 2 }
 $onlineServer = "$(Setting 'online_server')".Trim()
