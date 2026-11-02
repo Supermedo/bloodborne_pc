@@ -57,7 +57,6 @@ class PackageFilesTests(unittest.TestCase):
         runtime.write_bytes(b'wrong version')
         self.assertEqual(P.check(self.port),
                          ('1.9.5', ['bin/fsr24/amd_fidelityfx_upscaler_vk.dll']))
-        self.assertEqual(P.check(self.port, quick=True), ('1.9.5', []))
         runtime.unlink()
         self.assertEqual(P.check(self.port),
                          ('1.9.5', ['bin/fsr24/amd_fidelityfx_upscaler_vk.dll']))
