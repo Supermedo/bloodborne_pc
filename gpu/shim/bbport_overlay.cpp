@@ -430,7 +430,7 @@ void Fsr41Settings() {
             const bool ready=s.FsrMethodSupported(route.version,route.backend);
             const bool selected=s.upscaler==route.version && s.fsr411_backend==route.backend;
             int status=ready ? 0 : s.fsr41_status[route.version==BbSettings::UpscalerFsr412][route.backend].load();
-            if(status<0 || status>8 || (!ready && status==0)) status=5;
+            if(status<0 || status>9 || (!ready && status==0)) status=5;
             ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
             if(selected) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,IM_COL32(45,42,34,255));
             ImGui::BeginDisabled(!ready);
@@ -439,6 +439,7 @@ void Fsr41Settings() {
                 Store(s.fsr41_version,route.version,true);
                 Store(s.fsr411_backend,route.backend,true);
                 Store(s.upscaler,route.version,true);
+                BbSettings::SelectUpscaler(route.version);
             }
             ImGui::EndDisabled();
             ImGui::SameLine();
@@ -457,7 +458,7 @@ void Fsr41Settings() {
                 status==1 ? ImVec4(.88f,.47f,.44f,1) :
                 status==5 || status==6 || status==8 ? ImVec4(.54f,.55f,.56f,1) : ImVec4(.85f,.64f,.25f,1);
             ImGui::PushTextWrapPos();
-            ImGui::TextColored(color,"%s",Fsr41Ui::Text(Fsr41Ui::Supported+status));
+            ImGui::TextColored(color,"%s",Fsr41Ui::Status(status));
             ImGui::PopTextWrapPos();
         }
         ImGui::EndTable();
@@ -527,6 +528,7 @@ void Menu() {
                         }
                     }
                 } else Store(s.upscaler, i, true);
+                BbSettings::SelectUpscaler(s.upscaler);
             }
             ImGui::EndDisabled();
             if (!supported) {
@@ -578,9 +580,15 @@ void Menu() {
             ImGui::TextUnformatted("The selected mode is active. You can select FSR 4 again.");
         ImGui::PopTextWrapPos();
     }
+    if (s.UpscalerFallbackActive()) {
+        ImGui::TextWrapped("%s", Fsr41Ui::Text(Fsr41Ui::FallbackActive));
+        if (ImGui::Button(Fsr41Ui::Text(Fsr41Ui::Retry))) {
+            BbSettings::SelectUpscaler(s.upscaler);
+        }
+    }
     if (BbSettings::IsFsr4(s.upscaler)) {
         if (s.upscaler == BbSettings::UpscalerFsr412) {
-            Hint("FSR 4.1.2 uses the original AMD Vulkan driver or AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
+            Hint("FSR 4.1.2 uses AMD SDK 2.4 through Vulkan or the AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
         } else if (s.upscaler == BbSettings::UpscalerFsr411) {
 #ifdef _WIN32
             Hint("FSR 4.1.1 temporal upscaling uses the method selected above. AMD DX12 is included in the Windows package; Vulkan assets can be downloaded in the launcher. Quality presets and sharpening apply to both methods.");
@@ -590,9 +598,22 @@ void Menu() {
         } else {
             Hint("FSR 4 INT8 uses the v07 model from the AMD FidelityFX SDK. Higher quality than FSR 3.1, with more GPU work. Changing presets rebuilds the model and may pause briefly. Assets: tools/fetch_fsr4_assets.sh.");
         }
-        Checkbox("FSR 4: auto exposure", s.fsr4_auto_exposure);
+        bool fixed_exposure = false;
+#ifdef _WIN32
+        fixed_exposure = BbSettings::WindowsAutoExposureFixed(s.upscaler, s.fsr411_backend);
+#endif
+        if (fixed_exposure) {
+            // Show the active automatic behavior without overwriting the preference
+            // retained for the providers where exposure remains configurable.
+            bool automatic = true;
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("FSR 4: auto exposure", &automatic);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("%s", Fsr41Ui::Text(Fsr41Ui::AutoExposureAutomatic));
+        } else Checkbox("FSR 4: auto exposure", s.fsr4_auto_exposure);
         Checkbox("FSR 4: invert jitter", s.fsr4_invert_jitter);
-        Hint("Ghosting diagnostics: FSR 4 uses exposure to normalize color and decide when to discard history. These options apply immediately.");
+        if (!fixed_exposure)
+            Hint("Ghosting diagnostics: FSR 4 uses exposure to normalize color and decide when to discard history. These options apply immediately.");
     }
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
     const bool taa = s.upscaler == BbSettings::UpscalerTaa;
@@ -1103,10 +1124,11 @@ void FpsCounter() {
         const int out = s.output_res;
         ImGui::TextDisabled("|  %ux%u", output_width ? output_width : u32(BbSettings::OutputWidths[out]),
                             output_height ? output_height : u32(BbSettings::OutputHeights[out]));
-        if (UpscalerLabel(s.upscaler)[0] != '\0') {
+        const int active_upscaler = s.ActiveUpscaler();
+        if (UpscalerLabel(active_upscaler)[0] != '\0') {
             ImGui::SameLine(0.0f, 6.0f * base_scale);
-            ImGui::TextColored(PlainCounter() ? PlainValue : UpscalerColor(s.upscaler), "%s",
-                               UpscalerLabel(s.upscaler));
+            ImGui::TextColored(PlainCounter() ? PlainValue : UpscalerColor(active_upscaler), "%s",
+                               UpscalerLabel(active_upscaler));
         }
         const int generated = s.frame_gen != BbSettings::FrameGenOff ? s.frame_gen_now.load() : 0;
         if (generated > 0 && s.game_fps > 0.0f) {

@@ -240,7 +240,7 @@ class ShortcutTests(unittest.TestCase):
         status = dict(supported=False, reason='download', detail='test.dll')
         with patch.object(launcher, 'attach_stdio'), patch.object(launcher, 'load_ini',
                 return_value=({'upscaler':'fsr411', 'fsr411_backend':'vk'}, [])), \
-             patch.object(support, 'query', return_value=READY), \
+             patch.object(launcher.bbport_fsr41, 'query', return_value=READY), \
              patch.object(support, 'method_status', return_value=status), \
              patch.object(launcher, 'game_underway', return_value=False), \
              patch.object(launcher.subprocess, 'Popen') as popen, \

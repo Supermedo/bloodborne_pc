@@ -290,6 +290,15 @@ if (WIN32)
     # <windows.h> out of the way of std::min/max and the Vulkan/SDL headers.
     target_compile_definitions(bbgpu PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN VK_USE_PLATFORM_WIN32_KHR)
     target_sources(bbgpu PRIVATE fsr411_dx12/native_fsr411.cpp fsr411_dx12/fsr411_support.cpp)
+    # SDK 2.4 headers only for upscaling TUs: keep FG's existing SDK headers intact.
+    set(FSR24_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/fsr24/sdk/api/include;${CMAKE_CURRENT_SOURCE_DIR}/fsr24/sdk/upscalers/include")
+    set_source_files_properties(fsr411_dx12/native_fsr411.cpp fsr411_dx12/fsr411_support.cpp
+        shadps4/video_core/renderer_vulkan/vk_instance.cpp
+        shadps4/video_core/renderer_vulkan/vk_fsr412_driver.cpp ../tools/fsr411_capabilities.cpp
+        PROPERTIES INCLUDE_DIRECTORIES "${FSR24_INCLUDES}")
+    set_source_files_properties(shadps4/video_core/renderer_vulkan/vk_instance.cpp
+        shadps4/video_core/renderer_vulkan/vk_fsr412_driver.cpp
+        PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
     # AMD's runtime loader checks MSBuild's _WINDOWS macro, not MinGW's _WIN32.
     set_source_files_properties(fsr411_dx12/native_fsr411.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
     set_source_files_properties(fsr411_dx12/fsr411_support.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
@@ -341,9 +350,24 @@ if (WIN32)
     target_link_options(bb-probe PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
     add_executable(bb-gpu-capabilities ../tools/gpu_capabilities.c ../tools/fsr411_capabilities.cpp
         fsr411_dx12/fsr411_support.cpp ../packaging/windows/bb-gpu-capabilities.rc)
+    target_compile_definitions(bb-gpu-capabilities PRIVATE _WINDOWS)
     target_include_directories(bb-gpu-capabilities PRIVATE shim fsr411_dx12
         fsr411_dx12/sdk/api/include fsr411_dx12/sdk/upscalers/include)
     target_compile_definitions(bb-gpu-capabilities PRIVATE NOMINMAX)
+    add_executable(fsr24-api-test EXCLUDE_FROM_ALL ../tests/test_fsr24_api.cpp)
+    target_include_directories(fsr24-api-test PRIVATE fsr411_dx12 ${FSR24_INCLUDES})
+    target_compile_definitions(fsr24-api-test PRIVATE _WINDOWS NOMINMAX)
+    target_compile_options(fsr24-api-test PRIVATE -UNDEBUG)
+    add_executable(fsr24-vulkan-features-test EXCLUDE_FROM_ALL ../tests/test_fsr24_vulkan_features.cpp)
+    target_include_directories(fsr24-vulkan-features-test PRIVATE fsr411_dx12)
+    target_compile_options(fsr24-vulkan-features-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    add_executable(fsr-support-cache-test EXCLUDE_FROM_ALL ../tests/test_fsr_support_cache.cpp)
+    target_include_directories(fsr-support-cache-test PRIVATE shadps4)
+    target_compile_options(fsr-support-cache-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(fsr-support-cache-test PRIVATE -pthread)
+    add_executable(fsr4-preferences-test EXCLUDE_FROM_ALL ../tests/test_fsr4_preferences.cpp shim/bbport_settings.cpp)
+    target_include_directories(fsr4-preferences-test PRIVATE shim)
+    target_compile_options(fsr4-preferences-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_libraries(bb-gpu-capabilities PRIVATE Vulkan::Vulkan d3d12 dxgi)
     # "Play Bloodborne.exe": the game with the launcher's saved settings, no launcher window.
     add_executable(bb-play WIN32 ../packaging/windows/play.c ../packaging/windows/play.rc)
@@ -462,15 +486,10 @@ target_include_directories(shared-graphics-test PRIVATE shim)
 target_compile_options(shared-graphics-test PRIVATE -UNDEBUG)
 
 if (WIN32)
-    add_library(fsr-driver-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_fixture.cpp)
-    target_include_directories(fsr-driver-fixture PRIVATE fsr411_dx12 fsr411_dx12/sdk/api/include)
-    add_library(fsr-driver-invalid-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_invalid.c)
-    target_link_options(fsr-driver-invalid-fixture PRIVATE -nostdlib -Wl,--entry,DllMain)
-    add_executable(fsr-driver-test EXCLUDE_FROM_ALL ../tests/test_fsr_driver.cpp)
-    target_include_directories(fsr-driver-test PRIVATE shim fsr411_dx12 fsr411_dx12/sdk/api/include)
-    target_compile_options(fsr-driver-test PRIVATE -UNDEBUG)
-    target_link_libraries(fsr-driver-test PRIVATE bcrypt)
-    add_dependencies(fsr-driver-test fsr-driver-fixture fsr-driver-invalid-fixture)
+    add_executable(pc-menu-upscaler-test EXCLUDE_FROM_ALL ../tests/test_pc_menu_upscaler.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(pc-menu-upscaler-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(pc-menu-upscaler-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     add_executable(shared-graphics-overlay-test EXCLUDE_FROM_ALL ../tests/test_shared_graphics_overlay.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(shared-graphics-overlay-test PRIVATE .. ../src shim shadps4

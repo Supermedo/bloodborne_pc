@@ -21,13 +21,6 @@ import time
 PORT = Path(__file__).resolve().parent
 
 
-def prepare_driver_environment(env):
-    """The direct/frozen runner needs the same automatic driver lookup as the GUI."""
-    sys.path.insert(0, str(PORT / 'launcher'))
-    import bbport_driver_runtime
-    return bbport_driver_runtime.configure_environment(env)
-
-
 # The Vulkan loader's variables that decide which graphics drivers it loads: one set in Windows' environment
 # variables hides every other card from the game (the launcher's Help: "The game does not use your graphics card").
 VULKAN_DRIVER_VARIABLES = ('VK_ICD_FILENAMES', 'VK_DRIVER_FILES', 'VK_ADD_DRIVER_FILES', 'VK_LOADER_DRIVERS_SELECT',
@@ -580,7 +573,9 @@ def main():
     note = files_note(PORT)
     if note:
         print(note)
-    prepare_driver_environment(env)
+    # Internal-driver overrides belonged to the old prototype, not the public SDK.
+    env.pop('BB_TEST_AMD_VK_RUNTIME', None)
+    env.pop('BB_TEST_AMD_DX_RUNTIME', None)
     note = vulkan_driver_note(env)
     if note:
         print(note)

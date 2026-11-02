@@ -21,7 +21,8 @@ enum TextId {Settings, Family, Recommended, Alternative, Compatibility,
              Supported, Gpu, Capability, Driver, Files, Check, Disabled, Interop, Checking,
              Help, Download, Recheck, Close, Selected, Unavailable, Method, Availability,
              Support, Details, Hint412Vk, Hint412Dx, Hint411Dx, Hint411Vk,
-             MotionCacheLabel, MotionCacheHelp};
+             MotionCacheLabel, MotionCacheHelp, FallbackActive, Retry, RestartRequired,
+             AutoExposureAutomatic};
 inline constexpr const char* languages[] = {LANGUAGES};
 inline constexpr const char* texts[13][TEXT_COUNT] = {
 ROWS
@@ -33,6 +34,9 @@ inline int Language() {
     return 0;
 }
 inline const char* Text(int id) { return texts[Language()][id]; }
+inline const char* Status(int code) {
+    return Text(code == 9 ? RestartRequired : Supported + code);
+}
 }
 '''.replace('LANGUAGES',', '.join(json.dumps(c) for c in codes)).replace('ROWS',rows).replace('TEXT_COUNT', str(len(texts.KEYS)))
 target=ROOT/'gpu/shim/bbport_fsr41_ui.h'

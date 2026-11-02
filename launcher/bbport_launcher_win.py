@@ -1300,8 +1300,8 @@ def game_environment(s, graphics=None):
         if not (s.get('online') and s.get('online_pool') == 'shadnet' and theirs and theirs == ours):
             for key in BBSC_SCRIPT_VARIABLES:
                 env.pop(key, None)
-    import bbport_driver_runtime
-    bbport_driver_runtime.configure_environment(env, replace=True)
+    env.pop('BB_TEST_AMD_VK_RUNTIME', None)
+    env.pop('BB_TEST_AMD_DX_RUNTIME', None)
     graphics = graphics if graphics is not None else load_ini(s)[0]
     env['BB_UI_LANGUAGE'] = s.get('ui_language') or LANG
     env['BB_GAME_DIR'] = s['game_dir']

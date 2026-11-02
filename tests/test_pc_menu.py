@@ -1,4 +1,5 @@
 from paths import ROOT
+from pathlib import Path
 import re
 import struct
 import sys
@@ -61,6 +62,46 @@ class PcMenuTests(unittest.TestCase):
                          len(pc_menu.LINES))
         for constant, value in re.findall(r'(\w+_TEXT) = (\d+)', source):
             self.assertIn(int(value), names, constant)
+
+    def test_retry_label_and_fsr412_are_available_in_each_game_language(self):
+        self.assertTrue(set(quit_menu.TEXTS) <= set(pc_menu.RETRY_UPSCALER))
+        for language in pc_menu.RETRY_UPSCALER:
+            names = pc_menu.texts(language)[200]
+            self.assertEqual(names[119106], 'FSR 4.1.2')
+            self.assertEqual(names[119109], pc_menu.RETRY_UPSCALER[language])
+        self.assertEqual(pc_menu.texts('unknown')[200][119109], 'Retry FSR')
+
+    def test_upscaler_text_blocks_match_native_ids_and_leave_room_for_retry(self):
+        source = (ROOT / 'gpu/shim/bbport_pc_menu.cpp').read_text(encoding='utf-8')
+        ids = {name: int(value) for name, value in
+               re.findall(r'(\w+_TEXT) = (\d+)', source)}
+        self.assertEqual(ids['RETRY_UPSCALER_TEXT'], pc_menu.RETRY_UPSCALER_TEXT)
+        labels = dict(pc_menu.LABELS)
+        header = (ROOT / 'gpu/shim/bbport_settings.h').read_text(encoding='utf-8')
+        choices = re.search(r'enum Upscaler : int \{(.*?)UpscalerCount', header, re.S).group(1)
+        count = len(re.findall(r'\bUpscaler\w+', choices))
+        self.assertEqual(len(labels[ids['UPSCALER_TEXT']]), count)
+        self.assertLessEqual(ids['UPSCALER_TEXT'] + count, ids['RETRY_UPSCALER_TEXT'])
+        self.assertLess(ids['RETRY_UPSCALER_TEXT'], ids['PRESET_TEXT'])
+
+    def test_text_layer_selects_retry_translation_per_archive(self):
+        import tempfile
+        from test_quit_menu import menu_archive, fmgs_of
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game, out = root / 'game', root / 'out'
+            archive = menu_archive({200: {42: 'retained'}, 201: {}, 204: {}})
+            for language in quit_menu.TEXTS:
+                source = game / 'dvdroot_ps4/msg' / language / 'menu.msgbnd.dcx'
+                source.parent.mkdir(parents=True)
+                source.write_bytes(archive)
+            quit_menu.write_text_layer(game, out, pc_menu.texts)
+            for language in quit_menu.TEXTS:
+                target = out / 'dvdroot_ps4/msg' / language / 'menu.msgbnd.dcx'
+                names = fmgs_of(target.read_bytes())[200]
+                self.assertEqual(names[42], 'retained')
+                self.assertEqual(names[119109], pc_menu.RETRY_UPSCALER[language])
+                self.assertEqual(names[119106], 'FSR 4.1.2')
 
 
 if __name__ == '__main__':

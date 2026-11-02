@@ -95,6 +95,10 @@ cp -r scripts patches "$dest/"
 # The first build downloads AMD's SDK archive; subsequent builds verify the cached DLL.
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr411_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_upscaler_dx12.dll "$dest/bin/"
+# SDK 2.4 is separate: retain the original FSR4.1.1 and FG libraries above/below.
+out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr24_upscaling.py
+mkdir -p "$dest/bin/fsr24"
+cp out/fsr24/amd_fidelityfx_upscaler_dx12.dll out/fsr24/amd_fidelityfx_upscaler_vk.dll "$dest/bin/fsr24/"
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fg401_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_framegeneration_dx12.dll \
    out/fsr411-dx12/amd_fidelityfx_loader_dx12.dll out/fsr411-dx12/D3D12Core.dll "$dest/bin/"
@@ -126,6 +130,7 @@ cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
 cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
+cp docs/FSR24_UPSCALING.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"

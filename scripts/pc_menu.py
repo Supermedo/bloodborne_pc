@@ -98,7 +98,7 @@ PAGE_HELP = {
 
 # Choice labels: (first id, labels), in bbport_pc_menu.cpp's order.
 LABELS = [
-    (119100, ['Off', 'FSR 3.1', 'FSR 4', 'FSR 4.1.1', 'TAA', 'DLSS']),
+    (119100, ['Off', 'FSR 3.1', 'FSR 4', 'FSR 4.1.1', 'TAA', 'DLSS', 'FSR 4.1.2']),
     (119110, ['Native', 'Quality', 'Balanced', 'Performance', 'Ultra Performance']),
     (119120, ['Off', '0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '1.0', '1.5', '2.0']),
     (119140, ['Off', 'FSR 3.1', 'DLSS', 'AMD ML']),
@@ -118,9 +118,25 @@ PAGE_TITLES = {119001: 'PC Graphics', 119002: 'PC Effects', 119003: 'PC Options'
 RESTART = 119009                     # the Restart Game button: name (200), help (201), question (204)
 
 
-def texts():
+RETRY_UPSCALER_TEXT = 119109
+RETRY_UPSCALER = {
+    'engus': 'Retry FSR', 'enggb': 'Retry FSR',
+    'dandk': 'Prøv FSR igen', 'deude': 'FSR erneut versuchen',
+    'finfi': 'Yritä FSR:ää uudelleen', 'frafr': 'Réessayer FSR',
+    'itait': 'Riprova FSR', 'jpnjp': 'FSR を再試行', 'korkr': 'FSR 다시 시도',
+    'nldnl': 'FSR opnieuw proberen', 'norno': 'Prøv FSR på nytt',
+    'polpl': 'Ponów próbę FSR', 'porbr': 'Tentar FSR novamente',
+    'porpt': 'Tentar FSR novamente', 'rusru': 'Повторить FSR',
+    'spaes': 'Reintentar FSR', 'spaar': 'Reintentar FSR',
+    'swese': 'Försök FSR igen', 'turtr': 'FSR yeniden dene',
+    'zhocn': '重试 FSR', 'zhotw': '重試 FSR', 'araae': 'إعادة محاولة FSR',
+}
+
+
+def texts(language='engus'):
     """{FMG id: {text id: text}} for menu.msgbnd.dcx: 200 names, titles and labels, 201 help."""
     names, help_texts = dict(PAGE_TITLES), dict(PAGE_HELP)
+    names[RETRY_UPSCALER_TEXT] = RETRY_UPSCALER.get(language.casefold(), RETRY_UPSCALER['engus'])
     names[RESTART] = 'Restart Game'
     help_texts[RESTART] = 'Restarts the game to apply the changes marked for restart.'
     questions = {RESTART: 'Restart the game now\nto apply the changes?'}

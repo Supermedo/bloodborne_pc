@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "fsr411_support.h"
 #include "fsr411_vulkan_support.h"
-#include "driver_provider.h"
+#include "sdk24_upscaling.h"
+#include "vk/ffx_api_vk.h"
 #include "ffx_upscale.h"
 #include <cstdio>
 #include <stdexcept>
@@ -99,30 +100,18 @@ extern "C" void PrintFsr412Capabilities(VkPhysicalDevice physical, int dx12) {
             throw std::runtime_error("vkCreateDevice=" + std::to_string(result));
         FsrCheck(&trace, stage, "pass", "Vulkan preflight device");
         stage = "runtime_load";
-        const auto module = DriverFsr::Runtime(false);
-        FsrCheck(&trace, stage, "pass", "amdvkffx64.dll");
+        const auto& api = FsrSdk24::Runtime(false);
+        FsrCheck(&trace, stage, "pass", "SDK 2.4 / " + api.path.filename().string());
         stage = "provider_query";
-        const auto provider = DriverFsr::Get(module, FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE);
-        char identity[64]{};
-        std::snprintf(identity, sizeof(identity), "0x%llx", (unsigned long long)provider.provider.versionId);
-        FsrCheck(&trace, stage, "pass", std::string(identity) + " " +
-            (provider.provider.versionName ? provider.provider.versionName : ""));
-        stage = "provider_version";
-        const bool version = (uint32_t(provider.provider.versionId) & 0x7fffffffu) ==
-                             ((4u << 22) | (1u << 12) | 2u);
-        FsrCheck(&trace, stage, version ? "pass" : "fail", "4.1.2");
-        if (!version) {
-            status = {false, "driver", "FSR 4.1.2 provider unavailable"};
-        } else {
-            stage = "provider_support";
-            const struct { VkDevice device; VkPhysicalDevice physical; PFN_vkGetDeviceProcAddr gdpa; }
-                backend{device, physical, &vkGetDeviceProcAddr};
-            const bool supported = DriverFsr::Supported(provider, &backend.device);
-            FsrCheck(&trace, stage, supported ? "pass" : "fail",
-                supported ? "isSupported=true" : "isSupported=false");
-            status = {supported, supported ? "ready" : "hardware",
-                supported ? "4.1.2" : "FSR 4.1.2 unsupported by selected GPU"};
-        }
+        VkDeviceContext backend{device, physical, &vkGetDeviceProcAddr};
+        const auto selected = FsrSdk24::Select(api, &backend);
+        FsrCheck(&trace, stage, "pass", selected.name);
+        FsrCheck(&trace, "provider_version", "pass", selected.name);
+        FsrCheck(&trace, "provider_support", "pass", "SDK offers 4.1.2 for the selected Vulkan device");
+        status = {true, "ready", selected.name};
+    } catch (const FsrSdk24::Error& error) {
+        FsrCheck(&trace, stage, "fail", error.what());
+        status = {false, error.reason, error.what()};
     } catch (const std::exception& error) {
         FsrCheck(&trace, stage, "fail", error.what());
         status = {false, (std::string_view(stage) == "queue" || std::string_view(stage) == "device" ||

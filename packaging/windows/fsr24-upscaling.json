@@ -1,0 +1,18 @@
+{
+  "tag": "v2.4.0",
+  "commit": "7539ae8b6568ad29ed78a753404351daf3b5cca7",
+  "files": [
+    {
+      "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll",
+      "bytes": 57664272,
+      "sha256": "aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace",
+      "blob": "6d01d9f52c412fc336350f04e948eb1bee196a38"
+    },
+    {
+      "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_vk.dll",
+      "bytes": 36135696,
+      "sha256": "4a7e895af6e0b615d40a84d59eb8c2b1054ad91cdd0c739567940270d51bdab7",
+      "blob": "9e2fade37c51fc2fd6323218bf3d736969e9dd2a"
+    }
+  ]
+}

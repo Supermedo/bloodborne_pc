@@ -26,6 +26,8 @@
 #include "fg401_support.h"
 #include "fsr411_support.h"
 #include "fsr411_vulkan_support.h"
+#include "sdk24_upscaling.h"
+#include "sdk24_vulkan_features.h"
 #include "video_core/renderer_vulkan/vk_low_latency.h"
 #endif
 
@@ -202,7 +204,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
 
-    CreateDevice();
+    CreateDevice(window_info.type != Frontend::WindowSystemType::Headless);
     CollectPhysicalMemoryInfo();
     CollectImageFormatInfo();
     CollectToolingInfo();
@@ -272,7 +274,7 @@ std::string Instance::GetDriverVersionName() {
     return GetReadableVersion(version);
 }
 
-bool Instance::CreateDevice() {
+bool Instance::CreateDevice(bool presentation) {
     const vk::StructureChain feature_chain = physical_device.getFeatures2<
         vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
         vk::PhysicalDeviceVulkan12Features, vk::PhysicalDeviceVulkan13Features,
@@ -286,6 +288,10 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
         vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT,
         vk::PhysicalDeviceDescriptorBufferFeaturesEXT,
+#ifdef _WIN32
+        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR,
+        vk::PhysicalDeviceShaderFloat8FeaturesEXT,
+#endif
         vk::PhysicalDeviceFaultFeaturesEXT, vk::PhysicalDevicePresentIdFeaturesKHR,
         vk::PhysicalDeviceAntiLagFeaturesAMD>();
     features = feature_chain.get().features;
@@ -322,8 +328,12 @@ bool Instance::CreateDevice() {
     };
 
     // Required
-    ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    // Headless helpers have no VK_KHR_surface instance extension and never present.
+    // Enabling a swapchain there violates its instance-extension dependency.
+    if (presentation) {
+        ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
+                   "Required Vulkan extension unavailable: {}", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
     ASSERT_MSG(add_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
                "Required Vulkan extension unavailable: {}", VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     ASSERT_MSG(add_extension(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME),
@@ -480,7 +490,7 @@ bool Instance::CreateDevice() {
     }
     // bbport: low latency (BB_LOW_LATENCY=on or boost): NVIDIA Reflex, else AMD Anti-Lag 2.
     // Only enabled when chosen; see vk_low_latency.cpp.
-    if (LowLatency::Wanted()) {
+    if (presentation && LowLatency::Wanted()) {
         present_id = feature_chain.get<vk::PhysicalDevicePresentIdFeaturesKHR>().presentId &&
                      add_extension(VK_KHR_PRESENT_ID_EXTENSION_NAME);
         nv_low_latency = present_id &&
@@ -526,6 +536,50 @@ bool Instance::CreateDevice() {
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
+    // The SDK records shaders on our logical device; hardware support alone
+    // does not enable their Vulkan capabilities. Keep non-SDK paths unchanged.
+    bool sdk_full_subgroups = false;
+    bool sdk_variable_storage = false, sdk_variable = false, sdk_memory_model = false;
+    bool sdk_memory_scope = false, sdk_partially_bound = false;
+#ifdef _WIN32
+    const bool sdk_requested = GetVendorID() == 0x1002 && FsrSdk24::VulkanRuntimePresent();
+    const auto has_extension = [&](std::string_view name) {
+        return std::find(available_extensions.begin(), available_extensions.end(), name) != available_extensions.end();
+    };
+    const auto coop = feature_chain.get<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>();
+    const auto fp8 = feature_chain.get<vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
+    const auto sdk_features = FsrSdk24::ChooseVulkanFeatures(sdk_requested,
+        has_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME), bool(coop.cooperativeMatrix),
+        has_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME), bool(fp8.shaderFloat8),
+        bool(fp8.shaderFloat8CooperativeMatrix), bool(vk13_features.computeFullSubgroups));
+    const bool sdk_cooperative = sdk_features.cooperative_matrix;
+    const bool sdk_float8 = sdk_features.float8;
+    sdk_full_subgroups = sdk_features.full_subgroups;
+    const FsrSdk24::VulkanCoreFeatures core_support{
+        bool(vk11_features.variablePointersStorageBuffer), bool(vk11_features.variablePointers),
+        bool(vk12_features.vulkanMemoryModel), bool(vk12_features.vulkanMemoryModelDeviceScope),
+        bool(vk12_features.descriptorBindingPartiallyBound)};
+    const auto sdk_core = FsrSdk24::ChooseVulkanCoreFeatures(sdk_requested, core_support);
+    sdk_variable_storage = sdk_core.variable_pointers_storage_buffer;
+    sdk_variable = sdk_core.variable_pointers;
+    sdk_memory_model = sdk_core.memory_model;
+    sdk_memory_scope = sdk_core.memory_model_device_scope;
+    sdk_partially_bound = sdk_core.partially_bound;
+    // Restoring SDK files cannot add features to an already created logical device.
+    const auto desired = FsrSdk24::ChooseVulkanFeatures(true,
+        has_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME), bool(coop.cooperativeMatrix),
+        has_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME), bool(fp8.shaderFloat8),
+        bool(fp8.shaderFloat8CooperativeMatrix), bool(vk13_features.computeFullSubgroups));
+    fsr412_vulkan_device_ready = sdk_features == desired &&
+        sdk_core == FsrSdk24::ChooseVulkanCoreFeatures(true, core_support);
+    if (sdk_cooperative) add_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    if (sdk_float8) add_extension(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+    if (sdk_requested) std::printf("FSR SDK 2.4 Vulkan device features: cooperativeMatrix=%d, shaderFloat8=%d, shaderFloat8CooperativeMatrix=%d, computeFullSubgroups=%d\n",
+        int(sdk_cooperative), int(sdk_float8), int(sdk_float8), int(sdk_full_subgroups));
+    if (sdk_requested) std::printf("FSR SDK 2.4 Vulkan core features: variablePointersStorageBuffer=%d, variablePointers=%d, vulkanMemoryModel=%d, vulkanMemoryModelDeviceScope=%d, descriptorBindingPartiallyBound=%d\n",
+        int(sdk_core.variable_pointers_storage_buffer), int(sdk_core.variable_pointers),
+        int(sdk_core.memory_model), int(sdk_core.memory_model_device_scope), int(sdk_core.partially_bound));
+#endif
     // bbport: FSR 4.1.1 through the fsr4vk provider DLL (vk_fsr4vk.cpp). Its device requirements
     // (provider/INTEGRATION-CONTRACT.md) are standard features and two extensions; they are
     // requested only when the DLL is installed and the device has all of them, so nothing changes
@@ -618,6 +672,8 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceVulkan11Features{
             .storageBuffer16BitAccess = vk11_features.storageBuffer16BitAccess,
+            .variablePointersStorageBuffer = sdk_variable_storage,
+            .variablePointers = sdk_variable,
             .shaderDrawParameters = vk11_features.shaderDrawParameters,
         },
         vk::PhysicalDeviceVulkan12Features{
@@ -628,6 +684,7 @@ bool Instance::CreateDevice() {
             .shaderSharedInt64Atomics = vk12_features.shaderSharedInt64Atomics,
             .shaderFloat16 = vk12_features.shaderFloat16,
             .shaderInt8 = vk12_features.shaderInt8,
+            .descriptorBindingPartiallyBound = sdk_partially_bound,
             .descriptorBindingVariableDescriptorCount = fsr4vk,
             .runtimeDescriptorArray = fsr4vk,
             .scalarBlockLayout = vk12_features.scalarBlockLayout,
@@ -636,12 +693,15 @@ bool Instance::CreateDevice() {
             .hostQueryReset = vk12_features.hostQueryReset,
             .timelineSemaphore = vk12_features.timelineSemaphore,
             .bufferDeviceAddress = vk12_features.bufferDeviceAddress,
+            .vulkanMemoryModel = sdk_memory_model,
+            .vulkanMemoryModelDeviceScope = sdk_memory_scope,
             .shaderOutputLayer = vk12_features.shaderOutputLayer,
         },
         vk::PhysicalDeviceVulkan13Features{
             .robustImageAccess = vk13_features.robustImageAccess,
             .shaderDemoteToHelperInvocation = vk13_features.shaderDemoteToHelperInvocation,
             .subgroupSizeControl = vk13_features.subgroupSizeControl,
+            .computeFullSubgroups = sdk_full_subgroups,
             .synchronization2 = vk13_features.synchronization2,
             .dynamicRendering = vk13_features.dynamicRendering,
             .shaderIntegerDotProduct = vk13_features.shaderIntegerDotProduct,
@@ -649,6 +709,13 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT{.mutableDescriptorType = fsr4vk},
         vk::PhysicalDeviceDescriptorBufferFeaturesEXT{.descriptorBuffer = fsr4vk},
+#ifdef _WIN32
+        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR{.cooperativeMatrix = sdk_cooperative},
+        vk::PhysicalDeviceShaderFloat8FeaturesEXT{
+            .shaderFloat8 = sdk_float8,
+            .shaderFloat8CooperativeMatrix = sdk_float8,
+        },
+#endif
         // Extensions
         vk::PhysicalDeviceCustomBorderColorFeaturesEXT{
             .customBorderColors = true,
@@ -743,6 +810,10 @@ bool Instance::CreateDevice() {
         },
     };
 
+#ifdef _WIN32
+    if (!sdk_cooperative) device_chain.unlink<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>();
+    if (!sdk_float8) device_chain.unlink<vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
+#endif
     if (!fsr4vk) {
         device_chain.unlink<vk::PhysicalDeviceMutableDescriptorTypeFeaturesEXT>();
         device_chain.unlink<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>();
