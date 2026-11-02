@@ -6809,4 +6809,5 @@ def main():
 
 
 if __name__ == '__main__':
+    saves.OUTSIDE = saves.outside_dir()  # every backup also outside the port folder (R86); not for tests' main()
     main()

@@ -874,6 +874,8 @@ def main():
             if env.get('BB_EXIT_BACKUP') == '1':  # the save as the game left it, also after a crash
                 sys.path.insert(0, str(PORT / 'launcher'))
                 from bbport_exit_backup import run_with_backup
+                import bbport_saves
+                bbport_saves.OUTSIDE = bbport_saves.outside_dir()  # also outside the port folder (R86)
                 return run_with_backup(command, saves_dir, original_game, creationflags=no_console())
             return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
         finally:
