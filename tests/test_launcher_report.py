@@ -243,6 +243,19 @@ class ToolHintTests(unittest.TestCase):
         self.assertIn('the server closed the co-op connection 5 times during this game', hints)
         self.assertNotIn('co-op connection', self.hints(NORMAL_RUN + drop * 2, version='1.9.6'))
 
+    def test_only_real_drops_count(self):
+        # R92: each refused login (code 6) closes the port's own socket, and its reader then logs error 10038.
+        line = ('GPU [ShadNet] <Warning> client.cpp:241 ReaderThread: Reader header recv failed (recv {}, error {}), '
+                'disconnecting\n')
+        refused = ('GPU [ShadNet] <Error> client.cpp:778 HandleLoginReply: Login rejected error code 6\n'
+                   + line.format(-1, 10038))
+        hints = self.hints(NORMAL_RUN + refused * 6, version='1.9.6')
+        self.assertNotIn('the server closed the co-op connection', hints)
+        self.assertIn('Online login error code 6', hints)
+        real = line.format(-1, 10054) + line.format(-1, 10060) + line.format(0, 0) + refused * 4
+        self.assertIn('the server closed the co-op connection 3 times during this game',
+                      self.hints(NORMAL_RUN + real, version='1.9.6'))
+
 
 if __name__ == '__main__':
     unittest.main()
