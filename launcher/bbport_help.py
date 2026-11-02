@@ -39,6 +39,14 @@ def _(*texts):
     return L.renamed(L._(*texts)) if L else texts[0]
 
 
+def step_text(step):
+    text = _(step)
+    if step == motion_text.HELP_KEYS['Disable']:
+        return text.format(expert=_('Expert view'), graphics=_('All graphics'),
+                           option=_('Object motion vectors'))
+    return text
+
+
 def number(value, digits=0):
     """A number as the launcher's language writes it: 93,825,704 / 93.825.704; 29.3 / 29,3."""
     text = f'{value:,.{digits}f}'
@@ -858,7 +866,7 @@ class HelpMixin:
             line.pack(fill='x', pady=px(2))
             tk.Label(line, text=f'{number}.', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10),
                      width=3, anchor='ne').pack(side='left', anchor='n')
-            self.wrap_within(tk.Label(line, text=_(step), bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 10),
+            self.wrap_within(tk.Label(line, text=step_text(step), bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 10),
                                       justify='left', anchor='w'), 660).pack(side='left', fill='x', expand=True)
 
         actions = TOPIC_ACTIONS.get(key, [])

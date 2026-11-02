@@ -65,6 +65,25 @@ class StorageGuard(unittest.TestCase):
         self.assertEqual((ROOT / 'gpu/shim/bbport_motion_ui.h').read_text(encoding='utf-8'),
                          generator.generate())
 
+    def test_help_uses_the_actual_translated_navigation_and_switch_labels(self):
+        import bbport_help as help_
+        from string import Formatter
+        for code, row in catalog.HELP_TEXTS.items():
+            with self.subTest(language=code):
+                self.assertEqual({field for _, field, _, _ in Formatter().parse(row['Disable'])
+                                  if field}, {'expert', 'graphics', 'option'})
+                self.assertIn('RX 6000', row['Title'])
+                self.assertNotIn('SSBO', row['Title'])
+                labels = {'Expert view': 'EXPERT-'+code, 'All graphics': 'PAGE-'+code,
+                          'Object motion vectors': 'SWITCH-'+code,
+                          catalog.HELP_KEYS['Disable']: row['Disable']}
+                with mock.patch.object(help_, '_', side_effect=lambda text: labels.get(text, text)):
+                    rendered = help_.step_text(catalog.HELP_KEYS['Disable'])
+                    for name in ('EXPERT-', 'PAGE-', 'SWITCH-'):
+                        self.assertIn(name+code, rendered)
+                    self.assertNotIn('{', rendered)
+                    self.assertEqual(help_.step_text('Unchanged step'), 'Unchanged step')
+
     def generator(self):
         spec = importlib.util.spec_from_file_location('motion_ui_texts', ROOT / 'tools/motion_ui_texts.py')
         module = importlib.util.module_from_spec(spec)
