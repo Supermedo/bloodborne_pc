@@ -12,6 +12,7 @@
 // calling convention.
 
 #include "bbport_settings.h"
+#include "bbport_pc_fsr.h"
 #include "../bbgpu.h"
 
 #include <algorithm>
@@ -277,25 +278,12 @@ void DefaultSettings(int32_t* out) {
     out[Restart] = 0;
 }
 
-int SupportedFsrBackend(int upscaler) {
-    const auto& s = BbSettings::Get();
-    const int saved = s.fsr411_backend.load();
-    if (saved >= 0 && saved <= 1 && s.FsrMethodSupported(upscaler, saved)) return saved;
-    // Match the family picker's version-specific order while preserving a usable choice.
-    const int first = upscaler == BbSettings::UpscalerFsr412
-                          ? BbSettings::Fsr411Vulkan : BbSettings::Fsr411Dx12;
-    for (const int backend : {first, 1 - first}) {
-        if (s.FsrMethodSupported(upscaler, backend)) return backend;
-    }
-    return -1;
-}
-
 bool UpscalerSupported(int upscaler) {
     const auto& s = BbSettings::Get();
     switch (upscaler) {
     case BbSettings::UpscalerFsr4: return s.fsr4_supported.load();
     case BbSettings::UpscalerFsr411:
-    case BbSettings::UpscalerFsr412: return SupportedFsrBackend(upscaler) >= 0;
+    case BbSettings::UpscalerFsr412: return BbPcFsr::Supported(s, upscaler);
     case BbSettings::UpscalerDlss: return s.dlss_supported.load();
     default: return true;
     }
@@ -317,16 +305,13 @@ bool Apply(Line line, int32_t v) {
         v = std::clamp(v, 0, BbSettings::UpscalerCount - 1);
         if ((v == BbSettings::UpscalerFsr411 || v == BbSettings::UpscalerFsr412) &&
             v != s.upscaler) {
-            const int backend = SupportedFsrBackend(v);
-            if (backend < 0) {
+            if (!BbPcFsr::Select(s, v)) {
                 // A stale open list must not replace the saved choice with an unavailable route.
                 const int selected = s.upscaler.load();
                 SetValue(Upscaler, selected);
                 applied[Upscaler] = selected;
                 return false;
             }
-            s.fsr411_backend = backend;
-            s.fsr41_version = v;
         }
         BbSettings::SelectUpscaler(v);
         return true;

@@ -100,6 +100,12 @@ Build normal Windows targets plus `fsr24-api-test`, `fsr24-vulkan-features-test`
 `fg401-preferences-test`, `shared-graphics-overlay-test`, `pc-menu-upscaler-test`.
 ABI compile controls, Python launcher/package tests and generated 13-language
 catalogs complement native tests. The overlay fixture uses the actual widgets.
+The native PC-menu fixture covers 48 Windows version/backend/preference cases
+and both native-4.1.1 availability states against every Windows table combination.
+Changing versions uses that version's supported-method order; a saved backend
+is retained only for its own version. Linux keeps its native 4.1.1 availability
+and does not write Windows route preferences. These are policy tests on Windows,
+not a full Linux renderer build.
 
 The isolated runtime matrix covers four methods at 1080p/4K, routing, unavailable
 and failed methods, input checking, presets, DLL load order, repair/restart and

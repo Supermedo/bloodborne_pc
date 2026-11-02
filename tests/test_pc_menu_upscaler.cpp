@@ -20,27 +20,31 @@ int main() {
             for (unsigned mask = 0; mask != 4; ++mask) {
                 s.fsr41_backend_supported[row][0] = (mask & 1) != 0;
                 s.fsr41_backend_supported[row][1] = (mask & 2) != 0;
-                for (const int saved : {-1, 0, 1}) {
-                    SelectUpscaler(UpscalerFsr3);
-                    s.fsr411_backend = saved;
-                    const bool keep_saved = saved >= 0 && (mask & (1u << saved));
-                    const int expected = !mask ? -1 : keep_saved ? saved
-                        : provider == UpscalerFsr412 ? ((mask & 1) ? 0 : 1)
-                                                   : ((mask & 2) ? 1 : 0);
-                    Require(SupportedFsrBackend(provider) == expected,
-                            "PC menu backend choice differs from supported method order");
-                    Require(UpscalerSupported(provider) == bool(mask),
-                            "PC menu offers a version without a supported backend");
-                    const bool save = Apply(Line::Upscaler, provider);
-                    Require(save == bool(mask), "unavailable route unexpectedly requested a save");
-                    Require(s.upscaler == (mask ? provider : UpscalerFsr3),
-                            "unavailable selection replaced the saved upscaler");
-                    if (mask) Require(s.fsr411_backend == expected && s.fsr41_version == provider,
-                                      "PC menu did not synchronize the supported version/backend");
-                    else Require(Value(Line::Upscaler) == UpscalerFsr3 &&
-                                 applied[Line::Upscaler] == UpscalerFsr3,
-                                 "stale unsupported list was not reset");
-                    ++route_cases;
+                for (const int saved_version : {UpscalerFsr411, UpscalerFsr412}) {
+                    for (const int saved : {-1, 0, 1}) {
+                        SelectUpscaler(UpscalerFsr3);
+                        s.fsr411_backend = saved;
+                        s.fsr41_version = saved_version;
+                        const bool keep_saved = saved_version == provider && saved >= 0 &&
+                                                (mask & (1u << saved));
+                        const int expected = !mask ? -1 : keep_saved ? saved
+                            : provider == UpscalerFsr412 ? ((mask & 1) ? 0 : 1)
+                                                       : ((mask & 2) ? 1 : 0);
+                        Require(BbPcFsr::Backend(s, provider) == expected,
+                                "PC menu backend choice differs from supported method order");
+                        Require(UpscalerSupported(provider) == bool(mask),
+                                "PC menu offers a version without a supported backend");
+                        const bool save = Apply(Line::Upscaler, provider);
+                        Require(save == bool(mask), "unavailable route unexpectedly requested a save");
+                        Require(s.upscaler == (mask ? provider : UpscalerFsr3),
+                                "unavailable selection replaced the saved upscaler");
+                        if (mask) Require(s.fsr411_backend == expected && s.fsr41_version == provider,
+                                          "PC menu did not synchronize the supported version/backend");
+                        else Require(Value(Line::Upscaler) == UpscalerFsr3 &&
+                                     applied[Line::Upscaler] == UpscalerFsr3,
+                                     "stale unsupported list was not reset");
+                        ++route_cases;
+                    }
                 }
             }
             // A persisted unavailable choice stays intact and can explicitly retry that route.
@@ -53,6 +57,27 @@ int main() {
             Require(!Apply(Line::Upscaler, RetryUpscaler) &&
                     s.upscaler_request == request + 1 && s.fsr411_backend == Fsr411Dx12,
                     "explicit retry switched an unavailable persisted method");
+        }
+        // Exercise both platform policies, including a stale Windows support table on Linux.
+        for (const bool native : {false, true}) {
+            s.fsr411_supported = native;
+            for (unsigned mask = 0; mask != 16; ++mask) {
+                for (int row = 0; row != 2; ++row)
+                    for (int backend = 0; backend != 2; ++backend)
+                        s.fsr41_backend_supported[row][backend] = (mask & (1u << (row * 2 + backend))) != 0;
+                Require(BbPcFsr::Supported<false>(s, UpscalerFsr411) == native,
+                        "Linux native 4.1.1 availability depends on the Windows table");
+                Require(!BbPcFsr::Supported<false>(s, UpscalerFsr412) &&
+                        BbPcFsr::Backend<false>(s, UpscalerFsr411) == -1,
+                        "Linux unexpectedly offers or routes a Windows SDK method");
+                s.fsr411_backend = Fsr411Dx12;
+                s.fsr41_version = UpscalerFsr412;
+                Require(BbPcFsr::Select<false>(s, UpscalerFsr411) == native &&
+                        !BbPcFsr::Select<false>(s, UpscalerFsr412),
+                        "Linux route selection differs from its native availability");
+                Require(s.fsr411_backend == Fsr411Dx12 && s.fsr41_version == UpscalerFsr412,
+                        "Linux selection overwrote Windows route preferences");
+            }
         }
         for (const int provider : {UpscalerFsr4, UpscalerFsr411, UpscalerFsr412}) {
             if (provider != UpscalerFsr4) {
