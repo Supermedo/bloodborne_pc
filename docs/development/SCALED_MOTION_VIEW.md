@@ -29,6 +29,9 @@ motion, object coverage and alpha. Cases cover odd dimensions, absent/larger/
 smaller object targets, WQHD/4K, Performance/Native-AA input sizes and returning
 to a small output. Run in private test profiles without loading a game.
 
+`--policy-only` checks hardware/VRAM/SSBO-limit skip decisions without creating
+a GPU device. Resource/setup failures on supported hardware remain failures.
+
 The fixture checks shader output and isolated resource transitions; it does
 not replace a gameplay/HUD sight check.
 
@@ -59,8 +62,7 @@ for this independently extracted branch.
 size-mismatched coverage while retaining the raw View/Image accessors for other
 uses. CameraMotion and both debug branches use the checked view. This changes
 diagnostic blue selection, not motion generation or depth acceptance for FSR.
-Late reads still go through View/Image so the separate cache-lifetime change
-can account for them when the topics are combined.
+The accessor is read-only; target lifetime is managed by the owning cache.
 
 The shader fixture adds negative X, saturation at/above eight render pixels,
 and zero motion with blue coverage. A real ObjectMotion owner regression writes

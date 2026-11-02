@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 #include <vk_mem_alloc.h>
 
 #ifdef _WIN32
@@ -24,6 +25,9 @@ extern "C" void runtime_restart() { std::abort(); }
 #endif
 
 namespace {
+static_assert(std::is_same_v<decltype(std::declval<const Vulkan::ObjectMotion&>().CurrentView(1, 1)),
+                             vk::ImageView>);
+
 void Need(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
@@ -207,10 +211,12 @@ void RunCase(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler, u32
 }
 
 const char* CoverageSkipReason(bool vertex_stores, bool guarded_gpu, bool discrete, u64 vram,
-                               bool forced) {
+                               bool forced, bool storage_limits = true) {
     // Match ObjectMotion's pre-allocation guards; setup/allocation failures must fail.
     if (!vertex_stores)
         return "vertex shader stores/atomics unavailable";
+    if (!storage_limits)
+        return "required SSBO limits unavailable";
     if (!forced && guarded_gpu)
         return "existing GPU/driver guard";
     if (!forced && discrete && vram < (6ull << 30) - (256ull << 20))
@@ -230,7 +236,14 @@ void TestCoveragePolicy() {
     constexpr u64 threshold = (6ull << 30) - (256ull << 20);
     Need(!CoverageSkipReason(true, false, true, threshold, false), "VRAM boundary must run coverage");
     Need(CoverageSkipReason(true, false, true, threshold - 1, false) != nullptr, "VRAM below boundary must skip");
-    std::puts("PASS current-frame coverage policy: features, guards, VRAM and overrides");
+    Need(CoverageSkipReason(true, false, true, enough, true, false) != nullptr,
+         "explicit override must not bypass required SSBO limits");
+    Need(CoverageSkipReason(true, false, true, enough, false, false) != nullptr,
+         "missing SSBO limits must skip");
+    // A constructor/resource failure on supported hardware is not an expected skip.
+    Need(!CoverageSkipReason(true, false, true, enough, false, true),
+         "supported policy incorrectly hides a resource failure");
+    std::puts("PASS current-frame coverage policy: features, SSBO limits, guards, VRAM and overrides");
 }
 
 bool CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler) {
@@ -239,9 +252,16 @@ bool CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& s
     const auto physical = instance.GetPhysicalDevice();
     const auto props = physical.getProperties();
     bool guarded_gpu = props.vendorID == 0x1002 && props.deviceID < 0x7440;
+    bool storage_limits = true;
 #if __has_include("shader_recompiler/motion_storage.h")
     // The independent RX6000 fix lifts this guard for its automatic SSBO path.
-    guarded_gpu &= !Shader::MotionStorage::UsesSsbo(props.vendorID, props.deviceID);
+    const bool ssbo = Shader::MotionStorage::UsesSsbo(props.vendorID, props.deviceID);
+    guarded_gpu &= !ssbo;
+    const auto& limits = props.limits;
+    storage_limits = !ssbo || (limits.maxVertexOutputComponents >= 128 &&
+        limits.maxFragmentInputComponents >= 128 &&
+        limits.maxPerStageDescriptorStorageBuffers >= 3 && limits.maxBoundDescriptorSets >= 2 &&
+        limits.maxStorageBufferRange >= vk::DeviceSize(4u << 20) * 16 + 16);
 #endif
     const auto& memory = instance.GetMemoryProperties();
     u64 vram = 0;
@@ -251,7 +271,7 @@ bool CurrentFrameCoverage(const Vulkan::Instance& instance, Vulkan::Scheduler& s
     const char* forced = std::getenv("BB_OBJECT_MOTION");
     if (const char* reason = CoverageSkipReason(physical.getFeatures().vertexPipelineStoresAndAtomics,
             guarded_gpu, props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu, vram,
-            forced && forced[0] == '1')) {
+            forced && forced[0] == '1', storage_limits)) {
         std::printf("SKIP current-frame coverage: %s\n", reason);
         return false;
     }
