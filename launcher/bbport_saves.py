@@ -256,9 +256,18 @@ def walk(roots, depth=9, limit=30000):
     return found
 
 
-def scan(port_dir, game_dir='', exclude=(), extra=()):
+def from_seamless(folder):
+    """A save of Seamless co-op's own: its characters (run.py COOP_SAVES) or a copy BBSC made in bbsc/save-backups
+    before it changed a character. BBSC's items are in them, which the game without it cannot name ("?GoodsName?"),
+    and the bells are gone: never for the normal saves."""
+    parts = [part.lower() for part in Path(folder).parts]
+    return COOP_SAVES in parts or any(a == 'bbsc' and b == 'save-backups' for a, b in zip(parts, parts[1:]))
+
+
+def scan(port_dir, game_dir='', exclude=(), extra=(), seamless=False):
     """[SaveSet] of every complete save on this PC that is not this port's own, newest first, and the
-    (label, folder) pairs in `extra` (Seamless co-op's: the normal characters)."""
+    (label, folder) pairs in `extra` (Seamless co-op's: the normal characters). `seamless`: for Seamless co-op's
+    characters; else Seamless co-op's own saves and copies are left out (from_seamless)."""
     seen = set()
     for path in exclude:
         try:
@@ -279,6 +288,8 @@ def scan(port_dir, game_dir='', exclude=(), extra=()):
             continue
         if key in seen or not folder.is_dir():
             continue
+        if not seamless and from_seamless(folder):
+            continue  # for the normal saves: Seamless co-op's characters and copies are not offered
         seen.add(key)
         try:
             save = SaveSet(labels.get(folder) or label_for(folder), folder)
@@ -607,16 +618,25 @@ def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP, notes=None):
     if not changed:
         return None
     ahead = time.time() + 86400
-    existing = [b for b in backups(user_dir) if b.created.timestamp() <= ahead]
-    future = len(backups(user_dir)) - len(existing)
+    every = backups(user_dir)
+    existing = [b for b in every if b.created.timestamp() <= ahead]
+    future = len(every) - len(existing)
     if future and notes is not None:
         notes.append(f'Saves: {future} backup(s) dated in the future (the PC\'s clock was wrong when they were '
                      'made) are not taken for the newest')
-    if existing and existing[0].created.timestamp() >= int(changed):
+    # "Nothing played since" only by a readable copy of this save (not one added from a file, dated now but holding
+    # another save; not a broken zip): such a backup cancelled the next automatic one, and the session played before
+    # it was in no backup (2026-11-02).
+    copies = [b for b in existing if b.ok and b.reason not in ('file', 'old')]
+    if copies and copies[0].created.timestamp() >= int(changed):
         return None  # nothing played since
     made = backup(user_dir, game_dir, reason='auto')
-    automatic = [b for b in backups(user_dir) if b.reason == 'auto']
-    for old in automatic[keep:]:
+    # Only unnamed automatic ones go, the oldest first: one the player named is theirs (it went after ten starts).
+    # Those dated in the future count as the oldest.
+    automatic = [b for b in backups(user_dir) if b.reason == 'auto' and not b.label]
+    dated = [b for b in automatic if b.created.timestamp() <= ahead] + \
+            [b for b in automatic if b.created.timestamp() > ahead]
+    for old in dated[keep:]:
         try:
             old.path.unlink()
         except OSError:

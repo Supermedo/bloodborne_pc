@@ -83,6 +83,23 @@ class SaveTests(unittest.TestCase):
             self.assertEqual(saves.misplaced(self.root / 'empty'), ([], []))
         self.assertEqual([(s.source, s.folder) for s in found], [('Your normal characters', normal)])
 
+    def test_bbsc_copies_are_only_offered_to_seamless_coop(self):
+        """BBSC's copies before it changes a character (bbsc/save-backups/<moment>/save-dir/SPRJ0005), here and in
+        an older installation, hold its items: the setup guide offered them for the normal saves (2026-11-02)."""
+        mine = make_save(saves.target_dir(self.user), 'Normal')
+        copy = make_save(self.root / 'port' / 'bbsc' / 'save-backups' / 'before-duel-bell-1' / 'save-dir' / 'SPRJ0005',
+                         'Coop')
+        old = make_save(self.root / 'BB.Old' / 'bbsc' / 'save-backups' / 'before-duel-bell-2' / 'save-dir' /
+                        'SPRJ0005', 'Coop')
+        (self.root / 'BB.Old' / 'run.py').write_text('')
+        self.assertTrue(saves.from_seamless(copy) and saves.from_seamless(saves.target_dir(self.user / 'seamless-coop')))
+        self.assertFalse(saves.from_seamless(mine))
+        with mock.patch.dict(os.environ, {'APPDATA': '', 'LOCALAPPDATA': ''}):
+            for_normal = saves.scan(self.root / 'port', exclude=[mine])
+            for_coop = saves.scan(self.root / 'port', exclude=[mine], seamless=True)
+        self.assertEqual(for_normal, [])
+        self.assertEqual(sorted(s.folder for s in for_coop), sorted([copy, old]))
+
     def test_benchmark_characters_are_not_offered(self):
         """A port build's bundled benchmark character (benchmark/savedata/…) and recorded test routes are
         not a player's save."""
@@ -276,6 +293,37 @@ class BackupTests(unittest.TestCase):
         kinds = [b.reason for b in saves.backups(self.user)]
         self.assertEqual(kinds.count('auto'), 3)
         self.assertTrue(mine.exists())
+
+    def test_a_named_automatic_backup_is_kept(self):
+        """Renamed by the player ("before Orphan"), an automatic backup is theirs: it was deleted ten starts later
+        like any other (2026-11-02)."""
+        first = saves.auto_backup(self.user)
+        named = saves.rename_backup(first, 'Before Orphan')
+        for number in range(5):
+            stamp = time.time() + 120 * (number + 1)
+            os.utime(self.save / 'userdata0000', (stamp, stamp))
+            with mock.patch.object(saves.datetime, 'datetime', wraps=saves.datetime.datetime) as clock:
+                clock.now.return_value = saves.datetime.datetime.fromtimestamp(stamp + 1)
+                saves.auto_backup(self.user, keep=2)
+        self.assertTrue(named.exists())
+        unnamed = [b for b in saves.backups(self.user) if b.reason == 'auto' and not b.label]
+        self.assertEqual(len(unnamed), 2)
+
+    def test_a_backup_added_from_a_file_does_not_stop_the_next_automatic_one(self):
+        """A friend's zip added after playing is dated now but holds another save: the session played before it
+        still gets its automatic backup at the next start (2026-11-02)."""
+        saves.auto_backup(self.user)
+        stamp = time.time() + 120
+        os.utime(self.save / 'userdata0000', (stamp, stamp))  # played
+        friend = self.root / 'friend.zip'
+        with zipfile.ZipFile(friend, 'w') as zipped:
+            for path in self.save.iterdir():
+                zipped.write(path, f'savedata/1/CUSA00207/SPRJ0005/{path.name}')
+        with mock.patch.object(saves.datetime, 'datetime', wraps=saves.datetime.datetime) as clock:
+            clock.now.return_value = saves.datetime.datetime.fromtimestamp(stamp + 60)
+            saves.add_backup_file(friend, self.user)
+            made = saves.auto_backup(self.user)
+        self.assertIsNotNone(made)
 
     def test_restore_takes_only_the_games_files(self):
         archive = self.root / 'other.zip'

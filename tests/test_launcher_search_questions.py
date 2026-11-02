@@ -40,7 +40,8 @@ MORE_QUESTIONS = [
     ('wo sind meine spielstände', {'user_dir', 'page:saves'}),
     ('wo sind die spielstände', {'user_dir', 'page:saves'}),
     ('why is my game stuttering', {'topic:shader_cache', 'frames_ahead'}),
-    ('how do i play with friends', {'online', 'online_pool', 'page:online'}),
+    ('how do i play with friends', {'online', 'online_pool', 'page:online', 'topic:play_together'}),
+    ('wie spiele ich mit freunden', {'topic:play_together', 'party_key', 'page:online'}),
     ('how do i add mods', {'mods_enabled', 'page:mods'}), ('install mods', {'page:mods'}),
     ('how to install', {'button:site'}),
 ]

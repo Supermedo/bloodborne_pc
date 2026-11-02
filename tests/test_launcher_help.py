@@ -294,6 +294,22 @@ class FileTests(unittest.TestCase):
         self.assertEqual(clean['supermedo_user'], '(hidden)')
         self.assertEqual(clean['fps_mode'], 'uncap')
 
+    def test_report_hides_every_account_secret_of_the_launcher(self):
+        """supermedo_pass and party_key went into the report zip in clear text (2026-11-02): every account key the
+        launcher keeps (OWN_ONLINE_KEYS, the shadNet boxes) is hidden, and secret variables in extra_env too."""
+        import bbport_launcher_win as L
+        settings = {key: 'value-123' for key in L.OWN_ONLINE_KEYS + ('online_npid', 'online_password')}
+        settings['extra_env'] = 'BB_SHADNET_PASSWORD=hunter2 BB_FRAME_STATS=1 BB_THD_TOKEN="abc def"'
+        clean = help_.private_free(settings)
+        for key in L.OWN_ONLINE_KEYS + ('online_npid', 'online_password'):
+            if key == 'online_pool':
+                continue  # which server, no secret
+            with self.subTest(key=key):
+                self.assertEqual(clean[key], '(hidden)')
+        self.assertNotIn('hunter2', clean['extra_env'])
+        self.assertNotIn('abc def', clean['extra_env'])
+        self.assertIn('BB_FRAME_STATS=1', clean['extra_env'])
+
 
 class AfterExitTests(unittest.TestCase):
     """After the game ended with an error. Started from Steam or a shortcut (--play), the launcher opens with

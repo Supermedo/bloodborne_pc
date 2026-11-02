@@ -704,6 +704,8 @@ class OnlinePageTests(unittest.TestCase):
 
     def test_a_new_account(self):
         import struct
+        # Its boxes are folded until "No account yet? Make one" opens them (as the search's jump does).
+        next(e for e in self.app.search_settings if e['key'] == 'button:create_account')['reveal']()
         for title, value in (('New Online ID', 'NewHunter'), ('New password', 'secret'),
                              ('Email address', 'hunter@example.net')):
             label, = [w for w in widgets(self.page) if w.winfo_class() == 'TLabel' and w.cget('text') == title]

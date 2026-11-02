@@ -136,6 +136,8 @@ WORDS = {
     # ich mich an", whose "an" is a stop word ("melden" alone is a report)
     'button:signin_supermedo': 'sign signin login einloggen anmelden anmeldung melde logge discord supermedo account '
                                'konto connexion connecter iniciar sesion entrar accedi zaloguj войти вход',
+    'button:signin_password': 'sign signin login einloggen anmelden anmeldung passwort password kennwort online id '
+                              'npid supermedo account konto connexion mot de passe contrasena senha haslo пароль войти',
     'button:signin_thd': 'sign signin login einloggen anmelden anmeldung melde logge discord hunters dream thd account '
                          'konto code connexion connecter iniciar sesion entrar accedi zaloguj войти вход',
     'button:signout': 'logout signout abmelden ausloggen account konto wechseln switch deconnexion выйти',
@@ -207,6 +209,8 @@ WORDS = {
                        'switch',
     'topic:smartscreen': 'smartscreen windows geschutzt schutz warnung',
     'topic:black_screen': 'schwarz schwarzer bildschirm black screen shader cache leeren',
+    'topic:play_together': 'zusammen spielen freunde freund friends mitspielen coop co-op koop summon beschworen '
+                           'glocke bell party host gast guest multiplayer seamless',
 }
 # With the game tests on (bbport_launcher_win.GAME_TESTS): their words, added to their pages.
 GAME_TEST_WORDS = {'page:system': 'benchmark test messen stabilitat beta tests', 'page:picture': 'messen benchmark'}

@@ -366,7 +366,7 @@ class MisplacedSaveTests(unittest.TestCase):
         line, encrypted = L.misplaced_saves(ui.app)
         self.assertIsNone(line)
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self):')]
+        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self')]
         self.assertIn("self.app['encrypted_told'] = encrypted", play)
         self.assertIn('Apollo Save Tool', play)
 
@@ -477,7 +477,7 @@ class HandEditedFileTests(unittest.TestCase):
 
     def test_the_repairs_go_into_the_next_starts_log(self):
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self):')]
+        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self')]
         self.assertIn('for line in textfile.REPAIRS:', play)
         self.assertIn("args=(self.process, self.log.get('1.0', 'end-1c'))", play)
         self.textfile.REPAIRS.append('Settings: repaired')

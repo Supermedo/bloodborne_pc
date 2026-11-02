@@ -291,6 +291,7 @@ import bbport_search  # noqa: E402
 import bbport_setup  # noqa: E402
 import bbport_news  # noqa: E402
 import bbport_seamless  # noqa: E402
+import bbport_signin  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
 import bbport_theme as theme  # noqa: E402
 import bbport_tls  # noqa: E402 (every HTTPS request: no expired certificates of the stores, Windows' trust)
@@ -1075,6 +1076,49 @@ def shadnet_register(address, npid, password, email, timeout=15):
         reply = read(sock, 16)
     error = reply[15]
     return None if error == 0 else SHADNET_ERRORS.get(error, f'The server said no (error {error}).')
+
+
+def shadnet_check_login(address, npid, password, timeout=15):
+    """Whether a shadNet server takes this Online ID and password: its Login command (the LoginRequest
+    protobuf, as the game sends it, with appear_offline so nobody sees the check), then the connection is
+    closed. Returns None, or why it was refused. "Already logged in" means the password is right (the account
+    is online elsewhere, the game itself for example)."""
+    import socket
+    import struct
+
+    def varint(n):
+        out = b''
+        while True:
+            byte, n = n & 0x7F, n >> 7
+            out += bytes([byte | (0x80 if n else 0)])
+            if not n:
+                return out
+
+    def text(field, value):
+        data = value.encode('utf-8')
+        return varint(field << 3 | 2) + varint(len(data)) + data if data else b''
+
+    def read(sock, n):
+        data = b''
+        while len(data) < n:
+            chunk = sock.recv(n - len(data))
+            if not chunk:
+                raise OSError('the server closed the connection')
+            data += chunk
+        return data
+    host, _sep, port = address.rpartition(':')
+    proto = text(1, npid) + text(2, password) + varint(6 << 3) + varint(1)  # appear_offline = true
+    payload = struct.pack('<I', len(proto)) + proto
+    with socket.create_connection((host, int(port)), timeout=timeout) as sock:
+        info = read(sock, 15)
+        read(sock, struct.unpack_from('<I', info, 3)[0] - 15)  # ServerInfo: the protocol version
+        sock.sendall(struct.pack('<BHIQ', 0, 0, 15 + len(payload), 1) + payload)
+        reply = read(sock, 16)
+    error = reply[15]
+    if error in (0, 6):
+        return None
+    return {7: _('No account has this Online ID.'), 8: _('The password is wrong.')}.get(
+        error, _(SHADNET_ERRORS[error]) if error in SHADNET_ERRORS else _('The server said no (error {}).').format(error))
 
 
 def thd_open(request):
@@ -2033,8 +2077,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         """A heading in Cinzel with a hairline running to the right edge."""
         head = self.ttk.Frame(parent)
         head.grid(row=self.next_row(parent), column=0, columnspan=2, sticky='we', pady=(top + 6, 6))
-        self.ttk.Label(head, text=title, style='Section.TLabel').pack(side='left')
+        label = self.ttk.Label(head, text=title, style='Section.TLabel')
+        label.pack(side='left')
         self.tk.Frame(head, bg=LINE, height=1).pack(side='left', fill='x', expand=True, padx=(14, 0), pady=(4, 0))
+        return label  # a page that renames its section (the Saves page by kind)
 
     def folder(self, parent, key, title, prompt, hint=None, on_change=None):
         ttk = self.ttk
@@ -2670,6 +2716,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         elif name == 'trophies':
             self.render_trophies()
         elif name == 'saves':
+            view = getattr(self, 'saves_view', None)
+            if view is not None and getattr(self, 'saves_view_next', None):
+                view.set(self.saves_view_next)  # asked for a kind (Seamless co-op's settings link there)
+            elif view is not None:
+                view.set('seamless' if self.plays_seamless() else 'normal')  # opened: what Play starts with
+            self.saves_view_next = None
             self.refresh_saves(only_if_changed=True)
         elif name == 'system':
             self.update_rating()
@@ -3203,6 +3255,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                  'play-through.', 'Патчи игры для версии 1.09, применяются при запуске. Для обычного '
                                  'прохождения оставьте их выключенными.'))
         self.version_warning(f)
+        self.note(f, _('Offline only: when you play online, the game starts without them, fair to the other '
+                       'players.'), top=0)
         self.section(f, _('Cheats', 'Читы'), top=4)
         for key, title, _on in CHEATS:
             self.check(f, key, 'ini', _(*title))
@@ -3320,8 +3374,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                _('Messages, bloodstains and ghosts come from the game server; bells and summons '
                                  'go through a shadNet server.'))
         self.check(f, 'online', 'app', _('Play online'),
-                   _('Off: the game stays offline, as before.'))
+                   _('Off: the game stays offline, as before.') + ' ' +
+                   _('Cheats, debug features and third-party patches run offline only.'))
         self.var('online', 'app').trace_add('write', lambda *_a: self.refresh_status())
+        # Where the player stands, in one line above everything: online where and as whom, or what is missing.
+        state_line = self.wrap_within(ttk.Label(f, text='', justify='left', anchor='w'), 680)
+        state_line.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(self.px(10), 0))
         self.section(f, _('Co-op pool'))
         pool = self.var('online_pool', 'app')
         pool.trace_add('write', lambda *_a: (self.refresh_status(), self.root.after_idle(self.ask_hunters)))
@@ -3353,32 +3411,39 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                          _("Own server: Seamless co-op's or a friend's private server, with its address and "
                            'account.')))
         tk, px = self.tk, self.px
-        pools = tk.Frame(f, bg=theme.BG)
+        # The ways to play online as cards side by side: what each one is, in a line or two, and the chosen one
+        # framed in gold (the tabs before showed only the names, and the difference was below them).
+        blurbs = {'supermedo': _('Online as on the PS4: messages, bloodstains, summons and invasions, and parties '
+                                 'to play with friends.'),
+                  'seamless': _('Up to 5 hunters stay together through deaths, lamps and areas (BBSC). It plays '
+                                'its own characters, and everyone in the session chooses it.')}
+        pools = tk.Frame(f, bg=PANEL)
         pools.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
-        strip = tk.Frame(pools, bg=theme.BG)
-        strip.pack(fill='x')
-        tk.Frame(pools, bg=theme.BORDER, height=1).pack(fill='x')
-        about = ttk.Label(f, text='', style='Muted.TLabel', justify='left')
-        self.wrap_within(about, 640).grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(8), 0))
-        tab_widgets = {}
-        for value, title, _hint in tabs:
-            holder = tk.Frame(strip, bg=theme.BG, cursor='hand2')
-            holder.pack(side='left', padx=(0, px(6)))
-            label = tk.Label(holder, text=title, bg=theme.BG, font=(theme.BODY_SEMI, 11), padx=px(14), pady=px(8),
-                             cursor='hand2')
-            label.pack()
-            bar = tk.Frame(holder, height=px(3), bg=theme.BG)
-            bar.pack(fill='x')
-            for widget in (holder, label):
+        cards = {}
+        for index, (value, title, hint) in enumerate(tabs):
+            pools.columnconfigure(index, weight=1, uniform='pools')
+            card = tk.Frame(pools, bg=theme.CARD, highlightthickness=px(2), cursor='hand2')
+            card.grid(row=0, column=index, sticky='nsew', padx=(0, px(10) if index < len(tabs) - 1 else 0))
+            top = tk.Frame(card, bg=theme.CARD)
+            top.pack(fill='x', padx=px(14), pady=(px(10), 0))
+            dot = tk.Label(top, text='', bg=theme.CARD, font=(theme.BODY_SEMI, 11))
+            dot.pack(side='left')
+            name = tk.Label(top, text=title, bg=theme.CARD, font=(theme.BODY_SEMI, 11), anchor='w')
+            name.pack(side='left', padx=(px(6), 0))
+            words = self.wrap_within(tk.Label(card, text=blurbs.get(value, hint), bg=theme.CARD, fg=theme.MUTED,
+                                              font=(theme.BODY, 9), justify='left', anchor='w'), 480)
+            words.pack(fill='x', padx=px(14), pady=(px(4), px(12)))
+            for widget in (card, top, dot, name, words):
                 widget.bind('<Button-1>', lambda _e, v=value: pool.set(v))
-            tab_widgets[value] = (label, bar)
+            cards[value] = (card, dot, name)
 
         def show_tabs(*_a):
-            for value, (label, bar) in tab_widgets.items():
+            for value, (card, dot, name) in cards.items():
                 on = pool.get() == value
-                label.configure(fg=theme.GOLD_LIGHT if on else theme.MUTED)
-                bar.configure(bg=theme.GOLD if on else theme.BG)
-            about.configure(text=next((hint for value, _t, hint in tabs if value == pool.get()), ''))
+                card.configure(highlightbackground=theme.GOLD if on else theme.BORDER,
+                               highlightcolor=theme.GOLD if on else theme.BORDER)
+                dot.configure(text='●' if on else '○', fg=theme.GOLD if on else theme.MUTED)
+                name.configure(fg=theme.GOLD_LIGHT if on else theme.TEXT)
         pool.trace_add('write', show_tabs)
         show_tabs()
         pools.setting_key = 'online_pool'  # the search's words (bbport_search.WORDS)
@@ -3475,21 +3540,30 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         # shadNet server, the only other one, turned the port away.
         custom = self.var('online_custom_servers', 'app')
         group('shadnet')
-        # SuperMedo Server: the account in use (Sign out empties it), and a new account made on the
-        # server from here with its own boxes; once made, it is the account in use. Its own settings,
-        # not the shadNet boxes (a co-op tool writes those).
+        # SuperMedo Server and Seamless co-op share one account. Signed in, the section is the name and Sign out;
+        # signed out, the three ways in: Discord, the Online ID with its password (an account made here or on
+        # another PC: the launcher had only Discord and sign-up), and a new account, folded until asked for.
+        # Its own settings, not the shadNet boxes (a co-op tool writes those).
         npid_var, password_var = self.var('supermedo_npid', 'app'), self.var('supermedo_pass', 'app')
         self.section(f, _('SuperMedo account'))
-        signed = ttk.Label(f, text='', justify='left')
+        self.note(f, _('One account for SuperMedo Server and Seamless co-op.'), top=0)
+        group('supermedo')
+        # Sign out stays beside the name, greyed out while nobody is signed in: hidden, the search ranked it
+        # behind other answers to "how do I sign out".
+        account = ttk.Frame(f)
+        signed = ttk.Label(account, text='', justify='left')
+        signed.pack(side='left')
         buttons = ttk.Frame(f)
 
-        def show_signed(*_args):
-            name = pool_account({'online_pool': 'supermedo', 'supermedo_npid': npid_var.get(),
+        def signed_name():
+            return pool_account({'online_pool': 'supermedo', 'supermedo_npid': npid_var.get(),
                                  'supermedo_pass': password_var.get()})
-            signed.configure(text=_('Signed in as {}').format(name) if name
-                             else _('Not signed in: sign in with Discord, or create an account below.'))
-            # Sign out only with an account to sign out of: without one the button did nothing.
-            sign_out_button.state(['!disabled' if name else 'disabled'])
+
+        def show_signed(*_args):
+            name = signed_name()
+            signed.configure(text=_('Signed in as {}').format(name) if name else _('Not signed in'))
+            sign_out_button.state(['!disabled'] if name else ['disabled'])
+            show_account()
         npid_var.trace_add('write', show_signed)
         password_var.trace_add('write', show_signed)
 
@@ -3497,6 +3571,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             npid_var.set('')
             password_var.set('')
             self.collect()
+        sign_out_button = ttk.Button(account, text=_('Sign out'), command=sign_out)
+        sign_out_button.pack(side='left', padx=(px(14), 0))
+        self.row(f, _('Account'), account, key='supermedo_npid')
+        self.index_entry(sign_out_button, _('Sign out'), _('SuperMedo account'), key='button:signout')
+        group('supermedo')
         discord_line = self.wrap_within(ttk.Label(f, text='', style='Muted.TLabel', justify='left', anchor='w'), 560)
 
         def sign_in_discord():
@@ -3517,19 +3596,54 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.ui_calls.put(lambda: (npid_var.set(npid), password_var.set(password),
                                            discord_line.configure(text=''), self.collect()))
             threading.Thread(target=work, daemon=True).start()
-        self.row(f, _('Account'), signed, key='supermedo_npid')
         button = ttk.Button(buttons, text=_('Sign in with Discord'), command=sign_in_discord)
         button.pack(side='left')
         hint = _('Discord makes your SuperMedo account the first time, named after your Discord name; nothing to '
                  'remember. Sign in again on any PC.')
         self.index_entry(button, _('Sign in with Discord'), hint, key='button:signin_supermedo')
-        sign_out_button = ttk.Button(buttons, text=_('Sign out'), command=sign_out)
-        sign_out_button.pack(side='left', padx=(14, 0))
-        self.index_entry(sign_out_button, _('Sign out'), _('SuperMedo account'), key='button:signout')
-        show_signed()
-        self.row(f, '', buttons, hint)
+        self.row(f, 'Discord', buttons, hint, key='supermedo_npid')
         discord_line.grid(row=self.next_row(f), column=1, sticky='we', pady=(6, 0))
-        self.section(f, _('New SuperMedo account'))
+        # The Online ID and its password: checked with the server's own login before they are kept, so a typo
+        # never leaves the game to fail at the start (the game logs in with exactly these).
+        login_npid, login_password = self.tk.StringVar(value=''), self.tk.StringVar(value='')
+        login_line = self.wrap_within(ttk.Label(f, text='', style='Muted.TLabel', justify='left', anchor='w'), 560)
+
+        def sign_in_password():
+            npid, password = login_npid.get().strip(), login_password.get()  # read here, not in the thread
+            if not npid or not password:
+                login_line.configure(text=_('Enter your Online ID and your password.'))
+                return
+            login_line.configure(text=_('Checking the account…'))
+
+            def work():
+                problem = bbport_signin.password_problem(npid, password)  # the line always answers
+                if problem:
+                    self.ui_calls.put(lambda: login_line.configure(text=problem))
+                    return
+                self.ui_calls.put(lambda: (npid_var.set(npid), password_var.set(password), login_password.set(''),
+                                           login_line.configure(text=''), self.collect()))
+            threading.Thread(target=work, daemon=True).start()
+        self.row(f, _('Online ID'), ttk.Entry(f, textvariable=login_npid, width=40), key='supermedo_npid')
+        login_row = ttk.Frame(f)
+        password_box = ttk.Entry(login_row, textvariable=login_password, width=28, show='•')
+        password_box.pack(side='left')
+        password_box.bind('<Return>', lambda _e: sign_in_password())
+        login_button = ttk.Button(login_row, text=_('Sign in'), command=sign_in_password)
+        login_button.pack(side='left', padx=(px(8), 0))
+        self.row(f, _('Password'), login_row,
+                 _('An account made here, on another PC or before: its Online ID and password.'), key='supermedo_npid')
+        self.index_entry(login_button, _('Online ID and password'), _('Sign in'), key='button:signin_password')
+        login_line.grid(row=self.next_row(f), column=1, sticky='we', pady=(4, 0))
+        # A new account: a gold link opens its boxes (most players sign in with Discord).
+        register_link = self.tk.Label(f, text='', bg=PANEL, fg=GOLD, cursor='hand2', font=(theme.BODY_MEDIUM, 9))
+        register_link.grid(row=self.next_row(f), column=1, sticky='w', pady=(px(10), 0))
+        group('supermedo_out')
+        register_open = [False]
+
+        def toggle_register(_e=None, show=None):
+            register_open[0] = (not register_open[0]) if show is None else show
+            show_account()
+        register_link.bind('<Button-1>', toggle_register)
         sign_up = self.wrap_within(ttk.Label(f, text='', style='Muted.TLabel', justify='left', anchor='w'), 560)
         new_npid, new_password, email = (self.tk.StringVar(value='') for _n in range(3))
 
@@ -3543,13 +3657,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             sign_up.configure(text=_('Creating the account…'))
 
             def work():
-                try:
-                    problem = shadnet_register(SUPERMEDO_SERVER, npid, password, mail)
-                except OSError as error:
-                    problem = _('SuperMedo Server could not be reached: {}').format(error_text(error))
-                except Exception as error:
-                    # An answer that is not shadNet's (struct.error): never "Creating the account…" for good.
-                    problem = _('The account could not be created: {}').format(error_text(error))
+                problem = bbport_signin.register_problem(npid, password, mail)  # never "Creating…" for good
                 if problem:
                     self.ui_calls.put(lambda: sign_up.configure(text=problem))
                     return
@@ -3564,9 +3672,25 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.row(f, _('Email address'), ttk.Entry(f, textvariable=email, width=40),
                  _('Only to make the account.'), key='supermedo_npid')
         button = self.row(f, '', ttk.Button(f, text=_('Create account'), command=create_account))
-        self.index_entry(button, _('Create account'), _('New SuperMedo account'), key='button:create_account')
+        self.index_entry(button, _('Create account'), _('New SuperMedo account'), key='button:create_account',
+                         reveal=lambda: toggle_register(show=True))
         sign_up.grid(row=self.next_row(f), column=1, sticky='we', pady=(6, 0))
-        group('supermedo')
+        group('register')
+        built = []  # the page's last row is made
+
+        def show_account():
+            """Signed in: the name and Sign out. Signed out: the ways in, and the new account's boxes once
+            asked for. Only on the pools with the SuperMedo account (show_pool hides it on the others), and once
+            the page is built: rows hidden earlier are not counted by next_row, and the rows built after them
+            took the same numbers (the party's lay over the new account's boxes when they opened)."""
+            if pool.get() not in ('supermedo', 'seamless') or not built:
+                return
+            signed_in = bool(signed_name())
+            for name, wanted in (('supermedo_out', not signed_in), ('register', not signed_in and register_open[0])):
+                for widget in groups.get(name, []):
+                    widget.grid() if wanted else widget.grid_remove()
+            register_link.configure(text=_('No account yet? Make one') + ('  ⌄' if register_open[0] else '  ›'))
+        show_signed()
         self.build_party(f, npid_var, password_var)
         group('party')
         if BBSC_LAUNCH.exists():
@@ -3628,13 +3752,26 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         button = self.row(f, '', ttk.Button(f, text=_('Test connection'), command=check))
         self.index_entry(button, _('Test connection'), _('Connection'), key='button:test_connection')
         result.grid(row=self.next_row(f), column=1, sticky='w', pady=(6, 0))
-        self.note(f, _('Everyone in a session needs the same game version (1.09) and the same server. '
-                       'Cheats change the game for the other players too: turn them off when you play together.'))
+        self.note(f, _('Everyone in a session needs the same game version (1.09) and the same server.') + ' ' +
+                  _('Cheats, debug features and third-party patches run offline only.'))
         show_code()  # hidden until a sign-in shows one; its row stays reserved (rows are counted above)
         shown = {'shadnet': {'account', 'shadnet', 'servers', 'upnp'},
                  'huntersdream': {'huntersdream', 'upnp'},
-                 'supermedo': {'supermedo', 'party', 'upnp'},
-                 'seamless': {'supermedo', 'seamless', 'upnp'}}
+                 'supermedo': {'supermedo', 'supermedo_out', 'register', 'party', 'upnp'},
+                 'seamless': {'supermedo', 'supermedo_out', 'register', 'party', 'seamless', 'upnp'}}
+
+        def show_state(*_args):
+            title = next((title for value, title, _hint in tabs if value == pool.get()), '')
+            name = self.account_name()
+            if not self.var('online', 'app').get():
+                text, colour = _('• Online play is off: the game starts offline.'), theme.MUTED
+            elif name:
+                text, colour = _('✓ Online with {0}, signed in as {1}.').format(title, name), theme.GOLD_LIGHT
+            else:
+                text, colour = _("⚠ Not signed in yet: sign in below to play online."), theme.AMBER
+            state_line.configure(text=text, foreground=colour)
+        for var in (self.var('online', 'app'), npid_var, password_var, thd_token):
+            var.trace_add('write', show_state)
 
         def show_pool(*_args):
             if pool.get() == 'huntersdream' and not HUNTERS_DREAM_POOL:
@@ -3653,8 +3790,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 show_code(code_label.cget('text'))
             else:
                 code_box.grid_remove()
+            show_account()  # of the SuperMedo account's rows, only those for signed in or out
+            show_state()
         pool.trace_add('write', show_pool)
         custom.trace_add('write', show_pool)
+        built.append(True)
         show_pool()
         # The other pools' rows stay findable ("sign in" while The Hunter's Dream is chosen): the search says
         # which pool they need and marks "Play with". An own server's only while it can be chosen.
@@ -3669,15 +3809,18 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
 
     def build_party(self, f, npid_var, password_var):
         """Party (play with friends): a party code from SuperMedo Server (parties.go there). While in a party,
-        the hunter's signs and Beckoning Bell find only the party's hunters (the server gives them the party's
-        summon password)."""
+        the hunter's signs and bells find only the party's hunters (the server gives them the party's summon
+        password), on SuperMedo Server and in Seamless co-op: a password of their own in the game's network
+        settings kept them apart. Seamless co-op had no party until 2026-11-02 (Nick: the party brings its
+        hunters together there too)."""
         ttk = self.ttk
         key = self.var('party_key', 'app')
         self.section(f, _('Party (play with friends)'))
         line = ttk.Label(f, text=_('Not in a party.'), justify='left', wraplength=self.px(560))
         self.row(f, _('Your party'), line,
-                 _("While you are in a party, your summon signs and your Beckoning Bell find only your party's "
-                   'hunters, with no level limit. Up to 4 hunters.'), key='party_key')
+                 _("While you are in a party, your bells and summon signs find only your party's hunters, with no "
+                   "level limit. Leave the password in the game's network settings empty: the party brings you "
+                   'together.'), key='party_key')
         code_row = ttk.Frame(f)
         code = ttk.Label(code_row, text='', style='Code.TLabel')
         code.pack(side='left')
@@ -3773,15 +3916,21 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                         status, signed = party_call('signin', {'name': name, 'password': password})
                         if status != 200:
                             raise ValueError(signed.get('error', status))
-                        self.ui_calls.put(lambda k=signed['key']: (key.set(k), self.collect()))
+                        # Kept only while the account is still the one asked for (a late answer after a switch
+                        # gave the new account the old one's key).
+                        self.ui_calls.put(lambda k=signed['key']: (key.set(k), self.collect())
+                                          if npid_var.get().strip() == name else None)
                         status, answer = party_call(call, body, signed['key'])
                     if status != 200:
                         raise ValueError(answer.get('error', status))
-                except (OSError, ValueError) as error:
+                    if not isinstance(answer, dict):
+                        raise ValueError(_('an answer that is not a party'))
+                except Exception as error:  # every failure answers (a broken reply too): "Checking…" stayed for good
                     if not quiet:
                         self.ui_calls.put(lambda e=error: said.configure(text=_('SuperMedo Server said: {}').format(e)))
                     return
-                self.ui_calls.put(lambda: (show(answer), quiet or said.configure(text='')))
+                self.ui_calls.put(lambda: (show(answer), quiet or said.configure(text=''))
+                                  if npid_var.get().strip() == name else None)
             threading.Thread(target=work, daemon=True).start()
 
         def poll():  # while the party box is on screen: friends who join or leave show up by themselves
@@ -3813,6 +3962,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                     _('shadPS4/GoldHEN XML patch files for version 1.09. Empty: {}',
                       'XML-патчи shadPS4/GoldHEN для версии 1.09. Пусто: {}').format(DATA_DIR / 'patches'),
                     on_change=self.refresh_lists)
+        self.note(f, _('Offline only: when you play online, the game starts without them, fair to the other '
+                       'players.'), top=6)
         self.patches_frame = self.ttk.Frame(f)
         self.patches_frame.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(8, 0))
         self.ttk.Button(f, text=_('Refresh', 'Обновить'), command=self.refresh_lists).grid(
@@ -5000,9 +5151,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                                              _('not signed in ›') if online and not signed_in else ''),
                                        fg=MUTED if signed_in else theme.AMBER)
         self.show_hunters()
-        cheats = [_(*title) for key, title, _on in CHEATS if self.var(key, 'ini').get()]
-        self.check_line('cheats', ('⚠ ' + _('Cheats on: {}').format(', '.join(t.split(' (')[0] for t in cheats))
-                                   if cheats else ''), lambda: self.show('cheats'))
+        cheats = ', '.join(_(*title).split(' (')[0] for key, title, _on in CHEATS if self.var(key, 'ini').get())
+        self.check_line('cheats', ('• ' + _('Cheats on: {} (they stay off online)').format(cheats) if online else
+                                   '⚠ ' + _('Cheats on: {}').format(cheats)) if cheats else '',
+                        lambda: self.show('cheats'))
         news = self.var('setup_done', 'app').get() and self.app.get('seen_version') != VERSION_TEXT
         self.check_line('news', '• ' + _('New in version {}: what has changed').format(VERSION_TEXT) if news else '',
                         self.open_news)
@@ -5555,6 +5707,19 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 {'enabled': sorted(enabled), 'disabled': sorted(disabled)}, indent=2))
 
     # ---- game process ------------------------------------------------------------------------
+    def offline_only_on(self):
+        """What is on of what patches.py leaves out of an online start (its OFFLINE_ONLY, third-party patches)."""
+        names = [_(*title).split(' (')[0] for key, title, _on in CHEATS + EXTRAS
+                 if key != 'skip_intro' and self.var(key, 'ini').get()]
+        if self.patch_vars:  # the Mods page's boxes, maybe changed since patches.json was written
+            return names + [key for key, var in self.patch_vars.items() if var.get()]
+        try:
+            from patches import external_patches, external_selection
+            found = external_patches(Path(self.var('patches_dir', 'app').get() or DATA_DIR / 'patches'), PATCH_VERSION)
+            return names + [key for key, _path, _meta in external_selection(found, DATA_DIR / 'patches.json')]
+        except (OSError, ValueError, ImportError):
+            return names
+
     def play(self):
         if self.process or self.fsr411_downloading or self.update_installing():
             return
@@ -5578,27 +5743,41 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             online.set(bool(choice))
         pool_name = self.var('online_pool', 'app').get()
         hunters_dream = pool_name == 'huntersdream'
+        # "No: play offline this time" is this start only: it turned "Play online" off for good before
+        # (2026-11-02), and every later start from Steam or a shortcut stayed offline without a word.
+        offline_once = False
         if online.get() and hunters_dream and not self.var('thd_token', 'app').get():
             if self.messagebox.askyesno(
                     'Bloodborne', _("To play online with The Hunter's Dream, sign in with Discord first.") + '\n\n' +
                     _('Sign in now? (No: play offline this time.)')):
                 self.show('online')
                 return
-            online.set(False)
-        if online.get() and pool_name in ('supermedo', 'seamless') and not self.account_name():
-            # Online without an account was offline without a word (a new player, the setup's default).
-            if self.messagebox.askyesno(
-                    'Bloodborne', _('To play online with SuperMedo Server, sign in with Discord or make a free '
-                                    'account first.') + '\n\n' + _('Sign in now? (No: play offline this time.)')):
-                self.show('online')
+            offline_once = True
+        if online.get() and not offline_once and pool_name in ('supermedo', 'seamless') and not self.account_name():
+            # Online without an account was offline without a word (a new player, the setup's default). Asked with
+            # the account's three ways in: signed in there, this start goes online (it offered Discord alone and
+            # sent the player to the Online page before).
+            answer = bbport_signin.ask(self)
+            if answer is None:
                 return
-            online.set(False)
-        if online.get() and pool_name == 'shadnet' and '@' in npid.get():
+            offline_once = answer == 'offline'
+        if online.get() and not offline_once and pool_name == 'shadnet' and '@' in npid.get():
             self.messagebox.showwarning(
                 'Bloodborne', _('The Online ID is the account name (NPID) you registered on the server, '
                                 'not your email address.'))
             self.show('online')
             return
+        # Fair play: patches.py leaves cheats, debug features and third-party patches out of every online start.
+        # Asked here, so the player chooses instead of finding them gone in the game.
+        offline_only = self.offline_only_on() if online.get() and not offline_once else []
+        if offline_only:
+            choice = self.messagebox.askyesnocancel(
+                'Bloodborne', _('Cheats and debug features run offline only, fair to the other players. On now: '
+                                '{}.').format(', '.join(offline_only)) + '\n\n' +
+                _('Yes: play online without them.   No: play offline with them.'))
+            if choice is None:
+                return
+            offline_once = not choice
         if self.var('output_display', 'app').get():
             self.var('output_res', 'ini').set(display.size_text(self.game_monitor_size()))
         if not self.save_settings():
@@ -5638,10 +5817,11 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.messagebox.showinfo('Bloodborne', _("These are a PS4's own encrypted backups (sdimg_…); they cannot "
                                                      'be used. Export the save with Apollo Save Tool on the PS4 '
                                                      'instead.') + '\n\n' + encrypted)
-        self.auto_backup()
+        start = {**self.app, 'online': False} if offline_once else self.app  # the settings of this one start
+        self.auto_backup(start)
         self.remember_game_start()
         try:
-            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(self.app, self.ini),
+            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=game_environment(start, self.ini),
                                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                             stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         except OSError as error:
@@ -5663,13 +5843,15 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         elif self.setting('on_play') == 'minimize':
             self.root.after(5000, lambda: self.process and self.root.state() == 'normal' and self.minimize())
 
-    def auto_backup(self):
-        """Before a start: the saves backed up when they changed since the last backup (never in the way)."""
+    def auto_backup(self, start=None):
+        """Before a start: the saves backed up when they changed since the last backup (never in the way). `start`:
+        that start's settings, so the saves it plays are the ones backed up (offline this once: the normal ones)."""
         if not self.app.get('auto_backup', True):
             return
         notes = []
         try:
-            made = saves.auto_backup(self.save_user_dir(), self.app['game_dir'], notes=notes)
+            made = saves.auto_backup(saves_user_dir(start) if start else self.save_user_dir(), self.app['game_dir'],
+                                     notes=notes)
         except OSError as error:
             self.append(_('The automatic backup of the saves failed: {}').format(error) + '\n')
             return
@@ -6927,6 +7109,7 @@ class _ThisModule:
 bbport_setup.bind(_ThisModule())
 bbport_news.bind(_ThisModule())
 bbport_seamless.bind(_ThisModule())
+bbport_signin.bind(_ThisModule())
 bbport_help.bind(_ThisModule())
 bbport_search.bind(_ThisModule())
 bbport_pad.bind(_ThisModule())
