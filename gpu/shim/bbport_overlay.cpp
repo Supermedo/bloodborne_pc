@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_overlay.h"
+#include "bbport_native_mods.h"
 
 #include <algorithm>
 #include <array>
@@ -1345,6 +1346,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
+    BbNativeMods::Init(instance, format, image_count);
     std::printf("Overlay: menu ready (%s)\n", MenuOpeners().c_str());
 }
 
@@ -1364,6 +1366,9 @@ void UpdateTextInput(SDL_Window* window) {
 }
 
 bool HandleEvent(const SDL_Event& event) {
+    if (BbNativeMods::HandleEvent(event)) {
+        return true;
+    }
     std::scoped_lock lock{imgui_mutex};
     if (!initialized) {
         return false;
@@ -1467,12 +1472,13 @@ bool ReadoutsOn() {
 }
 
 bool Visible() {
-    return initialized &&
-           (menu_open || text_entry_active || WarningActive() || ReadoutsOn());
+    if (!initialized) return false;
+    const bool native = BbNativeMods::TickAndVisible(menu_open || text_entry_active);
+    return native || menu_open || text_entry_active || WarningActive() || ReadoutsOn();
 }
 
 bool CapturesInput() {
-    return menu_open || text_entry_active;
+    return menu_open || text_entry_active || BbNativeMods::CapturesInput();
 }
 
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text) {
@@ -1549,7 +1555,8 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     // What is actually presented: follows a window resize, unlike the configured output.
     output_width = extent.width;
     output_height = extent.height;
-    if (!Visible()) {
+    BbNativeMods::Render(cmdbuf, view, extent);
+    if (!(menu_open || text_entry_active || WarningActive() || ReadoutsOn())) {
         return;
     }
     std::scoped_lock lock{imgui_mutex};

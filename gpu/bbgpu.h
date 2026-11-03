@@ -36,6 +36,10 @@ int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
+/* Native mods receive the already mapped logical pad. Atlas consumes it while
+ * its map/quick-menu tile is active; the runtime then holds game input neutral. */
+uint32_t bbgpu_atlas_route_pad(uint32_t buttons, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
+int bbgpu_atlas_captures_input(void);
 /* PC Settings in the game's System menu (gpu/shim/bbport_pc_menu.cpp, scripts/pc_menu.py): the
  * game image, then its System menu's request for the line ("bb:o"); `list` points at the menu's
  * line list, which the call may replace. */

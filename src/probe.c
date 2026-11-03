@@ -7,6 +7,8 @@
 #include <inttypes.h>
 #include <cpuid.h>
 #include "runtime.h"
+#include "runtime_map.h"
+#include "runtime_atlas_state.h"
 #include "gpu/bbgpu.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
@@ -746,6 +748,10 @@ int main(int argc, char **argv) {
     }
     free(page_flags);
     if (!executable_entry) fail("entry is not executable");
+    /* Native Atlas services verify the final, patched executable before binding.
+     * Without the selected mod these functions do not inspect or patch the game. */
+    runtime_map_bind(image,size);
+    runtime_atlas_state_bind(image,size);
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", size, ns, nr);
     if (native_libc) {
         for (uint64_t m=0;m<module_count;++m) {
