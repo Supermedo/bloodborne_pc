@@ -130,6 +130,37 @@ def hunters_dream(env, user_dir):
 LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
 
 
+# The in-game trophy pop-up (gpu/shim/bbport_overlay.cpp) speaks the game's text language (BB_LANGUAGE
+# codes, launcher LANGUAGES): the trophy names' translations (launcher/bbport_lang_trophies.py) and its heading.
+TROPHY_LANGUAGES = {'1': 'en', '8': 'ru', '0': 'ja', '2': 'fr', '3': 'es', '4': 'de', '5': 'it', '9': 'ko',
+                    '10': 'zh', '11': 'zh', '17': 'pt'}
+TROPHY_HEADINGS = {'1': 'Trophy earned', '8': 'Получен приз', '0': 'トロフィーを獲得しました',
+                   '2': 'Trophée obtenu', '3': 'Trofeo obtenido', '4': 'Trophäe erhalten', '5': 'Trofeo ottenuto',
+                   '9': '트로피를 획득했습니다', '10': '獲得獎盃', '11': '获得奖杯', '17': 'Troféu conquistado'}
+
+
+def write_trophy_text(path, language):
+    """The pop-up's texts, read through BB_TROPHY_TEXT: "lang", "heading" and one "id grade name
+    description" line per trophy, tab-separated (the translations' line breaks joined)."""
+    sys.path.insert(0, str(PORT / 'launcher'))
+    import bbport_trophies
+    from bbport_lang_trophies import TRANSLATIONS
+    language = str(language or '1')
+    code = TROPHY_LANGUAGES.get(language, 'en')
+    words = TRANSLATIONS.get(code, {})
+    joiner = '' if code in ('zh', 'ja') else ' '
+
+    def text(english):
+        lines = words.get(english, english).replace('\t', ' ').splitlines()
+        return joiner.join(part.strip() for part in lines if part.strip())
+
+    rows = [f'lang\t{code}', f'heading\t{TROPHY_HEADINGS.get(language, TROPHY_HEADINGS["1"])}']
+    rows += [f'{trophy}\t{grade[0]}\t{text(name)}\t{text(description)}'
+             for trophy, name, description, grade, _ in bbport_trophies.TROPHIES]
+    Path(path).write_text('\n'.join(rows) + '\n', encoding='utf-8')
+    return Path(path)
+
+
 def eboot_image(game):
     """eboot.bin's loaded image (its loadable segments at their addresses): the same whatever
     tool dumped it, unlike the SELF around it."""
@@ -843,6 +874,10 @@ def main():
         if lang in ('10', '11'):
             if 'Unlock Game Region' not in extra:
                 extra = ';'.join(filter(None, (extra, 'Unlock Game Region')))
+        try:
+            env['BB_TROPHY_TEXT'] = str(write_trophy_text(out / 'trophies.tsv', lang))
+        except Exception as error:  # the pop-up then says "Trophy <id>"
+            print(f'Trophy names for the pop-up: {error}')
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),

@@ -9,8 +9,13 @@
 #include <string>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
+#include <deque>
+#include <fstream>
+#include <map>
 #include <mutex>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1267,6 +1272,210 @@ void WarningBanner() {
     ImGui::PopStyleColor(2);
 }
 
+// Trophy pop-ups (TrophyUnlocked). The names come from the launcher (run.py writes them in the
+// game's text language to the file BB_TROPHY_TEXT names: "lang\t<code>", "heading\t<text>" and
+// "<id>\t<grade>\t<name>\t<description>" lines); without it the pop-up says "Trophy <id>".
+struct TrophyEntry {
+    char grade = 'b'; // p, g, s, b
+    std::string name, description;
+};
+struct TrophyTable {
+    std::string lang = "en";
+    std::string heading = "Trophy earned";
+    std::map<int, TrophyEntry> entries;
+};
+const TrophyTable& TrophyTexts() {
+    static const TrophyTable table = [] {
+        TrophyTable t;
+#ifdef _WIN32
+        const wchar_t* env = _wgetenv(L"BB_TROPHY_TEXT");
+#else
+        const char* env = std::getenv("BB_TROPHY_TEXT");
+#endif
+        if (!env || !*env) return t;
+        std::ifstream file{std::filesystem::path(env)};
+        std::string line;
+        while (std::getline(file, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            std::vector<std::string> fields;
+            size_t start = 0;
+            for (size_t tab; (tab = line.find('\t', start)) != std::string::npos; start = tab + 1)
+                fields.push_back(line.substr(start, tab - start));
+            fields.push_back(line.substr(start));
+            if (fields.size() == 2 && fields[0] == "lang") {
+                t.lang = fields[1];
+            } else if (fields.size() == 2 && fields[0] == "heading") {
+                if (!fields[1].empty()) t.heading = fields[1];
+            } else if (fields.size() == 4 && !fields[0].empty() &&
+                       fields[0].find_first_not_of("0123456789") == std::string::npos) {
+                TrophyEntry& e = t.entries[std::atoi(fields[0].c_str())];
+                e.grade = fields[1].empty() ? 'b' : char(std::tolower((unsigned char)fields[1][0]));
+                e.name = fields[2];
+                e.description = fields[3];
+            }
+        }
+        return t;
+    }();
+    return table;
+}
+bool TrophyPopupsOn() {
+    static const bool on = [] {
+        const char* env = std::getenv("BB_TROPHY_POPUPS");
+        return !(env && env[0] == '0');
+    }();
+    return on;
+}
+
+struct TrophyNote {
+    int id;
+    bool started = false;
+    std::chrono::steady_clock::time_point shown{};
+};
+std::mutex trophy_mutex;
+std::deque<TrophyNote> trophy_queue;
+std::chrono::steady_clock::time_point overlay_ready{}; // Init: when BB_TROPHY_TEST fires
+constexpr float TrophyShowSeconds = 5.0f, TrophyInSeconds = 0.35f, TrophyOutSeconds = 0.5f;
+constexpr float TrophyPi = 3.14159265f;
+
+// BB_TROPHY_TEST=5,0 (test runs): those pop-ups BB_TROPHY_TEST_AT seconds (30) after the overlay
+// starts, without touching trophies.log. Called with trophy_mutex held.
+void TrophyTestHook(std::chrono::steady_clock::time_point now) {
+    static bool fired = false;
+    static const char* ids = std::getenv("BB_TROPHY_TEST");
+    if (fired || !ids || !*ids || overlay_ready == std::chrono::steady_clock::time_point{}) return;
+    const char* at_env = std::getenv("BB_TROPHY_TEST_AT");
+    const double at = at_env && *at_env ? std::atof(at_env) : 30.0;
+    if (now - overlay_ready < std::chrono::duration<double>(at)) return;
+    fired = true;
+    for (const char* p = ids; *p;) {
+        char* end = nullptr;
+        const long id = std::strtol(p, &end, 10);
+        if (end == p) {
+            ++p;
+            continue;
+        }
+        trophy_queue.push_back(TrophyNote{int(id)});
+        p = end;
+    }
+}
+
+bool TrophyActive() {
+    std::scoped_lock lock{trophy_mutex};
+    const auto now = std::chrono::steady_clock::now();
+    TrophyTestHook(now);
+    while (!trophy_queue.empty() && trophy_queue.front().started &&
+           now - trophy_queue.front().shown >= std::chrono::duration<float>(TrophyShowSeconds))
+        trophy_queue.pop_front();
+    return !trophy_queue.empty();
+}
+
+// The cup in the grade's colour, in the square at `at` with side `side`.
+void DrawTrophyCup(ImDrawList* draw, ImVec2 at, float side, ImU32 colour, ImU32 shine) {
+    const float s = side, cx = at.x + s * 0.5f;
+    const ImVec2 bowl_min(at.x + s * 0.27f, at.y + s * 0.14f);
+    const ImVec2 bowl_max(at.x + s * 0.73f, at.y + s * 0.52f);
+    draw->AddRectFilled(bowl_min, bowl_max, colour, s * 0.18f, ImDrawFlags_RoundCornersBottom);
+    const float thick = std::max(1.5f, s * 0.06f);
+    const float handle_y = at.y + s * 0.29f, handle_r = s * 0.10f;
+    draw->PathArcTo(ImVec2(bowl_min.x, handle_y), handle_r, TrophyPi * 0.5f, TrophyPi * 1.5f, 12);
+    draw->PathStroke(colour, ImDrawFlags_None, thick);
+    draw->PathArcTo(ImVec2(bowl_max.x, handle_y), handle_r, -TrophyPi * 0.5f, TrophyPi * 0.5f, 12);
+    draw->PathStroke(colour, ImDrawFlags_None, thick);
+    draw->AddRectFilled(ImVec2(cx - s * 0.05f, bowl_max.y - 1.0f), ImVec2(cx + s * 0.05f, at.y + s * 0.71f),
+                        colour);
+    draw->AddRectFilled(ImVec2(cx - s * 0.19f, at.y + s * 0.71f), ImVec2(cx + s * 0.19f, at.y + s * 0.82f),
+                        colour, s * 0.03f);
+    draw->AddRectFilled(ImVec2(bowl_min.x + s * 0.06f, bowl_min.y + s * 0.05f),
+                        ImVec2(bowl_min.x + s * 0.11f, bowl_min.y + s * 0.24f), shine, s * 0.02f);
+}
+
+// The front of the queue, top left, as the console shows it: slides in, stays five seconds, fades.
+void TrophyPopup() {
+    int id;
+    float age;
+    bool first;
+    {
+        std::scoped_lock lock{trophy_mutex};
+        if (trophy_queue.empty()) return;
+        TrophyNote& note = trophy_queue.front();
+        const auto now = std::chrono::steady_clock::now();
+        first = !note.started;
+        if (first) {
+            note.started = true;
+            note.shown = now;
+        }
+        id = note.id;
+        age = std::chrono::duration<float>(now - note.shown).count();
+    }
+    const TrophyTable& texts = TrophyTexts();
+    const auto found = texts.entries.find(id);
+    TrophyEntry entry;
+    if (found != texts.entries.end()) {
+        entry = found->second;
+    } else {
+        entry.grade = id == 0 ? 'p' : 'b';
+        entry.name = "Trophy " + std::to_string(id);
+    }
+    if (first) {
+        std::printf("Overlay: trophy %d pop-up (%s)\n", id, entry.name.c_str());
+    }
+
+    ImVec4 colour; // platinum, gold, silver, bronze
+    switch (entry.grade) {
+    case 'p': colour = ImVec4(0.80f, 0.88f, 0.94f, 1.0f); break;
+    case 'g': colour = ImVec4(0.90f, 0.75f, 0.31f, 1.0f); break;
+    case 's': colour = ImVec4(0.76f, 0.78f, 0.80f, 1.0f); break;
+    default: colour = ImVec4(0.80f, 0.51f, 0.27f, 1.0f); break;
+    }
+    const float in = std::clamp(age / TrophyInSeconds, 0.0f, 1.0f);
+    const float out = std::clamp((TrophyShowSeconds - age) / TrophyOutSeconds, 0.0f, 1.0f);
+    const float ease = 1.0f - (1.0f - in) * (1.0f - in) * (1.0f - in);
+    const float alpha = std::min(in, out);
+    const float margin = 24.0f * base_scale, width = 430.0f * base_scale;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin - (1.0f - ease) * (width + margin),
+                                   viewport->WorkPos.y + margin),
+                            ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, 0.0f), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * base_scale, 10.0f * base_scale));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.07f, 0.07f, 0.08f, 0.97f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(colour.x, colour.y, colour.z, 0.55f));
+    if (ImGui::Begin("##trophy", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing)) {
+        const float icon = 56.0f * base_scale;
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(at, ImVec2(at.x + icon, at.y + icon),
+                            ImGui::GetColorU32(ImVec4(0.14f, 0.14f, 0.16f, 1.0f)), 6.0f * base_scale);
+        DrawTrophyCup(draw, at, icon, ImGui::GetColorU32(colour),
+                      ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.55f)));
+        ImGui::Dummy(ImVec2(icon, icon));
+        ImGui::SameLine(0.0f, 12.0f * base_scale);
+        ImGui::BeginGroup();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.72f, 1.0f));
+        ImGui::TextUnformatted(texts.heading.c_str());
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.15f);
+        ImGui::PushStyleColor(ImGuiCol_Text, colour);
+        ImGui::TextUnformatted(entry.name.c_str());
+        ImGui::PopStyleColor();
+        ImGui::SetWindowFontScale(1.0f);
+        if (!entry.description.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
+            ImGui::TextUnformatted(entry.description.c_str());
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::EndGroup();
+    }
+    ImGui::End();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
+}
+
 } // namespace
 
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
@@ -1295,6 +1504,12 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     ranges.AddRanges(io.Fonts->GetGlyphRangesDefault());
     ranges.AddRanges(io.Fonts->GetGlyphRangesCyrillic());
     for (const char* text : Fsr41Ui::texts[Fsr41Ui::Language()]) ranges.AddText(text);
+    const TrophyTable& trophy_texts = TrophyTexts(); // the pop-ups' glyphs, in the game's language
+    ranges.AddText(trophy_texts.heading.c_str());
+    for (const auto& [id, entry] : trophy_texts.entries) {
+        ranges.AddText(entry.name.c_str());
+        ranges.AddText(entry.description.c_str());
+    }
     ranges.BuildRanges(&picker_glyphs);
     ImFontConfig font_config;
     font_config.FontDataOwnedByAtlas = false;
@@ -1304,8 +1519,9 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
 #ifdef _WIN32
     if (const char* windows=std::getenv("WINDIR")) {
         const std::string language=Fsr41Ui::languages[Fsr41Ui::Language()];
-        const char* candidates[] = {"msyh.ttc","YuGothM.ttc","msgothic.ttc","malgun.ttf"};
-        if (language=="zh" || language=="ja" || language=="ko") for(const char* file:candidates) {
+        const auto cjk=[](const std::string& code){ return code=="zh" || code=="ja" || code=="ko"; };
+        const char* candidates[] = {"msyh.ttc","YuGothM.ttc","msgothic.ttc","malgun.ttf","msjh.ttc"};
+        if (cjk(language) || cjk(trophy_texts.lang)) for(const char* file:candidates) {
             const auto path=std::filesystem::path(windows)/"Fonts"/file;
             if(!std::filesystem::is_regular_file(path)) continue;
             ImFontConfig merge; merge.MergeMode=true;
@@ -1345,6 +1561,10 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         return;
     }
     initialized = true;
+    {
+        std::scoped_lock trophy_lock{trophy_mutex};
+        overlay_ready = std::chrono::steady_clock::now();
+    }
     std::printf("Overlay: menu ready (%s)\n", MenuOpeners().c_str());
 }
 
@@ -1467,8 +1687,11 @@ bool ReadoutsOn() {
 }
 
 bool Visible() {
+    // First and every frame: it also retires a pop-up whose time is up (and starts BB_TROPHY_TEST),
+    // which an FPS counter that is on must not skip.
+    const bool trophy = TrophyActive();
     return initialized &&
-           (menu_open || text_entry_active || WarningActive() || ReadoutsOn());
+           (trophy || menu_open || text_entry_active || WarningActive() || ReadoutsOn());
 }
 
 bool CapturesInput() {
@@ -1488,6 +1711,12 @@ void Warn(const std::string& headline, const std::string& detail, float used_fra
     warn_detail = detail;
     warn_fraction = used_fraction;
     warn_until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+}
+
+void TrophyUnlocked(int id) {
+    if (id < 0 || !TrophyPopupsOn()) return;
+    std::scoped_lock lock{trophy_mutex};
+    trophy_queue.push_back(TrophyNote{id});
 }
 
 void SetVramUsage(u64 used_bytes, u64 limit_bytes, u64 pressure_bytes, u64 critical_bytes,
@@ -1579,6 +1808,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     if (WarningActive()) {
         WarningBanner();
     }
+    TrophyPopup();
     ImGui::Render();
 
     const vk::RenderingAttachmentInfo attachment{

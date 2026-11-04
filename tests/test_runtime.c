@@ -29,6 +29,34 @@ typedef void *(ABI *TlsAddress)(const uint64_t *);
 typedef void *(ABI *ThreadSelf)(void);
 typedef int32_t (ABI *ThreadGetAttr)(void *,void **);
 typedef int32_t (ABI *ThreadAffinity)(void **,uint64_t *);
+/* sceNpTrophyUnlockTrophy: every trophy goes into <user>/trophies.log once, a repeat or another
+ * call leaves it alone, and the platinum (0) follows the last of the 33 base-game trophies (the
+ * DLC's 34-39 do not count). */
+typedef int32_t (ABI *TrophyUnlock)(int32_t,int32_t,int32_t,int32_t *);
+static void trophy_unlocks(const char *user) {
+    runtime_file_configure(user,user);
+    char path[600]; snprintf(path,sizeof(path),"%s/trophies.log",user);
+    remove(path);
+    TrophyUnlock unlock=GET(TrophyUnlock,"28xmRUFao68#l#m");
+    assert(unlock);
+    int32_t platinum=7;
+    for (int id=33;id>=2;--id) { assert(unlock(1,1,id,&platinum)==0); assert(platinum==-1); }
+    assert(unlock(1,1,5,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,34,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,1,&platinum)==0 && platinum==0);
+    assert(unlock(1,1,1,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,0,&platinum)==0 && platinum==-1);
+    int count[64]={0}, lines=0, last=-1, id; long long when;
+    FILE *log=fopen(path,"r"); assert(log);
+    char line[64];
+    while (fgets(line,sizeof(line),log)) {
+        assert(sscanf(line,"%d %lld",&id,&when)==2 && id>=0 && id<64 && when>0);
+        ++count[id]; ++lines; last=id;
+    }
+    fclose(log);
+    for (int t=0;t<=34;++t) assert(count[t]==1);
+    assert(lines==35 && last==0);
+}
 static void *main_identity;
 static void *tls_worker(void *unused) {
     (void)unused;
@@ -347,6 +375,7 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--stack-failure")) {
         GET(GuestCallback,"Ou3iL1abvng#p#J")(); return 99;
     }
+    if (argc>2 && !strcmp(argv[1],"--trophy-unlock")) { trophy_unlocks(argv[2]); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-lifecycle")) { rw_lifecycle(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-concurrency")) { rw_concurrency(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }

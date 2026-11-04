@@ -354,20 +354,61 @@ static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint6
 }
 static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_INVALID; *handle=new_id(); return 0; }
 static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) { (void)ctx; (void)handle; (void)options; return 0; }
+/* The platinum (trophy 0) is the console's to award, once every base-game trophy (1-33) is unlocked;
+ * the DLC's (34-39) don't count. bbport_trophies.PLATINUM_NEEDS is the same set (tests/test_trophies.py). */
+#define TROPHY_PLATINUM 0
+#define TROPHY_BASE_FIRST 1
+#define TROPHY_BASE_LAST 33
+
+/* The trophies <user>/trophies.log already has, one bit per id (0-127). */
+static void trophy_log_ids(const char *path,uint64_t seen[2]) {
+    seen[0]=seen[1]=0;
+    FILE *log=fopen(path,"r");
+    if (!log) return;
+    char line[64];
+    int id; long long when;
+    while (fgets(line,sizeof(line),log))
+        if (sscanf(line,"%d %lld",&id,&when)==2 && id>=0 && id<128) seen[id>>6]|=1ull<<(id&63);
+    fclose(log);
+}
+
 static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
     (void)ctx; (void)handle;
+    int fresh=0,award_platinum=0;
     /* <user>/trophies.log ("id unix-time" per line) is read by the launcher's Trophies page,
-     * also when the game was started without it (shortcut, Steam). */
+     * also when the game was started without it (shortcut, Steam). A trophy goes in once: the
+     * game may ask again for one it has, and only a new one gets the in-game notice. */
     if (id>=0 && id<128) {
         char path[600];
         snprintf(path,sizeof(path),"%s/trophies.log",runtime_file_user_dir());
         pthread_mutex_lock(&lock);
-        FILE *log=fopen(path,"a");
-        if (log) { fprintf(log,"%d %lld\n",id,(long long)time(NULL)); fclose(log); }
+        uint64_t seen[2];
+        trophy_log_ids(path,seen);
+        fresh=!((seen[id>>6]>>(id&63))&1);
+        if (fresh) {
+            FILE *log=fopen(path,"a");
+            if (log) {
+                const long long now=(long long)time(NULL);
+                fprintf(log,"%d %lld\n",id,now);
+                seen[id>>6]|=1ull<<(id&63);
+                uint64_t base=0;
+                for (int t=TROPHY_BASE_FIRST;t<=TROPHY_BASE_LAST;++t) base|=1ull<<t;
+                if (!(seen[0]&1) && (seen[0]&base)==base) {
+                    fprintf(log,"%d %lld\n",TROPHY_PLATINUM,now);
+                    award_platinum=1;
+                }
+                fclose(log);
+            }
+        }
         pthread_mutex_unlock(&lock);
     }
     printf("Runtime: trophy %d unlocked\n",id);
-    if (platinum) *platinum=-1;
+    if (fresh) bbgpu_trophy_unlocked(id);
+    if (award_platinum) {
+        printf("Runtime: trophy %d unlocked\n",TROPHY_PLATINUM);
+        bbgpu_trophy_unlocked(TROPHY_PLATINUM);
+    }
+    if (platinum) *platinum=award_platinum ? TROPHY_PLATINUM : -1;
     return 0;
 }
 static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,void *data) {
