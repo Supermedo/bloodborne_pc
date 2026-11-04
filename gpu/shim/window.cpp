@@ -374,12 +374,10 @@ void WindowSDL::UpdateMouseCapture() {
     }
     mouse_captured_last = wants;
     SDL_SetWindowRelativeMouseMode(window, wants);
-    // Enabling relative mode hides the cursor by itself; disabling it does not document giving
-    // it back, so that side is made explicit here (SDL_ShowCursor is a no-op if already shown).
-    if (!wants) {
-        SDL_ShowCursor();
-        cursor_hidden = false;
-    }
+    // Relative mode hides the cursor by itself. Disabling it does not document giving the cursor
+    // back, so remember that it is hidden and let UpdateCursor() decide from the device in use:
+    // visible for the keyboard and mouse, hidden while the controller drives the game or a mod.
+    cursor_hidden = true;
     {
         // MOU-005/MOU-007: leaving capture drops whatever motion/buttons/wheel accumulated so
         // far -- a button still held when capture ends must never reach the pad as a press.
@@ -401,19 +399,25 @@ void WindowSDL::UpdateCursor(bool pad_used, bool mouse_used) {
     if (mouse_captured_last) {
         return;
     }
-    // A native mod's surface (Hunter's Atlas map or quick-menu tile) needs the pointer even
-    // when it was opened from the controller: keep it visible until that surface closes.
-    if (BbNativeMods::ReleasesMouse()) {
-        if (cursor_hidden) {
-            SDL_ShowCursor();
-            cursor_hidden = false;
-        }
+    // A native mod's surface (Hunter's Atlas map or quick-menu tile) releases the mouse. The
+    // pointer follows the device in use there too: hidden while the controller drives the map,
+    // visible as soon as the keyboard or mouse is used. pads.InUse() catches a gentle stick
+    // push that does not reach the button-prompt threshold.
+    bool want_visible;
+    if (mouse_used) {
+        want_visible = true;
+    } else if (pad_used || pads.InUse()) {
+        want_visible = false;
+    } else {
+        want_visible = !BbPrompts::UsingController();
+    }
+    if (want_visible == !cursor_hidden) {
         return;
     }
-    if (mouse_used && cursor_hidden) {
+    if (want_visible) {
         SDL_ShowCursor();
         cursor_hidden = false;
-    } else if (pad_used && !mouse_used && !cursor_hidden) {
+    } else {
         SDL_HideCursor();
         cursor_hidden = true;
     }
