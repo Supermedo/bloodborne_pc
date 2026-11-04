@@ -1508,24 +1508,26 @@ void TrophyPopup() {
     const float ease = 1.0f - (1.0f - in) * (1.0f - in) * (1.0f - in);
     const float alpha = std::min(in, out);
     // A dark rounded card at the top left, as the PS5 lays it out: the trophy's picture, a cup in the
-    // grade's colour before the name and the heading under it. As wide as its text (the width of the
-    // frame before, for sliding in from the left).
-    static float card_width = 420.0f * base_scale;
+    // grade's colour before the name and the heading under it. Every pop-up the same size: a long name
+    // gets a smaller font, not a wider card (35 letters fit at the full size, the longest name of any
+    // language at the smallest).
     const float margin = 24.0f * base_scale, icon = 64.0f * base_scale, gap = 14.0f * base_scale;
-    const float name_scale = 1.3f, cup_gap = 7.0f * base_scale, text_max = 520.0f * base_scale;
+    const float width = 536.0f * base_scale, cup_gap = 7.0f * base_scale;
+    const float name_full = 1.3f, name_least = 0.95f;
+    const ImVec2 padding(14.0f * base_scale, 12.0f * base_scale);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin - (1.0f - ease) * (card_width + margin),
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin - (1.0f - ease) * (width + margin),
                                    viewport->WorkPos.y + margin),
                             ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(width, 0.0f), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * base_scale, 12.0f * base_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, padding);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 22.0f * base_scale);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.11f, 0.11f, 0.12f, 0.96f));
     if (ImGui::Begin("##trophy", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                         ImGuiWindowFlags_AlwaysAutoResize)) {
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing)) {
         const ImVec2 at = ImGui::GetCursorScreenPos();
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImU32 grade = ImGui::GetColorU32(colour);
@@ -1542,36 +1544,48 @@ void TrophyPopup() {
         ImGui::Dummy(ImVec2(icon, icon));
         ImGui::SameLine(0.0f, gap);
         ImGui::BeginGroup();
+        // The middle of the capital letters of the font as it is set now, from the top of its line
+        // (the font's 'H'), and their height.
+        const auto capitals = [] {
+            ImFontBaked* baked = ImGui::GetFontBaked();
+            const ImFontGlyph* capital = baked ? baked->FindGlyphNoFallback('H') : nullptr;
+            const float unit = baked && baked->Size > 0.0f ? ImGui::GetFontSize() / baked->Size : 1.0f;
+            const float line = ImGui::GetTextLineHeight();
+            const float top = capital ? capital->Y0 * unit : line * 0.25f;
+            const float bottom = capital ? capital->Y1 * unit : line * 0.75f;
+            return ImVec2((top + bottom) * 0.5f, bottom - top);
+        };
         const float heading_height = ImGui::GetTextLineHeight();
-        ImGui::SetWindowFontScale(name_scale);
+        ImGui::SetWindowFontScale(name_full);
         const float name_height = ImGui::GetTextLineHeight();
-        // The two lines in the middle of the picture's height.
-        const float lines = name_height + ImGui::GetStyle().ItemSpacing.y + heading_height;
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(0.0f, (icon - lines) * 0.5f));
-        // The cup as tall as the name's capital letters and level with them (the font's 'H' at this size;
-        // the cup's drawing fills 0.14-0.82 of its square, centred at 0.48).
-        ImFontBaked* baked = ImGui::GetFontBaked();
-        const ImFontGlyph* capital = baked ? baked->FindGlyphNoFallback('H') : nullptr;
-        const float unit = baked && baked->Size > 0.0f ? ImGui::GetFontSize() / baked->Size : 1.0f;
-        const float cap_top = capital ? capital->Y0 * unit : name_height * 0.25f;
-        const float cap_bottom = capital ? capital->Y1 * unit : name_height * 0.75f;
-        const float cup = (cap_bottom - cap_top) / 0.68f;
+        const ImVec2 full = capitals();
+        // The two lines in the middle of the picture's height, in the same place on every pop-up.
+        const float spacing = ImGui::GetStyle().ItemSpacing.y;
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
+                             std::max(0.0f, (icon - name_height - spacing - heading_height) * 0.5f));
         const ImVec2 line = ImGui::GetCursorScreenPos();
-        DrawTrophyCup(draw, ImVec2(line.x, line.y + (cap_top + cap_bottom) * 0.5f - cup * 0.48f), cup, grade,
-                      shine);
-        // The name placed by hand: on the picture's line, SameLine would put it back at the picture's top.
-        ImGui::SetCursorScreenPos(ImVec2(line.x + cup + cup_gap, line.y));
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_max);
+        // The cup as tall as the full-size capitals and level with them (its drawing fills 0.14-0.82 of
+        // its square, centred at 0.48).
+        const float cup = full.y / 0.68f;
+        DrawTrophyCup(draw, ImVec2(line.x, line.y + full.x - cup * 0.48f), cup, grade, shine);
+        const float room = width - padding.x * 2.0f - icon - gap - cup - cup_gap;
+        const float full_width = ImGui::CalcTextSize(entry.name.c_str()).x;
+        if (full_width > room) {
+            // A step under the exact fit: the font's sizes are rounded.
+            ImGui::SetWindowFontScale(std::max(name_least, name_full * room / full_width * 0.98f));
+        }
+        const float name_y = line.y + full.x - capitals().x; // its capitals level with the cup
+        // Placed by hand: on the picture's line, SameLine would put it back at the picture's top.
+        ImGui::SetCursorScreenPos(ImVec2(line.x + cup + cup_gap, name_y));
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.96f, 0.96f, 0.96f, 1.0f));
         ImGui::TextUnformatted(entry.name.c_str());
         ImGui::PopStyleColor();
         ImGui::SetWindowFontScale(1.0f);
+        ImGui::SetCursorScreenPos(ImVec2(line.x, line.y + name_height + spacing));
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.66f, 0.66f, 0.69f, 1.0f));
         ImGui::TextUnformatted(texts.heading.c_str());
         ImGui::PopStyleColor();
-        ImGui::PopTextWrapPos();
         ImGui::EndGroup();
-        card_width = ImGui::GetWindowWidth();
     }
     ImGui::End();
     ImGui::PopStyleColor();
