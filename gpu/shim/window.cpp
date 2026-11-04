@@ -401,6 +401,15 @@ void WindowSDL::UpdateCursor(bool pad_used, bool mouse_used) {
     if (mouse_captured_last) {
         return;
     }
+    // A native mod's surface (Hunter's Atlas map or quick-menu tile) needs the pointer even
+    // when it was opened from the controller: keep it visible until that surface closes.
+    if (BbNativeMods::ReleasesMouse()) {
+        if (cursor_hidden) {
+            SDL_ShowCursor();
+            cursor_hidden = false;
+        }
+        return;
+    }
     if (mouse_used && cursor_hidden) {
         SDL_ShowCursor();
         cursor_hidden = false;
