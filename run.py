@@ -161,6 +161,50 @@ def write_trophy_text(path, language):
     return Path(path)
 
 
+# The pop-up's pictures: the game's own trophy icons, the ones the launcher's trophy page shows, as raw
+# TROPHY_ICON_SIZE x TROPHY_ICON_SIZE RGBA (the overlay has no PNG decoder).
+TROPHY_ICON_SIZE = 128
+
+
+def write_trophy_icons(folder, game):
+    """<folder>/<id>.rgba for each trophy whose PNG the player's sce_sys/trophy/trophy00.trp holds, read
+    through BB_TROPHY_ICONS; a trophy without one keeps the pop-up's cup. Done again only when the
+    trophy file changed (source.txt). Nothing of the game is shipped: the pictures come from its copy."""
+    sys.path.insert(0, str(PORT / 'launcher'))
+    import bbport_trophies
+    from bbport_trophy_icons import TrophyIcons
+    from PIL import Image
+    folder = Path(folder)
+    source = Path(game) / 'sce_sys' / 'trophy' / 'trophy00.trp'
+    stat = source.stat()
+    stamp = f'{stat.st_size} {stat.st_mtime_ns} {TROPHY_ICON_SIZE}'
+    ids = [trophy for trophy, *_ in bbport_trophies.TROPHIES]
+    done = folder / 'source.txt'  # the stamp, then the ids written
+    try:
+        lines = done.read_text(encoding='utf-8').splitlines()
+        if (len(lines) == 2 and lines[0] == stamp
+                and all((folder / f'{trophy}.rgba').is_file() for trophy in lines[1].split())):
+            return folder
+    except OSError:
+        pass
+    folder.mkdir(parents=True, exist_ok=True)
+    icons = TrophyIcons(game)
+    written = []
+    for trophy in ids:
+        target = folder / f'{trophy}.rgba'
+        png = icons.get(trophy)
+        if not png:
+            target.unlink(missing_ok=True)
+            continue
+        with Image.open(io.BytesIO(png)) as image:
+            pixels = image.convert('RGBA').resize((TROPHY_ICON_SIZE, TROPHY_ICON_SIZE), Image.LANCZOS).tobytes()
+        target.write_bytes(pixels)
+        written.append(str(trophy))
+    done.write_text(f'{stamp}\n{" ".join(written)}\n', encoding='utf-8')
+    print(f'Trophy pictures for the pop-up: {len(written)} of {len(ids)} from {source.name}')
+    return folder
+
+
 def eboot_image(game):
     """eboot.bin's loaded image (its loadable segments at their addresses): the same whatever
     tool dumped it, unlike the SELF around it."""
@@ -878,6 +922,10 @@ def main():
             env['BB_TROPHY_TEXT'] = str(write_trophy_text(out / 'trophies.tsv', lang))
         except Exception as error:  # the pop-up then says "Trophy <id>"
             print(f'Trophy names for the pop-up: {error}')
+        try:
+            env['BB_TROPHY_ICONS'] = str(write_trophy_icons(out / 'trophy_icons', original_game))
+        except Exception as error:  # the pop-up then shows the cup in the grade's colour
+            print(f'Trophy pictures for the pop-up: {error}')
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),

@@ -31,7 +31,9 @@
 #include "bbport_settings.h"
 #include "bbport_fsr41_ui.h"
 #include <filesystem>
+#include <cstring>
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -1389,7 +1391,78 @@ void DrawTrophyCup(ImDrawList* draw, ImVec2 at, float side, ImU32 colour, ImU32 
                         ImVec2(bowl_min.x + s * 0.11f, bowl_min.y + s * 0.24f), shine, s * 0.02f);
 }
 
-// The front of the queue, top left, as the console shows it: slides in, stays five seconds, fades.
+// The trophy's own picture, the one the launcher's trophy page shows: run.py reads the player's
+// trophy00.trp and writes <id>.rgba (raw TrophyIconSize x TrophyIconSize RGBA, run.py TROPHY_ICON_SIZE)
+// to the folder BB_TROPHY_ICONS names. An ImGui user texture: the backend creates it with the frame's
+// draw data. nullptr for a trophy without a picture (the pop-up then draws the cup).
+constexpr int TrophyIconSize = 128;
+ImTextureData* TrophyIcon(int id) {
+    static std::map<int, ImTextureData*> icons;
+    if (const auto found = icons.find(id); found != icons.end()) return found->second;
+    ImTextureData*& icon = icons[id];
+#ifdef _WIN32
+    const wchar_t* env = _wgetenv(L"BB_TROPHY_ICONS");
+#else
+    const char* env = std::getenv("BB_TROPHY_ICONS");
+#endif
+    if (!env || !*env) return icon;
+    std::ifstream file{std::filesystem::path(env) / (std::to_string(id) + ".rgba"), std::ios::binary};
+    std::vector<char> pixels(size_t(TrophyIconSize) * TrophyIconSize * 4);
+    if (!file.read(pixels.data(), std::streamsize(pixels.size())) ||
+        file.peek() != std::char_traits<char>::eof()) {
+        return icon;
+    }
+    icon = IM_NEW(ImTextureData)();
+    icon->Create(ImTextureFormat_RGBA32, TrophyIconSize, TrophyIconSize);
+    std::memcpy(icon->GetPixels(), pixels.data(), pixels.size());
+    icon->UseColors = true;
+    ImGui::RegisterUserTexture(icon);
+    return icon;
+}
+
+// The pop-up's sound: a short two-note chime made here (no sound file of anyone's), once a pop-up shows.
+// BB_TROPHY_SOUND=0 leaves it out; silent without the game's audio (BB_AUDIO=none) and while the game
+// is muted in the background (bbport.ini mute_unfocused).
+extern "C" int bbgpu_audio_muted(void);
+void PlayTrophySound() {
+    static const bool wanted = [] {
+        const char* env = std::getenv("BB_TROPHY_SOUND");
+        return !env || env[0] != '0';
+    }();
+    static SDL_AudioStream* stream = nullptr;
+    static bool failed = false;
+    static std::vector<float> chime;
+    if (!wanted || failed || !SDL_WasInit(SDL_INIT_AUDIO) || bbgpu_audio_muted()) return;
+    if (!stream) {
+        constexpr int rate = 48000;
+        const SDL_AudioSpec spec{SDL_AUDIO_F32, 1, rate};
+        stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (!stream) {
+            failed = true;
+            std::printf("Overlay: trophy sound unavailable (%s)\n", SDL_GetError());
+            return;
+        }
+        SDL_ResumeAudioStreamDevice(stream);
+        std::printf("Overlay: trophy sound ready (%s)\n", SDL_GetCurrentAudioDriver());
+        // Two bell-like notes a fifth apart (E6, then B6 0.11 s later): a sine with a quieter octave,
+        // 4 ms attack, decaying over about half a second.
+        const struct { float start, hz; } notes[] = {{0.0f, 1318.5f}, {0.11f, 1975.5f}};
+        chime.assign(size_t(rate * 0.9f), 0.0f);
+        for (const auto& note : notes) {
+            for (size_t i = size_t(note.start * rate); i < chime.size(); ++i) {
+                const float t = float(i) / rate - note.start;
+                const float envelope = std::min(t / 0.004f, 1.0f) * std::exp(-t * 7.0f);
+                chime[i] += 0.16f * envelope *
+                            (std::sin(2.0f * TrophyPi * note.hz * t) +
+                             0.25f * std::sin(4.0f * TrophyPi * note.hz * t));
+            }
+        }
+    }
+    SDL_ClearAudioStream(stream);
+    SDL_PutAudioStreamData(stream, chime.data(), int(chime.size() * sizeof(float)));
+}
+
+// The front of the queue, top left: slides in, stays five seconds, fades.
 void TrophyPopup() {
     int id;
     float age;
@@ -1416,8 +1489,11 @@ void TrophyPopup() {
         entry.grade = id == 0 ? 'p' : 'b';
         entry.name = "Trophy " + std::to_string(id);
     }
+    ImTextureData* picture = TrophyIcon(id);
     if (first) {
-        std::printf("Overlay: trophy %d pop-up (%s)\n", id, entry.name.c_str());
+        std::printf("Overlay: trophy %d pop-up (%s)%s\n", id, entry.name.c_str(),
+                    picture ? ", its picture" : "");
+        PlayTrophySound();
     }
 
     ImVec4 colour; // platinum, gold, silver, bronze
@@ -1431,49 +1507,75 @@ void TrophyPopup() {
     const float out = std::clamp((TrophyShowSeconds - age) / TrophyOutSeconds, 0.0f, 1.0f);
     const float ease = 1.0f - (1.0f - in) * (1.0f - in) * (1.0f - in);
     const float alpha = std::min(in, out);
-    const float margin = 24.0f * base_scale, width = 430.0f * base_scale;
+    // A dark rounded card at the top left, as the PS5 lays it out: the trophy's picture, a cup in the
+    // grade's colour before the name and the heading under it. As wide as its text (the width of the
+    // frame before, for sliding in from the left).
+    static float card_width = 420.0f * base_scale;
+    const float margin = 24.0f * base_scale, icon = 64.0f * base_scale, gap = 14.0f * base_scale;
+    const float name_scale = 1.3f, cup_gap = 7.0f * base_scale, text_max = 520.0f * base_scale;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin - (1.0f - ease) * (width + margin),
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + margin - (1.0f - ease) * (card_width + margin),
                                    viewport->WorkPos.y + margin),
                             ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(width, 0.0f), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * base_scale, 10.0f * base_scale));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.07f, 0.07f, 0.08f, 0.97f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(colour.x, colour.y, colour.z, 0.55f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * base_scale, 12.0f * base_scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 22.0f * base_scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.11f, 0.11f, 0.12f, 0.96f));
     if (ImGui::Begin("##trophy", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing)) {
-        const float icon = 56.0f * base_scale;
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
         const ImVec2 at = ImGui::GetCursorScreenPos();
         ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->AddRectFilled(at, ImVec2(at.x + icon, at.y + icon),
-                            ImGui::GetColorU32(ImVec4(0.14f, 0.14f, 0.16f, 1.0f)), 6.0f * base_scale);
-        DrawTrophyCup(draw, at, icon, ImGui::GetColorU32(colour),
-                      ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.55f)));
+        const ImU32 grade = ImGui::GetColorU32(colour);
+        const ImU32 shine = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.55f));
+        if (picture && picture->Status == ImTextureStatus_OK) {
+            draw->AddImageRounded(picture->GetTexRef(), at, ImVec2(at.x + icon, at.y + icon), ImVec2(0.0f, 0.0f),
+                                  ImVec2(1.0f, 1.0f), ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f)),
+                                  6.0f * base_scale);
+        } else {
+            draw->AddRectFilled(at, ImVec2(at.x + icon, at.y + icon),
+                                ImGui::GetColorU32(ImVec4(0.18f, 0.18f, 0.20f, 1.0f)), 6.0f * base_scale);
+            DrawTrophyCup(draw, at, icon, grade, shine);
+        }
         ImGui::Dummy(ImVec2(icon, icon));
-        ImGui::SameLine(0.0f, 12.0f * base_scale);
+        ImGui::SameLine(0.0f, gap);
         ImGui::BeginGroup();
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.70f, 0.72f, 1.0f));
-        ImGui::TextUnformatted(texts.heading.c_str());
-        ImGui::PopStyleColor();
-        ImGui::SetWindowFontScale(1.15f);
-        ImGui::PushStyleColor(ImGuiCol_Text, colour);
+        const float heading_height = ImGui::GetTextLineHeight();
+        ImGui::SetWindowFontScale(name_scale);
+        const float name_height = ImGui::GetTextLineHeight();
+        // The two lines in the middle of the picture's height.
+        const float lines = name_height + ImGui::GetStyle().ItemSpacing.y + heading_height;
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(0.0f, (icon - lines) * 0.5f));
+        // The cup as tall as the name's capital letters and level with them (the font's 'H' at this size;
+        // the cup's drawing fills 0.14-0.82 of its square, centred at 0.48).
+        ImFontBaked* baked = ImGui::GetFontBaked();
+        const ImFontGlyph* capital = baked ? baked->FindGlyphNoFallback('H') : nullptr;
+        const float unit = baked && baked->Size > 0.0f ? ImGui::GetFontSize() / baked->Size : 1.0f;
+        const float cap_top = capital ? capital->Y0 * unit : name_height * 0.25f;
+        const float cap_bottom = capital ? capital->Y1 * unit : name_height * 0.75f;
+        const float cup = (cap_bottom - cap_top) / 0.68f;
+        const ImVec2 line = ImGui::GetCursorScreenPos();
+        DrawTrophyCup(draw, ImVec2(line.x, line.y + (cap_top + cap_bottom) * 0.5f - cup * 0.48f), cup, grade,
+                      shine);
+        // The name placed by hand: on the picture's line, SameLine would put it back at the picture's top.
+        ImGui::SetCursorScreenPos(ImVec2(line.x + cup + cup_gap, line.y));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_max);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.96f, 0.96f, 0.96f, 1.0f));
         ImGui::TextUnformatted(entry.name.c_str());
         ImGui::PopStyleColor();
         ImGui::SetWindowFontScale(1.0f);
-        if (!entry.description.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
-            ImGui::TextUnformatted(entry.description.c_str());
-            ImGui::PopStyleColor();
-        }
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.66f, 0.66f, 0.69f, 1.0f));
+        ImGui::TextUnformatted(texts.heading.c_str());
+        ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
         ImGui::EndGroup();
+        card_width = ImGui::GetWindowWidth();
     }
     ImGui::End();
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(4);
 }
 
 } // namespace
