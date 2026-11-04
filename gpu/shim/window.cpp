@@ -10,6 +10,7 @@
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "bbport_mouse.h"
+#include "bbport_native_mods.h"
 #include "bbport_overlay.h"
 #include "bbport_prompts.h"
 #include "bloodborne_cam.h"
@@ -360,7 +361,10 @@ void WindowSDL::UpdateMouseCamera() {
 bool WindowSDL::WantsMouseCapture() const {
     // MOU-003: all of mouse mode on, window focused, menu closed, text dialog inactive.
     // BbOverlay::CapturesInput() already covers both the menu and the text entry box.
-    return mouse_mode_on.load(std::memory_order_relaxed) && window_focused && !BbOverlay::CapturesInput();
+    // A native mod (Hunter's Atlas) releases the mouse while its map or quick-menu tile is
+    // open, so the pointer can pan/zoom/click there; closing it captures the mouse again.
+    return mouse_mode_on.load(std::memory_order_relaxed) && window_focused &&
+           !BbOverlay::CapturesInput() && !BbNativeMods::ReleasesMouse();
 }
 
 void WindowSDL::UpdateMouseCapture() {
@@ -370,12 +374,10 @@ void WindowSDL::UpdateMouseCapture() {
     }
     mouse_captured_last = wants;
     SDL_SetWindowRelativeMouseMode(window, wants);
-    // Enabling relative mode hides the cursor by itself; disabling it does not document giving
-    // it back, so that side is made explicit here (SDL_ShowCursor is a no-op if already shown).
-    if (!wants) {
-        SDL_ShowCursor();
-        cursor_hidden = false;
-    }
+    // Relative mode hides the cursor by itself. Disabling it does not document giving the cursor
+    // back, so remember that it is hidden and let UpdateCursor() decide from the device in use:
+    // visible for the keyboard and mouse, hidden while the controller drives the game or a mod.
+    cursor_hidden = true;
     {
         // MOU-005/MOU-007: leaving capture drops whatever motion/buttons/wheel accumulated so
         // far -- a button still held when capture ends must never reach the pad as a press.
@@ -397,10 +399,25 @@ void WindowSDL::UpdateCursor(bool pad_used, bool mouse_used) {
     if (mouse_captured_last) {
         return;
     }
-    if (mouse_used && cursor_hidden) {
+    // A native mod's surface (Hunter's Atlas map or quick-menu tile) releases the mouse. The
+    // pointer follows the device in use there too: hidden while the controller drives the map,
+    // visible as soon as the keyboard or mouse is used. pads.InUse() catches a gentle stick
+    // push that does not reach the button-prompt threshold.
+    bool want_visible;
+    if (mouse_used) {
+        want_visible = true;
+    } else if (pad_used || pads.InUse()) {
+        want_visible = false;
+    } else {
+        want_visible = !BbPrompts::UsingController();
+    }
+    if (want_visible == !cursor_hidden) {
+        return;
+    }
+    if (want_visible) {
         SDL_ShowCursor();
         cursor_hidden = false;
-    } else if (pad_used && !mouse_used && !cursor_hidden) {
+    } else {
         SDL_HideCursor();
         cursor_hidden = true;
     }

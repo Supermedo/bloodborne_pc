@@ -14,11 +14,13 @@
  * the clock. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_menu_sound.h"
 #include "gpu/bbgpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <SDL3/SDL.h>
 #ifdef _WIN32
@@ -67,6 +69,46 @@ static int device_channels; /* >0 playback channels, <0 query failed */
 static int device_period_frames; /* device chunk, in 48 kHz frames */
 static float master_gain=1.f;
 
+static pthread_mutex_t menu_load_lock=PTHREAD_MUTEX_INITIALIZER;
+static BbMenuSounds menu_sounds;
+static int menu_load_state;
+static atomic_uint menu_move_pending,menu_select_pending;
+static atomic_uint menu_queued_move,menu_queued_select,menu_mixed_move,menu_mixed_select,menu_muted;
+static atomic_uint menu_decoded_move,menu_decoded_select;
+static pthread_mutex_t menu_mix_lock=PTHREAD_MUTEX_INITIALIZER;
+static int menu_playing;
+static uint32_t menu_cursor;
+
+void runtime_audio_menu_event(int select) {
+    const char *enabled=getenv("BB_ATLAS_ENABLED");
+    if(!enabled || strcmp(enabled,"1"))return;
+    const char *mode=getenv("BB_AUDIO");
+    if(bbgpu_audio_muted()){atomic_fetch_add(&menu_muted,1);return;}
+    if(mode && !strcmp(mode,"none")){atomic_fetch_add(&menu_muted,1);return;}
+    pthread_mutex_lock(&menu_load_lock);
+    if(!menu_load_state){
+        char path[4096];
+        menu_load_state=runtime_file_translate("/app0/dvdroot_ps4/sound/sprj_main.fsb",path,sizeof(path))==0 &&
+                        runtime_menu_sound_load(path,&menu_sounds) ? 1 : -1;
+        if(menu_load_state<0)puts("Atlas: local menu cursor sound unavailable");
+        else {
+            atomic_store(&menu_decoded_move,menu_sounds.move.frames);
+            atomic_store(&menu_decoded_select,menu_sounds.select.frames);
+        }
+    }
+    if(menu_load_state>0){
+        if(select){atomic_fetch_add(&menu_queued_select,1);atomic_fetch_add(&menu_select_pending,1);}
+        else {atomic_fetch_add(&menu_queued_move,1);atomic_fetch_add(&menu_move_pending,1);}
+    }
+    pthread_mutex_unlock(&menu_load_lock);
+}
+void runtime_audio_menu_stats(BbMenuSoundStats *out){
+    if(!out)return;
+    *out=(BbMenuSoundStats){atomic_load(&menu_decoded_move),atomic_load(&menu_decoded_select),
+        atomic_load(&menu_queued_move),atomic_load(&menu_queued_select),
+        atomic_load(&menu_mixed_move),atomic_load(&menu_mixed_select),atomic_load(&menu_muted)};
+}
+
 /* SDL's 7.1->stereo matrix multiplies the front pair by ~0.21 so a full 8ch
  * sum stays at 1. The game's mix lives in the fronts, so a stereo PC sounds
  * about 13 dB quieter than everything else. Fold here, fronts at unity. */
@@ -79,6 +121,37 @@ static void put(void *dst, int is_float, size_t index, float v) {
     v=sat(v);
     if (is_float) { memcpy((char *)dst+index*4,&v,4); return; }
     int16_t s=(int16_t)(v*32767.f); memcpy((char *)dst+index*2,&s,2);
+}
+static void menu_mix(void *converted,const Port *p) {
+    if(p->type!=0||!p->stream||!atomic_load(&menu_decoded_move))return;
+    pthread_mutex_lock(&menu_mix_lock);
+    if(bbgpu_audio_muted()){
+        atomic_store(&menu_select_pending,0);atomic_store(&menu_move_pending,0);
+        menu_playing=0;pthread_mutex_unlock(&menu_mix_lock);return;
+    }
+    if(atomic_exchange(&menu_select_pending,0)){
+        atomic_store(&menu_move_pending,0);menu_playing=2;menu_cursor=0;
+    }else if(atomic_exchange(&menu_move_pending,0)){
+        menu_playing=1;menu_cursor=0;
+    }
+    const BbMenuSound *sound=menu_playing==2?&menu_sounds.select:&menu_sounds.move;
+    if(menu_playing&&sound->pcm){
+        for(int f=0;f<p->frames&&menu_cursor<sound->frames;++f,++menu_cursor){
+            const float sample=(float)sound->pcm[menu_cursor]/32768.f*master_gain;
+            const int fronts=p->out_channels<2?p->out_channels:2;
+            for(int c=0;c<fronts;++c){
+                const size_t at=(size_t)f*(size_t)p->out_channels+(size_t)c;
+                const float gain=(float)p->volume[c]/VOLUME_0DB;
+                put(converted,p->is_float,at,take(converted,p->is_float,at,1.f)+sample*gain);
+            }
+        }
+        if(menu_cursor>=sound->frames){
+            if(menu_playing==2)atomic_fetch_add(&menu_mixed_select,1);
+            else atomic_fetch_add(&menu_mixed_move,1);
+            menu_playing=0;
+        }
+    }
+    pthread_mutex_unlock(&menu_mix_lock);
 }
 static void fold8(const float in[8], float *out, int n) {
     memset(out,0,(size_t)n*sizeof(float));
@@ -289,6 +362,7 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
                 else { int16_t v; memcpy(&v,(const char *)data+from*2,2); v=(int16_t)((float)v*gain); memcpy(converted+to*2,&v,2); }
             }
         }
+        menu_mix(converted,p);
         if (p->dump) fwrite(converted,1,out_bytes,p->dump);
         if (p->stats) {
             uint64_t now=now_ns();

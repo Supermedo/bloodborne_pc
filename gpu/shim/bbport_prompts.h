@@ -30,6 +30,10 @@ void OnInput(Device device);
 /// the controller's then; without one, keyboard and mouse.
 void OnControllerConnected(Device device);
 
+/// Window thread: whether the last input came from a controller. Before any input it returns
+/// false, so the cursor starts visible as it did before a controller was used.
+bool UsingController();
+
 /// Window thread, every PollEvents: writes the icons that should change (outside every
 /// renderer lock: a write to a tracked page faults into the texture cache).
 void Apply();
