@@ -1,5 +1,9 @@
-/* Linux rwlocks behind PS4 pointer-to-handle ABI. The registry protects
-   lifetime, static initialization and ownership; waiting happens outside it. */
+/* PS4 rwlocks behind the pointer-to-handle ABI, on the host's reader-writer locks (SRW locks on
+   Windows). Lock records come from a pool that is never freed, so a handle from the game is
+   checked without a global lock: 0 is the static initializer, 1 a destroyed lock, anything else
+   must point at a live record. Each thread keeps the list of locks it holds (EDEADLK, EPERM),
+   and a thread that already reads a lock reads it again without asking the host lock, so a
+   writer waiting in between can't deadlock it (FreeBSD's libthr allows nested reads too). */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
@@ -8,21 +12,38 @@
 #include <pthread.h>
 #include <errno.h>
 #include <limits.h>
-typedef struct Holder {
-    pthread_t thread;
-    unsigned readers, writer, pending;
-    struct Holder *next;
-} Holder;
+#include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+/* A cache line each: threads using different locks don't slow each other down. */
 typedef struct Rwlock {
-    pthread_rwlock_t native;
-    Holder *holders;
-    unsigned inflight;
-    struct Rwlock *next;
+#ifdef _WIN32
+    _Alignas(64) SRWLOCK native;
+#else
+    _Alignas(64) pthread_rwlock_t native;
+#endif
+    unsigned users;  /* threads holding the lock or waiting for it; DEAD while the record is free */
+    struct Rwlock *next_free;
 } Rwlock;
+#define DEAD 0x80000000u
+#ifdef _WIN32
+#define chunk_alloc(size) _aligned_malloc(size,64)
+#else
+#define chunk_alloc(size) aligned_alloc(64,size)
+#endif
+enum { CHUNK=1024, CHUNKS=4096 };
 typedef struct { int64_t seconds, nanoseconds; } GuestTime;
-static pthread_mutex_t registry_lock = PTHREAD_MUTEX_INITIALIZER;
-static Rwlock *registry;
+/* Making and destroying locks; using them takes no global lock. */
+static pthread_mutex_t pool_lock = PTHREAD_MUTEX_INITIALIZER;
+static Rwlock *chunks[CHUNKS];
+static unsigned chunk_count, next_unused;
+static Rwlock *free_records;
 static size_t created, reads, writes, unlocks;
+/* The locks this thread holds: a thread rarely holds more than a few at once. */
+typedef struct { Rwlock *lock; unsigned readers, writer; } Held;
+static _Thread_local Held *held;
+static _Thread_local unsigned held_count, held_size;
 static int32_t error(int e) {
     if (!e) return 0;
     unsigned code;
@@ -38,32 +59,104 @@ static int32_t error(int e) {
     }
     return (int32_t)(UINT32_C(0x80020000)|code);
 }
-/* All helpers ending in _locked require registry_lock. */
-static Rwlock *find_locked(Rwlock *handle) {
-    for (Rwlock *r=registry; r; r=r->next) if (r==handle) return r;
+/* The live record a handle points at, or NULL. Reads only pool memory, which stays mapped. */
+static Rwlock *live(Rwlock *handle) {
+    uintptr_t p=(uintptr_t)handle;
+    unsigned n=__atomic_load_n(&chunk_count,__ATOMIC_ACQUIRE);
+    for (unsigned i=0;i<n;++i) {
+        uintptr_t base=(uintptr_t)chunks[i];
+        if (p<base || p-base>=CHUNK*sizeof(Rwlock)) continue;
+        if ((p-base)%sizeof(Rwlock)) return NULL;
+        return __atomic_load_n(&handle->users,__ATOMIC_ACQUIRE)&DEAD ? NULL : handle;
+    }
     return NULL;
 }
-static int create_locked(Rwlock **out) {
-    Rwlock *r=calloc(1,sizeof(*r));
-    if (!r) return ENOMEM;
+/* Requires pool_lock. */
+static int make_locked(Rwlock **out) {
+    Rwlock *r=free_records;
+    if (r) free_records=r->next_free;
+    else {
+        unsigned n=chunk_count;
+        if (!n || next_unused==CHUNK) {
+            if (n==CHUNKS) return ENOMEM;
+            Rwlock *chunk=chunk_alloc(CHUNK*sizeof(*chunk)); /* never freed */
+            if (!chunk) return ENOMEM;
+            memset(chunk,0,CHUNK*sizeof(*chunk));
+            for (unsigned i=0;i<CHUNK;++i) chunk[i].users=DEAD;
+            chunks[n++]=chunk; next_unused=0;
+            __atomic_store_n(&chunk_count,n,__ATOMIC_RELEASE);
+        }
+        r=&chunks[n-1][next_unused++];
+    }
+#ifdef _WIN32
+    InitializeSRWLock(&r->native);
+#else
     int e=pthread_rwlock_init(&r->native,NULL);
-    if (e) { free(r); return e; }
-    r->next=registry; registry=r; *out=r; ++created; return 0;
+    if (e) { r->next_free=free_records; free_records=r; return e; }
+#endif
+    /* Clears only DEAD: a late call with a stale handle may still be counting itself in. */
+    __atomic_fetch_and(&r->users,~DEAD,__ATOMIC_RELEASE);
+    *out=r; ++created; return 0;
 }
+/* The record behind a handle; a statically initialized (0) handle gets one on first use. */
+static int resolve(Rwlock **handle, Rwlock **out) {
+    Rwlock *h=__atomic_load_n(handle,__ATOMIC_ACQUIRE);
+    if (!h) {
+        pthread_mutex_lock(&pool_lock);
+        int e=0;
+        if (!(h=*handle)) {
+            e=make_locked(&h);
+            if (!e) __atomic_store_n(handle,h,__ATOMIC_RELEASE);
+        }
+        pthread_mutex_unlock(&pool_lock);
+        if (e) return e;
+    }
+    return (*out=live(h)) ? 0 : EINVAL;
+}
+static Held *holding(const Rwlock *r) {
+    for (unsigned i=0;i<held_count;++i) if (held[i].lock==r) return &held[i];
+    return NULL;
+}
+#ifdef _WIN32
+static int take(Rwlock *r, int writer, int attempt) {
+    if (attempt) return (writer ? TryAcquireSRWLockExclusive(&r->native) : TryAcquireSRWLockShared(&r->native)) ? 0 : EBUSY;
+    if (writer) AcquireSRWLockExclusive(&r->native); else AcquireSRWLockShared(&r->native);
+    return 0;
+}
+static void give(Rwlock *r, int writer) {
+    if (writer) ReleaseSRWLockExclusive(&r->native); else ReleaseSRWLockShared(&r->native);
+}
+/* SRW locks have no timed wait: try again until the deadline, yielding first, then in 1 ms naps. */
+static int take_until(Rwlock *r, int writer, const struct timespec *deadline) {
+    for (unsigned tries=0;;++tries) {
+        if (!take(r,writer,1)) return 0;
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME,&now);
+        if (now.tv_sec>deadline->tv_sec || (now.tv_sec==deadline->tv_sec && now.tv_nsec>=deadline->tv_nsec)) return ETIMEDOUT;
+        if (tries<64) SwitchToThread(); else Sleep(1);
+    }
+}
+#else
+static int take(Rwlock *r, int writer, int attempt) {
+    if (attempt) return writer ? pthread_rwlock_trywrlock(&r->native) : pthread_rwlock_tryrdlock(&r->native);
+    return writer ? pthread_rwlock_wrlock(&r->native) : pthread_rwlock_rdlock(&r->native);
+}
+static void give(Rwlock *r, int writer) { (void)writer; pthread_rwlock_unlock(&r->native); }
+static int take_until(Rwlock *r, int writer, const struct timespec *deadline) {
+    return writer ? pthread_rwlock_timedwrlock(&r->native,deadline) : pthread_rwlock_timedrdlock(&r->native,deadline);
+}
+#endif
 static ABI int32_t rw_init(Rwlock **out, void *const *attr, const char *name) {
     (void)name;
     if (!out || (attr && !*attr)) return error(EINVAL);
     if (attr) { fputs("STOP: non-default PS4 rwlock attributes are not implemented\n",stderr); exit(21); }
-    pthread_mutex_lock(&registry_lock);
+    pthread_mutex_lock(&pool_lock);
     /* POSIX allows uninitialized storage, so never read *out during init. */
-    int e=create_locked(out);
-    pthread_mutex_unlock(&registry_lock); return error(e);
-}
-static void prune_locked(Rwlock *r, Holder *h) {
-    if (h->readers || h->writer || h->pending) return;
-    Holder **link=&r->holders;
-    while (*link!=h) link=&(*link)->next;
-    *link=h->next; free(h);
+    Rwlock *r=NULL;
+    int e=make_locked(&r);
+    pthread_mutex_unlock(&pool_lock);
+    if (!e) *out=r;
+    return error(e);
 }
 enum Operation { READ, WRITE, TRY_READ, TRY_WRITE, TIMED_READ, TIMED_WRITE };
 static int32_t acquire(Rwlock **handle, enum Operation op, const GuestTime *time) {
@@ -71,42 +164,37 @@ static int32_t acquire(Rwlock **handle, enum Operation op, const GuestTime *time
     int writer=op==WRITE || op==TRY_WRITE || op==TIMED_WRITE;
     int attempt=op==TRY_READ || op==TRY_WRITE;
     int timed=op==TIMED_READ || op==TIMED_WRITE;
-    pthread_mutex_lock(&registry_lock);
-    int e=0;
-    if (!*handle) e=create_locked(handle);
-    Rwlock *r=e ? NULL : find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(e ? e : EINVAL); }
-    Holder *h=r->holders;
-    while (h && !pthread_equal(h->thread,pthread_self())) h=h->next;
-    if (h && (h->writer || (writer && h->readers))) {
-        pthread_mutex_unlock(&registry_lock); return error(attempt ? EBUSY : EDEADLK);
+    Rwlock *r;
+    int e=resolve(handle,&r);
+    if (e) return error(e);
+    Held *h=holding(r);
+    if (h) {
+        if (h->writer || writer) return error(attempt ? EBUSY : EDEADLK);
+        if (h->readers==UINT_MAX) return error(EAGAIN);
+        ++h->readers; RUNTIME_COUNT(reads); return 0;
     }
-    if (h && h->readers==UINT_MAX) { pthread_mutex_unlock(&registry_lock); return error(EAGAIN); }
-    if (!h) {
-        h=calloc(1,sizeof(*h));
-        if (!h) { pthread_mutex_unlock(&registry_lock); return error(ENOMEM); }
-        h->thread=pthread_self(); h->next=r->holders; r->holders=h;
+    if (held_count==held_size) {
+        unsigned size=held_size ? held_size*2 : 8;
+        Held *grown=realloc(held,size*sizeof(*grown));
+        if (!grown) return error(ENOMEM);
+        held=grown; held_size=size;
     }
-    ++r->inflight; ++h->pending;
-    pthread_mutex_unlock(&registry_lock);
-    /* Timed operations first try the lock, matching POSIX timeout validation. */
-    if (attempt || timed) e=writer ? pthread_rwlock_trywrlock(&r->native) : pthread_rwlock_tryrdlock(&r->native);
-    else e=writer ? pthread_rwlock_wrlock(&r->native) : pthread_rwlock_rdlock(&r->native);
-    if (timed && e==EBUSY) {
-        if (!time || time->nanoseconds<0 || time->nanoseconds>=1000000000) e=EINVAL;
-        else {
-            struct timespec deadline={.tv_sec=(time_t)time->seconds,.tv_nsec=(long)time->nanoseconds};
-            e=writer ? pthread_rwlock_timedwrlock(&r->native,&deadline) : pthread_rwlock_timedrdlock(&r->native,&deadline);
+    if (__atomic_fetch_add(&r->users,1,__ATOMIC_ACQ_REL)&DEAD) e=EINVAL; /* destroyed meanwhile */
+    else {
+        /* Timed operations first try the lock, matching POSIX timeout validation. */
+        e=take(r,writer,attempt || timed);
+        if (timed && e==EBUSY) {
+            if (!time || time->nanoseconds<0 || time->nanoseconds>=1000000000) e=EINVAL;
+            else {
+                struct timespec deadline={.tv_sec=(time_t)time->seconds,.tv_nsec=(long)time->nanoseconds};
+                e=take_until(r,writer,&deadline);
+            }
         }
     }
-    pthread_mutex_lock(&registry_lock);
-    --r->inflight; --h->pending;
-    if (!e) {
-        if (writer) { h->writer=1; ++writes; }
-        else { ++h->readers; ++reads; }
-    }
-    prune_locked(r,h);
-    pthread_mutex_unlock(&registry_lock); return error(e);
+    if (e) { __atomic_fetch_sub(&r->users,1,__ATOMIC_ACQ_REL); return error(e); }
+    held[held_count++]=(Held){r,!writer,writer};
+    if (writer) RUNTIME_COUNT(writes); else RUNTIME_COUNT(reads);
+    return 0;
 }
 static ABI int32_t rw_read(Rwlock **r) { return acquire(r,READ,NULL); }
 static ABI int32_t rw_write(Rwlock **r) { return acquire(r,WRITE,NULL); }
@@ -116,31 +204,34 @@ static ABI int32_t rw_timedread(Rwlock **r,const GuestTime *t) { return acquire(
 static ABI int32_t rw_timedwrite(Rwlock **r,const GuestTime *t) { return acquire(r,TIMED_WRITE,t); }
 static ABI int32_t rw_unlock(Rwlock **handle) {
     if (!handle) return error(EINVAL);
-    pthread_mutex_lock(&registry_lock);
-    Rwlock *r=find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(EINVAL); }
-    Holder *h=r->holders;
-    while (h && !pthread_equal(h->thread,pthread_self())) h=h->next;
-    if (!h || (!h->readers && !h->writer)) { pthread_mutex_unlock(&registry_lock); return error(EPERM); }
-    int e=pthread_rwlock_unlock(&r->native);
-    if (!e) { if (h->writer) h->writer=0; else --h->readers; ++unlocks; }
-    prune_locked(r,h);
-    pthread_mutex_unlock(&registry_lock); return error(e);
+    Held *h=holding(*handle);
+    if (!h) return error(live(*handle) ? EPERM : EINVAL);
+    RUNTIME_COUNT(unlocks);
+    if (!h->writer && --h->readers) return 0; /* this thread still reads it */
+    Rwlock *r=h->lock;
+    give(r,h->writer);
+    *h=held[--held_count];
+    __atomic_fetch_sub(&r->users,1,__ATOMIC_ACQ_REL);
+    return 0;
 }
 static ABI int32_t rw_destroy(Rwlock **handle) {
     if (!handle) return error(EINVAL);
-    pthread_mutex_lock(&registry_lock);
-    if (!*handle) { pthread_mutex_unlock(&registry_lock); return 0; }
-    Rwlock *r=find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(EINVAL); }
-    if (r->inflight || r->holders) { pthread_mutex_unlock(&registry_lock); return error(EBUSY); }
-    int e=pthread_rwlock_destroy(&r->native);
-    if (!e) {
-        Rwlock **link=&registry;
-        while (*link!=r) link=&(*link)->next;
-        *link=r->next; free(r); *handle=(Rwlock *)(uintptr_t)1;
+    pthread_mutex_lock(&pool_lock);
+    if (!*handle) { pthread_mutex_unlock(&pool_lock); return 0; }
+    Rwlock *r=live(*handle);
+    if (!r) { pthread_mutex_unlock(&pool_lock); return error(EINVAL); }
+    /* Only an unused lock is destroyed; from then on every check of its handle fails. */
+    unsigned unused=0;
+    if (!__atomic_compare_exchange_n(&r->users,&unused,DEAD,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
+        pthread_mutex_unlock(&pool_lock); return error(EBUSY);
     }
-    pthread_mutex_unlock(&registry_lock); return error(e);
+#ifndef _WIN32
+    int e=pthread_rwlock_destroy(&r->native);
+    if (e) { __atomic_store_n(&r->users,0,__ATOMIC_RELEASE); pthread_mutex_unlock(&pool_lock); return error(e); }
+#endif
+    r->next_free=free_records; free_records=r;
+    *handle=(Rwlock *)(uintptr_t)1;
+    pthread_mutex_unlock(&pool_lock); return 0;
 }
 uintptr_t runtime_rwlock_resolve(const char *name) {
     if (!strcmp(name,"6ULAa0fq4jA#p#J")) return (uintptr_t)rw_init;
@@ -155,8 +246,9 @@ uintptr_t runtime_rwlock_resolve(const char *name) {
     return 0;
 }
 void runtime_rwlock_report(void) {
-    pthread_mutex_lock(&registry_lock);
-    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",created,reads,writes,unlocks);
-    pthread_mutex_unlock(&registry_lock);
+    pthread_mutex_lock(&pool_lock);
+    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",created,
+           __atomic_load_n(&reads,__ATOMIC_RELAXED),__atomic_load_n(&writes,__ATOMIC_RELAXED),
+           __atomic_load_n(&unlocks,__ATOMIC_RELAXED));
+    pthread_mutex_unlock(&pool_lock);
 }
-

@@ -1,15 +1,23 @@
 from paths import ROOT
+import os
 from pathlib import Path
 import subprocess
 import unittest
 
-EXE = ROOT / 'out/runtime-test'
+# build.sh --test (Linux), or on Windows: ninja -C out/gpu runtime-test, copied to out/.
+EXE = next((p for p in (ROOT / 'out/runtime-test', ROOT / 'out/runtime-test.exe') if p.exists()),
+           ROOT / 'out/runtime-test')
 
 
 @unittest.skipUnless(EXE.exists(), 'run bash build.sh --test first')
 class RuntimeTests(unittest.TestCase):
     def run_case(self, *args):
-        return subprocess.run([str(EXE.resolve()), *args], capture_output=True, text=True, timeout=10)
+        env = dict(os.environ)
+        if os.name == 'nt':  # the CLANG64 DLLs it links (SDL3, ...), first on PATH as msys2-env.sh puts them
+            root = os.environ.get('MSYS2_ROOT', '')
+            root = root if root[1:2] == ':' else 'C:/msys64'
+            env['PATH'] = os.path.join(root, 'clang64', 'bin') + os.pathsep + env.get('PATH', '')
+        return subprocess.run([str(EXE.resolve()), *args], capture_output=True, text=True, timeout=10, env=env)
 
     def test_runtime_contracts(self):
         r=self.run_case()
@@ -41,4 +49,8 @@ class RuntimeTests(unittest.TestCase):
 
     def test_rwlock_timeouts_use_orbis_errors(self):
         r=self.run_case('--rwlock-timeouts')
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+
+    def test_rwlock_nested_read_passes_waiting_writer(self):
+        r=self.run_case('--rwlock-nested-read')
         self.assertEqual(r.returncode,0,r.stdout+r.stderr)

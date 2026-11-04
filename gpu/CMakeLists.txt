@@ -332,6 +332,14 @@ if (WIN32)
     target_link_libraries(fsr411-compare PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     target_include_directories(fsr411-compare PRIVATE ${SHADER_INCLUDE})
     add_dependencies(fsr411-compare host_shaders)
+    # The runtime's own tests (tests/test_runtime.py runs them; build.sh --test on Linux):
+    # ninja -C out/gpu runtime-test, then copy out/gpu/runtime-test.exe to out/.
+    add_executable(runtime-test EXCLUDE_FROM_ALL ../tests/test_runtime.c ${BB_RUNTIME} ../src/compat_win.c)
+    set_target_properties(runtime-test PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
+    target_compile_options(runtime-test PRIVATE -UNDEBUG) # the checks are assert()s
+    target_include_directories(runtime-test PRIVATE .. ../src)
+    target_link_libraries(runtime-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+    target_link_options(runtime-test PRIVATE -Wl,--disable-high-entropy-va)
     add_executable(object-motion-cache-test EXCLUDE_FROM_ALL ../tests/test_object_motion_cache.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(object-motion-cache-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)

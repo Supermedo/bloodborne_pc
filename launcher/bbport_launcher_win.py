@@ -410,7 +410,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'voice_language': 'auto',
                 'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '', 'low_vram': '', 'vram_warning': True,
-                'frames_ahead': '', 'low_latency': 'off', 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
+                'frames_ahead': '', 'low_latency': 'auto', 'low_latency_auto': True, 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
                 'on_play': 'stay', 'reopen_after_game': False, 'minimize_to_tray': False, 'discord_status': True,
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
@@ -557,7 +557,9 @@ FRAME_CAPS = [('', ('Auto: display refresh, max 120 (recommended)', 'Авто: �
               ('240', ('240  ⚠',)), ('0', ('No limit  ⚠', 'Без ограничения  ⚠'))]
 FRAMES_AHEAD = [('', ('1 (default)', '1 (по умолчанию)')), ('2', ('2',)), ('0', ('Unbounded', 'Без ограничения'))]
 # gpu/shadps4/video_core/renderer_vulkan/vk_low_latency.cpp: NVIDIA Reflex or AMD Anti-Lag 2.
-LOW_LATENCY = [('off', ('Off', 'Выкл.')), ('on', ('On', 'Вкл.')), ('boost', ('On + Boost', 'Вкл. + Boost'))]
+# auto: On + Boost on NVIDIA (the GPU keeps its clocks while the game waits on it), off on other GPUs.
+LOW_LATENCY = [('auto', ('Auto (NVIDIA: On + Boost)', 'Авто (NVIDIA: Вкл. + Boost)')), ('off', ('Off', 'Выкл.')),
+               ('on', ('On', 'Вкл.')), ('boost', ('On + Boost', 'Вкл. + Boost'))]
 # vk_pipeline_cache.cpp BB_ASYNC_PIPELINES: new pipelines built on worker threads, their draws skipped meanwhile.
 # gpu/shim/core/emulator_settings.h BB_VRR: V-Sync (FIFO) and a frame cap just below the refresh rate.
 VRR_MODES = [('', ('Off', 'Выкл.')), ('1', ('On (G-Sync / FreeSync)', 'Вкл. (G-Sync / FreeSync)'))]
@@ -1558,6 +1560,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.app['online_community'] = COMMUNITY_SERVER
         if self.app.get('readbacks') == '0':  # Off left the launcher (READBACKS)
             self.app['readbacks'] = ''
+        if not saved.get('low_latency_auto'):  # Off was the default until 1.9.8: Auto once (Off chosen again stays)
+            if self.app.get('low_latency') == 'off':
+                self.app['low_latency'] = 'auto'
+            self.app['low_latency_auto'] = True
         self.app.update(settled_online(self.app, saved))  # dead ends to SuperMedo Server
         self.online_written = {key: saved.get(key) for key in SHADNET_KEYS + OWN_ONLINE_KEYS}
         for key in ('supermedo_user', 'supermedo_password'):  # 1.9.2's account, the password in plain text
@@ -3023,10 +3029,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                  self.choice(f, 'low_latency', 'app', LOW_LATENCY),
                  _('Less input lag: the game starts each frame just in time instead of queuing frames for the '
                    'display. NVIDIA Reflex on GeForce, AMD Anti-Lag 2 on Radeon (current drivers); other GPUs ignore '
-                   'it. Boost keeps the GPU clocks up.',
+                   'it. Boost keeps the GPU clocks up. Auto: On + Boost on NVIDIA, off on other GPUs.',
                    'Меньше задержка ввода: игра начинает кадр вовремя, а не копит кадры в очереди. NVIDIA Reflex на '
                    'GeForce, AMD Anti-Lag 2 на Radeon (свежие драйверы); на других GPU не действует. Boost держит '
-                   'частоты GPU высокими.'))
+                   'частоты GPU высокими. Авто: Вкл. + Boost на NVIDIA, выкл. на других GPU.'))
         early = self.row(f, _('Send frames to the GPU in parts', 'Отправлять кадр в GPU частями'),
                  self.choice(f, 'early_submit', 'app', EARLY_SUBMIT),
                  _('The graphics card starts drawing a frame while the rest of it is still being prepared, '

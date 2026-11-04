@@ -480,7 +480,7 @@ bool Instance::CreateDevice() {
     }
     // bbport: low latency (BB_LOW_LATENCY=on or boost): NVIDIA Reflex, else AMD Anti-Lag 2.
     // Only enabled when chosen; see vk_low_latency.cpp.
-    if (LowLatency::Wanted()) {
+    if (LowLatency::Wanted(GetVendorID())) {
         present_id = feature_chain.get<vk::PhysicalDevicePresentIdFeaturesKHR>().presentId &&
                      add_extension(VK_KHR_PRESENT_ID_EXTENSION_NAME);
         nv_low_latency = present_id &&
