@@ -10,6 +10,7 @@
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "bbport_mouse.h"
+#include "bbport_native_mods.h"
 #include "bbport_overlay.h"
 #include "bbport_prompts.h"
 #include "bloodborne_cam.h"
@@ -360,7 +361,10 @@ void WindowSDL::UpdateMouseCamera() {
 bool WindowSDL::WantsMouseCapture() const {
     // MOU-003: all of mouse mode on, window focused, menu closed, text dialog inactive.
     // BbOverlay::CapturesInput() already covers both the menu and the text entry box.
-    return mouse_mode_on.load(std::memory_order_relaxed) && window_focused && !BbOverlay::CapturesInput();
+    // A native mod (Hunter's Atlas) releases the mouse while its map or quick-menu tile is
+    // open, so the pointer can pan/zoom/click there; closing it captures the mouse again.
+    return mouse_mode_on.load(std::memory_order_relaxed) && window_focused &&
+           !BbOverlay::CapturesInput() && !BbNativeMods::ReleasesMouse();
 }
 
 void WindowSDL::UpdateMouseCapture() {
