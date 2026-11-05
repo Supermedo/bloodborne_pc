@@ -1,4 +1,5 @@
 from paths import ROOT
+from io import BytesIO
 import importlib.util
 import os
 from pathlib import Path
@@ -202,3 +203,51 @@ class TrophyPopupTextTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TrophyPopupPictureTests(unittest.TestCase):
+    """run.py's pictures for the in-game pop-up (BB_TROPHY_ICONS: <id>.rgba from the game's trophy00.trp)."""
+
+    def setUp(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest('Pillow is not installed')
+        from test_trophy_icons import archive
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.game = Path(self.temp.name) / 'game'
+        self.folder = Path(self.temp.name) / 'out' / 'trophy_icons'
+        self.trp = self.game / 'sce_sys' / 'trophy' / 'trophy00.trp'
+
+        def png(colour, size):
+            data = BytesIO()
+            Image.new('RGBA', (size, size), colour).save(data, 'PNG')
+            return data.getvalue()
+        self.png, self.archive = png, archive
+
+    def test_each_picture_as_raw_rgba_and_none_for_the_missing(self):
+        self.archive(self.trp, [(b'TROP000.PNG', self.png((255, 0, 0, 255), 240), 0),
+                                (b'TROP014.PNG', self.png((0, 0, 255, 128), 16), 0)])
+        run_py.write_trophy_icons(self.folder, self.game)
+        side = run_py.TROPHY_ICON_SIZE
+        for trophy, pixel in ((0, b'\xff\x00\x00\xff'), (14, b'\x00\x00\xff\x80')):
+            data = (self.folder / f'{trophy}.rgba').read_bytes()
+            self.assertEqual(len(data), side * side * 4)
+            self.assertEqual(data[:4], pixel)
+        self.assertEqual(sorted(p.name for p in self.folder.glob('*.rgba')), ['0.rgba', '14.rgba'])
+
+    def test_done_again_only_when_the_trophy_file_changed(self):
+        self.archive(self.trp, [(b'TROP000.PNG', self.png((255, 0, 0, 255), 32), 0)])
+        run_py.write_trophy_icons(self.folder, self.game)
+        (self.folder / '0.rgba').write_bytes(b'kept')
+        run_py.write_trophy_icons(self.folder, self.game)  # the same trophy file: nothing written
+        self.assertEqual((self.folder / '0.rgba').read_bytes(), b'kept')
+        self.archive(self.trp, [(b'TROP000.PNG', self.png((0, 255, 0, 255), 64), 0)])
+        os.utime(self.trp, ns=(self.trp.stat().st_atime_ns, self.trp.stat().st_mtime_ns + 1_000_000_000))
+        run_py.write_trophy_icons(self.folder, self.game)
+        self.assertEqual((self.folder / '0.rgba').read_bytes()[:4], b'\x00\xff\x00\xff')
+
+    def test_no_trophy_file_raises_for_the_start_to_note(self):
+        with self.assertRaises(OSError):
+            run_py.write_trophy_icons(self.folder, self.game)
