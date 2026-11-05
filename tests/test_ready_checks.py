@@ -157,6 +157,14 @@ class GameFilesTests(Folder):
             size, digest, name = stream.readline().rstrip('\n').split('\t')
         self.assertEqual((len(digest), int(size) > 0), (32, True))
 
+    def test_the_list_holds_only_the_games_own_files(self):
+        """1.9.7's list came from a test PC whose menu/common.tpf.dcx a tool had rewritten, keeping a .bak: every clean
+        game showed both as damaged (lyrical hero, 31.10.2026). The clean file is the one the .bak held."""
+        clean = G.read_list()
+        leftovers = [name for name in clean if name.lower().endswith(('.bak', '.orig', '.old', '.tmp'))]
+        self.assertEqual(leftovers, [])
+        self.assertEqual(clean['dvdroot_ps4/menu/common.tpf.dcx'][0], 9415151)
+
 
 class GameFolderTests(Folder):
     def test_a_synced_game_folder(self):

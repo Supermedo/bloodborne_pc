@@ -22,8 +22,11 @@ SLOT, PROFILE = 1310720, 262144
 
 
 def make_save(folder, name='Hunter', slots=(0,), extra=()):
-    """A save folder like the game writes: ten slots (unused ones zero) and the profile."""
+    """A save folder like the game writes: ten slots (unused ones zero) and the profile, which marks the
+    used slots."""
     folder.mkdir(parents=True, exist_ok=True)
+    profile = bytearray(PROFILE)
+    profile[0] = 0x1a
     for i in range(10):
         data = bytearray(SLOT)
         if i in slots:
@@ -31,12 +34,20 @@ def make_save(folder, name='Hunter', slots=(0,), extra=()):
             text = name.encode('utf-16-le') + b'\0\0'
             data[0x8000:0x8008] = bytes(8)
             data[0x8008:0x8008 + len(text)] = text
+            profile[saves.PROFILE_LISTED + i] = 1
         (folder / f'userdata{i:04d}').write_bytes(bytes(data))
-    (folder / 'userdata0010').write_bytes(b'\x1a' + bytes(PROFILE - 1))
+    (folder / 'userdata0010').write_bytes(bytes(profile))
     (folder / 'backup0000').write_bytes(bytes(SLOT))
     for name_ in extra:
         (folder / name_).write_bytes(b'meta')
     return folder
+
+
+def delete_in_game(folder, slot):
+    """What the game's Load Game > Delete does: the slot's byte in the profile to 0, its file stays."""
+    profile = bytearray((folder / 'userdata0010').read_bytes())
+    profile[saves.PROFILE_LISTED + slot] = 0
+    (folder / 'userdata0010').write_bytes(bytes(profile))
 
 
 class SaveTests(unittest.TestCase):
@@ -357,6 +368,30 @@ class BackupTests(unittest.TestCase):
         added = saves.add_backup_file(copy, self.user)
         item = saves.Backup(added)
         self.assertEqual((item.reason, item.detail, item.names), ('file', 'from a friend', ['Nick', 'Nick']))
+
+    def test_a_character_deleted_in_the_game_is_not_listed(self):
+        """Load Game > Delete keeps the slot file; only the profile's byte says it is gone."""
+        delete_in_game(self.save, 3)
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000'])
+        made = saves.backup(self.user)
+        self.assertTrue(made.name.endswith(' - Nick.zip'))
+        self.assertIn('savedata/1/CUSA00207/SPRJ0005/userdata0003', zipfile.ZipFile(made).namelist())  # kept
+        old = saves.backup_dir(self.user) / 'saves_2026-10-12_101500.zip'
+        with zipfile.ZipFile(old, 'w') as zipped:  # without the launcher's notes: names from the files
+            for path in self.save.iterdir():
+                zipped.write(path, f'savedata/1/CUSA00207/SPRJ0005/{path.name}')
+        self.assertEqual(saves.Backup(old).names, ['Nick'])
+        copy = self.root / 'from a friend.zip'
+        copy.write_bytes(made.read_bytes())
+        self.assertEqual(saves.Backup(saves.add_backup_file(copy, self.user)).names, ['Nick'])
+
+    def test_a_profile_that_cannot_tell_leaves_it_to_the_files(self):
+        profile = bytearray((self.save / 'userdata0010').read_bytes())
+        profile[saves.PROFILE_LISTED + 5] = 0x1a  # not 0 or 1 there: another layout
+        (self.save / 'userdata0010').write_bytes(bytes(profile))
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000', 'userdata0003'])
+        (self.save / 'userdata0010').write_bytes(b'\x1a' + bytes(16))  # too short to tell
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000', 'userdata0003'])
 
 
 def contents(folder):

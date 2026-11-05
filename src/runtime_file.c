@@ -50,7 +50,9 @@ typedef struct { char *names; size_t count, *offsets; unsigned char *types; } Li
 /* commit: a save file opened for writing is written to a temporary copy (temp), which replaces
  * the file (commit) in one rename when closed: a crash or a kill mid-save leaves the old file
  * (from bbport 0.5, deadinside28#64). */
-typedef struct { int used, host, dirty; Listing *dir; size_t position; char path[512]; char *commit, *temp; } File;
+/* offset, append, preading: Windows only (see do_read). */
+typedef struct { int used, host, dirty; Listing *dir; size_t position; char path[512]; char *commit, *temp;
+                 int64_t offset; int append, preading; } File;
 typedef struct { char guest[64]; char host[512]; } Mount;
 static File files[MAX_FILES];
 static Mount mounts[MAX_MOUNTS];
@@ -436,7 +438,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
         if (temp) unlink(temp);
         free(commit); free(temp); return -EMFILE;
     }
-    files[fd]=(File){.used=1,.host=host,.dir=dir,.commit=commit,.temp=temp};
+    files[fd]=(File){.used=1,.host=host,.dir=dir,.commit=commit,.temp=temp,.append=(flags&0x8)!=0};
     snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
     ++opens;
     pthread_mutex_unlock(&lock);
@@ -488,6 +490,19 @@ static int host_fd_written(int fd) {
 /* The CRT reads and writes at most INT_MAX bytes per call. */
 static ssize_t host_read(int h,void *buffer,uint64_t size) { return read(h,buffer,(unsigned)(size>0x7ffff000 ? 0x7ffff000 : size)); }
 static ssize_t host_write(int h,const void *buffer,uint64_t size) { return write(h,buffer,(unsigned)(size>0x7ffff000 ? 0x7ffff000 : size)); }
+/* bbport: a descriptor keeps its own position and every read and write goes to an explicit
+ * place; the host file pointer is not used. A positioned read on Windows moves that pointer
+ * (compat_pread put it back afterwards), so a seek + read of another thread in between read at
+ * the wrong place (tests/test_file_positions.c). read, write and lseek of a descriptor take its
+ * lock; pread and pwrite need none. */
+static SRWLOCK position_locks[MAX_FILES];
+static size_t raced;
+/* A seek or read while a pread of the same descriptor runs: what used to read wrong bytes. */
+static void note_race(File *f) {
+    if (!__atomic_load_n(&f->preading,__ATOMIC_RELAXED)) return;
+    if (__atomic_add_fetch(&raced,1,__ATOMIC_RELAXED)==1)
+        printf("Runtime: %s is read with pread and with seek + read at once (each read has its own place)\n",f->path);
+}
 #else
 #define host_read read
 #define host_write write
@@ -507,7 +522,19 @@ static int64_t do_read(int fd,void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
+#ifdef _WIN32
+    ssize_t n;
+    if (fd>=3) {
+        File *f=get(fd);
+        AcquireSRWLockExclusive(&position_locks[fd]);
+        note_race(f);
+        n=compat_read_at(h,buffer,size,f->offset);
+        if (n>0) f->offset+=n;
+        ReleaseSRWLockExclusive(&position_locks[fd]);
+    } else n=host_read(h,buffer,size);
+#else
     ssize_t n=host_read(h,buffer,size);
+#endif
     if (n<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",fd,(unsigned long long)size,errno); return -errno; }
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
     return n;
@@ -516,7 +543,14 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     touch_for_write(buffer,size);
+#ifdef _WIN32
+    File *f=get(fd);
+    if (f) __atomic_add_fetch(&f->preading,1,__ATOMIC_RELAXED);
+    ssize_t n=compat_read_at(h,buffer,size,offset);
+    if (f) __atomic_sub_fetch(&f->preading,1,__ATOMIC_RELAXED);
+#else
     ssize_t n=pread(h,buffer,size,offset);
+#endif
     if (n<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",fd,(unsigned long long)size,(long long)offset,errno); return -errno; }
     __atomic_add_fetch(&reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&bytes_read,(uint64_t)n,__ATOMIC_RELAXED);
     return n;
@@ -524,7 +558,19 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
 static int64_t do_write(int fd,const void *buffer,uint64_t size) {
     int h=host_fd_written(fd);
     if (h<0) return -EBADF;
+#ifdef _WIN32
+    ssize_t n;
+    if (fd>=3) {
+        File *f=get(fd);
+        AcquireSRWLockExclusive(&position_locks[fd]);
+        int64_t at=f->append ? _filelengthi64(h) : f->offset;
+        n=at<0 ? -1 : compat_write_at(h,buffer,size,at);
+        if (n>0) f->offset=at+n;
+        ReleaseSRWLockExclusive(&position_locks[fd]);
+    } else n=host_write(h,buffer,size);
+#else
     ssize_t n=host_write(h,buffer,size);
+#endif
     if (n<0) return -errno;
     __atomic_add_fetch(&writes,1,__ATOMIC_RELAXED);
     return n;
@@ -532,7 +578,11 @@ static int64_t do_write(int fd,const void *buffer,uint64_t size) {
 static int64_t do_pwrite(int fd,const void *buffer,uint64_t size,int64_t offset) {
     int h=host_fd_written(fd);
     if (h<0) return -EBADF;
+#ifdef _WIN32
+    ssize_t n=compat_write_at(h,buffer,size,offset);
+#else
     ssize_t n=pwrite(h,buffer,size,offset);
+#endif
     return n<0 ? -errno : n;
 }
 static int64_t do_lseek(int fd,int64_t offset,int whence) {
@@ -544,7 +594,17 @@ static int64_t do_lseek(int fd,int64_t offset,int whence) {
         if (whence==0 && offset>=0) { f->position=(size_t)offset; return offset; }
         return -EINVAL;
     }
+#ifdef _WIN32
+    AcquireSRWLockExclusive(&position_locks[fd]);
+    note_race(f);
+    int64_t base=whence==0 ? 0 : whence==1 ? f->offset : _filelengthi64(f->host);
+    int64_t r=base<0 ? -1 : base+offset;
+    if (base>=0 && r<0) errno=EINVAL;
+    if (r>=0) f->offset=r;
+    ReleaseSRWLockExclusive(&position_locks[fd]);
+#else
     int64_t r=host_lseek(f->host,offset,whence);
+#endif
     return r<0 ? -errno : r;
 }
 static int64_t do_fstat(int fd,GuestStat *out) {
@@ -728,5 +788,8 @@ int runtime_file_translate(const char *guest,char *out,size_t size) { return tra
 void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
            opens,reads,(unsigned long long)bytes_read,writes,missing);
+#ifdef _WIN32
+    if (raced) printf("Runtime: %zu seeks and reads came during a pread of the same file\n",raced);
+#endif
 }
 

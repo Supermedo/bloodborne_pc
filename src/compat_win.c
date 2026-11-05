@@ -58,13 +58,15 @@ int compat_errno_from_win32(unsigned long error) {
 }
 
 /* Positioned I/O on a synchronous handle moves the file pointer: it is restored afterwards.
- * A concurrent read() on the same descriptor would race, as with a shared offset anyway. */
-static ssize_t positioned(int fd, void *buffer, size_t size, int64_t offset, int write) {
+ * A concurrent read() on the same descriptor would race, as with a shared offset anyway.
+ * restore 0 (compat_read_at, compat_write_at): the pointer is left where the I/O ended, for
+ * descriptors whose pointer nobody uses. */
+static ssize_t positioned(int fd, void *buffer, size_t size, int64_t offset, int write, int restore) {
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
     if (offset < 0) { errno = EINVAL; return -1; }
     LARGE_INTEGER zero = {0}, saved;
-    if (!SetFilePointerEx(h, zero, &saved, FILE_CURRENT)) { errno = compat_errno_from_win32(GetLastError()); return -1; }
+    if (restore && !SetFilePointerEx(h, zero, &saved, FILE_CURRENT)) { errno = compat_errno_from_win32(GetLastError()); return -1; }
     size_t done = 0;
     while (done < size) {
         DWORD chunk = size - done > 0x40000000u ? 0x40000000u : (DWORD)(size - done), n = 0;
@@ -76,7 +78,7 @@ static ssize_t positioned(int fd, void *buffer, size_t size, int64_t offset, int
         if (!ok) {
             DWORD e = GetLastError();
             if (e == ERROR_HANDLE_EOF) break;
-            SetFilePointerEx(h, saved, NULL, FILE_BEGIN);
+            if (restore) SetFilePointerEx(h, saved, NULL, FILE_BEGIN);
             if (done) return (ssize_t)done;
             errno = compat_errno_from_win32(e);
             return -1;
@@ -84,11 +86,13 @@ static ssize_t positioned(int fd, void *buffer, size_t size, int64_t offset, int
         done += n;
         if (n < chunk) break;
     }
-    SetFilePointerEx(h, saved, NULL, FILE_BEGIN);
+    if (restore) SetFilePointerEx(h, saved, NULL, FILE_BEGIN);
     return (ssize_t)done;
 }
-ssize_t compat_pread(int fd, void *buffer, size_t size, int64_t offset) { return positioned(fd, buffer, size, offset, 0); }
-ssize_t compat_pwrite(int fd, const void *buffer, size_t size, int64_t offset) { return positioned(fd, (void *)buffer, size, offset, 1); }
+ssize_t compat_pread(int fd, void *buffer, size_t size, int64_t offset) { return positioned(fd, buffer, size, offset, 0, 1); }
+ssize_t compat_pwrite(int fd, const void *buffer, size_t size, int64_t offset) { return positioned(fd, (void *)buffer, size, offset, 1, 1); }
+ssize_t compat_read_at(int fd, void *buffer, size_t size, int64_t offset) { return positioned(fd, buffer, size, offset, 0, 0); }
+ssize_t compat_write_at(int fd, const void *buffer, size_t size, int64_t offset) { return positioned(fd, (void *)buffer, size, offset, 1, 0); }
 
 long compat_utc_offset(time_t t) {
     struct tm local, utc;

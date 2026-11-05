@@ -3291,7 +3291,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             return
         user = Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user')
         found = [(folder, slot, who) for folder in respec.save_folders(user)
-                 for slot, who in respec.characters(folder)]
+                 for listed in [saves.slots_in_use(folder)]  # not the ones deleted in the game
+                 for slot, who in respec.characters(folder) if saves.SLOTS[slot] in listed]
         if not found:
             self.messagebox.showinfo(title, _('No characters found in {}.', 'Персонажи не найдены в {}.').format(user))
             return
