@@ -8,7 +8,7 @@ KEYS = [
     'Low latency (Reflex / Anti-Lag 2)',
     'Less input lag: the game starts each frame just in time instead of queuing frames for the '
     'display. NVIDIA Reflex on GeForce, AMD Anti-Lag 2 on Radeon (current drivers); other GPUs ignore '
-    'it. Boost keeps the GPU clocks up.',
+    'it. Boost keeps the GPU clocks up. Auto: On + Boost on NVIDIA, off on other GPUs.',
     'Send frames to the GPU in parts',
     'The graphics card starts drawing a frame while the rest of it is still being prepared, '
     'so it is finished about 2 ms sooner. Uses a little more CPU. New: turn it off if you see '
@@ -22,13 +22,16 @@ KEYS = [
     'In the background: a place seen for the first time does not stutter while its shaders are '
     'compiled; things drawn with them appear a moment later instead. Each is compiled once and kept.',
     'Not available on AMD Radeon: there it adds lag and costs FPS.',
+    'Auto (NVIDIA: On + Boost)',
+    'On + Boost',
 ]
 TEXTS = {
     'ar': [
         'زمن استجابة منخفض (Reflex / Anti-Lag 2)',
         'تأخير أقل في الإدخال: تبدأ اللعبة كل إطار في الوقت المناسب بدلاً من تكديس الإطارات للشاشة. NVIDIA Reflex '
         'على GeForce وAMD Anti-Lag 2 على Radeon (برامج تشغيل حديثة)؛ وتتجاهله البطاقات الأخرى. Boost يبقي ترددات '
-        'البطاقة مرتفعة.',
+        'البطاقة مرتفعة. '
+        'تلقائي: تشغيل + Boost على NVIDIA، وإيقاف على البطاقات الأخرى.',
         'إرسال الإطارات إلى البطاقة على أجزاء',
         'تبدأ بطاقة الرسوميات رسم الإطار بينما يُجهَّز باقيه، فينتهي قبل نحو 2 مللي ثانية. يستهلك المعالج أكثر قليلاً. '
         'جديد: أوقفه إذا رأيت وميضاً أو أجساماً مفقودة.',
@@ -40,12 +43,15 @@ TEXTS = {
         'في الخلفية: لا يتقطع المكان الذي يُرى لأول مرة أثناء تجميع مظللاته؛ بل تظهر الأشياء المرسومة بها بعد لحظة. '
         'يُجمَّع كل منها مرة واحدة ويُحفظ.',
         'غير متاح على AMD Radeon: هناك يزيد التأخير ويخفض الإطارات.',
+        'تلقائي (NVIDIA: تشغيل + Boost)',
+        'تشغيل + Boost',
     ],
     'es': [
         'Baja latencia (Reflex / Anti-Lag 2)',
         'Menos retraso de entrada: el juego empieza cada fotograma justo a tiempo en lugar de acumular fotogramas '
         'para la pantalla. NVIDIA Reflex en GeForce, AMD Anti-Lag 2 en Radeon (controladores actuales); las demás '
-        'GPU lo ignoran. Boost mantiene altas las frecuencias de la GPU.',
+        'GPU lo ignoran. Boost mantiene altas las frecuencias de la GPU. '
+        'Automático: Activado + Boost en NVIDIA, desactivado en las demás GPU.',
         'Enviar los fotogramas a la GPU por partes',
         'La tarjeta gráfica empieza a dibujar un fotograma mientras el resto aún se prepara, así termina unos 2 ms '
         'antes. Usa un poco más de CPU. Nuevo: desactívalo si ves parpadeos u objetos que faltan.',
@@ -58,12 +64,15 @@ TEXTS = {
         'En segundo plano: un lugar visto por primera vez no da tirones mientras se compilan sus shaders; lo que se '
         'dibuja con ellos aparece un momento después. Cada uno se compila una vez y se guarda.',
         'No disponible en AMD Radeon: allí añade retraso y cuesta FPS.',
+        'Automático (NVIDIA: Activado + Boost)',
+        'Activado + Boost',
     ],
     'pt': [
         'Baixa latência (Reflex / Anti-Lag 2)',
         'Menos atraso de entrada: o jogo começa cada quadro na hora certa em vez de enfileirar quadros para a tela. '
         'NVIDIA Reflex em GeForce, AMD Anti-Lag 2 em Radeon (drivers atuais); outras GPUs ignoram. Boost mantém os '
-        'clocks da GPU altos.',
+        'clocks da GPU altos. '
+        'Automático: Ligado + Boost em NVIDIA, desligado nas outras GPUs.',
         'Enviar os quadros à GPU em partes',
         'A placa de vídeo começa a desenhar um quadro enquanto o resto ainda está sendo preparado, então ele fica '
         'pronto cerca de 2 ms antes. Usa um pouco mais de CPU. Novo: desligue se vir piscadas ou objetos faltando.',
@@ -75,12 +84,15 @@ TEXTS = {
         'Em segundo plano: um lugar visto pela primeira vez não engasga enquanto seus shaders são compilados; o que '
         'é desenhado com eles aparece um instante depois. Cada um é compilado uma vez e guardado.',
         'Indisponível em AMD Radeon: lá aumenta o atraso e custa FPS.',
+        'Automático (NVIDIA: Ligado + Boost)',
+        'Ligado + Boost',
     ],
     'fr': [
         'Faible latence (Reflex / Anti-Lag 2)',
         'Moins de latence d’entrée : le jeu commence chaque image juste à temps au lieu d’accumuler des images pour '
         'l’écran. NVIDIA Reflex sur GeForce, AMD Anti-Lag 2 sur Radeon (pilotes récents) ; les autres GPU '
-        'l’ignorent. Boost maintient les fréquences du GPU élevées.',
+        'l’ignorent. Boost maintient les fréquences du GPU élevées. '
+        'Auto : Activé + Boost sur NVIDIA, désactivé sur les autres GPU.',
         'Envoyer les images au GPU par morceaux',
         'La carte graphique commence à dessiner une image pendant que le reste est encore préparé : elle est prête '
         'environ 2 ms plus tôt. Utilise un peu plus le CPU. Nouveau : désactivez-le si vous voyez des scintillements '
@@ -94,12 +106,15 @@ TEXTS = {
         'En arrière-plan : un lieu vu pour la première fois ne saccade pas pendant la compilation de ses shaders ; '
         'ce qu’ils dessinent apparaît un instant plus tard. Chacun est compilé une fois et conservé.',
         'Indisponible sur AMD Radeon : il y ajoute de la latence et coûte des FPS.',
+        'Auto (NVIDIA : Activé + Boost)',
+        'Activé + Boost',
     ],
     'de': [
         'Niedrige Latenz (Reflex / Anti-Lag 2)',
         'Weniger Eingabeverzögerung: Das Spiel beginnt jedes Bild genau rechtzeitig, statt Bilder für den Bildschirm '
         'anzustauen. NVIDIA Reflex auf GeForce, AMD Anti-Lag 2 auf Radeon (aktuelle Treiber); andere GPUs ignorieren '
-        'es. Boost hält die GPU-Takte hoch.',
+        'es. Boost hält die GPU-Takte hoch. '
+        'Automatisch: An + Boost auf NVIDIA, aus auf anderen GPUs.',
         'Bilder in Teilen an die GPU senden',
         'Die Grafikkarte beginnt ein Bild zu zeichnen, während der Rest noch vorbereitet wird, und ist so etwa 2 ms '
         'früher fertig. Braucht etwas mehr CPU. Neu: Schalte es aus, wenn du Flackern oder fehlende Objekte siehst.',
@@ -112,12 +127,15 @@ TEXTS = {
         'Im Hintergrund: Ein zum ersten Mal gesehener Ort ruckelt nicht, während seine Shader kompiliert werden; was '
         'damit gezeichnet wird, erscheint einen Moment später. Jeder wird einmal kompiliert und behalten.',
         'Auf AMD Radeon nicht verfügbar: Dort erhöht es die Latenz und kostet FPS.',
+        'Automatisch (NVIDIA: An + Boost)',
+        'An + Boost',
     ],
     'it': [
         'Bassa latenza (Reflex / Anti-Lag 2)',
         'Meno ritardo di input: il gioco inizia ogni fotogramma appena in tempo invece di accodare fotogrammi per lo '
         'schermo. NVIDIA Reflex su GeForce, AMD Anti-Lag 2 su Radeon (driver recenti); le altre GPU lo ignorano. '
-        'Boost mantiene alte le frequenze della GPU.',
+        'Boost mantiene alte le frequenze della GPU. '
+        'Automatico: Attivo + Boost su NVIDIA, disattivo sulle altre GPU.',
         'Invia i fotogrammi alla GPU a parti',
         'La scheda video inizia a disegnare un fotogramma mentre il resto è ancora in preparazione, così finisce '
         'circa 2 ms prima. Usa un po’ più di CPU. Novità: disattivalo se vedi sfarfallii o oggetti mancanti.',
@@ -130,12 +148,15 @@ TEXTS = {
         'In background: un luogo visto per la prima volta non scatta mentre i suoi shader vengono compilati; ciò '
         'che disegnano appare un attimo dopo. Ognuno viene compilato una volta e conservato.',
         'Non disponibile su AMD Radeon: lì aggiunge ritardo e costa FPS.',
+        'Automatico (NVIDIA: Attivo + Boost)',
+        'Attivo + Boost',
     ],
     'pl': [
         'Niskie opóźnienie (Reflex / Anti-Lag 2)',
         'Mniejsze opóźnienie sterowania: gra zaczyna każdą klatkę w samą porę zamiast kolejkować klatki dla ekranu. '
         'NVIDIA Reflex na GeForce, AMD Anti-Lag 2 na Radeon (aktualne sterowniki); inne GPU to ignorują. Boost '
-        'utrzymuje wysokie taktowanie GPU.',
+        'utrzymuje wysokie taktowanie GPU. '
+        'Auto: Wł. + Boost na NVIDIA, wył. na innych GPU.',
         'Wysyłaj klatki do GPU w częściach',
         'Karta graficzna zaczyna rysować klatkę, gdy reszta jest jeszcze przygotowywana, więc kończy ją około 2 ms '
         'wcześniej. Trochę bardziej obciąża CPU. Nowość: wyłącz, jeśli widzisz migotanie lub brakujące obiekty.',
@@ -148,12 +169,15 @@ TEXTS = {
         'W tle: miejsce widziane po raz pierwszy nie przycina podczas kompilacji shaderów; to, co nimi rysowane, '
         'pojawia się chwilę później. Każdy jest kompilowany raz i zachowywany.',
         'Niedostępne na AMD Radeon: tam zwiększa opóźnienie i obniża FPS.',
+        'Auto (NVIDIA: Wł. + Boost)',
+        'Wł. + Boost',
     ],
     'tr': [
         'Düşük gecikme (Reflex / Anti-Lag 2)',
         'Daha az giriş gecikmesi: oyun, ekran için kare biriktirmek yerine her kareye tam zamanında başlar. '
         'GeForce’ta NVIDIA Reflex, Radeon’da AMD Anti-Lag 2 (güncel sürücüler); diğer GPU’lar yok sayar. Boost GPU '
-        'saat hızlarını yüksek tutar.',
+        'saat hızlarını yüksek tutar. '
+        'Otomatik: NVIDIA’da Açık + Boost, diğer GPU’larda kapalı.',
         'Kareleri GPU’ya parça parça gönder',
         'Ekran kartı, karenin geri kalanı hâlâ hazırlanırken çizmeye başlar; böylece kare yaklaşık 2 ms erken biter. '
         'Biraz daha fazla CPU kullanır. Yeni: titreme veya eksik nesneler görürseniz kapatın.',
@@ -165,11 +189,14 @@ TEXTS = {
         'Arka planda: ilk kez görülen bir yer, gölgelendiricileri derlenirken takılmaz; onlarla çizilenler bir an '
         'sonra görünür. Her biri bir kez derlenir ve saklanır.',
         'AMD Radeon’da kullanılamaz: orada gecikmeyi artırır ve FPS düşürür.',
+        'Otomatik (NVIDIA: Açık + Boost)',
+        'Açık + Boost',
     ],
     'zh': [
         '低延迟（Reflex / Anti-Lag 2）',
         '降低输入延迟：游戏在恰当的时机开始每一帧，而不是为显示器排队缓存帧。GeForce 上为 NVIDIA Reflex，Radeon 上为 '
-        'AMD Anti-Lag 2（需较新驱动）；其他显卡会忽略此项。Boost 让显卡保持高频率。',
+        'AMD Anti-Lag 2（需较新驱动）；其他显卡会忽略此项。Boost 让显卡保持高频率。'
+        '自动：NVIDIA 上为开启 + Boost，其他显卡上为关闭。',
         '分段将帧发送给显卡',
         '显卡在帧的其余部分仍在准备时就开始绘制，因此约提前 2 毫秒完成。会略微增加 CPU 占用。新功能：如出现闪烁或物体缺失，请关闭。',
         '可变刷新率（VRR）',
@@ -178,12 +205,15 @@ TEXTS = {
         '游戏中的新着色器',
         '在后台进行：首次看到的地方在编译着色器时不会卡顿；用这些着色器绘制的物体会稍晚出现。每个着色器只编译一次并保存。',
         '在 AMD Radeon 上不可用：会增加延迟并降低帧率。',
+        '自动（NVIDIA：开启 + Boost）',
+        '开启 + Boost',
     ],
     'ja': [
         '低遅延（Reflex / Anti-Lag 2）',
         '入力遅延を減らします：フレームをディスプレイ用にため込まず、ちょうどよいタイミングで各フレームを開始します。GeForce では '
         'NVIDIA Reflex、Radeon では AMD Anti-Lag 2（最新ドライバー）。その他の GPU では無視されます。Boost は GPU '
-        'のクロックを高く保ちます。',
+        'のクロックを高く保ちます。'
+        '自動：NVIDIA ではオン + Boost、その他の GPU ではオフです。',
         'フレームを分割して GPU に送る',
         'フレームの残りを準備している間にグラフィックカードが描画を始めるため、約 2 ms 早く完成します。CPU '
         'をやや多く使います。新機能：ちらつきや表示されない物体がある場合はオフにしてください。',
@@ -196,12 +226,15 @@ TEXTS = {
         'バックグラウンドで処理：初めて訪れた場所でシェーダーのコンパイル中にカクつきません。その代わり、それで描かれる物は'
         '少し遅れて表示されます。各シェーダーは一度だけコンパイルされ保存されます。',
         'AMD Radeon では使用できません：遅延が増え、FPS が下がります。',
+        '自動（NVIDIA：オン + Boost）',
+        'オン + Boost',
     ],
     'ko': [
         '낮은 지연 시간 (Reflex / Anti-Lag 2)',
         '입력 지연 감소: 디스플레이용 프레임을 쌓아 두지 않고 각 프레임을 딱 맞춰 시작합니다. GeForce에서는 NVIDIA '
         'Reflex, Radeon에서는 AMD Anti-Lag 2(최신 드라이버). 다른 GPU에서는 무시됩니다. Boost는 GPU 클럭을 높게 '
-        '유지합니다.',
+        '유지합니다. '
+        '자동: NVIDIA에서는 켬 + Boost, 다른 GPU에서는 끔입니다.',
         '프레임을 나눠서 GPU로 보내기',
         '프레임의 나머지가 준비되는 동안 그래픽 카드가 그리기를 시작하므로 약 2ms 빨리 완성됩니다. CPU를 조금 더 '
         '사용합니다. 새 기능: 깜빡임이나 사라진 물체가 보이면 끄세요.',
@@ -213,6 +246,8 @@ TEXTS = {
         '백그라운드에서: 처음 보는 장소에서 셰이더를 컴파일하는 동안 끊기지 않으며, 그 셰이더로 그리는 물체는 잠시 '
         '후에 나타납니다. 각 셰이더는 한 번 컴파일되어 저장됩니다.',
         'AMD Radeon에서는 사용할 수 없습니다: 지연이 늘고 FPS가 떨어집니다.',
+        '자동 (NVIDIA: 켬 + Boost)',
+        '켬 + Boost',
     ],
 }
 
