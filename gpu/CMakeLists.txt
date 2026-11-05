@@ -310,8 +310,10 @@ if (WIN32)
     add_library(atrac9 STATIC ${BB_ATRAC9})
     target_compile_options(atrac9 PRIVATE -w)
     set_target_properties(atrac9 PROPERTIES C_STANDARD 99 INTERPROCEDURAL_OPTIMIZATION OFF)
+    # Offline Chalice Glyphs (docs/LOCAL_CHALICE.md).
+    set(BB_LOCAL_CHALICE ../src/local_chalice.cpp ../src/lc_desc.cpp ../src/lc_platform.cpp ../src/offline_slot.cpp)
     add_executable(bb-probe ../src/probe.c ${BB_RUNTIME} ../src/compat_win.c ../src/vulkan_smoke.c
-        ../packaging/windows/bb-probe.rc)
+        ${BB_LOCAL_CHALICE} ../packaging/windows/bb-probe.rc)
     # The overlay's GPU usage comes from Windows' GPU Engine counters (pdh), the CPU name from the
     # registry (advapi32).
     target_link_libraries(bbgpu INTERFACE pdh advapi32)
