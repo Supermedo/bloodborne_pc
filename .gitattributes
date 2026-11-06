@@ -1,0 +1,3 @@
+# A CRLF checkout broke build.sh: `git apply` refuses a patch whose lines end in CRLF
+# (the FSR patches apply to a submodule checked out with LF). Keep them LF everywhere.
+*.patch text eol=lf
