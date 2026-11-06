@@ -1259,8 +1259,11 @@ void StepPendingConnections() {
 
             // Nothing from the peer a few seconds in: routers block the direct way, so go
             // through the relay on the shadNet server from now on.
+            // bbport (2026-11-02): also when the peer's packets do arrive. Behind a carrier's NAT
+            // (Shiza, local 100.65.x.x) only one way gets through: we heard them, so the relay was
+            // never used, the handshake never finished and the join failed. Not up by now is
+            // reason enough.
             if (!transport.relayed && transport.addr != 0 && transport.handshake_start_us != 0 &&
-                transport.last_peer_rx_us < transport.handshake_start_us &&
                 now - transport.handshake_start_us > kRelayAfterUs) {
                 transport.relayed = true;
                 relay.emplace_back(transport_id, transport.addr);
@@ -1737,6 +1740,18 @@ void StopMatching2(NpMatching2::ContextObject& ctx, s32 error_code) {
     }
     for (const auto room_id : rooms) {
         StopMatching2(ctx, room_id, error_code);
+    }
+}
+
+// bbport (2026-11-02): a member's connection was kept when it left the room. A transport is found by
+// the peer's Online ID and nothing times out an established one, so a player whose game dropped
+// stayed "connected" for good, and when it joined again the host's game reused the dead
+// connection and kicked the newcomer (rowl666, 9 kicks in 9 minutes, 1.3 s after each join). Its
+// Sig1 connections die with it, so the game is told and a rejoin starts a fresh handshake.
+void StopMatching2Peer(s32 transport_id) {
+    if (transport_id != 0) {
+        CloseTransportAndDispatchDead(transport_id, ORBIS_NP_SIGNALING_ERROR_TERMINATED_BY_PEER,
+                                      ORBIS_NP_MATCHING2_SIGNALING_ERROR_TERMINATED_BY_PEER);
     }
 }
 

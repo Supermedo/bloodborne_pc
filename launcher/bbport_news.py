@@ -35,6 +35,152 @@ def hunters_dream_notice():
 
 
 NOTES = {
+    '1.9.8': (
+        None,
+        [('Seamless co-op (new)', [
+            "Seamless co-op is here: BBSC 1.0.0 (Yharnam Together) on its own Seamless co-op page under Online "
+            "play, on SuperMedo's seamless server with your SuperMedo account. Up to 5 hunters stay together "
+            'through deaths, lamps and areas.',
+            "It runs on this port's own engine with every setting of this launcher: picture, frame rate, controls, "
+            'mods and patches. The normal game and normal online play are unchanged.',
+            "BBSC's co-op screens are in the game: the team screen at the title (F2 in the game), the party HUD, "
+            'the compass, team pings (T), the map (M), trades, duels and travelling together. On a controller, '
+            'hold View/Back (the touchpad on PlayStation) for the map and tap it twice for a ping.',
+            "Each teammate's character picture shows in the party list, on the compass and on the map.",
+            "The team plays the host's world and its progress stays in the host's save. A player who joins is "
+            'placed next to the host; a new character joining late gets the starter weapons.',
+            'Host rules: enemy difficulty with a Custom choice (your own health, damage and poise, 1 to 10), a '
+            'Revival switch, boss tempo, Rot and travelling together.',
+            'Seamless co-op keeps its own save folder (seamless\\user); a new game is recommended.',
+        ]), ('Parties and online', [
+            'Parties: make a party code on the Online page and send it to your friends. In a party, your summon '
+            "signs and Beckoning Bell find only your party's hunters, with no level limit.",
+            'Sign in to SuperMedo Server with your Online ID and password, or make a new account, not only with '
+            'Discord.',
+            'Cheat and debug patches are left out of online games; with one on, Play asks what to do.',
+            'Back online by itself after a dropped connection; a player who joins again is no longer kicked; '
+            "players who needed a VPN join through the server's relay; no more short freeze about once a minute.",
+        ]), ('Performance and fixes', [
+            'Faster locks inside the engine: a few more frames per second. Three rare freezes fixed.',
+            'Low latency is Auto by default: NVIDIA Reflex and Boost on NVIDIA cards, off on the others.',
+        ]), ('Trophies, saves and patches', [
+            'A pop-up shows each trophy as you earn it, with its own picture and a short chime.',
+            'Characters deleted in the game no longer show in the launcher; named backups are kept.',
+            'Every patch in the list is from the public community list or written for this port.',
+        ])]),
+    '1.9.8 beta 14': (
+        None,
+        [('Online', [
+            "Seamless co-op: the Doll's level-up message shows only once, as in the normal game, and her talk "
+            'no longer gets stuck after a level up (she sat down and nothing happened until you travelled).',
+            'Seamless co-op start message: Seamless co-op keeps its own save folder; a new game is recommended, and '
+            'main-game saves can be put into the seamless folder by hand at your own risk.',
+            'Seamless co-op no longer closes with a "GPU library assertion failed" error (code 23) when the game '
+            'hands the graphics an unreadable shader: that one draw is skipped instead.',
+            "Seamless co-op keeps its own co-op event files over a mod's (MOAL's turned floors red and broke co-op "
+            "events): such a mod's event files are not used in seamless, its other files are.",
+        ])]),
+    '1.9.8 beta 13': (
+        None,
+        [('Online', [
+            'Seamless co-op host rules: Enemies has a Custom choice with your own health, damage and poise '
+            "multipliers (1 to 10), and a Revival switch: off, a fallen hunter dies for real instead of going down.",
+            "The Doll's level-up message no longer comes back at every talk in Seamless co-op, and leaving her talk "
+            'quickly no longer leaves it stuck.',
+        ])]),
+    '1.9.8 beta 12': (
+        None,
+        [('Online', [
+            "Seamless co-op plays the host's world: every time the team starts, its world is made from the host's "
+            "own save, and the progress stays in the host's save. Guests get their own world back when they play "
+            'alone.',
+            'A player who joins the team is placed next to the host, a new character too.',
+            'Going back to the title and loading another save no longer stops players joining each other until '
+            'the game is restarted.',
+            'A new character who joins a team late gets the starter weapons (Saw Cleaver, Hunter Axe, Threaded '
+            'Cane, Hunter Pistol and Hunter Blunderbuss).',
+            'Seamless co-op plays at your own frame rate setting, as the normal game does.',
+            'Starting Seamless co-op reminds you to use a new character, not your main save.',
+        ])]),
+    '1.9.8 beta 11': (
+        None,
+        [('Online', [
+            "Seamless co-op shows each teammate's character picture in the party list, on the compass and on the "
+            'map. Your picture is taken from your hunter as they look now, and taken again when you change outfit.',
+        ]), ('Patches', [
+            'Every patch in the patch list is now from the public community list or written for this port. The '
+            "Hunter's Dream live-map patch is replaced by this port's own Faster play log patch.",
+        ])]),
+    '1.9.8 beta 10': (
+        None,
+        [('Online', [
+            'Seamless co-op on a controller: hold View/Back (the touchpad on a PlayStation pad) for the map, tap it '
+            'twice for a ping. The map and the co-op team are also in the game menu, under System.',
+            "Seamless co-op runs as a release build, as BBSC's own releases do.",
+        ])]),
+    '1.9.8 beta 9': (
+        None,
+        [('Online', [
+            "Seamless co-op runs on this port's own engine now (bin\\bb-probe-seamless.exe, built with BBSC "
+            "1.0.0's co-op), started by this launcher with every one of its settings: picture, controls, mods and "
+            'patches. The normal game and its engine are unchanged.',
+            "BBSC's co-op screens are in the game: the team screen at the title (your team, invites, quick match, "
+            'the world, Begin the hunt or Alone; F2 opens it in the game), the party HUD, the compass, team pings '
+            '(T), the map (M), trades, duels and travelling together.',
+        ])]),
+    '1.9.8 beta 8': (
+        None,
+        [('Online', [
+            "Seamless co-op is BBSC 1.0.0 (BBSC: Yharnam Together) now, on its own Seamless co-op page under Online "
+            "play: it plays on SuperMedo's seamless server with your SuperMedo account, and your party is your co-op "
+            'team. The host rules (enemies, boss tempo, Rot, travelling together) are on that page; the picture '
+            'follows yours. The normal online game is as before.',
+            "BBSC 1.0.0 keeps its characters in its own folder (seamless\\user): the earlier Seamless co-op's "
+            'characters are not moved there. Everyone in a seamless session needs this version.',
+        ])]),
+    '1.9.8 beta 7': (
+        None,
+        [('Trophies', [
+            'A pop-up shows each trophy as you earn it, with its own picture from your game and a short chime '
+            '(BB_TROPHY_SOUND=0 turns the chime off, BB_TROPHY_POPUPS=0 the pop-up).',
+        ]), ('Performance', [
+            'Faster locks inside the engine: a few more frames per second, and a rare freeze between two locks is '
+            'gone.',
+            'Low latency is Auto by default: NVIDIA Reflex and Boost on NVIDIA cards, off on the others. Its '
+            'settings are translated now.',
+        ]), ('Game and saves', [
+            'Characters deleted in the game no longer show in the launcher.',
+            "The game files check's list of the 1.09 files is fixed.",
+            'Windows: every open game file keeps its own read position.',
+            'For crash reports: BB_GPU_CHECKPOINTS=1 records where the GPU was when it stopped (code 23 crashes). '
+            'Off by default.',
+        ])]),
+    '1.9.8 beta 6': (
+        None,
+        [('Online', [
+            'Sign in to SuperMedo Server with your Online ID and password, or make a new account, not only with '
+            'Discord: on the Online page, at Play, and in the setup guide.',
+            'Cheat and debug patches are left out of online games (Seamless co-op too). With one on, Play asks: online '
+            'without it, or this one start offline with it.',
+            'Seamless co-op: new difficulty steps (Normal is gentler now), the party box shows there too, and the '
+            'Online page says who hosts and when new characters get the bells.',
+            'Parties take 5 hunters now, for Seamless co-op with 4 guests.',
+            'Seamless co-op: dead and watching a hunter, your unseen body now goes with them, so their area stays '
+            'loaded and you see them, also far from where you fell.',
+            "Seamless co-op: a guest who dies while the host fights a boss now watches the fight instead of waking "
+            'at the lamp (when the boss bar had not come up on their own screen).',
+            'Co-op: a player whose game dropped and who joins again is no longer kicked by the host right away '
+            '(the host kept the old, dead connection to them). They show up again.',
+            'Online: connections to the servers are kept and reused, so each call waits one trip instead of two '
+            'or more. Far from the servers this ends the short freeze about once a minute.',
+            "Co-op: players behind their provider's shared address (they needed a VPN) join through the server's "
+            'relay when only one way gets through, instead of failing.',
+            "A character played in Seamless co-op gets the game's own bells back when it is played normally (they "
+            "showed as ?GoodsName? and did nothing), and BBSC's items have names in every language.",
+        ]), ('Saves', [
+            "Seamless co-op's characters and BBSC's own backups are never offered to your normal saves.",
+            'Automatic backups you named are kept, and a backup added from a file no longer stops the next one.',
+        ])]),
     '1.9.8 beta 5': (
         None,
         [('Online', [

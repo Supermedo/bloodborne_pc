@@ -80,7 +80,13 @@ struct State {
 
 State state;
 
+// What "auto" became for this GPU (Wanted), else empty.
+std::string_view resolved;
+
 std::string_view Setting() {
+    if (!resolved.empty()) {
+        return resolved;
+    }
     const char* env = std::getenv("BB_LOW_LATENCY");
     return env ? std::string_view{env} : std::string_view{};
 }
@@ -196,7 +202,15 @@ void WatchLoop() {
     }
 }
 
-bool Wanted() {
+bool Wanted(u32 vendor_id) {
+    // bbport: auto is Reflex + Boost on NVIDIA. Without it the driver lowers the GPU clocks while
+    // the game's threads wait on the card, and a CPU-bound frame then waits longer still
+    // (another Bloodborne port measured an RTX 3070 at 50 FPS without Boost, 106 with it).
+    if (Setting() == "auto") {
+        resolved = vendor_id == 0x10DE ? "boost" : "off";
+        std::printf("Low latency: auto, %s\n",
+                    resolved == "boost" ? "NVIDIA: Reflex + Boost" : "off on this GPU");
+    }
     const auto setting = Setting();
     return setting == "on" || setting == "boost";
 }
@@ -211,7 +225,7 @@ void Init(const Instance& instance) {
     if (const u32 limit = EmulatorSettings.GetFrameLimit()) {
         state.period = std::chrono::nanoseconds(1'000'000'000 / limit);
     }
-    if (!Wanted()) {
+    if (!Wanted(instance.GetVendorID())) {
         // VRR with V-Sync: the frame is paced before it starts, or V-Sync and the limiter
         // would each hold it (a frame or two of latency).
         if (EmulatorSettings.IsVrr() && state.period.count()) {

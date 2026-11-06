@@ -422,6 +422,10 @@ extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
 }
 
+extern "C" void bbgpu_trophy_unlocked(int id) {
+    BbOverlay::TrophyUnlocked(id);
+}
+
 extern "C" int bbgpu_audio_muted(void) {
     return g_window && BbSettings::Get().mute_unfocused && !g_window->IsFocused() ? 1 : 0;
 }

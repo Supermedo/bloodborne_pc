@@ -106,9 +106,30 @@ mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
-# BBSC (seamless co-op, github.com/Classmg22/BBSC, GPL-2.0): its launcher, mod and notices from out/bbsc,
-# for the Online page's SuperMedo Seamless co-op; left out when out/bbsc isn't there.
-if [[ -f out/bbsc/bbsc-launch.exe ]]; then cp -r out/bbsc "$dest/bbsc"; fi
+# Seamless co-op (BBSC 1.0.0's co-op, github.com/CLSAMG22/BBSC, GPL-2.0) for the launcher's Seamless co-op page
+# (launcher/bbport_yharnam.py): this port's own engine built with BBSC's co-op and network code, a program of its
+# own (out/bb-probe-seamless.exe; the normal bb-probe.exe never changes), and from BBSC's release (out/seamless,
+# scripts/fetch_yharnam.py) only what the launcher uses: the event tool and its reference, the party HUD patcher
+# and its icons, BBSC's licences. Named files only: out/seamless may hold a launcher's game view (junctions into
+# the whole game, which cp -r follows: it filled the disk once).
+# Without them, 0.0.2's launcher and mod from out/bbsc, which run this port's engine; neither when both are missing.
+# BB_SEAMLESS_EXE names the seamless engine when it was built elsewhere (its own source copy).
+seamless_exe=${BB_SEAMLESS_EXE:-out/bb-probe-seamless.exe}
+if [[ -f $seamless_exe && -f out/seamless/tools/party_boss_events.py ]]; then
+    llvm-strip --strip-debug -o "$dest/bin/bb-probe-seamless.exe" "$seamless_exe"
+    # The CLANG64 DLLs it loads besides the normal engine's (BBSC's network code: abseil's logging).
+    ldd "$dest/bin/bb-probe-seamless.exe" | awk '/\/clang64\/bin\// && !/vulkan-1\.dll/ {print $3}' | sort -u |
+        while read -r dll; do cp -u "$dll" "$dest/bin/"; done
+    mkdir -p "$dest/seamless/tools" "$dest/seamless/scripts"
+    cp out/seamless/tools/party_boss_events.py "$dest/seamless/tools/"
+    cp out/seamless/scripts/hud_patch.py out/seamless/scripts/party_hud_icons.bin "$dest/seamless/scripts/"
+    for name in event-reference.json LICENSE CREDITS.txt VERSION.txt; do
+        if [[ -f out/seamless/$name ]]; then cp "out/seamless/$name" "$dest/seamless/"; fi
+    done
+    if [[ -d out/seamless/licenses ]]; then cp -r out/seamless/licenses "$dest/seamless/"; fi
+elif [[ -f out/bbsc/bbsc-launch.exe ]]; then
+    cp -r out/bbsc "$dest/bbsc"
+fi
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
 # (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
@@ -177,7 +198,13 @@ else
     if [[ -d $play/bbsc ]]; then
         find "$play/bbsc" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
     fi
-    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini ! -name bbsc \
+    # seamless\ holds the player's BBSC characters (user) and the co-op game view, junctions into the game that
+    # rm -rf walks into: only its program goes, link-safe (bbport_yharnam.clear_program).
+    if [[ -d $play/seamless ]]; then
+        out/pyenv/Scripts/python.exe -I -c 'import sys; sys.path.insert(0, "launcher"); import bbport_yharnam
+bbport_yharnam.clear_program(sys.argv[1])' "$play/seamless"
+    fi
+    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini ! -name bbsc ! -name seamless \
         ! -name fsr4vk ! -name input.ini ! -name mods.json ! -name patches.json ! -name last_run.log -exec rm -rf {} +
     cp -r "$dest/." "$play/"
 fi

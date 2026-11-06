@@ -785,6 +785,65 @@ static std::optional<std::vector<u8>> InflateGzipBody(const std::string& compres
     return out;
 }
 
+#ifdef ORBIS_HTTP_WITH_HTTPLIB
+// bbport (2026-11-02): connections to a server are kept open and reused, as the PS4's HTTP library
+// does. Every call made a new connection (TCP, and TLS for https): two round trips or more for
+// each one. Far from the server (Brazil to France, ~235 ms) the game froze ~470 ms on the calls
+// it waits for, once a minute (the emergency notice, the ghost upload). A client is taken out of
+// the pool for one request and put back only when the request worked; one key per server and
+// certificate choice.
+struct HttpClientPool {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::vector<std::unique_ptr<httplib::Client>>> idle;
+};
+static HttpClientPool g_client_pool;
+constexpr size_t kIdleClientsPerKey = 4;
+
+class PooledHttpClient {
+public:
+    PooledHttpClient(std::string key, const std::string& base_url) : key_(std::move(key)) {
+        {
+            std::scoped_lock lock{g_client_pool.mutex};
+            auto& list = g_client_pool.idle[key_];
+            if (!list.empty()) {
+                client_ = std::move(list.back());
+                list.pop_back();
+                reused_ = true;
+            }
+        }
+        if (!client_) {
+            client_ = std::make_unique<httplib::Client>(base_url);
+        }
+        client_->set_keep_alive(true);
+    }
+    ~PooledHttpClient() {
+        if (!worked_ || !client_) {
+            return; // a failed connection is not reused
+        }
+        std::scoped_lock lock{g_client_pool.mutex};
+        auto& list = g_client_pool.idle[key_];
+        if (list.size() < kIdleClientsPerKey) {
+            list.push_back(std::move(client_));
+        }
+    }
+    httplib::Client& operator*() {
+        return *client_;
+    }
+    bool reused() const {
+        return reused_;
+    }
+    void worked() {
+        worked_ = true;
+    }
+
+private:
+    std::string key_;
+    std::unique_ptr<httplib::Client> client_;
+    bool reused_ = false;
+    bool worked_ = false;
+};
+#endif
+
 static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
                               u32& out_event_bits) {
     out_event_bits = 0;
@@ -865,7 +924,10 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
             (plan.scheme == "http" && plan.port != 80)) {
             base_url += ":" + std::to_string(plan.port);
         }
-        httplib::Client cli(base_url);
+        PooledHttpClient pooled(base_url + "|" + std::to_string(plan.settings.ssl_flags) + "|" +
+                                    (plan.ctx_has_loaded_certs ? "1" : "0"),
+                                base_url);
+        httplib::Client& cli = *pooled;
         cli.set_connection_timeout(pick_timeout_seconds(plan.settings.connect_timeout_us, 30));
         cli.set_read_timeout(pick_timeout_seconds(plan.settings.recv_timeout_us, 120));
         cli.set_write_timeout(pick_timeout_seconds(plan.settings.send_timeout_us, 120));
@@ -896,8 +958,8 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                          plan.scheme, plan.host);
             }
             cli.enable_server_certificate_verification(verify_server);
-            if (verify_server) {
-                bbnet::TrustWindowsRoots(cli, base_url);
+            if (verify_server && !pooled.reused()) {
+                bbnet::TrustWindowsRoots(cli, base_url); // a reused client has them already
             }
             if (config_disabled_verify) {
                 LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled by configuration",
@@ -959,6 +1021,7 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
             SynthesizeTransportFailureResponse(out_res);
             return TranslateHttplibError(result.error());
         }
+        pooled.worked(); // the connection can serve the next call
 
         // Populate response (overwrites any prior-iteration 3xx).
         out_res.status_code = result->status;

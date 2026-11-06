@@ -436,7 +436,7 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
 
 
 # Patches only the port's own file has (patches/Bloodborne.xml of any version since 1.8).
-PORT_ONLY_PATCHES={"Live map (The Hunter's Dream)",'Larger Frame Heaps'}
+PORT_ONLY_PATCHES={"Faster play log",'Larger Frame Heaps'}
 
 
 def port_patch_file(path, root):

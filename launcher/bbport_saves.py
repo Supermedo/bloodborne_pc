@@ -88,7 +88,7 @@ class SaveSet:
         self.source, self.folder = source, Path(folder)
         self.files = sorted(p for p in self.folder.iterdir() if p.is_file() and SAVE_FILES.match(p.name))
         self.modified = max((p.stat().st_mtime for p in self.files), default=0)
-        self.slots = [name for name in SLOTS if used(self.folder / name)]
+        self.slots = slots_in_use(self.folder)
         self.names = [n for n in (character_name(self.folder / slot) for slot in self.slots) if n]
 
     @property
@@ -108,6 +108,33 @@ def used(path):
             return any(stream.read(4096))
     except OSError:
         return False
+
+
+# The profile's byte per slot just before the Load Game blocks (0x1096): 1 while the game lists that
+# character. Deleting one in the game sets its byte to 0 and leaves its slot file as it was (checked in
+# the game, 2026-10-29), so a used slot file alone is no character.
+PROFILE_LISTED = 0x108c
+
+
+def listed_slots(profile):
+    """The slots the profile (its first bytes are enough) marks as the game's characters; None when it
+    cannot tell: too short, or not 0 or 1 there (another layout)."""
+    flags = bytes(profile[PROFILE_LISTED:PROFILE_LISTED + len(SLOTS)])
+    if len(flags) < len(SLOTS) or any(flag > 1 for flag in flags):
+        return None
+    return {slot for slot, flag in zip(SLOTS, flags) if flag}
+
+
+def slots_in_use(folder):
+    """The slots of a save folder with a character the game lists: a used slot file, and not deleted in
+    the game when the profile can tell."""
+    folder = Path(folder)
+    try:
+        with open(folder / PROFILE, 'rb') as stream:
+            listed = listed_slots(stream.read(PROFILE_LISTED + len(SLOTS)))
+    except OSError:
+        listed = None
+    return [slot for slot in SLOTS if used(folder / slot) and (listed is None or slot in listed)]
 
 
 # A character's name in its slot: UTF-16 after eight zero bytes, ending in a zero character.
@@ -523,8 +550,9 @@ class Backup:
                 if BACKUP_META in zipped.namelist():
                     meta = json.loads(zipped.read(BACKUP_META).decode('utf-8'))
                 if not meta.get('characters'):
+                    listed = listed_slots(zipped.read(files['save'][PROFILE])) if PROFILE in files['save'] else None
                     for slot in SLOTS:
-                        if slot in files['save']:
+                        if slot in files['save'] and (listed is None or slot in listed):
                             with zipped.open(files['save'][slot]) as stream:
                                 data = stream.read(0x20000)
                             name = name_in(data) if any(data[:4096]) else ''
@@ -548,7 +576,7 @@ class Backup:
 
 def characters(folder):
     """{slot: Character} of a save folder's readable characters."""
-    found = {slot: character.read_file(Path(folder) / slot) for slot in SLOTS if used(Path(folder) / slot)}
+    found = {slot: character.read_file(Path(folder) / slot) for slot in slots_in_use(folder)}
     return {slot: info for slot, info in found.items() if info}
 
 
@@ -563,8 +591,9 @@ def backup_characters(item):
         try:
             members = archive_files(item.path)['save']
             with zipfile.ZipFile(item.path) as zipped:
+                listed = listed_slots(zipped.read(members[PROFILE])) if PROFILE in members else None
                 for slot in SLOTS:
-                    if slot in members:
+                    if slot in members and (listed is None or slot in listed):
                         info = character.read(zipped.read(members[slot]))
                         if info:
                             found[slot] = info
@@ -656,8 +685,10 @@ def add_backup_file(path, user_dir):
         packed += [(f'savedata/1/{title}/{SAVE_DIR}.sce_sys/{name}', zipped.read(member)) for name, member in
                    sorted(files['meta'].items())]
     names = []
+    listed = listed_slots(next((data for member, data in packed if member.endswith(f'{SAVE_DIR}/{PROFILE}')), b''))
     for member, data in packed:
-        if member.rsplit('/', 1)[-1] in SLOTS and any(data[:4096]):
+        slot = member.rsplit('/', 1)[-1]
+        if slot in SLOTS and any(data[:4096]) and (listed is None or slot in listed):
             name = name_in(data[:0x20000])
             names += [name] if name else []
     created = datetime.datetime.now()

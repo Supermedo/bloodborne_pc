@@ -332,6 +332,14 @@ if (WIN32)
     target_link_libraries(fsr411-compare PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     target_include_directories(fsr411-compare PRIVATE ${SHADER_INCLUDE})
     add_dependencies(fsr411-compare host_shaders)
+    # The runtime's own tests (tests/test_runtime.py runs them; build.sh --test on Linux):
+    # ninja -C out/gpu runtime-test, then copy out/gpu/runtime-test.exe to out/.
+    add_executable(runtime-test EXCLUDE_FROM_ALL ../tests/test_runtime.c ${BB_RUNTIME} ../src/compat_win.c)
+    set_target_properties(runtime-test PROPERTIES C_STANDARD 11 C_EXTENSIONS OFF)
+    target_compile_options(runtime-test PRIVATE -UNDEBUG) # the checks are assert()s
+    target_include_directories(runtime-test PRIVATE .. ../src)
+    target_link_libraries(runtime-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+    target_link_options(runtime-test PRIVATE -Wl,--disable-high-entropy-va)
     add_executable(object-motion-cache-test EXCLUDE_FROM_ALL ../tests/test_object_motion_cache.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(object-motion-cache-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
@@ -441,6 +449,15 @@ target_compile_options(pad-use-test PRIVATE -UNDEBUG)
 add_executable(vram-warning-test EXCLUDE_FROM_ALL ../tests/test_vram_warning.cpp)
 target_include_directories(vram-warning-test PRIVATE shim)
 target_compile_options(vram-warning-test PRIVATE -UNDEBUG)
+
+# bbport: one file read from two threads, pread next to seek + read: ninja -C out/gpu
+# file-positions-test, then run it in the source tree (it writes under out/). No GPU, no game.
+if (WIN32)
+    add_executable(file-positions-test EXCLUDE_FROM_ALL ../tests/test_file_positions.c ../src/compat_win.c)
+    target_include_directories(file-positions-test PRIVATE ../src)
+    target_compile_options(file-positions-test PRIVATE -UNDEBUG)
+    target_link_libraries(file-positions-test PRIVATE bcrypt -pthread)
+endif()
 
 # bbport: keyboard and mouse button prompt icons: ninja -C out/gpu prompt-icons-test, then run it
 # (with a folder argument it writes each icon drawn and encoded, for viewing).

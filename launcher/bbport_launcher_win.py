@@ -45,7 +45,7 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 VERSION = '1.9.8'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
-BETA = 5
+BETA = 0
 VERSION_TEXT = f'{VERSION} beta {BETA}' if BETA else VERSION
 BETA_PAGE = 'https://github.com/Bloodborne-Port-supermedo/bbport-supermedo/releases'
 # The port's Discord application (discord.com/developers: its Application ID; an art asset named
@@ -265,6 +265,7 @@ import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts with The Hun
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
+import bbport_lang_yharnam  # noqa: E402,F401 (the Seamless co-op page, BBSC 1.0.0)
 import bbport_lang_gpu  # noqa: E402,F401 (a graphics card Windows has and Vulkan does not see)
 import bbport_lang_ready  # noqa: E402,F401 (the start's other prerequisites: runtime, folders, firewall)
 import bbport_lang_audit1  # noqa: E402,F401 (the launcher's own update: its checks and the installer's window)
@@ -292,6 +293,7 @@ import bbport_setup  # noqa: E402
 import bbport_news  # noqa: E402
 import bbport_seamless  # noqa: E402
 import bbport_signin  # noqa: E402
+import bbport_yharnam  # noqa: E402
 import bbport_trophies as trophies  # noqa: E402
 import bbport_theme as theme  # noqa: E402
 import bbport_tls  # noqa: E402 (every HTTPS request: no expired certificates of the stores, Windows' trust)
@@ -410,7 +412,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'voice_language': 'auto',
                 'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '', 'low_vram': '', 'vram_warning': True,
-                'frames_ahead': '', 'low_latency': 'off', 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
+                'frames_ahead': '', 'low_latency': 'auto', 'low_latency_auto': True, 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
                 'on_play': 'stay', 'reopen_after_game': False, 'minimize_to_tray': False, 'discord_status': True,
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
@@ -456,6 +458,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'test_repeats': '1', 'test_minutes': '10', 'test_saves': {}}  # the last check of eboot.bin (bbport_help), kept while the file is unchanged
 # bbbridge's own app reads and writes the online_* keys above: keep their names.
 APP_DEFAULTS.update(bbport_seamless.DEFAULTS)  # Seamless co-op's difficulty and options
+APP_DEFAULTS.update(bbport_yharnam.DEFAULTS)  # the Seamless co-op page's host rules (BBSC 1.0.0)
 
 UPSCALERS = [('dlss', ('DLSS (NVIDIA GeForce RTX)',)),
              ('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
@@ -557,7 +560,9 @@ FRAME_CAPS = [('', ('Auto: display refresh, max 120 (recommended)', 'Авто: �
               ('240', ('240  ⚠',)), ('0', ('No limit  ⚠', 'Без ограничения  ⚠'))]
 FRAMES_AHEAD = [('', ('1 (default)', '1 (по умолчанию)')), ('2', ('2',)), ('0', ('Unbounded', 'Без ограничения'))]
 # gpu/shadps4/video_core/renderer_vulkan/vk_low_latency.cpp: NVIDIA Reflex or AMD Anti-Lag 2.
-LOW_LATENCY = [('off', ('Off', 'Выкл.')), ('on', ('On', 'Вкл.')), ('boost', ('On + Boost', 'Вкл. + Boost'))]
+# auto: On + Boost on NVIDIA (the GPU keeps its clocks while the game waits on it), off on other GPUs.
+LOW_LATENCY = [('auto', ('Auto (NVIDIA: On + Boost)', 'Авто (NVIDIA: Вкл. + Boost)')), ('off', ('Off', 'Выкл.')),
+               ('on', ('On', 'Вкл.')), ('boost', ('On + Boost', 'Вкл. + Boost'))]
 # vk_pipeline_cache.cpp BB_ASYNC_PIPELINES: new pipelines built on worker threads, their draws skipped meanwhile.
 # gpu/shim/core/emulator_settings.h BB_VRR: V-Sync (FIFO) and a frame cap just below the refresh rate.
 VRR_MODES = [('', ('Off', 'Выкл.')), ('1', ('On (G-Sync / FreeSync)', 'Вкл. (G-Sync / FreeSync)'))]
@@ -1516,7 +1521,7 @@ GRADE_NAMES = {trophies.PLATINUM: ('Platinum', 'Платиновый'), trophies
 # The side bar: the pages a player needs, then the expert's (shown in the expert view only).
 NAV_SIMPLE = [('play', ('Play', 'Играть')), ('picture', ('Picture & performance',)),
               ('controls', ('Controls', 'Управление')), ('gameplay', ('Gameplay', 'Игровой процесс')),
-              ('online', ('Online play',)), ('saves', ('Saves',)),
+              ('online', ('Online play',)), ('seamless', ('Seamless co-op',)), ('saves', ('Saves',)),
               ('mods', ('Mods',)), ('language', ('Launcher customization', 'Настройки лаунчера')),
               ('trophies', ('Achievements', 'Достижения')), ('help', ('Help', 'Помощь'))]
 # The game tests (Measure on this PC, the Game tests on System & tests) are off for now, until they play
@@ -1558,6 +1563,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.app['online_community'] = COMMUNITY_SERVER
         if self.app.get('readbacks') == '0':  # Off left the launcher (READBACKS)
             self.app['readbacks'] = ''
+        if not saved.get('low_latency_auto'):  # Off was the default until 1.9.8: Auto once (Off chosen again stays)
+            if self.app.get('low_latency') == 'off':
+                self.app['low_latency'] = 'auto'
+            self.app['low_latency_auto'] = True
         self.app.update(settled_online(self.app, saved))  # dead ends to SuperMedo Server
         self.online_written = {key: saved.get(key) for key in SHADNET_KEYS + OWN_ONLINE_KEYS}
         for key in ('supermedo_user', 'supermedo_password'):  # 1.9.2's account, the password in plain text
@@ -2307,6 +2316,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.build_picture()
         self.build_controls()
         self.build_online()
+        self.build_seamless()
         self.build_saves()
         self.build_mods()
         self.build_language()
@@ -3023,10 +3033,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                  self.choice(f, 'low_latency', 'app', LOW_LATENCY),
                  _('Less input lag: the game starts each frame just in time instead of queuing frames for the '
                    'display. NVIDIA Reflex on GeForce, AMD Anti-Lag 2 on Radeon (current drivers); other GPUs ignore '
-                   'it. Boost keeps the GPU clocks up.',
+                   'it. Boost keeps the GPU clocks up. Auto: On + Boost on NVIDIA, off on other GPUs.',
                    'Меньше задержка ввода: игра начинает кадр вовремя, а не копит кадры в очереди. NVIDIA Reflex на '
                    'GeForce, AMD Anti-Lag 2 на Radeon (свежие драйверы); на других GPU не действует. Boost держит '
-                   'частоты GPU высокими.'))
+                   'частоты GPU высокими. Авто: Вкл. + Boost на NVIDIA, выкл. на других GPU.'))
         early = self.row(f, _('Send frames to the GPU in parts', 'Отправлять кадр в GPU частями'),
                  self.choice(f, 'early_submit', 'app', EARLY_SUBMIT),
                  _('The graphics card starts drawing a frame while the rest of it is still being prepared, '
@@ -3291,7 +3301,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             return
         user = Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user')
         found = [(folder, slot, who) for folder in respec.save_folders(user)
-                 for slot, who in respec.characters(folder)]
+                 for listed in [saves.slots_in_use(folder)]  # not the ones deleted in the game
+                 for slot, who in respec.characters(folder) if saves.SLOTS[slot] in listed]
         if not found:
             self.messagebox.showinfo(title, _('No characters found in {}.', 'Персонажи не найдены в {}.').format(user))
             return
@@ -3944,6 +3955,248 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         if npid_var.get().strip() and password_var.get() and key.get():
             self.root.after(500, lambda: act('status'))
         self.root.after(15000, poll)
+
+    # ---- Seamless co-op (BBSC: Yharnam Together 1.0.0, bbport_yharnam.py) --------------------------------------
+    # A page of its own under Online play, apart from the normal online game: the window's PLAY, the Online page and
+    # the normal game's log, saves and sign-in are not touched by it. Its Play starts BBSC's game on SuperMedo's
+    # seamless server with the SuperMedo account; the party made here is the game's co-op team there.
+
+    def build_seamless(self):
+        ttk, px = self.ttk, self.px
+        f = self.scrolled_page('seamless', _('Seamless co-op'),
+                               _("BBSC: Yharnam Together on SuperMedo's seamless server: up to 5 hunters stay "
+                                 'together through deaths, lamps and areas.'))
+        npid_var, password_var = self.var('supermedo_npid', 'app'), self.var('supermedo_pass', 'app')
+        top = ttk.Frame(f)
+        self.seamless_button = ttk.Button(top, text=_('Play Seamless co-op'), style='Accent.TButton',
+                                          command=self.play_seamless)
+        self.seamless_button.pack(side='left')
+        self.seamless_said = ttk.Label(top, text='', style='Muted.TLabel')
+        if not bbport_yharnam.available(PORT_DIR):  # a build without it (scripts/fetch_yharnam.py)
+            self.seamless_button.state(['disabled'])
+        self.seamless_said.pack(side='left', padx=(px(14), 0))
+        top.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(px(4), 0))
+        self.note(f, _('This starts Seamless co-op, not the normal game: the PLAY button below starts the normal game '
+                       'as always.'), top=8)
+
+        self.section(f, _('SuperMedo account'))
+        account = self.wrap_within(ttk.Label(f, text='', justify='left', anchor='w'), 560)
+        self.row(f, _('Account'), account, _('Seamless co-op signs in with your SuperMedo account, the one of the '
+                                             'Online page.'), key='supermedo_npid')
+        to_online = self.row(f, '', ttk.Button(f, text=_('Sign in on the Online page'),
+                                               command=lambda: self.show('online')))
+
+        def show_account(*_a):
+            name = npid_var.get().strip() if password_var.get() else ''
+            account.configure(text=_('Signed in as {}').format(name) if name else
+                              _('Not signed in: sign in or make a free account on the Online page.'))
+            to_online.grid_remove() if name else to_online.grid()
+        for var in (npid_var, password_var):
+            var.trace_add('write', show_account)
+        show_account()
+
+        self.build_party(f, npid_var, password_var)
+        self.note(f, _('In Seamless co-op your party is your co-op team: start Seamless co-op, and the hunters of your '
+                       'party find each other in the game. Everyone plays Seamless co-op from this page.'), top=8)
+
+        self.section(f, _('Host rules'))
+        self.note(f, _("The team leader's rules count for the whole team. Changes count from the next start."), top=0)
+        enemies = ttk.Frame(f)
+        for value, text in (('off', _('Normal')), ('auto', _('Auto: stronger with each hunter on the same map')),
+                            ('bit', _('A bit harder')), ('on', _('Harder')), ('much', _('Much harder')),
+                            ('custom', _('Custom'))):
+            ttk.Radiobutton(enemies, text=text, value=value, variable=self.var('yt_enemies', 'app')).pack(
+                anchor='w', pady=(0, px(2)))
+        # Custom (testers, 2026-11-06): the three multipliers, shown only with Custom chosen.
+        custom = ttk.Frame(enemies)
+        for column, (key, title) in enumerate(zip(bbport_yharnam.CUSTOM_ENEMIES,
+                                                  (_('Health ×'), _('Damage ×'), _('Poise ×')))):
+            ttk.Label(custom, text=title).grid(row=0, column=column * 2, sticky='w',
+                                               padx=(0 if column == 0 else px(14), px(4)))
+            ttk.Spinbox(custom, from_=1, to=10, increment=0.25, width=5, textvariable=self.var(key, 'app')).grid(
+                row=0, column=column * 2 + 1, sticky='w')
+        enemies_var = self.var('yt_enemies', 'app')
+
+        def show_custom(*_a):
+            if enemies_var.get() == 'custom':
+                custom.pack(anchor='w', padx=(px(26), 0), pady=(px(2), px(4)))
+            else:
+                custom.pack_forget()
+        enemies_var.trace_add('write', show_custom)
+        show_custom()
+        self.row(f, _('Enemies'), enemies, _('Harder: enemy health ×3, damage ×1.5, poise ×3 (a bit harder: ×1.5, '
+                                              '×1.25, ×1.5; much harder: ×5, ×2, ×5). Auto goes up to Harder for a '
+                                              'full team.') + ' ' + _("Custom: your own, each from 1 (the game's own) "
+                                                                       'to 10.'), key='yt_enemies')
+        tempos = (('', _("Vanilla: the game's own")), ('aggressive', _('Aggressive: half the pauses, turns ×1.3')),
+                  ('relentless', _('Relentless: a quarter of the pauses, turns ×1.6')))
+        tempo = self.var('yt_tempo', 'app')
+        box = ttk.Combobox(f, values=[text for _v, text in tempos], state='readonly', width=44)
+        box.current([v for v, _t in tempos].index(tempo.get()) if tempo.get() in bbport_yharnam.BOSS_TEMPOS else 0)
+        box.bind('<<ComboboxSelected>>', lambda _e: tempo.set(tempos[box.current()][0]))
+        self.row(f, _('Boss tempo'), box, _("Bosses rest less between their attacks and turn faster; their moves and "
+                                            "damage stay the game's."), key='yt_tempo')
+        self.check(f, 'yt_rot', 'app', _('Rot: each real death adds a penalty (up to 5)'),
+                   _('A lamp, a level up, a boss, your killer or your bloodstain takes it away.'))
+        self.check(f, 'yt_travel', 'app', _('Travel together'),
+                   _('A lamp or headstone asks to take the whole team with you. Off: everyone travels on their own.'))
+        vote = self.check(f, 'yt_vote', 'app', _('With a vote'), _('The team has 20 s; one No stops the trip.'))
+        vote.grid_configure(padx=(px(26), 0))
+        travel = self.var('yt_travel', 'app')
+        travel.trace_add('write', lambda *_a: vote.state(['!disabled'] if travel.get() else ['disabled']))
+        vote.state(['!disabled'] if travel.get() else ['disabled'])
+        self.check(f, 'yt_revive', 'app', _('Revival: a fallen hunter goes down and teammates strike them back up'),
+                   _('Off: a fallen hunter dies for real, as in the normal game.'))
+
+        self.section(f, _('Picture and characters'))
+        self.note(f, _("Seamless co-op is this port's own game with every setting of this launcher: picture, "
+                       'frame rate, controls, mods and patches.'), top=0)
+        self.note(f, _('Seamless co-op plays its own characters, kept apart from your normal saves (seamless\\user in '
+                       'the launcher folder). The game folder of the Game files page is used as it is: nothing in it '
+                       'is changed.'), top=6)
+        self.note(f, _("Server: {}. Everyone in the team needs this launcher's Seamless co-op ({}).").format(
+            bbport_yharnam.SERVER, bbport_yharnam.VERSION), top=6)
+
+    def play_seamless(self):
+        """Seamless co-op's Play: the game view, the co-op event files and the server's addresses are made in a
+        helper thread (bbport_yharnam.prepare), then this port's own game starts with the seamless engine
+        (seamless_start)."""
+        if (self.process or getattr(self, 'seamless_preparing', False) or self.update_installing()
+                or not bbport_yharnam.available(PORT_DIR)):
+            return
+        if game_underway():
+            front_game_window()
+            self.seamless_said.configure(text=_('The game runs already (started from Steam, a shortcut or the in-game '
+                                                'restart): its window was brought to the front.',
+                                                'Игра уже запущена (из Steam, ярлыка или после перезапуска в игре): её '
+                                                'окно выведено на передний план.'))
+            return
+        if not (self.var('supermedo_npid', 'app').get().strip() and self.var('supermedo_pass', 'app').get()):
+            self.messagebox.showinfo('Bloodborne', _('Not signed in: sign in or make a free account on the Online '
+                                                     'page.'))
+            self.show('online')
+            return
+        if not game_info(self.app['game_dir']):
+            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
+                                                      'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.show('game')
+            return
+        # The owner (2026-11-06): every start says Seamless co-op keeps its own saves; a new game is best.
+        if not self.messagebox.askokcancel('Bloodborne', _(
+                'Seamless coop uses its own save file folder. It is recommended to start a new game for a seamless '
+                'coop playthrough. Using your save files from the main game might cause some issues. If you want to '
+                'use it despite the risk - you have to manually put your saves into seamless folder.'),
+                parent=self.root):
+            return
+        if not self.save_settings():
+            return
+        settings, graphics = dict(self.app), dict(self.ini)
+        self.seamless_preparing = True
+        self.seamless_button.state(['disabled'])
+        self.play_button.configure(state='disabled')
+        self.seamless_said.configure(text=_('Preparing the game; it opens in its own window…',
+                                            'Подготовка игры; она откроется в своём окне…'))
+        self.set_log('')
+        self.append(f'BBSC: Yharnam Together {bbport_yharnam.VERSION} · {bbport_yharnam.SERVER}\n')
+        result = {}
+
+        def work():
+            try:
+                bbport_yharnam.learn_from_log(PORT_DIR)  # the last run's first-use key, before its log is rotated
+                game_dir = settings['game_dir']
+                if bbport_yharnam.needs_prepare(PORT_DIR, game_dir):
+                    root, note = bbport_yharnam.prepare(
+                        PORT_DIR, game_dir, lambda folder: (game_info(folder) or (None, None))[1],
+                        say=lambda line: self.output.put(line + '\n'))
+                else:
+                    root, note = bbport_yharnam.view_root(PORT_DIR), ''
+                    bbport_yharnam.copy_events(PORT_DIR, root)
+                ip = bbport_yharnam.resolve()
+                bbport_yharnam.write_host_overrides(PORT_DIR, ip)
+                # The player's mods as the normal game has them (game_environment), with the party HUD over them.
+                view, config, hud_note = bbport_yharnam.mods_view(
+                    PORT_DIR, Path(root) / bbport_yharnam.TITLE, settings['mods_dir'] or str(DATA_DIR / 'mods'),
+                    DATA_DIR / 'mods.json', settings['mods_enabled'])
+                bbport_yharnam.rotate_logs(PORT_DIR)
+                result.update(root=root, note='\n'.join(filter(None, (note, hud_note))), ip=ip, mods=(view, config))
+            except (RuntimeError, OSError, ValueError) as error:
+                result['error'] = str(error)
+            self.ui_calls.put(lambda: self.seamless_start(settings, graphics, result))
+        threading.Thread(target=work, daemon=True).start()
+
+    def seamless_start(self, settings, graphics, result):
+        self.seamless_preparing = False
+        if 'error' in result:
+            self.seamless_button.state(['!disabled'])
+            self.play_button.configure(state='normal')
+            self.seamless_said.configure(text=_('Seamless co-op could not start.'))
+            self.refresh_status()  # the window's PLAY as its own checks have it
+            self.append(result['error'] + '\n')
+            self.messagebox.showerror('Bloodborne', result['error'])
+            return
+        if result['note']:
+            self.append(result['note'] + '\n')
+        # The normal game's start (every setting of this launcher) without the normal online game; the seamless
+        # engine, server, event files and saves over it (bbport_yharnam.environment).
+        env = bbport_yharnam.environment(PORT_DIR, result['root'], settings, result['ip'],
+                                         bbport_yharnam.link_key(PORT_DIR),
+                                         game_environment({**settings, 'online': False}, graphics), result['mods'])
+        self.pad_stop()  # the game reads the controller now
+        try:
+            self.process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=env,
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        except OSError as error:
+            self.process = None
+            self.seamless_button.state(['!disabled'])
+            self.play_button.configure(state='normal')
+            self.seamless_said.configure(text=_('Could not start: {}', 'Не удалось запустить: {}').format(error))
+            self.refresh_status()
+            return
+        self.job = GameJob(self.process)
+        threading.Thread(target=self.read_seamless_output, args=(self.process,), daemon=True).start()
+        self.stop_button.configure(state='normal')
+        self.stop_button.pack(side='right', after=self.play_button)
+        self.seamless_said.configure(text=_('The game is running.', 'Игра запущена.'))
+        self.status.configure(text=_('Preparing the game; it opens in its own window…',
+                                     'Подготовка игры; она откроется в своём окне…'), fg=GOLD)
+
+    def read_seamless_output(self, process):
+        """Helper thread: Seamless co-op's output to the Log page and to seamless\\user\\log\\console.txt (not the
+        normal game's last_run.log); its end to seamless_ended."""
+        log = bbport_yharnam.user_dir(PORT_DIR) / 'log' / 'console.txt'
+        try:
+            out = open(log, 'w', encoding='utf-8', errors='replace')
+        except OSError:
+            out = None
+        for raw in iter(process.stdout.readline, b''):
+            text = raw.decode('utf-8', errors='replace')
+            self.output.put(text)
+            if out:
+                try:
+                    out.write(text.replace('\r\n', '\n'))
+                    out.flush()
+                except OSError:
+                    pass
+        if out:
+            out.close()
+        code = process.wait()
+        self.ui_calls.put(lambda: self.seamless_ended(code))
+
+    def seamless_ended(self, code):
+        self.process = None
+        self.append(_('\n— the game exited (code {}) —\n', '\n— игра завершилась (код {}) —\n').format(code))
+        if self.job:
+            self.reported(self.job.close)
+            self.job = None
+        self.stop_button.configure(state='disabled')
+        self.stop_button.pack_forget()
+        self.seamless_button.state(['!disabled'])
+        self.play_button.configure(state='normal')
+        self.seamless_said.configure(text='')
+        self.status.configure(text='', fg=MUTED)
+        self.reported(bbport_yharnam.learn_from_log, PORT_DIR)
+        self.reported(self.refresh_status)
 
     def build_mods(self):
         f = self.scrolled_page('mods', _('Mods & patches', 'Моды и патчи'),

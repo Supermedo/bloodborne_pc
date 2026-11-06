@@ -21,8 +21,9 @@ class Instance;
 /// frame with it as its Vulkan present id (PresentStart/PresentEnd).
 namespace Vulkan::LowLatency {
 
-/// Whether BB_LOW_LATENCY asks for it (the extensions are enabled only then).
-bool Wanted();
+/// Whether BB_LOW_LATENCY asks for it (the extensions are enabled only then). "auto" (the
+/// launcher's default) is On + Boost on NVIDIA (vendor 0x10DE) and off on other GPUs.
+bool Wanted(u32 vendor_id);
 
 /// After the device was made: picks Reflex or Anti-Lag 2 from what the Instance enabled.
 void Init(const Instance& instance);
