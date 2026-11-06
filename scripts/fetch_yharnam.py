@@ -1,6 +1,6 @@
 """Puts BBSC: Yharnam Together 1.0.0 (BBSC's BBport edition) in out/seamless, which packaging/windows/package.sh
-ships as the package's `seamless` folder: its game (engine, run.py, scripts, event tool), unchanged, without its
-own launcher (BLauncher.exe and what only it uses): this launcher starts it (launcher/bbport_yharnam.py). Two of
+ships as the package's `seamless` folder: its game (engine, run.py, scripts, event tool), unchanged but for FIXES,
+without its own launcher (BLauncher.exe and what only it uses): this launcher starts it (launcher/bbport_yharnam.py). Two of
 BBSC's launcher modules that its button icons need (bbport_controls.py, bbport_icons.py) come from its source zip
 into scripts/, where its run.py finds them.
 
@@ -30,6 +30,18 @@ SOURCE_TOP = f'BBSC-Yharnam-Together-{VERSION}-source/bbport/launcher/'
 ICON_MODULES = ('bbport_controls.py', 'bbport_icons.py')
 # BBSC's own launcher and what only it uses (its frozen Python, its window's art; portable.txt is about it).
 LEFT_OUT = {'blauncher.exe', 'bloodborne.exe', '_internal', 'launcher', 'portable.txt'}
+# This port's changes to BBSC's files (GPL-2.0: each is listed in MARK): (file, BBSC's text, this port's text).
+FIXES = (
+    # An event without instructions may give any instruction offset: mods' event files (written by event editors)
+    # give -1, and the game reads nothing there. BBSC's check refused them ("event 10008890: its 0 instructions at
+    # -1 are outside the instruction table"), so seamless co-op did not start with such a mod. Its parameter check
+    # already allowed this for an event without parameters.
+    ('tools/party_boss_events.py',
+     "        if (count < 0 or first < 0 or first % INSTRUCTION_SIZE or\n"
+     "                first + count * INSTRUCTION_SIZE > fields[2] * INSTRUCTION_SIZE):\n",
+     "        if count < 0 or count and (first < 0 or first % INSTRUCTION_SIZE or\n"
+     "                                   first + count * INSTRUCTION_SIZE > fields[2] * INSTRUCTION_SIZE):\n"),
+)
 
 
 def sha256(path):
@@ -84,10 +96,26 @@ def unpack(zip_path, dest, expected=SHA256):
             with archive.open(info) as source, open(target, 'wb') as file:
                 shutil.copyfileobj(source, file, 1 << 20)
             count += 1
+    apply_fixes(dest)
     (dest / MARK).write_text(f'BBSC: Yharnam Together {VERSION}\n{URL}\nSHA-256 {expected}\n'
                              'Without its own launcher (BLauncher.exe): the SuperMedo launcher starts it.\n'
+                             'Changed by the SuperMedo port: '
+                             + ', '.join(sorted({name for name, _, _ in FIXES})) +
+                             ' (an event without instructions may give any instruction offset)\n'
                              f'Source: {SOURCE_URL}\n', encoding='utf-8')
     return count
+
+
+def apply_fixes(dest):
+    """FIXES into the unpacked files; each must find BBSC's text exactly once."""
+    for name, old, new in FIXES:
+        path = Path(dest) / name
+        raw = path.read_bytes().decode('utf-8')
+        eol = '\r\n' if '\r\n' in raw else '\n'  # BBSC's own line ends are kept
+        text = raw.replace('\r\n', '\n')
+        if text.count(old) != 1:
+            raise ValueError(f'{name}: the text to change is not there once (BBSC {VERSION} changed?)')
+        path.write_bytes(text.replace(old, new).replace('\n', eol).encode('utf-8'))
 
 
 def add_icon_modules(source_zip, dest, expected=SOURCE_SHA256):

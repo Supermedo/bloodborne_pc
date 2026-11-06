@@ -35,6 +35,12 @@ def hunters_dream_notice():
 
 
 NOTES = {
+    '1.9.8.1': (
+        None,
+        [('Seamless co-op', [
+            'Seamless co-op starts again with mods whose event files hold an empty event: it stopped with '
+            '"Making the co-op event files failed".',
+        ])]),
     '1.9.8': (
         None,
         [('Seamless co-op (new)', [

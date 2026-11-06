@@ -166,6 +166,11 @@ adapted from [bbhost](https://github.com/droogie/bbhost) by droogie (GPL-3.0-or-
 team for their guidance, and to Wozzardman's [shadp2p](https://github.com/Wozzardman/shadp2p),
 which bbport's first online version was built on.
 
+Seamless co-op is **BBSC: Yharnam Together** by **CLSAMG22** ([CLSAMG22/BBSC](https://github.com/CLSAMG22/BBSC),
+GPL-2.0): this port runs BBSC's game files, co-op event patcher and HUD with its own engine
+(`bin\bb-probe-seamless.exe`) and launcher. This port's change to BBSC's files is listed in the
+package's `seamless\bbport-seamless.txt`.
+
 The low-VRAM profile for 4 GB graphics cards comes from the 4 GB mod by **fixdag** and
 **bashiku**.
 

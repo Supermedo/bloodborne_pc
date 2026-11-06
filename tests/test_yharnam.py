@@ -172,6 +172,10 @@ class PrepareTests(Folders):
         self.assertEqual((view / 'mine.txt').read_text(encoding='utf-8'), 'keep')
 
 
+def crlf(text):
+    return text.replace('\n', '\r\n')
+
+
 class FetchTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -185,6 +189,9 @@ class FetchTests(unittest.TestCase):
             archive.writestr('Yharnam Together/launcher/bloodborne.png', b'png')
             archive.writestr('Yharnam Together/run.py', b'run')
             archive.writestr('Yharnam Together/bin/bb-probe.exe', b'MZ2')
+            # BBSC's event tool, with the text FIXES changes (and its CRLF line ends)
+            archive.writestr('Yharnam Together/tools/party_boss_events.py',
+                             crlf('def parse():\n' + fetch_yharnam.FIXES[0][1] + '    pass\n'))
             archive.writestr('Yharnam Together/../escape.txt', b'no')
             archive.writestr('Other/stray.txt', b'no')
         self.sha = hashlib.sha256(self.zip.read_bytes()).hexdigest()
@@ -192,12 +199,25 @@ class FetchTests(unittest.TestCase):
     def test_the_game_unpacks_without_its_launcher(self):
         dest = self.root / 'out' / 'seamless'
         (dest / 'old').mkdir(parents=True)
-        self.assertEqual(fetch_yharnam.unpack(self.zip, dest, expected=self.sha), 2)
+        self.assertEqual(fetch_yharnam.unpack(self.zip, dest, expected=self.sha), 3)
         self.assertEqual((dest / 'bin' / 'bb-probe.exe').read_bytes(), b'MZ2')
+        # An event without instructions may give any offset (a mod's event file gave -1); line ends are kept.
+        tool = (dest / 'tools' / 'party_boss_events.py').read_bytes().decode()
+        self.assertIn(crlf(fetch_yharnam.FIXES[0][2]), tool)
+        self.assertNotIn(crlf(fetch_yharnam.FIXES[0][1]), tool)
+        self.assertIn('Changed by the SuperMedo port: tools/party_boss_events.py',
+                      (dest / fetch_yharnam.MARK).read_text(encoding='utf-8'))
         for gone in ('BLauncher.exe', '_internal', 'launcher', 'old'):
             self.assertFalse((dest / gone).exists(), gone)
         self.assertFalse((self.root / 'out' / 'escape.txt').exists())
         self.assertIn(self.sha, (dest / fetch_yharnam.MARK).read_text(encoding='utf-8'))
+
+    def test_a_fix_whose_text_is_gone_is_refused(self):
+        tools = self.root / 'other' / 'tools'
+        tools.mkdir(parents=True)
+        (tools / 'party_boss_events.py').write_text('def parse():\n    pass\n', encoding='utf-8')
+        with self.assertRaises(ValueError):
+            fetch_yharnam.apply_fixes(self.root / 'other')
 
     def test_another_zip_is_refused(self):
         with self.assertRaises(ValueError):
