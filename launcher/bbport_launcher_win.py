@@ -3105,7 +3105,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                        _('Your area, the boss you fight and your level on your Discord profile, while the Discord '
                          'app runs.'))
             stats = self.check(f, 'discord_stats', 'app', _("Show my hunter's stats on Discord"),
-                               _('Your level, Blood Echoes and Insight; the area and boss still show.'))
+                               _('Your level, Blood Echoes and Insight the area and boss still show.'))
             status = self.var('discord_status', 'app')
 
             def sync_stats(*_args):
