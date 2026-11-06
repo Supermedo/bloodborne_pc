@@ -18,6 +18,9 @@ https://nativeretro.com/
 
 ## Features
 
+- **RecompLauncher integration:** windowless preparation and direct launch, common graphics
+  settings, and save/log folder actions. See [the integration guide](docs/RECOMPLAUNCHER.md).
+
 - **Online play (beta):** messages, bloodstains and wandering ghosts from other hunters through
   [SuperMedo Server](https://bbport.de/server/), and bells and summons through a shadNet
   server (SupermMedos's public one by default).

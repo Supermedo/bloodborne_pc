@@ -172,13 +172,15 @@ def game_running():
     return result.returncode != 0 or b'bb-probe.exe' in result.stdout.lower()
 
 
-def remove_stale_views(out, game):
+def remove_stale_views(out, game, local_only=False):
     """The game views with mods (mods.py's mod-game-* folders in out or beside the game) that a
     game left behind when it did not end through run.py (ended in the Task Manager, the PC
     turned off): removed before a new one is made, while no other game runs. They hold links
     into the game folder; mods.remove_overlay deletes the links, never what they point to."""
     import tempfile  # mods.py's game view for a drive without links (exFAT, FAT32)
-    places = {Path(out).resolve(), Path(game).parent, Path(tempfile.gettempdir()) / 'bbport-game-view'}
+    places = {Path(out).resolve()}
+    if not local_only:
+        places.update((Path(game).parent, Path(tempfile.gettempdir()) / 'bbport-game-view'))
     stale = [path for place in places if place.is_dir() for path in place.glob('mod-game-*')
              if path.is_dir() and not path.is_symlink() and not (hasattr(path, 'is_junction') and path.is_junction())]
     if not stale or game_running():
@@ -565,6 +567,11 @@ def writable_saves(user_dir):
 
 def main():
     args = sys.argv[1:]
+    prepare_only = '--prepare-only' in args
+    args = [arg for arg in args if arg != '--prepare-only']
+    def progress(fraction, message):
+        if prepare_only:
+            print(f'progress {fraction:.3f} {message}', flush=True)
     restarted = len(args) >= 2 and args[0] == '--after'
     if restarted:
         wait_for(int(args[1]))
@@ -573,7 +580,7 @@ def main():
     # prepare the same files and share the saves. The in-game restart takes over from the game it replaces.
     if not hold_game_mutex() and not restarted:
         print('Start: another start of the game is being prepared or runs; this one ends')
-        return 0
+        return 1 if prepare_only else 0
     # As run.sh: relative paths (BB_GAME_DIR, BB_DATA_DIR, fsr4_shaders/) are from the port.
     os.chdir(PORT)
     env = os.environ
@@ -585,7 +592,7 @@ def main():
     if note:
         print(note)
     data = Path(env.get('BB_DATA_DIR', PORT))
-    out = data / 'out'
+    out = Path(env.get('BB_PREPARED_OUT', data / 'out'))
     out.mkdir(parents=True, exist_ok=True)
     env.setdefault('BB_CONFIG', str(data / 'bbport.ini'))
     config = env['BB_CONFIG']
@@ -630,7 +637,7 @@ def main():
             digest = None  # prepare.py reports unreadable executables itself
         # Not the clean 1.09 eboot.bin (a 60 fps one, a patched one, one cut off): the clean one comes back when it
         # is still on this PC (clean_eboot.py), the other one is kept beside it.
-        if digest != CLEAN_IMAGE:
+        if digest != CLEAN_IMAGE and env.get('BB_READ_ONLY_GAME') != '1' and not prepare_only:
             try:
                 restored = restore_eboot(game)
             except Exception:  # a repair: never in the way of a start
@@ -647,7 +654,7 @@ def main():
     sys.path.insert(0, str(PORT / 'scripts'))
     from patches import (OUTPUT_SIZE, PATCH_GROUPS, game_app_version, group_list, hud_canvas,
                          image_groups, output_size, read_settings, ui_viewport)
-    remove_stale_views(out, original_game)
+    remove_stale_views(out, original_game, local_only=env.get('BB_READ_ONLY_GAME') == '1' or prepare_only)
     # Patches exist for game version 01.09 only (patches.py applies none to others): other
     # versions keep the game's 30 FPS timing and change resolutions live. Of a 01.09 eboot.bin,
     # only the groups of patches whose code is the 01.09 build's are applied (patches.py
@@ -751,8 +758,11 @@ def main():
     if system.name != 'sce_sys':
         game = mod_view = system_view(original_game, mod_view, system, out)
     try:
+        progress(0.15, 'Preparing the executable')
         run_script('prepare.py', game, '--out', out)
+        progress(0.35, 'Linking the C runtime')
         run_script('link_libc.py', game, '--out', out)
+        progress(0.50, 'Linking game modules')
         run_script('link_modules.py', game, '--out', out)
         # Legacy CPU profile (scripts/cpu_compat.py): the image no longer needs BMI1, LZCNT or
         # MOVBE, and bb-probe's CPU check lets such a CPU start.
@@ -764,6 +774,7 @@ def main():
             env['BB_CPU_COMPAT'] = '1'
         else:
             env.pop('BB_CPU_COMPAT', None)
+        progress(0.65, 'Checking game content')
         run_script('content_profile.py', game, '--out', out, '--sku', env.get('BB_CONTENT_SKU', 'full'))
 
         # The groups checked above: the frame rate needs the FPS patches, the startup resolution
@@ -786,7 +797,7 @@ def main():
                 live = '0'
                 print(f'Output {scaled_output}: live resolution auto: startup patch (depth of field '
                       'blurs live scenes above 1080p; live_resolution=1 forces live changes)')
-            if live == 'auto':
+            if live == 'auto' and not prepare_only:
                 caps = probe.parent / 'bb-gpu-capabilities.exe'
                 result = subprocess.run([str(caps), '--live-resolution'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                         text=True, creationflags=no_console())
@@ -812,7 +823,7 @@ def main():
             env.setdefault('BB_DMEM_MB', '9152')
             print(f'Output {scaled_output}: scene {scaled_render}, direct memory {env["BB_DMEM_MB"]} MiB '
                   '(live_resolution=1: live changes)')
-        vram = low_vram_mb(env, probe.parent / 'bb-gpu-capabilities.exe')
+        vram = 0 if prepare_only else low_vram_mb(env, probe.parent / 'bb-gpu-capabilities.exe')
         if vram:
             env.setdefault('BB_GC_BUDGET_MB', str(max(2048, vram - VRAM_RESERVE_MB)))
             notes = [f'texture budget {env["BB_GC_BUDGET_MB"]} MiB']
@@ -839,11 +850,15 @@ def main():
         if lang in ('10', '11'):
             if 'Unlock Game Region' not in extra:
                 extra = ';'.join(filter(None, (extra, 'Unlock Game Region')))
+        progress(0.80, 'Preparing game patches')
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
                    '--patches-dir', env.get('BB_PATCHES_DIR', data / 'patches'),
                    '--patches-config', env.get('BB_PATCHES_CONFIG', data / 'patches.json'))
+        if prepare_only:
+            progress(0.90, 'Game files prepared')
+            return 0
         frame_pacing(env, fps)
 
         # The in-game restart starts this script again once this process is gone.

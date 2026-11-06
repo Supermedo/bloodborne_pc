@@ -1,0 +1,131 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Bloodborne for Windows",
+  "repo": "Supermedo/bloodborne_pc",
+  "game": {
+    "kind": "folder",
+    "label": "Your decrypted Bloodborne CUSA03173 game folder with the 1.09 update applied and an unmodified eboot.bin.",
+    "check": { "file": "eboot.bin" }
+  },
+  "start": {
+    "program": ["Bloodborne.exe"],
+    "args": ["--recomplauncher-play", "--game-dir", "{game}"]
+  },
+  "prepare": {
+    "program": ["Bloodborne.exe"],
+    "args": ["--prepare-content", "--game-dir", "{game}"],
+    "label": "Checking and preparing Bloodborne",
+    "timeout": 600
+  },
+  "config": [
+    {
+      "id": "main", "format": "ini",
+      "file": [{ "path": "{install}/bbport.ini" }],
+      "new": { "upscaler": "fsr3", "fsr411_backend": "vk", "preset": "1", "output_res": "1920x1080" }
+    },
+    {
+      "id": "launcher", "format": "json",
+      "file": [{ "path": "{config}/bbport-launcher/settings.json" }]
+    }
+  ],
+  "folders": {
+    "saves": [{ "path": "{install}/user/savedata" }],
+    "logs": [{ "path": "{install}/user" }]
+  },
+  "saves": ["{install}/user/savedata", "{install}/user/trophies.log", "{install}/bbport.ini", "{install}/input.ini"],
+  "looks": { "graphics": "vulkan" },
+  "exit_codes": {
+    "1": "Bloodborne could not start. Check its log and your selected game folder.",
+    "2": "The launch command is invalid. Reinstall this build and try again.",
+    "130": "Preparation was interrupted. Keep the staging folder for recovery before retrying."
+  },
+  "settings": [
+    {
+      "id": "resolution", "label": "Resolution",
+      "choices": [
+        { "label": "720p", "set": { "output_res": "1280x720" } },
+        { "label": "1080p", "set": { "output_res": "1920x1080" } },
+        { "label": "1440p", "set": { "output_res": "2560x1440" } },
+        { "label": "4K", "set": { "output_res": "3840x2160" } }
+      ],
+      "defaults": { "output_res": "1920x1080" }
+    },
+    {
+      "id": "upscaler", "label": "Upscaler",
+      "help": "DLSS needs an NVIDIA RTX card and its runtime. FSR 4.1 needs the provider supported by your GPU.",
+      "choices": [
+        { "label": "FSR 3.1", "set": { "upscaler": "fsr3" } },
+        { "label": "FSR 4.1 Vulkan", "set": { "upscaler": "fsr411", "fsr411_backend": "vk" } },
+        { "label": "FSR 4.1 DirectX 12", "set": { "upscaler": "fsr411", "fsr411_backend": "dx12" } },
+        { "label": "DLSS", "set": { "upscaler": "dlss" } },
+        { "label": "TAA", "set": { "upscaler": "taa" } },
+        { "label": "Off", "set": { "upscaler": "off" } }
+      ],
+      "defaults": { "upscaler": "fsr3", "fsr411_backend": "vk" }
+    },
+    {
+      "id": "quality", "label": "Upscaler quality",
+      "choices": [
+        { "label": "Native AA", "set": { "preset": "0" } },
+        { "label": "Quality", "set": { "preset": "1" } },
+        { "label": "Balanced", "set": { "preset": "2" } },
+        { "label": "Performance", "set": { "preset": "3" } },
+        { "label": "Ultra Performance", "set": { "preset": "4" } }
+      ],
+      "defaults": { "preset": "1" }
+    },
+    {
+      "id": "fps", "label": "Frame rate",
+      "choices": [
+        { "label": "30 fps", "set": { "fps_mode": "30", "frame_cap": "" } },
+        { "label": "60 fps", "set": { "fps_mode": "60", "frame_cap": "" } },
+        { "label": "90 fps", "set": { "fps_mode": "90", "frame_cap": "" } },
+        { "label": "120 fps", "set": { "fps_mode": "uncap", "frame_cap": "120" } },
+        { "label": "Unlocked", "set": { "fps_mode": "uncap", "frame_cap": "" } }
+      ],
+      "defaults": { "fps_mode": "uncap", "frame_cap": "" }
+    },
+    {
+      "id": "fullscreen", "label": "Full screen", "in": "launcher",
+      "choices": [
+        { "label": "Off", "set": { "fullscreen": "false" } },
+        { "label": "On", "set": { "fullscreen": "true" } }
+      ],
+      "defaults": { "fullscreen": "false" }
+    },
+    {
+      "id": "vsync", "label": "V-Sync", "in": "launcher",
+      "choices": [
+        { "label": "Fast, no tearing", "set": { "present_mode": "\"Mailbox\"" } },
+        { "label": "On", "set": { "present_mode": "\"Fifo\"" } },
+        { "label": "Off", "set": { "present_mode": "\"Immediate\"" } }
+      ],
+      "defaults": { "present_mode": "\"Mailbox\"" }
+    },
+    {
+      "id": "motion_blur", "label": "Motion blur",
+      "choices": [{ "label": "Off", "set": { "effect_motion_blur": "0" } }, { "label": "On", "set": { "effect_motion_blur": "1" } }],
+      "defaults": { "effect_motion_blur": "1" }
+    },
+    {
+      "id": "depth_of_field", "label": "Depth of field",
+      "choices": [{ "label": "Off", "set": { "effect_dof": "0" } }, { "label": "On", "set": { "effect_dof": "1" } }],
+      "defaults": { "effect_dof": "1" }
+    },
+    {
+      "id": "chromatic_aberration", "label": "Chromatic aberration",
+      "choices": [{ "label": "Off", "set": { "effect_chromatic_aberration": "0" } }, { "label": "On", "set": { "effect_chromatic_aberration": "1" } }],
+      "defaults": { "effect_chromatic_aberration": "1" }
+    },
+    {
+      "id": "skip_intro", "label": "Skip intro videos",
+      "choices": [{ "label": "Off", "set": { "skip_intro": "0" } }, { "label": "On", "set": { "skip_intro": "1" } }],
+      "defaults": { "skip_intro": "0" }
+    }
+  ],
+  "actions": [
+    { "id": "saves", "label": "Save folder", "open": "saves" },
+    { "id": "logs", "label": "Logs", "open": "logs" }
+  ]
+}

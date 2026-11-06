@@ -104,6 +104,7 @@ out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/
 # Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
 mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
+cp recomplauncher.json "$dest/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
@@ -126,6 +127,7 @@ cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
 cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
+cp docs/RECOMPLAUNCHER.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"

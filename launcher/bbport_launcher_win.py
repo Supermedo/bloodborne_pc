@@ -6741,6 +6741,10 @@ def restore_benchmark_backup(user):
 def main():
     global LANG
     args = sys.argv[1:]
+    if args[:1] in (['--prepare-content'], ['--recomplauncher-play']):
+        attach_stdio()
+        from bbport_recomplauncher import main as external_main
+        sys.exit(external_main(args, _ThisModule()))
     if args and args[0] in ('--run', '--script'):
         sys.exit(run_role(args))
     if args[:1] == ['--after'] and len(args) >= 2:
