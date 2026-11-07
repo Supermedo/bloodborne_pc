@@ -35,6 +35,14 @@ def hunters_dream_notice():
 
 
 NOTES = {
+    '1.9.8.2': (
+        None,
+        [('Online', [
+            'Summoning the same hunter again (on the next layer of a Chalice dungeon, or after a summon ended) '
+            'joins again: when the old connection to them had died, the summon never reached them and the host '
+            "waited a minute for nobody. A connection that stopped answering is now made anew, through the "
+            "server's relay when routers block the direct way.",
+        ])]),
     '1.9.8.1': (
         None,
         [('Seamless co-op', [

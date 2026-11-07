@@ -37,6 +37,10 @@ constexpr auto kMatching2EstablishDelay = std::chrono::milliseconds(1000);
 constexpr auto kStunPingInterval = std::chrono::seconds(5);
 constexpr s64 kHandshakeConnectTimeoutMs = 30'000;
 constexpr s64 kRelayAfterUs = 4'000'000; // no answer by then: use the shadNet relay
+// An established connection whose peer answered none of our echo pings (1 a second) for this
+// long is dead: the game reusing it for a new summon reached nobody (bbport, 2026-11-07: a dungeon
+// host summoning the same friend again on the next layer, 22 of 31 failed dungeon summons in 16 h).
+constexpr s64 kStaleAfterUs = 5'000'000;
 constexpr s64 kHandshakeRetransmitMs = 500;
 constexpr s64 kKeepaliveIntervalMs = 45'000;
 
@@ -151,6 +155,7 @@ void ProcessSignalingPacket(const void* data, u32 len, u32 from_addr, u16 from_p
             static_cast<s32>(pong.conn_id));
         if (transport_it != NpHandler::GetInstance().GetSignalingState().peer_transports.end()) {
             auto& transport = transport_it->second;
+            transport.last_peer_rx_us = NpSignaling::NowUs();
             const u32 idx =
                 transport.probe_sample_write_index % NpSignaling::PeerTransport::kProbeSampleCount;
             transport.probe_rtt_samples[idx] = rtt_us;
@@ -324,6 +329,29 @@ void SetTransportStateLocked(NpSignaling::PeerTransport& transport,
         new_state == NpSignaling::ConnState::Inactive) {
         transport.handshake_start_us = 0;
     }
+}
+
+// An established connection the peer stopped answering is connected again from the start: the
+// server is asked for the peer's address (it also tells the peer to connect back), a new
+// handshake, and the relay after kRelayAfterUs. True when it was stale.
+bool RestartIfStaleLocked(NpSignaling::PeerTransport& transport, std::string_view peer) {
+    const s64 now = NpSignaling::NowUs();
+    if (transport.state != NpSignaling::ConnState::Established || transport.last_peer_rx_us == 0 ||
+        now - transport.last_peer_rx_us <= kStaleAfterUs) {
+        return false;
+    }
+    LOG_INFO(Lib_NpSignaling,
+             "No answer from '{}' for {} s on the old connection: connecting to them again", peer,
+             (now - transport.last_peer_rx_us) / 1'000'000);
+    SetTransportStateLocked(transport, NpSignaling::ConnState::SendingOffer);
+    transport.transport_established_fired = false;
+    transport.peer_established = false;
+    transport.peer_activated = false;
+    transport.relayed = false;
+    transport.last_handshake_send_us = 0;
+    transport.handshake_start_us = 0;
+    transport.last_echo_ping_us = 0;
+    return true;
 }
 
 s32 AllocateTransportIdLocked() {
@@ -1485,6 +1513,7 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
         }
         auto& transport =
             NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+        const bool restarted = RestartIfStaleLocked(transport, peer_online_id_str);
         if (conn_id == 0) {
             conn_id = NpSignaling::AllocateConnectionIdLocked();
             if (conn_id < 0) {
@@ -1524,7 +1553,12 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
                 }
                 start_handshake = true;
             }
-            queue_activation = !was_locally_activated;
+            queue_activation = !was_locally_activated || restarted;
+            if (restarted) {
+                // The game is told again when the new connection is up.
+                ci.sig1_established_event_fired = false;
+                ci.mutual_fired = false;
+            }
         }
 
         NpHandler::GetInstance().GetSignalingState().npid_to_conn[lookup_key] = conn_id;
@@ -1675,6 +1709,7 @@ void StartMatching2(NpMatching2::ContextObject& ctx) {
             }
             auto& transport =
                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+            RestartIfStaleLocked(transport, OnlineIdString(member.np_id.handle));
             if (transport.state == NpSignaling::ConnState::WaitOffer) {
                 SetTransportStateLocked(transport, NpSignaling::ConnState::SendingOffer);
             }

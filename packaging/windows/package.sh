@@ -123,7 +123,7 @@ if [[ -f $seamless_exe && -f out/seamless/tools/party_boss_events.py ]]; then
     mkdir -p "$dest/seamless/tools" "$dest/seamless/scripts"
     cp out/seamless/tools/party_boss_events.py "$dest/seamless/tools/"
     cp out/seamless/scripts/hud_patch.py out/seamless/scripts/party_hud_icons.bin "$dest/seamless/scripts/"
-    for name in event-reference.json LICENSE CREDITS.txt VERSION.txt; do
+    for name in event-reference.json LICENSE CREDITS.txt VERSION.txt bbport-seamless.txt; do
         if [[ -f out/seamless/$name ]]; then cp "out/seamless/$name" "$dest/seamless/"; fi
     done
     if [[ -d out/seamless/licenses ]]; then cp -r out/seamless/licenses "$dest/seamless/"; fi
