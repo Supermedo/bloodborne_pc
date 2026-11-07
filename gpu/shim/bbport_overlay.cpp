@@ -689,7 +689,7 @@ void Menu() {
     if (ImGui::Checkbox("Show motion vectors (debug)", &show_motion)) {
         s.debug_view = show_motion ? BbSettings::DebugMotion : BbSettings::DebugNone;
     }
-    Hint("Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel has accurate object motion, beyond camera motion. A moving object with no blue or red/green is treated as stationary and may leave trails.");
+    Hint("Red/green: horizontal/vertical motion magnitude (8 render pixels per frame = full brightness). Blue: current-frame object-target coverage; depth validity is checked separately. Static surfaces use camera motion.");
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText("Frame generation");

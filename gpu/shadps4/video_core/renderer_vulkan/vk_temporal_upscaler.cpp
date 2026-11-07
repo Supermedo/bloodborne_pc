@@ -18,6 +18,7 @@
 #include "bbport_toggles.h"
 #include "ffx_vk_portable.h"
 #include "video_core/host_shaders/upscale_merge_comp.h"
+#include "video_core/host_shaders/upscale_motion_debug_comp.h"
 #include "video_core/host_shaders/upscale_reactive_comp.h"
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
@@ -1296,7 +1297,7 @@ void TemporalUpscaler::Run() {
         const vk::DescriptorImageInfo mask_info{.imageView = *reactive_view,
                                                 .imageLayout = vk::ImageLayout::eGeneral};
         // Sampled for the debug view only; the object image falls back to the motion image.
-        const vk::ImageView objects = camera_motion.ObjectMotionView();
+        const vk::ImageView objects = camera_motion.ObjectMotionView(w, h);
         const vk::DescriptorImageInfo motion_info{.imageView = *motion_view,
                                                   .imageLayout = vk::ImageLayout::eGeneral};
         const vk::DescriptorImageInfo objects_info{
@@ -1795,6 +1796,73 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
     ui_depth = depth_id;
 }
 
+void TemporalUpscaler::ShowScaledMotion(vk::CommandBuffer cmdbuf, u32 render_width, u32 render_height) {
+    // RunScaled bypasses the legacy composite's debug branch. Do not allocate or
+    // dispatch anything in normal rendering. This view requires the RGBA8 UI image;
+    // the presenter's HDR/display conversion happens later.
+    if (BbSettings::Get().debug_view != BbSettings::DebugMotion ||
+        ui_format != vk::Format::eR8G8B8A8Unorm)
+        return;
+    const auto device = instance.GetDevice();
+    if (!motion_debug_pipeline) {
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+        for (u32 i = 0; i < bindings.size(); ++i)
+            bindings[i] = {.binding = i,
+                           .descriptorType = i == 0 ? vk::DescriptorType::eStorageImage
+                                                    : vk::DescriptorType::eSampledImage,
+                           .descriptorCount = 1,
+                           .stageFlags = vk::ShaderStageFlagBits::eCompute};
+        motion_debug_desc_layout = Check(device.createDescriptorSetLayoutUnique(
+            {.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+             .bindingCount = u32(bindings.size()),
+             .pBindings = bindings.data()}));
+        motion_debug_pipeline_layout = Check(device.createPipelineLayoutUnique(
+            {.setLayoutCount = 1, .pSetLayouts = &*motion_debug_desc_layout}));
+        const auto module = CompileSPV(UPSCALE_MOTION_DEBUG_COMP, device);
+        motion_debug_pipeline = Check(device.createComputePipelineUnique(
+            {}, {.stage = {.stage = vk::ShaderStageFlagBits::eCompute,
+                           .module = module,
+                           .pName = "main"},
+                 .layout = *motion_debug_pipeline_layout}));
+        device.destroyShaderModule(module);
+    }
+    if (!ui_storage_view)
+        ui_storage_view = Check(device.createImageViewUnique(
+            {.image = vk::Image(ui_image),
+             .viewType = vk::ImageViewType::e2D,
+             .format = vk::Format::eR8G8B8A8Unorm,
+             .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}}));
+    const auto objects = camera_motion.ObjectMotionView(render_width, render_height);
+    const std::array<vk::DescriptorImageInfo, 3> images{
+        {{.imageView = *ui_storage_view, .imageLayout = vk::ImageLayout::eGeneral},
+         {.imageView = *motion_view, .imageLayout = vk::ImageLayout::eGeneral},
+         {.imageView = objects ? objects : *motion_view,
+          .imageLayout = vk::ImageLayout::eGeneral}}};
+    std::array<vk::WriteDescriptorSet, 3> writes{};
+    for (u32 i = 0; i < writes.size(); ++i)
+        writes[i] = {.dstBinding = i,
+                     .descriptorCount = 1,
+                     .descriptorType = i == 0 ? vk::DescriptorType::eStorageImage
+                                              : vk::DescriptorType::eSampledImage,
+                     .pImageInfo = &images[i]};
+    const auto all = vk::PipelineStageFlagBits2::eAllCommands;
+    const auto rw = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+    const vk::MemoryBarrier2 before{.srcStageMask = all,
+                                    .srcAccessMask = rw,
+                                    .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                                    .dstAccessMask = rw};
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &before});
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *motion_debug_pipeline);
+    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *motion_debug_pipeline_layout, 0,
+                                writes);
+    cmdbuf.dispatch((ui_width + 7) / 8, (ui_height + 7) / 8, 1);
+    const vk::MemoryBarrier2 after{.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+                                   .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
+                                   .dstStageMask = all,
+                                   .dstAccessMask = rw};
+    cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &after});
+}
+
 void TemporalUpscaler::RunScaled() {
     if (auto* profiler = GpuProfiler::Get()) {
         const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
@@ -1959,6 +2027,7 @@ void TemporalUpscaler::RunScaled() {
                 }
             }
         }
+        if (ok4) ShowScaledMotion(cmdbuf, w, h);
         if (fsr4)
             fsr4->ReleaseOutput(cmdbuf);
         done_this_frame = true;
@@ -2037,6 +2106,7 @@ void TemporalUpscaler::RunScaled() {
 
     done_this_frame = true; // the UI is not jittered
     if (ok) {
+        ShowScaledMotion(cmdbuf, w, h);
         ui_phase = true;
         ui_color = ldr_target;
         ui_depth = camera_motion.Depth();

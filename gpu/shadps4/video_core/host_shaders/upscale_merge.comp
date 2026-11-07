@@ -3,6 +3,7 @@
 // (post-processing reads data from it). Debug modes: 1 shows the reactive mask in red,
 // 2 the motion vectors given to the upscaler (red/green: |x|/|y|, 8 render pixels = full;
 // blue: the pixel has an object motion vector from its vertices, not camera motion).
+// Keep the color mapping in sync with upscale_motion_debug.comp (scaled UI path).
 #version 450
 #extension GL_EXT_samplerless_texture_functions : require
 

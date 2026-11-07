@@ -33,8 +33,8 @@ public:
     void SetObjectMotion(ObjectMotion* motion) noexcept {
         object_motion = motion;
     }
-    /// This frame's object motion image (after RecordMotion), for the debug view; or null.
-    vk::ImageView ObjectMotionView() const noexcept;
+    /// Current-frame object coverage at this render size, after RecordMotion; or null.
+    vk::ImageView ObjectMotionView(u32 width, u32 height) const noexcept;
     vk::Image ObjectMotionImage(u32 width, u32 height) const noexcept;
 
     void SetJitter(std::array<float, 2> value) noexcept {

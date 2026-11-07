@@ -30,6 +30,11 @@ public:
     }
 
     using DrawInfo = Motion::Draw;
+    /// Current-frame coverage at the requested render size, after PrepareRead.
+    [[nodiscard]] vk::ImageView CurrentView(u32 width, u32 height) const noexcept {
+        return enabled && Image(width, height) ? View() : vk::ImageView{};
+    }
+
     u32 PrepareDraw(const DrawInfo& draw);
     /// Small skeletons: whether the bone palette changed (Motion::History::Moving).
     bool Moving(const Motion::History::GateKey& key, u64 palette) {

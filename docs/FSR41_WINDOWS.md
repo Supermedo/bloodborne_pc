@@ -46,5 +46,24 @@ public Vulkan SDK. Actual support is determined by the selected driver/device.
 Both ML-FG 4.0.1 and 4.0.2 remain separate choices with their existing RX 9000,
 Windows 11, exact-provider and SDR requirements.
 
+## Motion-vector diagnostics
+
+**Show motion vectors (debug)** in the overlay visualizes the motion supplied to
+the temporal upscaler, including scaled output and custom render sizes. In the
+scaled path it runs on the RGBA8 UI image after reconstruction/sharpening and
+before the HUD; display/HDR conversion happens later.
+
+- Red/green show horizontal/vertical motion magnitude: 8 render pixels per frame
+  reach full brightness. Direction signs are not shown.
+- Blue marks current-frame object-target coverage at the matching render size.
+  The upscaler's separate depth-validity check may still reject those vectors.
+  Blue can remain when motion is zero; unwritten or mismatched targets add no blue.
+- Alpha is preserved. With the option off, no visualization dispatch runs.
+
+Compare colors at the same render resolution, camera movement and similar frame
+times. This view helps diagnose inputs; it does not identify a ghosting cause by itself.
+
+## Integration notes
+
 Regression fixtures cover failed loader retries, concurrent initialization, missing
 API callbacks, provider-independent host sharpening and package validation.

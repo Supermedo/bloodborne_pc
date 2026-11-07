@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Motion visualization after reconstruction/sharpening, before HUD rendering.
+// Keep the color mapping in sync with upscale_merge.comp (legacy 1080p path).
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform image2D scene;
+layout(binding = 1) uniform texture2D motion;
+layout(binding = 2) uniform texture2D objects;
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 output_size = imageSize(scene);
+    if (any(greaterThanEqual(pixel, output_size))) return;
+    const ivec2 size = textureSize(motion, 0);
+    const ivec2 p = min(pixel * size / output_size, size - 1);
+    const vec4 original = imageLoad(scene, pixel);
+    const vec2 mv = texelFetch(motion, p, 0).rg;
+    // Coverage in the object target does not establish depth validity at compose time.
+    const bool object = textureSize(objects, 0) == size && texelFetch(objects, p, 0).b > 0.99;
+    const float luma = dot(original.rgb, vec3(0.3, 0.6, 0.1));
+    const vec3 color = vec3(luma * 0.3) +
+        vec3(clamp(abs(mv) / 8.0, 0.0, 1.0), object ? 0.6 : 0.0);
+    imageStore(scene, pixel, vec4(color, original.a));
+}

@@ -153,6 +153,7 @@ private:
     void CaptureHudless(VideoCore::ImageId color);
     void CaptureHudlessUi();
     void RunScaled();
+    void ShowScaledMotion(vk::CommandBuffer cmdbuf, u32 render_width, u32 render_height);
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
     void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);
@@ -288,6 +289,9 @@ private:
     vk::UniqueDescriptorSetLayout merge_desc_layout;
     vk::UniquePipelineLayout merge_pipeline_layout;
     vk::UniquePipeline merge_pipeline;
+    vk::UniqueDescriptorSetLayout motion_debug_desc_layout;
+    vk::UniquePipelineLayout motion_debug_pipeline_layout;
+    vk::UniquePipeline motion_debug_pipeline;
     std::array<VideoCore::UniqueImage, 2> taa_history;
     std::array<vk::UniqueImageView, 2> taa_history_views;
     u32 taa_next = 0;
