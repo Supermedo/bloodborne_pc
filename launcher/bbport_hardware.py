@@ -200,7 +200,7 @@ class Gpu:
     @property
     def label(self):
         group = self.group.split(' (')[0]
-        if self.igpu:
+        if self.igpu or self.group == GENERIC:
             return self.name
         if group.split()[-1] == self.name.split()[0]:
             group = ' '.join(group.split()[:-1])
@@ -440,6 +440,26 @@ def match_gpu(name, vram_gb=None):
     return best
 
 
+GENERIC = 'Not in the list'
+
+
+def generic_gpu(name, integrated, vram_gb):
+    """A rough entry for a card the table doesn't know (Steam Deck's "AMD Custom GPU 0405", "AMD Radeon(TM)
+    Graphics", RX 7600S, RX 9060, RTX 2050, R82), from its maker, the integrated flag and the video memory:
+    without one it got no rating and kept the defaults, every effect on. None for an unknown maker (a virtual
+    or software device)."""
+    vendor = vendor_of(name)
+    if not vendor:
+        return None
+    full = re.sub(r'\s+', ' ', re.sub(r'\((r|tm)\)', '', name, flags=re.I)).strip()
+    if integrated:
+        return Gpu(vendor, GENERIC, full, 0, 20, 'igpu')
+    model = re.sub(r'^(nvidia|amd|intel)\s*(geforce|radeon)?\s*', '', full, flags=re.I).strip() or full
+    score = 30 if vram_gb < 4 else 45 if vram_gb <= 4 else 60 if vram_gb <= 6 else 75 if vram_gb <= 8 else \
+        110 if vram_gb <= 12 else 150
+    return Gpu(vendor, GENERIC, model, vram_gb, score)
+
+
 def best_gpu_line(lines):
     """The card a laptop with two plays on: a discrete one first, then the most video memory."""
     if not lines:
@@ -468,13 +488,17 @@ RESOLUTIONS = ('1080p', '1440p', '4K')
 
 
 def gpu_tier(g):
-    if not g.vulkan13 or g.score < 25:
+    # The website's thresholds since R82: players' RX 580, GTX 1060 6 GB and GTX 1660 ran 55–65 FPS where
+    # 70 / 112 rated them "About 30 FPS", an Arc B580 78 FPS where it read "Minimum". Integrated graphics
+    # stay at most "Above minimum".
+    if not g.vulkan13 or g.score < 12:
         return 0
     # Under 4 GB of video memory is below the minimum, not a stop: a player's GTX 1060 3 GB played up
     # to the Blood-Starved Beast. The launcher gives such a card the settings for 4 GB cards.
     if (not g.igpu and g.vram < 4) or g.score < 35:
         return 1
-    return 2 if g.score < 70 else 3 if g.score < 112 else 4 if g.score < 170 or g.vram < 12 else 5
+    tier = 2 if g.score < 55 else 3 if g.score < 85 else 4 if g.score < 170 or g.vram < 12 else 5
+    return min(tier, 3) if g.igpu else tier
 
 
 def resolution_levels(g, tier):
@@ -499,7 +523,8 @@ def cpu_tier(cpu):
         return 0
     if cpu.score is None:
         return 2  # not in the tables: counted as the minimum
-    return 1 if cpu.score < 85 else 2 if cpu.score < 125 else 3 if cpu.score < 160 else 4
+    # "Above minimum" from 115 (R82): i5-10400F, Ryzen 5 3600, i7-8700K and i7-9700K hold 60 FPS.
+    return 1 if cpu.score < 85 else 2 if cpu.score < 115 else 3 if cpu.score < 160 else 4
 
 
 def ram_tier(gb):
@@ -636,7 +661,10 @@ def outputs(width, height):
     else:
         variants = {'1080p': '1920x1080', '1440p': '2560x1440', '4K': '3840x2160'}
     limit = {'1080p': 0, '1440p': 1400, '4K': 2100}
-    return {res: value for res, value in variants.items() if height >= limit[res]}
+    found = {res: value for res, value in variants.items() if height >= limit[res]}
+    if height < 1080:
+        found['1080p'] = f'{width}x{height}'  # never above the display (R82: 1366x768 got 1920x1080)
+    return found
 
 
 def resolution_class(output):
@@ -649,9 +677,11 @@ def resolution_class(output):
 
 
 def recommended_class(rating, available):
+    """By what the card can do (picture_levels): a slow processor holds the frame rate down at every
+    resolution, so a smaller output would not add frames, only cost picture."""
     for wanted in (4, 3):
         for res in reversed(RESOLUTIONS):
-            if res in available and rating.levels[res] >= wanted:
+            if res in available and rating.picture_levels[res] >= wanted:
                 return res
     return '1080p'
 
@@ -704,7 +734,9 @@ def profile(rating, res, output, current=None, goal='smooth'):
     add('ini', 'output_res', output, 'The highest resolution up to your display at which your PC is expected to '
                                      'reach 60 FPS or more (else 30–60, else 1080p).' if output != '1280x720' else
         'Below the minimum at 1080p: 720p, the low end of the minimum requirements.')
-    if four_gb:
+    if four_gb and g.dlss:
+        add('ini', 'upscaler', 'dlss', 'DLSS on a GeForce RTX, also with 4 GB of video memory.')
+    elif four_gb:
         add('ini', 'upscaler', 'fsr3', 'The website\'s settings for 4 GB cards: FSR 3.1.')
     elif upscaler == 'off':
         add('ini', 'upscaler', 'off', 'Intel graphics: stretched polygons can still appear with an upscaler on.')
@@ -754,10 +786,10 @@ def profile(rating, res, output, current=None, goal='smooth'):
         lod, why = '0', 'Goal "Quiet": model detail as in the game.'
     elif (picture >= 5 or (goal == 'balanced' and picture >= 4)) and g.vram >= 8 and rating.ram >= 16:
         lod, why = '-2', 'Highest model detail: your card has room to spare at this resolution.'
-    elif picture >= 3 and not g.igpu:
+    elif not g.igpu and rating.tiers['gpu'] >= 2:
         lod, why = '0', 'Model detail as in the game.'
     else:
-        lod, why = '1', 'Lower model detail: below "Above minimum" every millisecond counts.'
+        lod, why = '1', 'Lower model detail: integrated graphics or a card below the minimum.'
     add('ini', 'model_lod', lod, why)
     if goal == 'quiet':
         add('ini', 'object_motion', False, 'Goal "Quiet": object motion vectors off (they cost about 5–10% FPS).')
