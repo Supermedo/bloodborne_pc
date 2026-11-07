@@ -446,6 +446,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 # A new key: the first test build saved 'translucent' on for everyone.
                 'translucent_window': False,
                 'windows_title_bar': False,  # Windows' caption instead of the launcher's own (bbport_frame)
+                'launcher_place': '',  # where the launcher window was at its last close (window_place, R30)
                 # The game's window (bbport_display): its monitor ('' = the main one), its size in a
                 # window ('output', 'last' or 'custom'), the player's own size and the last one it had.
                 'game_monitor': '', 'window_size': 'output', 'window_custom': '1600x900', 'window_last': '',
@@ -636,6 +637,29 @@ def load_settings():
     except OSError:
         pass
     return settings
+
+
+def placed(text, width=400):
+    """(x, y, zoomed) of the launcher's place at its last close ('x,y' or 'x,y,zoomed', window_place), or None
+    when there is none or no part of its title bar (`width` wide) is on a connected monitor now (a monitor
+    unplugged: the window opened off screen). Its left end, middle or right end will do: with monitors of
+    different scaling the top left can lie in a gap between them in Tk's (system DPI aware) coordinates, the
+    window still on the second monitor. MonitorFromPoint uses the same coordinates on this thread."""
+    parts = str(text or '').split(',')
+    try:
+        x, y = int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return None
+    try:
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = ctypes.c_void_p
+        spots = (x + 80, x + width // 2, x + width - 80)  # along the title bar; MONITOR_DEFAULTTONULL
+        if not any(user32.MonitorFromPoint(wintypes.POINT(spot, y + 16), 0) for spot in spots):
+            return None
+    except (AttributeError, OSError, ValueError):
+        return None
+    return x, y, parts[2:] == ['zoomed']
 
 
 def write_settings(settings):
@@ -1631,6 +1655,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         free_w, free_h = root.winfo_screenwidth() - self.px(40), root.winfo_screenheight() - self.px(80)
         root.geometry(f'{min(self.px(1180), free_w)}x{min(self.px(760), free_h)}')
         root.minsize(min(self.px(1000), free_w), min(self.px(680), free_h))
+        # Where it was at its last close, on that monitor (it always opened on the main one: R30).
+        place = placed(self.app.get('launcher_place'), min(self.px(1180), free_w))
+        if place:
+            root.geometry(f'+{place[0]}+{place[1]}')
+            if place[2]:
+                root.state('zoomed')
         self.compact = min(self.px(760), free_h) < self.px(740)  # a short screen: smaller banner and emblem
         theme.load_fonts(root)
         self.theme = theme.Theme(root, self.dpi)
@@ -6736,6 +6766,17 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.ui_calls.put(done)
         threading.Thread(target=work, daemon=True).start()
 
+    def window_place(self):
+        """The window's place for the next start (placed): its top left, or a point of its monitor and 'zoomed' when
+        maximized; '' when it is on the task bar. Read once at close, nothing while it is dragged."""
+        state = self.root.state()
+        if state == 'zoomed':
+            return f'{self.root.winfo_rootx()},{self.root.winfo_rooty()},zoomed'
+        if state != 'normal':
+            return ''
+        match = re.search(r'\+(-?\d+)\+(-?\d+)$', self.root.geometry())  # WxH+X+Y, '+-8' left of the screen
+        return f'{int(match[1])},{int(match[2])}' if match else ''
+
     def close(self):
         if self.test_running():  # a game test: its game must not stay behind
             if not self.messagebox.askyesno('Bloodborne', _('A game test is running. Stop it and close the launcher?')):
@@ -6743,6 +6784,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.bench.cancelled = True
             subprocess.run(['taskkill', '/IM', 'bb-probe.exe', '/F'], capture_output=True, creationflags=NO_WINDOW)
         try:
+            self.app['launcher_place'] = self.window_place() or self.app.get('launcher_place', '')
             self.collect()
         except Exception:  # never keep the window open over a settings problem
             pass
