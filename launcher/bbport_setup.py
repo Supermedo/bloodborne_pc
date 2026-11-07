@@ -1629,6 +1629,8 @@ class SetupMixin:
             return
         if not saves.to_recycle_bin(item.path):
             self.messagebox.showerror('Bloodborne', _('Could not move the backup to the Recycle Bin.'))
+        else:
+            saves.drop_outside(item.path)  # its copy outside the port folder (R86) goes with it
         self.refresh_saves()
 
     # ---- small pieces ----------------------------------------------------------------------------
