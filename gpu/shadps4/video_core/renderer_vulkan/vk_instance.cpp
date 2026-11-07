@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_fsr4vk.h"
+#include "video_core/renderer_vulkan/vk_low_latency.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 #include <vk_mem_alloc.h>
@@ -27,7 +28,6 @@
 #include "fg401_support.h"
 #include "fsr411_support.h"
 #include "fsr411_vulkan_support.h"
-#include "video_core/renderer_vulkan/vk_low_latency.h"
 #endif
 
 namespace Vulkan {

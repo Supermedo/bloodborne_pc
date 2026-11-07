@@ -42,6 +42,7 @@ int bbgpu_input_reload_requested(void) {
     stub_reload_requested=0;
     return r;
 }
+void bbgpu_input_note_read(void) {}
 
 static void inject(const char *path, const char *tokens) {
     FILE *f=fopen(path,"w");

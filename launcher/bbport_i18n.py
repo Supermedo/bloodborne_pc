@@ -143,6 +143,104 @@ EN = {
     "Слои валидации Vulkan": "Vulkan validation layers",
     "Сильно замедляет": "Much slower",
     "Доп. переменные (ИМЯ=значение через пробел)": "Extra variables (NAME=value, space-separated)",
+    # Online (bbport_linux_online)
+    "Онлайн": "Online",
+    "Призыв, послания и пятна крови других охотников. Применяется при запуске.":
+        "Summons, messages and bloodstains of other hunters. Applied at start.",
+    "Играть онлайн": "Play online",
+    "Серверы supermedo.com с бесплатным аккаунтом (ниже)": "supermedo.com's own servers, with a free account (below)",
+    "SuperMedo Seamless co-op (бета)": "SuperMedo Seamless co-op (beta)",
+    "Только в Windows: BBSC — программа для Windows, Linux-версию игры она не запускает":
+        "Windows only: BBSC is a Windows program and cannot start the Linux game",
+    "Роутер сам открывает порт игры другим охотникам": "The router opens the game's port for other hunters by itself",
+    "Соединение с сервером": "Connection to the server",
+    "Проверить": "Test",
+    "Проверка…": "Checking…",
+    "Аккаунт SuperMedo": "SuperMedo account",
+    "Аккаунт": "Account",
+    "Войти через Discord": "Sign in with Discord",
+    "Выйти": "Sign out",
+    "Вход выполнен: {}": "Signed in as {}",
+    "Вход не выполнен: войдите через Discord или создайте аккаунт ниже":
+        "Not signed in: sign in with Discord, or create an account below",
+    "Запуск входа…": "Starting the sign-in…",
+    "Войдите через Discord на открывшейся странице и вернитесь сюда: {}":
+        "Sign in with Discord in the page that opened, then come back here: {}",
+    "Вход не удался: {}": "Sign-in failed: {}",
+    # Sign-in with a password, fair play, the start steps from Windows
+    "Пароль": "Password",
+    "Вход по паролю": "Sign in with a password",
+    "Войти": "Sign in",
+    "Введите Online ID и пароль": "Enter your Online ID and password",
+    "Нет связи с сервером: {}": "Cannot reach the server: {}",
+    "Только офлайн: в онлайн-игре остаётся выключенным": "Offline only: stays off in online play",
+    "Читы и функции отладки работают только офлайн — честно по отношению к другим игрокам. Сейчас включены: {}.":
+        "Cheats and debug features run offline only, fair to the other players. On now: {}.",
+    "Отмена": "Cancel",
+    "Играть офлайн с ними": "Play offline with them",
+    "Играть онлайн без них": "Play online without them",
+    "Выход на рабочий стол в меню игры": "Quit to Desktop in the game's menus",
+    "Настройки ПК в системном меню игры": "PC Settings in the game's System menu",
+    "Перерождение у Куклы": "Rebirth at the Doll",
+    "Поле зрения": "Field of view",
+    "Градусы; в игре — 43": "Degrees; the game's is 43",
+    "Положение HUD на ультрашироком экране": "HUD position on an ultrawide screen",
+    "У краёв экрана": "Screen edges",
+    "Посередине": "Halfway",
+    "По центру (16:9)": "Centred (16:9)",
+    "V-Sync и ограничение кадров чуть ниже частоты экрана": "V-Sync and a frame cap just below the refresh rate",
+    "Низкая задержка": "Low latency",
+    "Авто (NVIDIA: включена + Boost)": "Auto (NVIDIA: On + Boost)",
+    "Выключена": "Off",
+    "Включена + Boost": "On + Boost",
+    "Сохранения": "Saves",
+    "Копия сохранений при запуске": "Back up saves at start",
+    "В папке save-backups рядом с сохранениями; хранятся последние 10":
+        "In save-backups beside the saves; the newest 10 are kept",
+    "Новый аккаунт SuperMedo": "New SuperMedo account",
+    "Не нужен при входе через Discord: Discord сам создаёт аккаунт с вашим именем в Discord":
+        "Not needed with Discord: signing in with Discord makes the account, named after your Discord name",
+    "Новый Online ID (1–16 букв, цифр, _ или -)": "New Online ID (1 to 16 letters, numbers, _ or -)",
+    "Новый пароль": "New password",
+    "Эл. почта (только для создания аккаунта)": "Email address (only to make the account)",
+    "Создать аккаунт": "Create account",
+    "Создать": "Create",
+    "Введите новый Online ID, пароль и адрес эл. почты": "Enter a new Online ID, a password and your email address",
+    "Создание аккаунта…": "Creating the account…",
+    "Сервер SuperMedo недоступен: {}": "SuperMedo Server could not be reached: {}",
+    "Не удалось создать аккаунт: {}": "The account could not be created: {}",
+    "Аккаунт {} создан, вход выполнен. Нажмите «Запустить»": "Account {} created and signed in. Press Play to go online",
+    "Войдите в аккаунт SuperMedo на странице «Онлайн» или выключите онлайн":
+        "Sign in to your SuperMedo account on the Online page, or turn online off",
+    "Отряд (игра с друзьями)": "Party (play with friends)",
+    "Пока вы в отряде, ваши знаки призыва и Колокол зова находят только охотников отряда, "
+    "без ограничения по уровню. До 4 охотников.":
+        "While you are in a party, your summon signs and your Beckoning Bell find only your party's hunters, "
+        "with no level limit. Up to 4 hunters.",
+    "Ваш отряд": "Your party",
+    "Не в отряде": "Not in a party",
+    "Обновить": "Refresh",
+    "Код отряда": "Party code",
+    "Отправьте код друзьям. Новый код отменяет старый; кто уже в отряде, остаётся":
+        "Send this code to your friends. A new code stops the old one; friends already in stay",
+    "Скопировать": "Copy",
+    "Код скопирован": "Code copied",
+    "Новый код": "New code",
+    "Вступить по коду друга (SM-XXXX-XXXX)": "Join with a friend's code (SM-XXXX-XXXX)",
+    "Создать код отряда": "Make party code",
+    "Покинуть отряд": "Leave party",
+    "Сначала войдите в аккаунт SuperMedo (выше)": "Sign in to your SuperMedo account first (above)",
+    "Ответ сервера SuperMedo: {}": "SuperMedo Server said: {}",
+    "В отряде {}/{}": "In the party {}/{}",
+    "хост": "host",
+    "в сети": "online",
+    "не в сети": "offline",
+    "уровень {}": "level {}",
+    "Исключить": "Kick",
+    "Это сохранения Seamless co-op из Windows (seamless-coop): без BBSC их предметы "
+    "показываются как ?GoodsName?. Выберите обычную папку user":
+        "These are Seamless co-op's saves from Windows (seamless-coop): without BBSC their items show as "
+        "?GoodsName?. Choose the normal user folder",
 }
 
 

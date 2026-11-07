@@ -7,8 +7,13 @@
 int bbgpu_overlay_captures_input(void) { return 0; }
 void bbgpu_mouse_take(BbMouseInput *out) { memset(out,0,sizeof(*out)); }
 void bbgpu_input_configure(int mode,int32_t toggle,int32_t reload) { (void)mode;(void)toggle;(void)reload; }
-void bbgpu_mouse_camera_configure(int direct,float sensitivity) { (void)direct;(void)sensitivity; }
+void bbgpu_mouse_camera_configure(int direct,float sensitivity,float scale_x,float scale_y,int sync) {
+    (void)direct;(void)sensitivity;(void)scale_x;(void)scale_y;(void)sync;
+}
+void bbgpu_prompts_configure_pad(const char *const *buttons,int count) { (void)buttons;(void)count; }
+void bbgpu_prompts_configure(const char *const *inputs,int count) { (void)inputs;(void)count; }
 int bbgpu_input_reload_requested(void) { return 0; }
+void bbgpu_input_note_read(void) {}
 uintptr_t runtime_lookup(const RuntimeExport *table,size_t count,const char *name) {
     (void)table;(void)count;(void)name;return 0;
 }
