@@ -127,6 +127,7 @@ add_host_shader(taa.comp taa_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
 add_host_shader(taa_sharpen.comp taa_sharpen_direct_comp DIRECT_HALF_INPUT=1)
+add_host_shader(taa_sharpen.comp taa_sharpen_fused_comp DIRECT_HALF_INPUT=1 LDR_OUTPUT=1 FUSED_LDR_OUTPUT=1)
 add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
 add_host_shader(depth_resample.frag depth_resample_frag)
 add_host_shader(depth_resample.frag depth_stencil_resample_frag HAS_STENCIL=1)
@@ -516,6 +517,12 @@ set_source_files_properties(../tests/test_fsr411_sharpen.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(fsr411-sharpen-test PRIVATE Vulkan::Vulkan)
 add_dependencies(fsr411-sharpen-test host_shaders)
+
+add_executable(fsr41-fused-output-test EXCLUDE_FROM_ALL ../tests/test_fsr41_fused_output.cpp)
+target_include_directories(fsr41-fused-output-test PRIVATE shim shadps4 ${SHADER_INCLUDE})
+target_compile_options(fsr41-fused-output-test PRIVATE -fPIC)
+target_link_libraries(fsr41-fused-output-test PRIVATE Vulkan::Vulkan)
+add_dependencies(fsr41-fused-output-test host_shaders)
 
 # Normalize dependency include paths for the Windows driver integration.
 foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)

@@ -30,6 +30,11 @@ checking, failed verification or a disabled provider. A failed check is not a
 hardware exclusion. The renderer also validates context creation at the actual
 render size. Provider activation is recorded in the game log.
 
+**Host sharpening:** FSR 4.1.1/4.1.2 use the existing RCAS switch and strength
+control with either backend. Positive sharpening combines with RGBA8 UI output
+where available, saving a separate intermediate image and transfer. The game log
+identifies the active sharpening route when it changes.
+
 Method selection in **Insert / L3+R3** applies live. If a requested method fails,
 the running method can be restored and the overlay reports that outcome.
 Motion-vector cache changes retain their restart requirement. All family/status
