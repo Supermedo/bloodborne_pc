@@ -108,6 +108,7 @@ WORDS = {
     'minimize_to_tray': 'tray taskleiste infobereich symbol notification area',
     'reopen_after_game': 'wieder oeffnen reopen back',
     'discord_status': 'discord rich presence status profil profile activity aktivitaet',
+    'discord_stats': 'discord stats statistics level echoes blood echoes insight blut echoe einsicht',
     'menu_key': 'overlay menu insert hotkey taste einstellungen ingame in-game key rebind',
     'menu_pad': 'overlay menu l3 r3 select start controller gamepad combo',
     'windows_title_bar': 'titelleiste title bar caption rahmen fensterrahmen windows',
