@@ -436,7 +436,7 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
 
 
 # Patches only the port's own file has (patches/Bloodborne.xml of any version since 1.8).
-PORT_ONLY_PATCHES={"Faster play log",'Larger Frame Heaps'}
+PORT_ONLY_PATCHES={'Larger Frame Heaps'}
 
 
 def port_patch_file(path, root):
@@ -458,7 +458,7 @@ def external_patches(directory, app_version='01.09', exclude=Path(__file__).reso
     directory=Path(directory)
     for path in sorted(directory.glob('*.xml')) if directory.is_dir() else []:
         if path.resolve()==Path(exclude).resolve(): continue  # the built-in file (patches/ in a checkout)
-        # Left by bbbridge's app: play logs every 5 s to The Hunter's Dream.
+        # Left by another online app (a live map's play-log patch): not a patch for this port.
         if path.name.lower()=='bbbridge-live-map.xml': continue
         try:
             root=ET.parse(path).getroot()

@@ -47,14 +47,14 @@ class StartTests(Folders):
         game_env = {'PATH': 'p', 'BB_RENDER_RES': '2560x1440', 'BB_UPSCALER': 'dlss', 'BB_MODS_ENABLED': '1',
                     'BB_MODS_DIR': 'my-mods', 'BB_PATCHES_DIR': 'my-patches', 'BB_GAME_DIR': 'my-game',
                     'BB_PROBE': 'normal', 'BB_FPS': 'uncap', 'BB_FPS_LIMIT': '30', 'BB_USER_DIR': 'normal-saves',
-                    'BB_ONLINE': '1', 'BB_SHADNET_SERVER': 'normal:31313', 'BB_NET_BACKEND': 'thd',
-                    'BB_THD_TOKEN': 't', 'BBSC_EMULATOR': 'x', 'SHADPS4_BLOODBORNE_PARTY': '1'}
+                    'BB_ONLINE': '1', 'BB_SHADNET_SERVER': 'normal:31313',
+                    'BBSC_EMULATOR': 'x', 'SHADPS4_BLOODBORNE_PARTY': '1'}
         settings = {'supermedo_npid': ' hunter ', 'supermedo_pass': 'secret', 'yt_enemies': 'on', 'yt_rot': True,
                     'yt_travel': False, 'yt_vote': True, 'yt_tempo': 'relentless'}
         env = yharnam.environment(self.port, self.root / 'view', settings, '1.2.3.4', KEY, game_env)
         for name in ('PATH', 'BB_RENDER_RES', 'BB_UPSCALER', 'BB_PATCHES_DIR'):  # the player's
             self.assertEqual(env[name], game_env[name])
-        for name in ('BB_NET_BACKEND', 'BB_THD_TOKEN', 'BBSC_EMULATOR', 'SHADPS4_BLOODBORNE_PARTY'):
+        for name in ('BBSC_EMULATOR', 'SHADPS4_BLOODBORNE_PARTY'):
             self.assertNotIn(name, env)
         self.assertEqual(env['BB_PROBE'], str(self.port / 'bin' / 'bb-probe-seamless.exe'))
         self.assertEqual(env['BB_GAME_DIR'], str(self.root / 'view' / 'CUSA03173'))

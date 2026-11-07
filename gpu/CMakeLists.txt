@@ -198,8 +198,7 @@ add_library(bbgpu ${BBGPU_KIND} ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOU
     shadps4/core/libraries/videodec/video_utils.cpp)
 add_dependencies(bbgpu host_shaders)
 # bbport online: shadPS4 v.0.20.0's network, NP and shadNet sources (bbnet/vendor/shadps4,
-# 529ceb3, with bbnet/vendor-changes.diff) and The Hunter's Dream backend (bbnet/thd, from
-# droogie's bbhost), as Awaken (Awakenchan/BloodBorneButPc) put them together.
+# 529ceb3, with bbnet/vendor-changes.diff), as Awaken (Awakenchan/BloodBorneButPc) put them together.
 # See bbnet/SHADNET-PORT.md.
 find_package(Protobuf CONFIG REQUIRED)
 set(BBNET_VENDOR "${CMAKE_CURRENT_SOURCE_DIR}/bbnet/vendor/shadps4")
@@ -217,9 +216,8 @@ file(GLOB_RECURSE BBNET_SOURCES CONFIGURE_DEPENDS
 # Trophies, commerce and the profile and Facebook dialogs stay in the C runtime.
 list(FILTER BBNET_SOURCES EXCLUDE REGEX
     "np_trophy|trophy_ui|np_sns_facebook_dialog|np_profile_dialog/|np_commerce/")
-file(GLOB BBNET_THD_SOURCES CONFIGURE_DEPENDS bbnet/thd/*.cpp)
 find_package(nlohmann_json CONFIG REQUIRED)
-add_library(bbnet STATIC ${BBNET_SOURCES} ${BBNET_THD_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
+add_library(bbnet STATIC ${BBNET_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
     bbnet/bbnet_glue.cpp)
 target_include_directories(bbnet PRIVATE bbnet/include bbnet shim "${BBNET_VENDOR}"
     "${BBNET_VENDOR}/shadnet" shadps4 "${SHADNET_PROTO_OUT}" third_party/imgui third_party/httplib)
@@ -231,7 +229,7 @@ target_compile_definitions(bbnet PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_Z
 # OpenSSL verifies the server's chain (with the Windows ROOT and CA stores) and the host name.
 # cpp-httplib's second check on Windows rebuilt the chain from the leaf alone and could pick an
 # expired cross-signed "ISRG Root X2" from the user's intermediate store: "SSL server
-# verification failed" (error 10) for The Hunter's Dream on some PCs.
+# verification failed" (error 10) on some PCs.
 target_compile_definitions(bbnet PRIVATE CPPHTTPLIB_DISABLE_WINDOWS_AUTOMATIC_ROOT_CERTIFICATES_UPDATE)
 target_link_libraries(bbnet PRIVATE OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
 # The ISRG roots the port carries and Windows' check of the server's whole chain (windows_trust.h)

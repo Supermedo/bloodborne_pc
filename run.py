@@ -43,7 +43,6 @@ def vulkan_driver_note(env):
 # Co-op: the community service that answers Bloodborne's own game-server requests
 # (messages, bloodstains, sign-in); summon requests go to the shadNet server instead.
 COMMUNITY_SERVER = 'https://game.supermedo.com'
-HUNTERS_DREAM_SERVER = 'https://thehuntersdream.com'  # The Hunter's Dream pool's own (BB_HUNTERS_DREAM=1)
 GAME_SERVER = 'https://ss4.scej-network.jp:20443'
 # The server's ss.info sends the game to this port for its API (summons among them).
 COMMUNITY_API_PORT = 18671
@@ -83,9 +82,8 @@ def online_overrides(env, user_dir):
         scheme, host = community.split('://', 1)
         host = host.split('/', 1)[0].rsplit(':', 1)[0] if re.search(r':\d+$', host) else host  # its API port below
         # The game's own server functions (messages, bloodstains, summon signs) go over HTTP to
-        # the game server only, as bbhost and Awaken's port send them; never through a shadNet
-        # WebAPI (Metr1k, The Hunter's Dream). Play logs go to its API port instead of
-        # FromSoftware's old storage buckets.
+        # the game server only, as Awaken's port sends them; never through a shadNet WebAPI.
+        # Play logs go to its API port instead of FromSoftware's old storage buckets.
         overrides = {GAME_SERVER: community}
         overrides.update({f'https://{bucket}:443': f'{scheme}://{host}:{COMMUNITY_API_PORT}'
                           for bucket in ('bb-playlog-prod.s3.amazonaws.com',
@@ -93,35 +91,6 @@ def online_overrides(env, user_dir):
         print(f'Co-op: game server {community}')
         path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
     env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
-
-
-# The Hunter's Dream co-op pool (BB_NET_BACKEND=thd, with bbhost players): the engine's own
-# backend for it (gpu/bbnet/thd, bbhost's protocol, from Awaken's port). The game's servers and
-# play logs go to the game server over HTTP; the account comes from the launcher's Discord sign-in.
-LIVE_MAP_PATCH = "Faster play log"
-PLAY_LOG_HOSTS = ('bb-playlog-prod.s3.amazonaws.com', 'bb-playlog-test.s3.amazonaws.com')
-
-
-def hunters_dream(env, user_dir):
-    if not env.get('BB_THD_TOKEN') or not env.get('BB_THD_ONLINE_ID'):
-        fail("The Hunter's Dream: not signed in. Sign in with Discord on the launcher's Online page.")
-    community = (env.get('BB_COMMUNITY_SERVER') or HUNTERS_DREAM_SERVER).rstrip('/')
-    if '://' not in community:
-        community = 'https://' + community
-    base = community
-    overrides = {'*.scej-network.jp': base}
-    overrides.update({host: f'{base}:{COMMUNITY_API_PORT}' for host in PLAY_LOG_HOSTS})
-    path = user_dir / 'host_overrides.json'
-    path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
-    for key in ('BB_SHADNET_SERVER', 'BB_SHADNET_WEBAPI', 'BB_SHADNET_NPID', 'BB_SHADNET_PASSWORD',
-                'BB_SHADNET_TOKEN'):
-        env.pop(key, None)
-    env.update(SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(path), BB_THD_SERVER=f'{base}:{COMMUNITY_API_PORT}',
-               BB_THD_AUTH=base)
-    env.setdefault('BB_THD_RULESET', 'vanilla')
-    env.setdefault('BB_P2P_PORT', '3658')
-    env.setdefault('BB_SIGN_TIMEOUT', '30')
-    print(f"Co-op: The Hunter's Dream as {env['BB_THD_ONLINE_ID']} ({base})")
 
 
 # The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
@@ -923,8 +892,6 @@ def main():
                         notes.append('no draw-preparation workers')
             print(f'Low-VRAM profile ({vram} MiB card): {", ".join(notes)}; BB_LOW_VRAM=0 turns it off')
         extra = env.get('BB_PATCHES', '')
-        if env.get('BB_ONLINE') == '1' and env.get('BB_NET_BACKEND') == 'thd' and env.get('BB_BRIDGE_LIVE_MAP') == '1':
-            extra = ';'.join(filter(None, (extra, LIVE_MAP_PATCH)))
         lang = env.get('BB_LANGUAGE') or read_settings(config).get('language')
         if lang in ('10', '11'):
             if 'Unlock Game Region' not in extra:
@@ -957,9 +924,7 @@ def main():
             for save in sorted(Path(saves_dir).glob('savedata/*/*/SPRJ0005')):
                 run_script('bbsc_items.py', '--repair', save, '--backups',
                            Path(saves_dir) / 'bbsc-repair-backups', optional=True)
-        if env.get('BB_ONLINE') == '1' and env.get('BB_NET_BACKEND') == 'thd':
-            hunters_dream(env, user_dir)
-        elif env.get('BB_ONLINE') == '1':
+        if env.get('BB_ONLINE') == '1':
             online_overrides(env, user_dir)
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         restart = [sys.executable, *this, '--after', str(os.getpid()), *args]

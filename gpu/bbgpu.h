@@ -18,9 +18,7 @@ typedef struct {
 void bbgpu_register_kernel(void);
 /* Co-op: the game folder and param.sfo identity for the network and PSN libraries. */
 void bbnet_configure(const char *app0, const char *serial, const char *title, const char *app_ver);
-/* The game's code before the patches (The Hunter's Dream backend), then the online session's
- * start (bbnet/bbnet_glue.cpp). */
-void bbnet_set_image(unsigned char *image, uint64_t size);
+/* The online session's start (bbnet/bbnet_glue.cpp). */
 void bbnet_initialize(void);
 /* Creates window, Vulkan device, presenter and GPU command processor. */
 int bbgpu_init(const BbGpuConfig *config);

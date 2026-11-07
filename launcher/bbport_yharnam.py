@@ -581,10 +581,10 @@ def host_rules(settings):
     return ','.join(words) or 'off'
 
 
-# The normal online game's settings in game_environment (its server, account, network backend and engine): the
+# The normal online game's settings in game_environment (its server, account and engine): the
 # seamless game has its own.
-NORMAL_ONLINE = ('BB_ONLINE', 'BB_NET_BACKEND', 'BB_COMMUNITY_SERVER', 'BB_BRIDGE_LIVE_MAP', 'BB_UPNP', 'BB_PROBE')
-NORMAL_ONLINE_PREFIXES = ('BB_SHADNET_', 'BB_THD_', 'BBSC_', 'SHADPS4_')
+NORMAL_ONLINE = ('BB_ONLINE', 'BB_COMMUNITY_SERVER', 'BB_UPNP', 'BB_PROBE')
+NORMAL_ONLINE_PREFIXES = ('BB_SHADNET_', 'BBSC_', 'SHADPS4_')
 
 
 def script_environment(base=None):

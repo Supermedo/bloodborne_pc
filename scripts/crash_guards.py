@@ -5,7 +5,7 @@
 - Online event without its data (0x1EB3D10, case 0). The game describes an event (r13: the event, its
   type the switch's value; r12: its data) and returns whether it could, the low byte of r12; an event
   type it does not know goes to 0x1EB3DD0: r12 = 0, "could not". Case 0 copies a string from r12 + 0x80
-  without checking r12: a player on The Hunter's Dream crashed there ("read access to 00000000000000a0
+  without checking r12: a player online crashed there ("read access to 00000000000000a0
   at guest offset 0x1eb56b7") right after the server's ss.info request timed out. Case 0 with no data now
   goes the same way as an unknown event.
 

@@ -159,7 +159,7 @@ cp docs/benchmarks/mlfg-sharpen-warehouse-20261020.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/ml-fg401-profile.ini "$dest/docs/benchmarks/"
 cp launcher/assets/fonts/Cinzel-OFL.txt "$dest/licenses/Cinzel-OFL.txt"  # the launcher's fonts
 cp launcher/assets/fonts/Inter-LICENSE.txt "$dest/licenses/Inter-OFL.txt"
-# Where the online code comes from (shadPS4 0.20, Awaken's port, bbhost's protocol).
+# Where the online code comes from (shadPS4 0.20, Awaken's port).
 cp gpu/bbnet/SHADNET-PORT.md "$dest/licenses/online-code-NOTICE.md"
 for package in protobuf abseil-cpp openssl miniupnpc zlib; do
     license=/clang64/share/licenses/$package/LICENSE

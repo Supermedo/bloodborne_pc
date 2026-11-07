@@ -694,7 +694,7 @@ class SetupMixin:
             return
         found, _encrypted = saves.find_in(folder)
         if not found:
-            self.messagebox.showinfo('Bloodborne', _('There is no save of this port, shadPS4 or bbhost in that folder '
+            self.messagebox.showinfo('Bloodborne', _('There is no save of this port or shadPS4 in that folder '
                                                      '(SPRJ0005 with userdata0000 …).'))
             return
         self.app.setdefault('test_saves', {})[scenario.id] = str(found[0])
@@ -1038,10 +1038,10 @@ class SetupMixin:
             sets = state['sets']
             top = 0 if manager else px(10)
             if sets is None:
-                tk.Label(body, text=_('Searching this PC for saves of shadPS4, Awaken\'s port and bbhost…'),
+                tk.Label(body, text=_('Searching this PC for saves of shadPS4 and Awaken\'s port…'),
                          bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9)).pack(anchor='w', pady=(top, 0))
             elif not sets:
-                self.wrap_within(tk.Label(body, text=_('No saves from shadPS4, Awaken\'s port or bbhost found on this '
+                self.wrap_within(tk.Label(body, text=_('No saves from shadPS4 or Awaken\'s port found on this '
                                                        'PC. If yours are somewhere else (a backup, a PS4 export), '
                                                        'choose their folder.'),
                                           bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9), justify='left',
@@ -1222,7 +1222,7 @@ class SetupMixin:
                                              "copy Seamless co-op made, or another version. Seamless co-op's "
                                              'characters are backed up first; the copied save stays as it is.')
                                       if seamless else
-                                      _('Characters from shadPS4, Awaken\'s port, bbhost or a PS4 export: found on '
+                                      _('Characters from shadPS4, Awaken\'s port or a PS4 export: found on '
                                         'this PC and copied into this port\'s saves folder. Your current saves are '
                                         'backed up first.'))
         found = getattr(self, 'found_view', None)
@@ -2570,7 +2570,7 @@ class SetupGuide:
             anchor='w', pady=(0, self.px(8)))
 
     # -- I: welcome --
-    ORIGINS = [('new', 'I am new to the port'), ('shadps4', 'shadPS4'), ('bbhost', 'bbhost'),
+    ORIGINS = [('new', 'I am new to the port'), ('shadps4', 'shadPS4'),
                ('awaken', "Awaken's port"), ('ps4', 'A PS4 (exported save)')]
 
     def step_welcome(self, body):
@@ -2872,63 +2872,8 @@ class SetupGuide:
                      ways.pack(anchor='w', fill='x', pady=(px(8), 0)))
             L.bbport_signin.build(app, ways, theme.CARD, show_supermedo, accent='Card.Accent.TButton')
             show_supermedo()
-        elif L.HUNTERS_DREAM_POOL and pool.get() == 'huntersdream':
-            tk.Label(online, text=_("With The Hunter's Dream, together with bbhost players. It needs a free sign-in "
-                                    'with Discord, once.'), bg=theme.CARD, fg=theme.TEXT_SOFT, font=(theme.BODY, 9),
-                     justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
-            status = tk.Label(online, text='', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10))
-            status.pack(anchor='w', pady=(px(8), 0))
-            code = tk.Label(online, text='', bg=theme.CARD, fg=theme.TEXT_STRONG, font=(theme.HEAD_BOLD, 18))
-            row = tk.Frame(online, bg=theme.CARD)
-            row.pack(anchor='w', pady=(px(8), 0))
-            thd_id, thd_token = app.var('thd_online_id', 'app'), app.var('thd_token', 'app')
-
-            def show():
-                if status.winfo_exists():
-                    code.pack_forget()  # a sign-in's code, done with
-                    status.configure(text=_('Signed in as {}').format(thd_id.get()) if thd_token.get() else
-                                     _('Not signed in yet'), fg=theme.GOLD_LIGHT if thd_token.get() else theme.AMBER)
-                    button.configure(text=_('Sign in again') if thd_token.get() else _('Sign in with Discord'),
-                                     style='Card.TButton' if thd_token.get() else 'Card.Accent.TButton')
-
-            def say(text, color, shown_code=None):
-                # The answer may come after the guide closed or moved to another step: its widgets are gone then
-                # (code.pack_forget() on a gone one raised before the sign-in was saved).
-                if not status.winfo_exists():
-                    return
-                status.configure(text=text, fg=color)
-                if shown_code:
-                    code.configure(text=shown_code)
-                    code.pack(anchor='w', pady=(px(4), 0), before=row)
-                else:
-                    code.pack_forget()
-
-            def sign_in():
-                say(_('Starting the sign-in…'), theme.MUTED)
-
-                def on_code(page, text):
-                    app.ui_calls.put(lambda: say(
-                        _('In the page that opened, sign in with Discord and enter this code:'), theme.TEXT, text))
-                    import webbrowser
-                    webbrowser.open(page)
-
-                def work():
-                    try:
-                        name, token = L.thd_sign_in(on_code)
-                    except Exception as error:  # a broken reply too (BadStatusLine): the line always answers
-                        app.ui_calls.put(lambda e=L.connection_error(error, L.COMMUNITY_SERVER): say(
-                            _('Sign-in failed: {}').format(e), theme.BLOOD_LIGHT))
-                        return
-                    app.ui_calls.put(lambda: (thd_id.set(name), thd_token.set(token), show(), app.collect()))
-                import threading
-                threading.Thread(target=work, daemon=True).start()
-            button = ttk.Button(row, text=_('Sign in with Discord'), style='Card.Accent.TButton', command=sign_in)
-            button.pack(side='left')
-            show()
-        tk.Label(online, text=_("The Hunter's Dream (the previous server), your own server, and every option: the "
-                                'Online play page. Offline needs nothing: untick it.') if L.HUNTERS_DREAM_POOL else
-                 _('A shadNet server instead, and every option: the Online play page. Offline needs '
-                   'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
+        tk.Label(online, text=_('A shadNet server instead, and every option: the Online play page. Offline needs '
+                                'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
                  justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(10), 0))
 
     # -- V: ready --

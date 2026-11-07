@@ -9,7 +9,6 @@ folder and the metadata beside it differ (checked against their source, 2026-10)
   this port, Awaken's port   <user>/savedata/1/<save title>/SPRJ0005 + SPRJ0005.sce_sys/param.bin
   shadPS4 0.16 and later     %APPDATA%/shadPS4/home/<1000..>/savedata/<save title>/SPRJ0005/sce_sys/param.sfo
   shadPS4 0.3 to 0.15        %APPDATA%/shadPS4/savedata/1/<title>/SPRJ0005 (or a portable user/ folder)
-  bbhost                     <data>/saves/SPRJ0005 (sce_param.bin inside), data in %LOCALAPPDATA%/bbhost
   Apollo Save Tool (PS4)     PS4/APOLLO/<user>_CUSA00207_SPRJ0005 (sce_sys/param.sfo)
 
 This port reads one folder only: <saves folder>/savedata/1/<the dump's INSTALL_DIR_SAVEDATA or
@@ -197,8 +196,6 @@ def _toml_value(path, section, key):
 def label_for(folder):
     """Which version a save folder belongs to, from where it is."""
     parts = [p.lower() for p in Path(folder).parts]
-    if 'saves' in parts and parts[-1] == SAVE_DIR.lower():
-        return 'bbhost'
     if 'apollo' in parts:
         return 'PS4 (Apollo Save Tool)'
     if 'home' in parts and 'savedata' in parts:
@@ -231,7 +228,7 @@ def label_for(folder):
 def sources(port_dir, game_dir=''):
     """Folder globs where other versions keep Bloodborne saves on this PC (see the module text)."""
     port_dir = Path(port_dir)
-    appdata, local = os.environ.get('APPDATA', ''), os.environ.get('LOCALAPPDATA', '')
+    appdata = os.environ.get('APPDATA', '')
     globs = []
     if appdata:
         shad = Path(appdata) / 'shadPS4'
@@ -247,13 +244,6 @@ def sources(port_dir, game_dir=''):
         if other:
             globs += [Path(other) / 'user' / 'savedata' / '1' / '*' / SAVE_DIR,
                       Path(other) / 'profiles' / '*' / 'savedata' / '1' / '*' / SAVE_DIR]
-        data = _toml_value(Path(appdata) / 'bbhost' / 'bbhost.toml', 'paths', 'data')
-        if data:
-            globs.append(Path(data) / 'saves' / SAVE_DIR)
-    if local:
-        globs.append(Path(local) / 'bbhost' / 'data' / 'saves' / SAVE_DIR)
-    if game_dir:
-        globs.append(Path(game_dir) / 'data' / 'saves' / SAVE_DIR)  # bbhost beside the dump
     return [str(g) for g in globs]
 
 
@@ -866,7 +856,7 @@ def import_set(save, user_dir, game_dir=''):
     source_meta = [save.folder / 'sce_sys', save.folder.with_name(save.folder.name + '.sce_sys'), save.folder]
     if not (meta / 'param.bin').is_file():
         for folder in source_meta:
-            if (folder / 'param.bin').is_file() or (folder / 'sce_param.bin').is_file():  # bbport, bbhost
+            if (folder / 'param.bin').is_file() or (folder / 'sce_param.bin').is_file():  # bbport
                 shutil.copyfile(folder / ('param.bin' if (folder / 'param.bin').is_file() else 'sce_param.bin'),
                                 meta / 'param.bin')
                 break
@@ -894,7 +884,7 @@ def saves_root(folder):
 def bring_trophies(save, user_dir):
     """The achievements of the saves folder `save` lies in (another installation's trophies.log) added to this
     one's, so a character brought over keeps them; how many were new here. Saves from elsewhere (shadPS4,
-    bbhost, a backup) have none."""
+    a backup) have none."""
     root = saves_root(save.folder)
     if root is None:
         return 0

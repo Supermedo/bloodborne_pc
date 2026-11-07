@@ -236,18 +236,18 @@ SETUP = {'de': {
         'Beim nächsten Mal startet Play Bloodborne.exe das Spiel direkt mit diesen Einstellungen.',
     # ---- saves from other versions ----
     'Saves from other versions': 'Spielstände aus anderen Versionen',
-    "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's "
+    "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's "
     "saves folder. Your current saves are backed up first.":
-        'Charaktere aus shadPS4, Awakens Port, bbhost oder einem PS4-Export: auf diesem PC gefunden und in den '
+        'Charaktere aus shadPS4, Awakens Port oder einem PS4-Export: auf diesem PC gefunden und in den '
         'Spielstand-Ordner dieses Ports kopiert. Deine aktuellen Spielstände werden vorher gesichert.',
     'Played before?': 'Schon woanders gespielt?',
     'This port: {}, last played {}': 'Dieser Port: {}, zuletzt gespielt {}',
     'This port has no saves yet.': 'Dieser Port hat noch keine Spielstände.',
-    "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-        'Suche auf diesem PC nach Spielständen von shadPS4, Awakens Port und bbhost…',
-    "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 "
+    "Searching this PC for saves of shadPS4 and Awaken's port…":
+        'Suche auf diesem PC nach Spielständen von shadPS4 und Awakens Port…',
+    "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 "
     "export), choose their folder.":
-        'Keine Spielstände von shadPS4, Awakens Port oder bbhost auf diesem PC gefunden. Liegen deine woanders '
+        'Keine Spielstände von shadPS4 oder Awakens Port auf diesem PC gefunden. Liegen deine woanders '
         '(ein Backup, ein PS4-Export), wähle ihren Ordner.',
     'no characters': 'keine Charaktere', '1 character': '1 Charakter', '{} characters': '{} Charaktere',
     'last played {}': 'zuletzt gespielt {}', 'Import': 'Importieren', 'Search again': 'Erneut suchen',

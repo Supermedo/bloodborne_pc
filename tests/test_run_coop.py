@@ -18,8 +18,8 @@ import bbport_launcher_win as launcher  # noqa: E402
 
 # As BBSC 0.0.2's tools/play-bbport.ps1 writes it.
 BBSC_CUSTOM = {'https://ss4.scej-network.jp:20443': 'http://199.195.193.131:20443',
-               'http://thehuntersdream.com:18671/summon_messenger': 'http://199.195.193.131:31315',
-               'https://thehuntersdream.com:18671/summon_messenger': 'http://199.195.193.131:31315'}
+               'http://game.example.net:18671/summon_messenger': 'http://199.195.193.131:31315',
+               'https://game.example.net:18671/summon_messenger': 'http://199.195.193.131:31315'}
 BBSC = r'C:\BBSC\bbsc\bbsc-launch.exe'
 
 
@@ -87,7 +87,7 @@ class ItsScriptTests(unittest.TestCase):
     def test_kept_for_its_server_only(self):
         on_it = {'online': True, 'online_pool': 'shadnet', 'online_server': 'play.seamlesshunt.com:31313'}
         self.assertEqual(self.start(**on_it)['BB_PROBE'], BBSC)
-        for other in ({**on_it, 'online': False}, {**on_it, 'online_pool': 'huntersdream'},
+        for other in ({**on_it, 'online': False}, {**on_it, 'online_pool': 'supermedo'},
                       {**on_it, 'online_server': 'rpcn.example.org:31313'}):
             env = self.start(**other)
             self.assertNotIn('BB_PROBE', env)

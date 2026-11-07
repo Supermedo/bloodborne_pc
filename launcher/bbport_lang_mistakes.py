@@ -17,7 +17,6 @@ MISTAKE_KEYS = [
     'again and copy the 1.09 update over it.',
     'Saves: a save in {} could not be copied to where the game reads it: {}',
     'Saves: {} copied to where the game reads them ({}); the original stays where it was.',
-    "The Hunter's Dream refused this PC's sign-in: sign in again on the Online page.",
     "Your PC's date is wrong ({}), so secure connections fail. Set the date in Windows: Settings > Time & language > "
     'Date & time, "Set time automatically".',
     'The saves folder {} is not there: its drive is not connected, or the folder was renamed or moved. Connect the '
@@ -39,7 +38,6 @@ MISTAKES = {
         'neuen, leeren Ordner und kopiere das Update 1.09 darüber.',
         'Spielstände: Ein Spielstand in {} konnte nicht dorthin kopiert werden, wo das Spiel ihn liest: {}',
         'Spielstände: {} wurde dorthin kopiert, wo das Spiel sie liest ({}); das Original bleibt, wo es war.',
-        "The Hunter's Dream hat die Anmeldung dieses PCs abgelehnt: Melde dich auf der Seite Online spielen erneut an.",
         'Das Datum deines PCs ist falsch ({}), deshalb schlagen sichere Verbindungen fehl. Stelle das Datum in Windows '
         'ein: Einstellungen > Zeit und Sprache > Datum und Uhrzeit, „Uhrzeit automatisch festlegen“.',
         'Der Spielstand-Ordner {} ist nicht da: Sein Laufwerk ist nicht angeschlossen, oder der Ordner wurde umbenannt '
@@ -59,8 +57,6 @@ MISTAKES = {
         'base en una carpeta nueva y vacía y copia encima la actualización 1.09.',
         'Partidas: no se pudo copiar una partida de {} adonde el juego la lee: {}',
         'Partidas: {} copiadas adonde el juego las lee ({}); el original se queda donde estaba.',
-        "The Hunter's Dream rechazó el inicio de sesión de este PC: vuelve a iniciar sesión en la página Juego en "
-        'línea.',
         'La fecha de tu PC es incorrecta ({}), por eso fallan las conexiones seguras. Ajusta la fecha en Windows: '
         'Configuración > Hora e idioma > Fecha y hora, «Establecer la hora automáticamente».',
         'La carpeta de partidas {} no está: su unidad no está conectada, o la carpeta se renombró o se movió. Conecta '
@@ -80,7 +76,6 @@ MISTAKES = {
         'e vazia e copie a atualização 1.09 por cima.',
         'Saves: não foi possível copiar um save de {} para onde o jogo o lê: {}',
         'Saves: {} copiados para onde o jogo os lê ({}); o original fica onde estava.',
-        "The Hunter's Dream recusou o login deste PC: entre de novo na página Jogo online.",
         'A data do seu PC está errada ({}), por isso as conexões seguras falham. Acerte a data no Windows: '
         'Configurações > Hora e idioma > Data e hora, "Definir horário automaticamente".',
         'A pasta de saves {} não está lá: a unidade dela não está conectada, ou a pasta foi renomeada ou movida. '
@@ -100,7 +95,6 @@ MISTAKES = {
         'de base dans un nouveau dossier vide et copiez la mise à jour 1.09 par-dessus.',
         'Sauvegardes : une sauvegarde de {} n’a pas pu être copiée là où le jeu la lit : {}',
         'Sauvegardes : {} copiées là où le jeu les lit ({}) ; l’original reste où il était.',
-        "The Hunter's Dream a refusé la connexion de ce PC : reconnectez-vous sur la page Jeu en ligne.",
         'La date de votre PC est fausse ({}), les connexions sécurisées échouent donc. Réglez la date dans Windows : '
         'Paramètres > Heure et langue > Date et heure, « Régler l’heure automatiquement ».',
         'Le dossier de sauvegardes {} n’est pas là : son lecteur n’est pas branché, ou le dossier a été renommé ou '
@@ -120,7 +114,6 @@ MISTAKES = {
         'una cartella nuova e vuota e copiaci sopra l’aggiornamento 1.09.',
         'Salvataggi: non è stato possibile copiare un salvataggio da {} dove il gioco lo legge: {}',
         'Salvataggi: {} copiati dove il gioco li legge ({}); l’originale resta dov’era.',
-        "The Hunter's Dream ha rifiutato l’accesso di questo PC: accedi di nuovo nella pagina Gioco online.",
         'La data del tuo PC è sbagliata ({}), quindi le connessioni sicure non riescono. Imposta la data in Windows: '
         'Impostazioni > Data/ora e lingua > Data e ora, "Imposta ora automaticamente".',
         'La cartella dei salvataggi {} non c’è: la sua unità non è collegata, oppure la cartella è stata rinominata o '
@@ -140,7 +133,6 @@ MISTAKES = {
         'pustego folderu i skopiuj na nią aktualizację 1.09.',
         'Zapisy: nie udało się skopiować zapisu z {} tam, gdzie gra go czyta: {}',
         'Zapisy: {} skopiowano tam, gdzie gra je czyta ({}); oryginał został na miejscu.',
-        "The Hunter's Dream odrzucił logowanie tego komputera: zaloguj się ponownie na stronie Gra online.",
         'Data na twoim komputerze jest błędna ({}), dlatego bezpieczne połączenia się nie udają. Ustaw datę w Windows: '
         'Ustawienia > Czas i język > Data i godzina, „Ustaw czas automatycznie”.',
         'Folderu zapisów {} nie ma: jego dysk nie jest podłączony albo folder zmienił nazwę lub miejsce. Podłącz dysk '
@@ -159,7 +151,6 @@ MISTAKES = {
         '1.09 güncellemesini üzerine kopyalayın.',
         'Kayıtlar: {} içindeki bir kayıt oyunun okuduğu yere kopyalanamadı: {}',
         'Kayıtlar: {} oyunun okuduğu yere kopyalandı ({}); asıl kayıt yerinde kalıyor.',
-        "The Hunter's Dream bu bilgisayarın oturum açmasını reddetti: Çevrim içi oyun sayfasında yeniden oturum açın.",
         'Bilgisayarınızın tarihi yanlış ({}), bu yüzden güvenli bağlantılar başarısız oluyor. Tarihi Windows’ta '
         'ayarlayın: Ayarlar > Saat ve dil > Tarih ve saat, "Saati otomatik olarak ayarla".',
         '{} kayıt klasörü yok: sürücüsü bağlı değil ya da klasörün adı veya yeri değişti. Sürücüyü bağlayın ya da kayıt '
@@ -177,7 +168,6 @@ MISTAKES = {
         'وانسخ تحديث 1.09 فوقها.',
         'ملفات الحفظ: تعذّر نسخ ملف حفظ من {} إلى حيث تقرؤه اللعبة: {}',
         'ملفات الحفظ: تم نسخ {} إلى حيث تقرؤها اللعبة ({})؛ يبقى الأصل في مكانه.',
-        "رفض The Hunter's Dream تسجيل دخول هذا الحاسوب: سجّل الدخول من جديد في صفحة اللعب عبر الإنترنت.",
         'تاريخ حاسوبك غير صحيح ({})، لذلك تفشل الاتصالات الآمنة. اضبط التاريخ في Windows: الإعدادات > الوقت واللغة > '
         'التاريخ والوقت، "ضبط الوقت تلقائيًا".',
         'مجلد الحفظ {} غير موجود: قرصه غير موصول، أو أُعيدت تسمية المجلد أو نُقل. صِل القرص، أو اختر مجلد الحفظ من جديد.',
@@ -192,7 +182,6 @@ MISTAKES = {
         '游戏文件夹中缺少 {}：游戏没有完整解包。请将本体游戏重新解包到一个新的空文件夹，再把 1.09 更新复制覆盖上去。',
         '存档：无法将 {} 中的存档复制到游戏读取的位置：{}',
         '存档：已将 {} 复制到游戏读取的位置（{}）；原件保留在原处。',
-        "The Hunter's Dream 拒绝了这台电脑的登录：请在“在线游玩”页面重新登录。",
         '你的电脑日期不正确（{}），因此安全连接失败。请在 Windows 中设置日期：设置 > 时间和语言 > 日期和时间，“自动设置时间”。',
         '存档文件夹 {} 不在：它所在的驱动器未连接，或文件夹已被重命名或移动。请连接该驱动器，或重新选择存档文件夹。',
         '移植版正在从临时文件夹运行（{}），就像直接从 zip 或 rar 压缩包中启动一样。压缩包关闭时该文件夹会被删除，你的存档也会随之'
@@ -208,7 +197,6 @@ MISTAKES = {
         'その上に 1.09 アップデートをコピーしてください。',
         'セーブデータ：{} のセーブデータをゲームが読む場所にコピーできませんでした：{}',
         'セーブデータ：{} をゲームが読む場所にコピーしました（{}）。元のデータはそのまま残ります。',
-        "The Hunter's Dream がこの PC のサインインを拒否しました：オンラインプレイのページでもう一度サインインしてください。",
         'PC の日付が正しくありません（{}）。そのため安全な接続に失敗します。Windows で日付を設定してください：設定 > 時刻と'
         '言語 > 日付と時刻、「時刻を自動的に設定する」。',
         'セーブフォルダー {} が見つかりません：ドライブが接続されていないか、フォルダーの名前や場所が変わりました。ドライブを'
@@ -226,7 +214,6 @@ MISTAKES = {
         '1.09 업데이트를 복사하세요.',
         '세이브: {}의 세이브를 게임이 읽는 곳으로 복사하지 못했습니다: {}',
         '세이브: {}을(를) 게임이 읽는 곳으로 복사했습니다({}). 원본은 그대로 남아 있습니다.',
-        "The Hunter's Dream이 이 PC의 로그인을 거부했습니다: 온라인 플레이 페이지에서 다시 로그인하세요.",
         'PC의 날짜가 잘못되었습니다({}). 그래서 보안 연결이 실패합니다. Windows에서 날짜를 설정하세요: 설정 > 시간 및 언어 > '
         '날짜 및 시간, "자동으로 시간 설정".',
         '세이브 폴더 {}이(가) 없습니다: 드라이브가 연결되어 있지 않거나 폴더 이름이 바뀌었거나 옮겨졌습니다. 드라이브를 '

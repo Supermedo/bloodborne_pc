@@ -135,14 +135,14 @@ class SeamlessPartyTests(unittest.TestCase):
         """Medo's beta 5 showed it with SuperMedo Server only; its code brings Seamless co-op's hunters together
         too (Nick, 2026-11-02)."""
         root = hidden_root(self)
-        for patcher in (mock.patch.object(L, 'LANG', 'en'), mock.patch.object(L, 'HUNTERS_DREAM_POOL', True),
+        for patcher in (mock.patch.object(L, 'LANG', 'en'),
                         mock.patch.object(L, 'BBSC_LAUNCH', mock.Mock(exists=lambda: True)),
                         mock.patch('webbrowser.open')):
             patcher.start()
             self.addCleanup(patcher.stop)
         app = self.app = bare_launcher(root=root, tk=tkinter, ttk=ttk, dpi=1, app=dict(L.APP_DEFAULTS), vars={},
                                        pages={}, content=ttk.Frame(root), refresh_status=mock.Mock(),
-                                       ask_hunters=mock.Mock(), collect=mock.Mock())
+                                       collect=mock.Mock())
         app.build_online()
         page = app.pages['online']
         for pool in ('supermedo', 'seamless'):

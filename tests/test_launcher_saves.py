@@ -75,13 +75,12 @@ class SaveTests(unittest.TestCase):
         appdata, local = self.root / 'Roaming', self.root / 'Local'
         make_save(appdata / 'shadPS4' / 'home' / '1000' / 'savedata' / 'CUSA00207' / 'SPRJ0005')
         make_save(appdata / 'shadPS4' / 'savedata' / '1' / 'CUSA03173' / 'SPRJ0005')
-        make_save(local / 'bbhost' / 'data' / 'saves' / 'SPRJ0005')
         make_save(self.root / 'BB.Other' / 'user' / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005')
         (self.root / 'BB.Other' / 'run.py').write_text('')
         mine = make_save(saves.target_dir(self.user))
         with mock.patch.dict(os.environ, {'APPDATA': str(appdata), 'LOCALAPPDATA': str(local)}):
             found = saves.scan(self.root / 'port', exclude=[mine])
-        self.assertEqual(sorted(s.source for s in found), ['bbhost', 'bbport (BB.Other)', 'shadPS4', 'shadPS4'])
+        self.assertEqual(sorted(s.source for s in found), ['bbport (BB.Other)', 'shadPS4', 'shadPS4'])
 
     def test_seamless_coops_own_characters_stay_apart(self):
         """BBSC changes the items of the characters it plays: its own (user/seamless-coop) are never offered to
@@ -131,13 +130,13 @@ class SaveTests(unittest.TestCase):
 
     def test_import_backs_up_copies_and_restores(self):
         mine = make_save(saves.target_dir(self.user), 'Old')
-        other = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
-                                                  extra=('sce_param.bin', 'icon0.png')))
+        other = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
+                                                         extra=('sce_param.bin', 'icon0.png')))
         archive = saves.import_set(other, self.user)
         self.assertTrue(archive.is_file())
         self.assertEqual(saves.SaveSet('', mine).names, ['New'])
         meta = mine.with_name('SPRJ0005.sce_sys')
-        self.assertEqual((meta / 'param.bin').read_bytes(), b'meta')  # bbhost's sce_param.bin
+        self.assertEqual((meta / 'param.bin').read_bytes(), b'meta')  # the save's own sce_param.bin
         self.assertFalse((mine / 'sce_param.bin').exists())  # only the game's own files go into the save
         self.assertFalse((self.user / 'save_import').exists())
         self.assertEqual(sorted(p.name for p in mine.parent.iterdir()), ['SPRJ0005', 'SPRJ0005.sce_sys'])
@@ -156,9 +155,9 @@ class SaveTests(unittest.TestCase):
         self.assertEqual((old_user / 'trophies.log').read_text(encoding='utf-8'), '14 100\n15 200\n')  # source as it was
 
     def test_no_achievements_from_elsewhere_or_from_this_folder(self):
-        bbhost = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005'))
+        elsewhere = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005'))
         (self.root / 'data' / 'trophies.log').write_text('14 100\n', encoding='utf-8')
-        self.assertEqual(saves.bring_trophies(bbhost, self.user), 0)
+        self.assertEqual(saves.bring_trophies(elsewhere, self.user), 0)
         mine = saves.SaveSet('', make_save(saves.target_dir(self.user)))
         (self.user / 'trophies.log').write_text('14 100\n', encoding='utf-8')
         self.assertEqual(saves.bring_trophies(mine, self.user), 0)
@@ -413,8 +412,8 @@ class SwapTests(unittest.TestCase):
         self.meta.mkdir()
         (self.meta / 'param.bin').write_bytes(b'old meta')
         self.before = contents(self.mine), contents(self.meta)
-        self.other = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
-                                                       slots=(0, 5), extra=('backup0002',)))
+        self.other = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
+                                                              slots=(0, 5), extra=('backup0002',)))
 
     def tearDown(self):
         self.temp.cleanup()

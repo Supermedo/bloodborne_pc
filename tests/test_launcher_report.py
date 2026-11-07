@@ -226,11 +226,6 @@ class ToolHintTests(unittest.TestCase):
         self.assertNotIn('not signed in', hints)
         self.assertNotIn('hunter', hints)  # the account name never reaches the report
 
-    def test_the_hunters_dream_without_its_sign_in(self):
-        hints = self.hints(NORMAL_RUN, settings={'online': True, 'online_pool': 'huntersdream'}, version='1.9.6')
-        self.assertIn("not signed in to The Hunter's Dream", hints)
-        self.assertNotIn('The log shows it', hints)  # this log never reached the online check
-
     def test_offline_or_old_ports_get_no_sign_in_hint(self):
         self.assertNotIn('not signed in', self.hints(NORMAL_RUN, settings={'online': False}, version='1.9.6'))
         self.assertNotIn('not signed in', self.hints(NORMAL_RUN, settings={'online': True}, version='1.9.4'))

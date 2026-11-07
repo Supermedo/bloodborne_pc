@@ -22,18 +22,6 @@ def notes(version):
     return NOTES.get(version)
 
 
-def servers_notice():
-    return _('Online servers: the port now plays on its own servers. SuperMedo Server is the default and '
-             "recommended; The Hunter's Dream stays available for any players who want to use their server. "
-             'Other servers can no longer be chosen: if you used one, you now play on SuperMedo Server. Sign '
-             'in, or make a free account, on the Online page.')
-
-
-def hunters_dream_notice():
-    return _("The Hunter's Dream is no longer offered: the port plays on SuperMedo Server only. If you played there, "
-             'you now play on SuperMedo Server. Sign in, or make a free account, on the Online page.')
-
-
 NOTES = {
     '1.9.8.2': (
         None,
@@ -122,8 +110,7 @@ NOTES = {
             "Seamless co-op shows each teammate's character picture in the party list, on the compass and on the "
             'map. Your picture is taken from your hunter as they look now, and taken again when you change outfit.',
         ]), ('Patches', [
-            'Every patch in the patch list is now from the public community list or written for this port. The '
-            "Hunter's Dream live-map patch is replaced by this port's own Faster play log patch.",
+            'Every patch in the patch list is now from the public community list or written for this port.',
         ])]),
     '1.9.8 beta 10': (
         None,
@@ -230,11 +217,8 @@ NOTES = {
             'Two rare freezes fixed (the game could hang for good while loading areas or adding new shaders).',
         ])]),
     '1.9.7': (
-        hunters_dream_notice,
-        [('Online', [
-            "The Hunter's Dream is no longer offered: SuperMedo Server is the port's server. Players who chose The "
-            "Hunter's Dream move to SuperMedo Server by themselves.",
-        ]), ('Fixes', [
+        None,
+        [('Fixes', [
             'Updates install safely: the new version is put in place in one step and undone when Windows holds a '
             'file, so an update can no longer leave a launcher that does not start ("Failed to start embedded '
             'python interpreter").',
@@ -258,15 +242,14 @@ NOTES = {
         None,
         [('Fixes', [
             'Online: "Failed to connect to Bloodborne server" at Play Online on some PCs is fixed. The port now '
-            "carries Let's Encrypt's root certificates itself, so it trusts SuperMedo Server and The Hunter's "
-            "Dream even before Windows has downloaded them, and Windows' own check gets the server's whole "
-            'certificate chain.',
+            "carries Let's Encrypt's root certificates itself, so it trusts SuperMedo Server even before Windows "
+            "has downloaded them, and Windows' own check gets the server's whole certificate chain.",
         ])]),
     '1.9.5': (
-        servers_notice,
+        None,
         [('Online', [
             'SuperMedo Server, our own online servers, is the default: sign in with Discord or make a free '
-            "account on the Online page. The Hunter's Dream stays available.",
+            'account on the Online page.',
             'Co-op through a relay when routers block a direct connection, and over the LAN for players behind '
             'the same connection.',
         ]), ('Gameplay at any frame rate', [
@@ -291,7 +274,7 @@ NOTES = {
             "This window: Help > What's new opens it again.",
         ])]),
     '1.9.5 beta 10': (
-        servers_notice,
+        None,
         [('Fixes', [
             'Ebrietas: the big frame drops in her fight are gone. Above 60 FPS (Uncap FPS++ and 90 FPS++), '
             'effects now step in whole 1/60 s, so her particles no longer pile up.',
@@ -313,7 +296,6 @@ NOTES = {
             'FPS counter: choose its lines (FPS, frame time, render latency, VRAM, GPU, CPU, RAM, graph) in All '
             'graphics > FPS counter or the in-game menu. Render latency has its own line, off by default. '
             'Value colours: colour-coded (green, orange, red) or plain grey.',
-            "Online: only SuperMedo Server and The Hunter's Dream to choose from.",
             "This window: what has changed, at the first start of each new version; Help > What's new opens "
             'it again.',
             'Our Discord and website: two buttons at the bottom of the side bar. Come say hi!',

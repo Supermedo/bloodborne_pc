@@ -1,14 +1,14 @@
 """The launcher's HTTPS (launcher/bbport_tls.py).
 
 1.9.5 beta 2: on players' PCs "Sign in with Discord" and "Test connection" failed with "certificate has
-expired" although thehuntersdream.com sends a valid chain. Python loads the Windows stores as they are
+expired" although the server sends a valid chain. Python loads the Windows stores as they are
 and OpenSSL always takes an issuer from them first, so an expired copy there broke a valid chain:
 
 - the stale intermediate: the stores hold the root and an expired copy of an intermediate the server
   sends valid (an old cross-signature);
 - the missing root: the stores hold DST Root CA X3 and "ISRG Root X1 signed by DST Root CA X3" (both
   expired) but not ISRG Root X1 itself, which Windows only downloads when its own chain building needs
-  it. tests/data/tls holds those public certificates and the chain thehuntersdream.com sends.
+  it. tests/data/tls holds those public certificates.
 
 Offline, a test PKI the openssl command makes plays both: R1 is the root, X2 an intermediate R1 signed,
 I1 the issuing CA, the leaf is localhost's; "old root" and "R1 signed by the old root" (expired) are DST
@@ -16,8 +16,7 @@ Root CA X3 and the old ISRG Root X1. Python's default context fails as on the pl
 launcher's leaves the expired copies out and, where the root itself is missing, asks Windows. Windows'
 part runs with a chain engine of the test's own whose only root is R1 (Windows having fetched the
 missing root): nothing is added to the PC's stores. Bad certificates are still refused, and a reason a
-player can fix is named. The online tests reach thehuntersdream.com (a GET of its start page and the
-game server's info, what Test connection reads; never the sign-in) and are skipped without a network."""
+player can fix is named."""
 from paths import ROOT
 import ctypes
 import functools
@@ -383,19 +382,9 @@ class ReasonTests(PkiTestCase):
         self.assertIsNone(T.explain([], 'localhost'))
         self.assertIsNone(T.explain([b'not a certificate'], 'localhost'))
 
-    def test_the_hunters_dream_is_lets_encrypt(self):
-        chain = self.pki.chain('av-leaf')
-        self.assertIn('Test Antivirus', T.explain(chain, 'thehuntersdream.com'))
-        self.assertIn('Test Antivirus', T.explain(chain, 'www.thehuntersdream.com'))
-        self.assertIsNone(T.explain(chain, 'notthehuntersdream.com'))
-        served = pem_certificates(DATA / 'thehuntersdream-chain.pem')
-        self.assertIsNone(T.explain(served, 'thehuntersdream.com', now=datetime(2026, 11, 1, tzinfo=timezone.utc)))
-        self.assertIn('date or time', T.explain(served, 'thehuntersdream.com',
-                                                now=datetime(2025, 11, 1, tzinfo=timezone.utc)))
-
     def test_certificate_facts_match_pythons(self):
         files = [self.pki.path(name) for name in ('x2-expired', 'leaf', 'av-root', 'old-root')]
-        files += [str(path) for path in sorted(DATA.glob('*.pem')) if path.name != 'thehuntersdream-chain.pem']
+        files += [str(path) for path in sorted(DATA.glob('*.pem'))]
         for file in files:
             with self.subTest(file=Path(file).name):
                 facts = T.certificate_facts(pem_certificates(file)[0])
@@ -406,8 +395,6 @@ class ReasonTests(PkiTestCase):
                 self.assertIn(issuer['commonName'], facts.issuer)
         self.assertEqual(T.certificate_facts(self.pki.der('x2-expired')).not_after,
                          datetime(2021, 1, 1, tzinfo=timezone.utc))
-        served = [T.certificate_facts(der).issuer for der in pem_certificates(DATA / 'thehuntersdream-chain.pem')]
-        self.assertEqual(served[0], "Let's Encrypt (YE2)")
 
 
 @unittest.skipUnless(sys.platform == 'win32', "Windows' own certificate check")
@@ -471,52 +458,6 @@ class LetsEncryptStoreTests(unittest.TestCase):
         loaded = T.tls_context(stores=old + [x1]).get_ca_certs()
         self.assertEqual([dict(pair for rdn in cert['subject'] for pair in rdn)['commonName'] for cert in loaded],
                          ['ISRG Root X1'])
-
-
-def reachable(host, port=443):
-    try:
-        socket.create_connection((host, port), timeout=3).close()
-        return True
-    except OSError:
-        return False
-
-
-@unittest.skipUnless(reachable('thehuntersdream.com'), 'thehuntersdream.com is not reachable')
-class TheHuntersDreamTests(unittest.TestCase):
-    """The players' stores (DST Root CA X3 and ISRG Root X1 signed by it, not ISRG Root X1) against the
-    real server. Only its start page and the game server's info, never the sign-in."""
-
-    URL = 'https://thehuntersdream.com/'
-
-    def setUp(self):
-        self.players = [pem_certificates(DATA / name)[0] for name in
-                        ('dst-root-ca-x3.pem', 'isrg-root-x1-by-dst-root-ca-x3.pem')]
-
-    def test_pythons_default_context_fails_like_on_the_players_pcs(self):
-        context = ssl.create_default_context(cadata=b''.join(self.players))
-        with self.assertRaises(urllib.error.URLError) as caught:
-            urllib.request.urlopen(self.URL, timeout=10, context=context)
-        self.assertIn('certificate has expired', str(caught.exception))
-
-    @unittest.skipUnless(sys.platform == 'win32', "Windows' own certificate check")
-    def test_the_launcher_connects_through_windows(self):
-        windows_trust(self, True)
-        with T.urlopen(self.URL, timeout=15, context=T.tls_context(stores=self.players)) as reply:
-            self.assertEqual(reply.status, 200)
-        windows_trust(self, False)
-        with self.assertRaises(urllib.error.URLError) as caught:
-            T.urlopen(self.URL, timeout=15, context=T.tls_context(stores=self.players))
-        self.assertIn('unable to get local issuer certificate', str(caught.exception))
-
-    @unittest.skipUnless(sys.platform == 'win32', "Windows' own certificate check")
-    def test_test_connection_on_the_online_page(self):
-        import bbport_launcher_win as L
-        windows_trust(self, True)
-        with mock.patch.object(T, 'store_certificates', lambda: self.players), mock.patch.object(T, '_opener', None), \
-                mock.patch.object(L, 'LANG', 'en'):
-            text = L.server_check_hunters_dream()
-        self.assertNotIn('not reachable', text)
-        self.assertEqual(text.count('reachable'), 2)
 
 
 class LauncherTests(unittest.TestCase):
