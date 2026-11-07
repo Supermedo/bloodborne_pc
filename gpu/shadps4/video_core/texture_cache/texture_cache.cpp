@@ -730,9 +730,15 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
                 return image_ids[i];
             }
         }
-        LOG_WARNING(Render_Vulkan,
-                    "Failed to find exact image match for copy addr={:#x}, size={:#x}", address,
-                    size);
+        // bbport: the first ones and then every 1024th (118 a second in some places of one run,
+        // 87% of all the logs' bytes): nothing reads them one by one.
+        static std::atomic<u64> reported{0};
+        if (const u64 n = reported.fetch_add(1, std::memory_order_relaxed); n < 32 || n % 1024 == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Failed to find exact image match for copy addr={:#x}, size={:#x} "
+                        "({} so far)",
+                        address, size, n + 1);
+        }
     }
     return {};
 }
