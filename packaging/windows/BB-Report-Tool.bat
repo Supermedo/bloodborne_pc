@@ -291,6 +291,8 @@ if (-not $gpuLines) { $gpuLines = @('not found') }
 if (-not $displayLines) { $displayLines = @('unknown') }
 # The card the game most likely runs on: a dedicated one if there is one.
 $gameGpu = @(@($gpuInfo | Where-Object { -not $_.Integrated }) + @($gpuInfo)) | Select-Object -First 1
+# Tests hand in the card (BBTOOL_GPU) instead of this PC's.
+if ($env:BBTOOL_GPU) { $gameGpu = [pscustomobject]@{ Name = $env:BBTOOL_GPU; Date = $null; Vram = 12GB; Integrated = $false } }
 
 # --- Free disk space ----------------------------------------------------------------------
 $space = @()
@@ -654,7 +656,9 @@ if ((LogHas 'DLSS: unavailable \(not an NVIDIA GPU\)') -and ($gpuInfo | Where-Ob
     Hint 'The game ran on the wrong graphics chip, not on your NVIDIA card: Windows Settings > System > Display > Graphics: add Bloodborne.exe, bin\bb-probe.exe and bin\bb-gpu-capabilities.exe from the port folder and set them to High performance.' 1 }
 if (($gpuName -match 'RTX') -and ($upscaler -in @('fsr4', 'fsr411', 'fsr3'))) {
     Hint "RTX card with upscaler '$upscaler': switch to DLSS (Graphics > Upscaler). On RTX cards it looks best and costs far less GPU time than FSR 4." 2 }
-elseif (($upscaler -in @('fsr4', 'fsr411')) -and $gpuName -and ($gpuName -notmatch 'RX (7|9)\d{3}')) {
+# Measured on Radeon RX 6000 only: an Intel Arc B580 runs FSR 4.1.1 at native 1080p at 78 FPS, so the hint stays on
+# Radeons before RX 7000 (1.11.2026).
+elseif (($upscaler -in @('fsr4', 'fsr411')) -and ($gpuName -match 'Radeon|\bRX ') -and ($gpuName -notmatch 'RX (7|9)\d{3}')) {
     Hint "FSR 4 is very slow on $gpuName (RX 6000: about 6 FPS at 4K): use FSR 3 (Graphics > Upscaler)." 2 }
 $vramGb = if ($gameGpu.Vram) { [math]::Round($gameGpu.Vram / 1GB) } else { 0 }
 if ($vramGb -gt 0 -and $vramGb -le 4) {
