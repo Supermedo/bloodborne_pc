@@ -365,6 +365,10 @@ target_include_directories(fsr411-requirements-test PRIVATE shim)
 target_link_libraries(fsr411-requirements-test PRIVATE Vulkan::Headers)
 target_compile_options(fsr411-requirements-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -Wno-missing-field-initializers)
 
+add_executable(copy-shader-test EXCLUDE_FROM_ALL ../tests/test_copy_shader.cpp)
+target_compile_options(copy-shader-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(copy-shader-test PRIVATE ..)
+
 add_executable(command-buffer-test EXCLUDE_FROM_ALL ../tests/test_command_buffers.cpp)
 target_compile_options(command-buffer-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(command-buffer-test PRIVATE ..)
@@ -374,6 +378,10 @@ add_executable(fsr4vk-post-test EXCLUDE_FROM_ALL ../tests/test_fsr4vk_post.cpp
 target_include_directories(fsr4vk-post-test PRIVATE shadps4)
 target_compile_options(fsr4vk-post-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(fsr4vk-post-test PRIVATE PkgConfig::XXHASH)
+
+add_executable(flip-tail-test EXCLUDE_FROM_ALL ../tests/test_flip_tail.cpp)
+target_compile_options(flip-tail-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(flip-tail-test PRIVATE ..)
 
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

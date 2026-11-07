@@ -156,6 +156,11 @@ public:
         return mapped_queues[curr_qid].cs_state;
     }
 
+    /// bbport: the queue being decoded (0 graphics, others compute), for log lines.
+    s32 CurrentQueue() const noexcept {
+        return curr_qid;
+    }
+
     struct AscQueueInfo {
         static constexpr size_t Pm4BufferSize = 1024;
         VAddr map_addr;
@@ -246,6 +251,7 @@ private:
         u32 ce_compare_count{};
         u32 ce_count{};
         u32 de_count{};
+        bool ce_waits_for_de{}; ///< the constant engine is in WaitOnDeCounterDiff
         static std::array<u8, 48_KB> constants_heap;
     } cblock{};
 

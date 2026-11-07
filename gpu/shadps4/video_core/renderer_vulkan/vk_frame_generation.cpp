@@ -203,7 +203,8 @@ void FrameGenerator::Release() {
     if (!depth_image && !hudless_image && !fsr3 && last_provider == 0) {
         return; // nothing held
     }
-    // Submitted frames may still use them; the open command buffer does not.
+    // Submitted frames may still use them. The feature and FSR 3 are not in the open command buffer
+    // (Generate did not run for this frame), the images below may be.
     scheduler.WaitSubmitted();
     DestroyFsr3();
 #ifdef _WIN32
@@ -217,6 +218,23 @@ void FrameGenerator::Release() {
     if (Dlss* dlss = Dlss::Get()) {
         dlss->ReleaseFrameGen();
     }
+    // bbport: the menu switches at any moment, also between this frame's captures (BeginCapture,
+    // CaptureHudless) and the present. They are in the open command buffer, which is submitted after
+    // this. Freed here, the driver can follow a freed image at the submit (seen once as a fault in
+    // nvoglv64.dll right after "off, its memory freed", without a stack). They go when that command
+    // buffer is done.
+    scheduler.DeferOperation([depth_view = std::move(depth_view), motion_view = std::move(motion_view),
+                              depth_image = std::move(depth_image),
+                              motion_image = std::move(motion_image),
+                              hudless_views = std::move(hudless_views),
+                              hudless_image = std::move(hudless_image)]() mutable {
+        depth_view.reset();
+        motion_view.reset();
+        hudless_views.clear();
+        depth_image = VideoCore::UniqueImage{};
+        motion_image = VideoCore::UniqueImage{};
+        hudless_image = VideoCore::UniqueImage{};
+    });
     depth_view.reset();
     motion_view.reset();
     depth_image = VideoCore::UniqueImage{};
