@@ -31,6 +31,7 @@ public:
 
     using DrawInfo = Motion::Draw;
     u32 PrepareDraw(const DrawInfo& draw);
+    void BindParameters(vk::PipelineLayout layout);
     /// Small skeletons: whether the bone palette changed (Motion::History::Moving).
     bool Moving(const Motion::History::GateKey& key, u64 palette) {
         return history.Moving(key, palette);
@@ -62,11 +63,16 @@ public:
     }
 
 private:
+    friend struct ObjectMotionCacheTest;
+    friend struct ObjectMotionParameterTest;
+    // The private overload lets isolated tests exercise the same SSBO owner on another GPU.
+    ObjectMotion(const Instance& instance, Scheduler& scheduler, bool ssbo);
     void EnsureImage(u32 width, u32 height);
 
     const Instance& instance;
     Scheduler& scheduler;
     bool enabled = false;
+    bool ssbo_history_reported = false;
 
     // Parameter ring (host visible): FrameSlots frames of ParamsPerFrame entries (two u32x4),
     // element 0 all zero (motion off).
@@ -77,6 +83,9 @@ private:
     Motion::History history{PositionsPerFrame};
     Motion::IndexRangeCache index_ranges;
     std::array<u64, FrameSlots> params_ticks{};
+    vk::UniqueDescriptorSetLayout params_layout;
+    vk::UniqueDescriptorPool params_pool;
+    vk::DescriptorSet params_set{};
     vk::Buffer params_buffer{};
     VmaAllocation params_allocation{};
     u32* params_mapped{};

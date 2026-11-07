@@ -104,6 +104,9 @@ out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/
 # Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
 mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
+# Player help only; technical validation stays in docs/development in the repository.
+mkdir -p "$dest/docs"
+cp docs/RX6000_OBJECT_MOTION.md "$dest/docs/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
 # Seamless co-op (BBSC 1.0.0's co-op, github.com/CLSAMG22/BBSC, GPL-2.0) for the launcher's Seamless co-op page

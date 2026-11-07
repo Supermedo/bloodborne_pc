@@ -127,6 +127,7 @@ private:
 
 private:
     GraphicsPipelineKey key;
+    vk::UniqueDescriptorSetLayout motion_param_layout;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
     std::array<vk::ShaderModule, MaxShaderStages> stage_modules{};
     struct DeferredBuild {
