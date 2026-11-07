@@ -43,7 +43,12 @@ vec3 gamma22_for_srgb_decode(vec3 encoded) {
 }
 
 void main() {
-    vec4 color_linear = texture(texSampler, uv);
+    // bbport: the outermost pixel ring takes the colour of the ring inside it. The UI is drawn
+    // at the output size, twice its 1080p canvas at 4K, so the anti-aliased fringe Scaleform most
+    // likely puts around its shapes covers the first row of a full-screen fade only 3/4: the picture
+    // behind showed through as a light line along the top during cutscenes.
+    vec2 inner = 1.5 / vec2(textureSize(texSampler, 0));
+    vec4 color_linear = texture(texSampler, clamp(uv, inner, 1.0 - inner));
     if (pp.hdr) {
         color = color_linear;
     } else {
