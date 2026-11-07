@@ -460,6 +460,21 @@ class GameVersionTests(unittest.TestCase):
         game = self.game('01.00')
         self.assertFalse(eboot_is_109(str(game / 'eboot.bin')))
 
+    def test_eboot_with_a_109_group_is_109(self):
+        # Not mocked: the check must work with PATCH_FINGERPRINTS' per-group hashes. The size argument (1, 2)
+        # keeps eboot_is_109's cache from answering the second check with the first one's result.
+        game = self.game('01.00')
+        eboot = bytearray(elf_image(b'\0' * 16))
+        eboot[:7] = b'\x7fELF\x02\x01\x01'  # parse_self: a little-endian ELF64 for x86-64
+        struct.pack_into('<H', eboot, 0x12, 62)
+        (game / 'eboot.bin').write_bytes(eboot)
+        with mock.patch.dict('patches.PATCH_FINGERPRINTS', {'01.09': {'fps': 'other', 'resolution': 'other'}}):
+            self.assertFalse(eboot_is_109(str(game / 'eboot.bin'), 1))
+        expected = {'fps': 'other', 'resolution': patch_fingerprint(
+            elf_image(b'\0' * 16), names=PATCH_GROUPS['resolution'])}
+        with mock.patch.dict('patches.PATCH_FINGERPRINTS', {'01.09': expected}):
+            self.assertTrue(eboot_is_109(str(game / 'eboot.bin'), 2))
+
 
 if __name__ == '__main__':
     unittest.main()

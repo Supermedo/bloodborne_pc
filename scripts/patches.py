@@ -70,7 +70,7 @@ MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LO
 def game_app_version(game):
     """APP_VER of the game folder's param.sfo ("01.09"), or None when it cannot be read.
     Game of the Year discs (CUSA03173) ship the 1.09 code with APP_VER 01.00: a game whose
-    eboot.bin has the 1.09 patch fingerprint is 01.09 whatever its param.sfo says."""
+    eboot.bin has the 1.09 bytes of a patch group (eboot_is_109) is 01.09 whatever its param.sfo says."""
     try:
         from prepare import sfo, system_folder
         version=sfo((system_folder(game) / 'param.sfo').read_bytes()).get('APP_VER')
@@ -93,7 +93,8 @@ def eboot_is_109(path,_size=None,_mtime=None):
     try:
         from prepare import parse_self
         elf=bytes(parse_self(Path(path).read_bytes())[0])
-        return patch_fingerprint(elf,BUILTIN_XML,'01.09')==PATCH_FINGERPRINTS['01.09']
+        # Any group with its 1.09 bytes is the 1.09 code: as for APP_VER 01.09, only those groups are patched.
+        return bool(matching_groups_of(lambda start,end: eboot_bytes(elf,start,end),'01.09'))
     except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error, ET.ParseError, ImportError):
         return False
 

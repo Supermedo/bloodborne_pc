@@ -2269,6 +2269,12 @@ def game_checks(folder):
     checks = []
     values = game_values(folder)
     title, version = values.get('TITLE_ID', '?'), values.get('APP_VER', '?')
+    try:
+        # game_app_version: Game of the Year dumps say APP_VER 01.00 over the 1.09 code.
+        from patches import game_app_version
+        version = game_app_version(folder) or version
+    except ImportError:
+        pass
     checks.append(('ok', _('eboot.bin found.')))
     if title == 'CUSA03173':
         checks.append(('ok', _('CUSA03173: the Game of the Year Edition, with The Old Hunters.')))
