@@ -35,6 +35,16 @@ GAME_VERSION = '01.09'
 TITLE = 'CUSA03173'
 # BBSC 1.0.0's fixed ports (bbport_coop.py): the link (UDP), the WebAPI and the game backend.
 LINK_PORT, WEBAPI_PORT, BACKEND_PORT = 31314, 31315, 20443
+# The Russia route (the launcher's online_relay, Online page): the relay in Almaty, Kazakhstan forwards the seamless
+# server on ports of its own (link, WebAPI, game backend), for players whose network in Russia cannot reach it
+# (bbrelay's nftables, 2026-11-08). Same address as the launcher's RUSSIA_RELAY.
+RELAY_IP = '89.126.206.250'
+RELAY_PORTS = (41314, 41315, 40443)
+
+
+def ports(settings):
+    """(link, WebAPI, backend) ports: the relay's with the Russia route on, else the seamless server's."""
+    return RELAY_PORTS if settings.get('online_relay') else (LINK_PORT, WEBAPI_PORT, BACKEND_PORT)
 GAME_SERVER = 'https://ss4.scej-network.jp:20443'  # the game's own server, sent to the backend
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 ENGINE = 'bb-probe-seamless.exe'
@@ -554,11 +564,16 @@ def resolve(host=SERVER, lookup=socket.gethostbyname):
         raise RuntimeError(f"Can't find the server {host}: check your internet connection.") from None
 
 
-def write_host_overrides(port_dir, ip):
+def server_ip(settings, lookup=socket.gethostbyname):
+    """The address the game links to: the relay's with the Russia route on, else the server's (resolve)."""
+    return RELAY_IP if settings.get('online_relay') else resolve(lookup=lookup)
+
+
+def write_host_overrides(port_dir, ip, port=BACKEND_PORT):
     """user\\host_overrides.custom.json: the game's own server is the seamless server's backend."""
     path = user_dir(port_dir) / 'host_overrides.custom.json'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({GAME_SERVER: f'http://{ip}:{BACKEND_PORT}'}, indent=2) + '\n', encoding='utf-8')
+    path.write_text(json.dumps({GAME_SERVER: f'http://{ip}:{port}'}, indent=2) + '\n', encoding='utf-8')
     return path
 
 
@@ -611,7 +626,7 @@ def environment(port_dir, root, settings, ip, key='', game_env=None, mods=None):
         'BB_USER_DIR': str(user_dir(port_dir)),
         'BB_RELEASE_VERSION': VERSION,
         'BB_ONLINE': '1',
-        'BB_SHADNET_SERVER': f'{ip}:{LINK_PORT}', 'BB_SHADNET_WEBAPI': f'http://{ip}:{WEBAPI_PORT}',
+        'BB_SHADNET_SERVER': f'{ip}:{ports(settings)[0]}', 'BB_SHADNET_WEBAPI': f'http://{ip}:{ports(settings)[1]}',
         'BB_SHADNET_NPID': str(settings.get('supermedo_npid', '')).strip(),
         'BB_SHADNET_PASSWORD': str(settings.get('supermedo_pass', '')),
         'SHADPS4_BLOODBORNE_SEAMLESS_COOP': '1', 'SHADPS4_BLOODBORNE_RE_TRACE': '0',

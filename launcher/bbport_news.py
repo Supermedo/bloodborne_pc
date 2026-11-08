@@ -23,6 +23,14 @@ def notes(version):
 
 
 NOTES = {
+    '1.9.8.4': (
+        None,
+        [('Seamless co-op', [
+            'The Russia route works for Seamless co-op too: with it on (Online page or the Seamless co-op page), '
+            'Seamless co-op connects through the relay in Kazakhstan to the seamless server. It went straight to '
+            'the server before, which networks in Russia block.',
+            'Chalice glyph search finds every SuperMedo dungeon in Seamless co-op (a server fix, live already).',
+        ])]),
     '1.9.8.3': (
         None,
         [('Online', [

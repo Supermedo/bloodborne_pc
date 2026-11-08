@@ -42,7 +42,7 @@ PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '1.9.8.3'
+VERSION = '1.9.8.4'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
 BETA = 0
@@ -66,7 +66,7 @@ RUSSIA_RELAY_HOSTS = ('np.supermedo.com', 'game.supermedo.com')
 
 def relay_routes(s):
     """{host: relay address} while the Russia route is on with SuperMedo Server, else {}."""
-    if s.get('online_relay') and s.get('online_pool', 'supermedo') == 'supermedo':
+    if s.get('online_relay') and s.get('online_pool', 'supermedo') in ('supermedo', 'seamless'):
         return {host: RUSSIA_RELAY for host in RUSSIA_RELAY_HOSTS}
     return {}
 # SuperMedo Seamless co-op (beta): BBSC's seamless co-op on supermedo.com's own seamless server, with the same
@@ -3806,6 +3806,14 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             var.trace_add('write', show_account)
         show_account()
 
+        # The Russia route here too (the same setting as the Online page's): the relay forwards the seamless server.
+        self.check(f, 'online_relay', 'app', _('Russia route (through a relay in Kazakhstan)',
+                                               'Маршрут для России (через ретранслятор в Казахстане)'),
+                   _('Only if your network in Russia cannot reach the SuperMedo server: the connection goes '
+                     'through a relay to the same server and players. Leave it off otherwise.',
+                     'Только если ваша сеть в России не может подключиться к серверу SuperMedo: соединение идёт '
+                     'через ретранслятор к тому же серверу и игрокам. В остальных случаях не включайте.'))
+
         self.build_party(f, npid_var, password_var)
         self.note(f, _('In Seamless co-op your party is your co-op team: start Seamless co-op, and the hunters of your '
                        'party find each other in the game. Everyone plays Seamless co-op from this page.'), top=8)
@@ -3922,8 +3930,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 else:
                     root, note = bbport_yharnam.view_root(PORT_DIR), ''
                     bbport_yharnam.copy_events(PORT_DIR, root)
-                ip = bbport_yharnam.resolve()
-                bbport_yharnam.write_host_overrides(PORT_DIR, ip)
+                ip = bbport_yharnam.server_ip(settings)  # the relay's with the Russia route on
+                bbport_yharnam.write_host_overrides(PORT_DIR, ip, bbport_yharnam.ports(settings)[2])
                 # The player's mods as the normal game has them (game_environment), with the party HUD over them.
                 view, config, hud_note = bbport_yharnam.mods_view(
                     PORT_DIR, Path(root) / bbport_yharnam.TITLE, settings['mods_dir'] or str(DATA_DIR / 'mods'),

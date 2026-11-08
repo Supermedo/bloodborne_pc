@@ -11,6 +11,10 @@ sys.path.insert(0, str(ROOT / 'launcher'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 import bbport_launcher_win as L  # noqa: E402
 import bbport_tls  # noqa: E402
+import bbport_yharnam as Y  # noqa: E402
+import json  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 
 class RussiaRouteEnvironmentTests(unittest.TestCase):
@@ -62,6 +66,31 @@ class LauncherRoutesTests(unittest.TestCase):
     def test_no_routes_no_change(self):
         bbport_tls.set_routes(L.relay_routes({'online_relay': False, 'online_pool': 'supermedo'}))
         self.assertEqual(bbport_tls.routed(('game.supermedo.com', 443)), ('game.supermedo.com', 443))
+
+
+class SeamlessRouteTests(unittest.TestCase):
+    """Seamless co-op through the relay: its own ports there, sent on to the seamless server's."""
+    def test_the_same_relay_as_normal_online(self):
+        self.assertEqual(Y.RELAY_IP, L.RUSSIA_RELAY)
+
+    def test_off_the_seamless_server_as_before(self):
+        self.assertEqual(Y.server_ip({}, lookup=lambda host: '203.0.113.7'), '203.0.113.7')
+        self.assertEqual(Y.ports({}), (31314, 31315, 20443))
+
+    def test_on_the_relay_and_its_ports(self):
+        s = {'online_relay': True}
+        self.assertEqual(Y.server_ip(s, lookup=lambda host: self.fail('no lookup')), L.RUSSIA_RELAY)
+        with tempfile.TemporaryDirectory() as port_dir:
+            env = Y.environment(port_dir, port_dir, s, Y.server_ip(s), game_env={})
+            self.assertEqual(env['BB_SHADNET_SERVER'], f'{L.RUSSIA_RELAY}:41314')
+            self.assertEqual(env['BB_SHADNET_WEBAPI'], f'http://{L.RUSSIA_RELAY}:41315')
+            path = Y.write_host_overrides(port_dir, Y.server_ip(s), Y.ports(s)[2])
+            self.assertEqual(json.loads(Path(path).read_text(encoding='utf-8')),
+                             {Y.GAME_SERVER: f'http://{L.RUSSIA_RELAY}:40443'})
+
+    def test_the_launcher_routes_with_the_seamless_pool_too(self):
+        self.assertTrue(L.relay_routes({'online_relay': True, 'online_pool': 'seamless'}))
+        self.assertFalse(L.relay_routes({'online_relay': True, 'online_pool': 'shadnet'}))
 
 
 if __name__ == '__main__':
