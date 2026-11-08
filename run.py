@@ -891,6 +891,11 @@ def main():
                         env['BB_PREP_WORKERS'] = '0'
                         notes.append('no draw-preparation workers')
             print(f'Low-VRAM profile ({vram} MiB card): {", ".join(notes)}; BB_LOW_VRAM=0 turns it off')
+        # Offline Chalice Glyphs (docs/LOCAL_CHALICE.md): a package has the catalog beside bb-probe.exe
+        # (bin/LocalChalice); a checkout reads it from data/.
+        catalog = PORT / 'data' / 'local_chalice' / 'catalog.bin'
+        if 'BB_LOCAL_CHALICE_CATALOG' not in env and catalog.is_file():
+            env['BB_LOCAL_CHALICE_CATALOG'] = str(catalog)
         extra = env.get('BB_PATCHES', '')
         lang = env.get('BB_LANGUAGE') or read_settings(config).get('language')
         if lang in ('10', '11'):

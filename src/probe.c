@@ -719,6 +719,12 @@ int main(int argc, char **argv) {
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     bbgpu_pc_menu_prepare(image);
 #ifdef _WIN32
+    /* Offline Chalice Glyphs (src/local_chalice.cpp, docs/LOCAL_CHALICE.md): checks the 1.09 code it
+     * hooks and does nothing when it differs, when online (BB_ONLINE=1) or BB_LOCAL_CHALICE_NATIVE=0. */
+    extern void lc_prepare(unsigned char *, size_t);
+    lc_prepare(image, size);
+#endif
+#ifdef _WIN32
     printf("Guest TCB loads redirected to the TEB TLS slot: %" PRIu64 "\n", patch_tcb_loads(segments, ns));
 #endif
     protect(traps, round_page((import_count + 1) * 32), 5);
