@@ -4,12 +4,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
 #include <vk_mem_alloc.h>
+
 #include "bbport_settings.h"
+#include "bbport_motion_ui.h"
 #include "bbport_toggles.h"
+#include "shader_recompiler/motion_storage.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_motion_parameters.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
@@ -17,11 +20,13 @@ namespace Vulkan {
 namespace {
 
 bool CreateBuffer(const Instance& instance, vk::DeviceSize size, bool host, vk::Buffer& buffer,
-                  VmaAllocation& allocation, void** mapped, u64& address) {
+                  VmaAllocation& allocation, void** mapped, u64& address, bool transfer = false) {
     const VkBufferCreateInfo buffer_ci{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        .usage =
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            (transfer ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0u),
     };
     VmaAllocationCreateInfo alloc_ci{
         .usage = VMA_MEMORY_USAGE_AUTO,
@@ -50,7 +55,16 @@ bool CreateBuffer(const Instance& instance, vk::DeviceSize size, bool host, vk::
 } // namespace
 
 ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
+    : ObjectMotion(
+          instance_, scheduler_,
+          Shader::MotionStorage::UsesSsbo(instance_.GetPhysicalDevice().getProperties().vendorID,
+                                          instance_.GetPhysicalDevice().getProperties().deviceID)) {
+}
+
+ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, bool ssbo)
     : instance{instance_}, scheduler{scheduler_} {
+    Shader::MotionVectors::storage_buffers = false;
+    BbSettings::Get().object_motion_unavailable = nullptr;
     // Pipeline selection limits the extra attachment and vertex stores to likely
     // animated draws. A setting or environment override can still disable the path.
     if (!BbSettings::Get().object_motion ||
@@ -60,19 +74,28 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     }
     const auto& features = instance.GetPhysicalDevice().getFeatures();
     if (!features.vertexPipelineStoresAndAtomics) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Features);
         std::printf("Object motion: vertexPipelineStoresAndAtomics unsupported, off\n");
         return;
     }
-    // AMD before RDNA3 (RX 6000 and older, device ids below 0x7440): the GPU is lost at the first
-    // frame of the world with object motion on (RX 6600, 6650 XT, 6700 XT, 6900 XT), also with
-    // its stores made plain. Off there unless BB_OBJECT_MOTION=1 asks for it; the upscalers work
-    // without it, with motion from the camera only.
+    // The tested RX6000 family uses SSBO access automatically. Keep the existing guard
+    // for other older AMD devices; upscalers can still use camera-only motion there.
     const auto props = instance.GetPhysicalDevice().getProperties();
     const char* forced = std::getenv("BB_OBJECT_MOTION");
-    if (props.vendorID == 0x1002 && props.deviceID < 0x7440 && !(forced && forced[0] == '1')) {
-        BbSettings::Get().object_motion_unavailable = "Not available on RX 6000 and older Radeon cards: "
-                                                       "they lose the device with it.";
-        std::printf("Object motion: off on this AMD GPU (RX 6000 and older lose the device with it; "
+    if (ssbo &&
+        (props.limits.maxVertexOutputComponents < 128 ||
+         props.limits.maxFragmentInputComponents < 128 ||
+         props.limits.maxPerStageDescriptorStorageBuffers < 3 ||
+         props.limits.maxBoundDescriptorSets < 2 ||
+         props.limits.maxStorageBufferRange < vk::DeviceSize(PositionsPerFrame) * 16 + 16)) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Limits);
+        std::puts("Object motion: SSBO limits unsupported, off");
+        return;
+    }
+    if (props.vendorID == 0x1002 && props.deviceID < 0x7440 && !ssbo &&
+        !(forced && forced[0] == '1')) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Gpu);
+        std::printf("Object motion: off on this AMD GPU (existing GPU/driver guard; "
                     "BB_OBJECT_MOTION=1 turns it on)\n");
         return;
     }
@@ -87,8 +110,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     }
     if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu && vram < (6ull << 30) - (256ull << 20) &&
         !(forced && forced[0] == '1')) {
-        BbSettings::Get().object_motion_unavailable = "Not available under 6 GB of video memory: "
-                                                       "textures need it more.";
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Vram);
         std::printf("Object motion: off with %llu MiB of VRAM (under 6 GB the memory goes to "
                     "textures; BB_OBJECT_MOTION=1 turns it on)\n",
                     (unsigned long long)(vram >> 20));
@@ -99,15 +121,53 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     if (!CreateBuffer(instance, vk::DeviceSize(1 + FrameSlots * ParamsPerFrame) * 32, true,
                       params_buffer, params_allocation, &mapped, params_address) ||
         !CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 16, false,
-                      positions_buffer, positions_allocation, nullptr, positions_address)) {
+                      positions_buffer, positions_allocation, nullptr, positions_address, ssbo)) {
+        BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Buffers);
         std::printf("Object motion: buffer creation failed, off\n");
         return;
     }
     params_mapped = static_cast<u32*>(mapped);
     std::memset(params_mapped, 0, 32);
+    if (ssbo) {
+        const auto device = instance.GetDevice();
+        params_layout = CreateMotionParameterLayout(device);
+        const u32 count = 3U;
+        const vk::DescriptorPoolSize size{vk::DescriptorType::eStorageBuffer, count};
+        auto [result, pool] = device.createDescriptorPoolUnique(
+            {.maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &size});
+        ASSERT_MSG(result == vk::Result::eSuccess, "OMV parameter descriptor pool failed");
+        params_pool = std::move(pool);
+        const vk::DescriptorSetLayout layout = *params_layout;
+        auto [allocated, sets] = device.allocateDescriptorSets(
+            {.descriptorPool = *params_pool, .descriptorSetCount = 1, .pSetLayouts = &layout});
+        ASSERT_MSG(allocated == vk::Result::eSuccess, "OMV parameter descriptor allocation failed");
+        params_set = sets.front();
+        constexpr vk::DeviceSize half_bytes = vk::DeviceSize(PositionsPerFrame) * 16;
+        constexpr vk::DeviceSize half_range = half_bytes + 16;
+        ASSERT(half_bytes % props.limits.minStorageBufferOffsetAlignment == 0);
+        ASSERT(half_range <= props.limits.maxStorageBufferRange);
+        const std::array<vk::DescriptorBufferInfo, 3> buffers{
+            {{params_buffer, 0, vk::DeviceSize(1 + FrameSlots * ParamsPerFrame) * 32},
+             {positions_buffer, 0, half_range},
+             {positions_buffer, half_bytes, half_range}}};
+        std::vector<vk::WriteDescriptorSet> writes;
+        for (u32 i = 0; i < count; ++i)
+            writes.push_back({.dstSet = params_set,
+                              .dstBinding = i,
+                              .descriptorCount = 1,
+                              .descriptorType = vk::DescriptorType::eStorageBuffer,
+                              .pBufferInfo = &buffers[i]});
+        device.updateDescriptorSets(writes, {});
+        std::puts("Object motion: SSBO parameters/history; bindings 0/1/2, compact I/O 24/25");
+    }
+    static_assert(Shader::MotionVectors::ParamSlots == 1 + FrameSlots * ParamsPerFrame);
+    static_assert(Shader::MotionVectors::PositionsPerHalf == PositionsPerFrame);
+    Shader::MotionVectors::storage_buffers = ssbo;
     Shader::MotionVectors::params_address = params_address;
     Shader::MotionVectors::positions_address = positions_address;
     enabled = true;
+    std::printf("Object motion: storage path %s (automatic GPU selection)\n",
+                ssbo ? "SSBO" : "BDA");
     const char* cache_setting = std::getenv("BB_OBJECT_MOTION_CACHE");
     cache_enabled = cache_setting && std::strcmp(cache_setting, "1") == 0;
     std::printf("Object motion: on (%u vertices per frame)\n", PositionsPerFrame);
@@ -172,11 +232,27 @@ void ObjectMotion::OnFrameStart() {
     });
 }
 
+void ObjectMotion::BindParameters(vk::PipelineLayout layout) {
+    if (!params_set)
+        return;
+    ASSERT(enabled && params_set);
+    const auto set = params_set;
+    scheduler.Record([layout, set](vk::CommandBuffer cmd) {
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, layout,
+                               Shader::MotionVectors::ParamDescriptorSet, set, {});
+    });
+}
+
 u32 ObjectMotion::PrepareDraw(const DrawInfo& draw) {
     if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
         return 0;
     }
     const auto allocation = history.Prepare(draw);
+    if (Shader::MotionVectors::storage_buffers && allocation.load && !ssbo_history_reported) {
+        std::printf("Object motion: SSBO previous-frame history prepared (frame=%llu)\n",
+                    (unsigned long long)frame);
+        ssbo_history_reported = true;
+    }
     u32 flags = (allocation.store ? Shader::MotionVectors::FlagStore : 0) |
                 (allocation.load ? Shader::MotionVectors::FlagLoad : 0);
     if (!flags) {

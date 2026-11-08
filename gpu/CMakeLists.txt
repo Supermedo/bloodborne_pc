@@ -385,9 +385,17 @@ if (NOT WIN32)
     target_include_directories(object-motion-cache-test PRIVATE .. shim shadps4 third_party/gcn/include)
     target_link_libraries(object-motion-cache-test PRIVATE bbgpu)
 endif()
-add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
-target_link_libraries(motion-shader-test PRIVATE bbgpu)
+if (WIN32)
+    add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp
+        ../tests/test_motion_shader_gpu.cpp ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(motion-shader-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(motion-shader-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+else()
+    add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp
+        ../tests/test_motion_shader_gpu.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
+    target_link_libraries(motion-shader-test PRIVATE bbgpu)
+endif()
 add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
 target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(ui-composition-test PRIVATE ..)
@@ -444,6 +452,10 @@ endif()
 add_executable(pad-use-test EXCLUDE_FROM_ALL ../tests/test_pad_use.cpp)
 target_include_directories(pad-use-test PRIVATE shim)
 target_compile_options(pad-use-test PRIVATE -UNDEBUG)
+
+add_executable(motion-storage-test EXCLUDE_FROM_ALL ../tests/test_motion_storage.cpp)
+target_include_directories(motion-storage-test PRIVATE shadps4)
+target_compile_options(motion-storage-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 
 # bbport: when the video memory banner comes up: ninja -C out/gpu vram-warning-test, then run it.
 # No GPU.

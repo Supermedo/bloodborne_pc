@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <set>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -21,6 +22,16 @@ using namespace Vulkan;
 #ifdef _WIN32
 extern "C" void runtime_restart() { std::abort(); }
 #endif
+
+namespace Vulkan {
+struct ObjectMotionCacheTest {
+    static std::unique_ptr<ObjectMotion> Make(const Instance& instance, Scheduler& scheduler) {
+        if (std::getenv("BB_OMV_TEST_SSBO"))
+            return std::unique_ptr<ObjectMotion>(new ObjectMotion(instance, scheduler, true));
+        return std::make_unique<ObjectMotion>(instance, scheduler);
+    }
+};
+} // namespace Vulkan
 
 int main(int argc, char **argv) {
     try {
@@ -57,7 +68,8 @@ int main(int argc, char **argv) {
         std::vector<std::array<u32, 4>> expected;
         u64 fnv = 1469598103934665603ull;
         {
-            ObjectMotion motion(instance, scheduler);
+            auto owner = ObjectMotionCacheTest::Make(instance, scheduler);
+            auto& motion = *owner;
             if (!motion.Enabled())
                 throw std::runtime_error("object motion unavailable");
             const char* cache_setting = std::getenv("BB_OBJECT_MOTION_CACHE");

@@ -126,6 +126,7 @@ public:
 
     void WarmUp();
     void Sync();
+    void NoteMotionFrame();
 
     /// bbport: the driver's own pipeline cache (its compiled GPU code), kept on disk next to the
     /// shader cache: a pipeline the driver built once is not compiled again on the next start.
@@ -201,6 +202,8 @@ private:
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
     std::shared_mutex programs_mutex;
     u64 prepared_hits = 0, prepared_misses = 0;
+    std::atomic<u64> motion_selections{}, motion_varying_fallbacks{};
+    u64 motion_frames{}; ///< GPU-thread frame count; selection counters include workers
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;

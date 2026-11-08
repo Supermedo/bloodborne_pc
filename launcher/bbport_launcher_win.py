@@ -274,6 +274,7 @@ import bbport_lang_195  # noqa: E402,F401 (the 1.9.5 texts: the shadNet server t
 import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts)
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
+import bbport_lang_motion  # noqa: E402,F401 (shared object-motion reasons and troubleshooting)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
 import bbport_lang_yharnam  # noqa: E402,F401 (the Seamless co-op page, BBSC 1.0.0)
 import bbport_lang_gpu  # noqa: E402,F401 (a graphics card Windows has and Vulkan does not see)
@@ -1229,9 +1230,10 @@ def object_motion_unavailable(gpu, gpu_line, extra_env=''):
     if 'BB_OBJECT_MOTION=1' in str(extra_env).split():
         return ''
     gpu = gpu or {}
-    if gpu.get('vendor_id') == 0x1002 and isinstance(gpu.get('device_id'), int) and gpu['device_id'] < 0x7440:
-        return _('Not available on RX 6000 and older Radeon cards: they lose the device with it.',
-                 'Недоступно на Radeon RX 6000 и более старых: с ним видеокарта теряет устройство.')
+    if gpu.get('vendor_id') == 0x1002 and isinstance(gpu.get('device_id'), int) and gpu['device_id'] < 0x7440 \
+            and gpu.get('object_motion_ssbo') is not True:
+        return _('Object motion unavailable for this GPU/driver.',
+                 'Векторы движения объектов недоступны для этой видеокарты/драйвера.')
     parts = [part.strip() for part in str(gpu_line or '').split(',')]
     vram = next((int(m.group(1)) for part in parts for m in [re.match(r'(\d+) MiB', part)] if m), 0)
     if 'discrete' in parts and 0 < vram < 6144 - 256:

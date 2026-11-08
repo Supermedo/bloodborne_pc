@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 #include <windows.h>
+#include "../gpu/shadps4/shader_recompiler/motion_storage.h"
 
 namespace {
 void String(const std::string& value) {
@@ -45,6 +46,8 @@ void Gpu(VkPhysicalDevice physical) {
     std::printf(",\"vendor_id\":%u,\"device_id\":%u,\"driver_name\":", p.vendorID, p.deviceID);
     String(driver.driverName);
     std::printf(",\"driver_info\":"); String(driver.driverInfo);
+    std::printf(",\"object_motion_ssbo\":%s",
+                Shader::MotionStorage::UsesSsbo(p.vendorID, p.deviceID) ? "true" : "false");
     std::printf(",\"vulkan\":\"%u.%u.%u\"}", VK_API_VERSION_MAJOR(p.apiVersion),
         VK_API_VERSION_MINOR(p.apiVersion), VK_API_VERSION_PATCH(p.apiVersion));
 }
