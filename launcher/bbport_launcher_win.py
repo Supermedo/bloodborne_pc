@@ -424,6 +424,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'frames_ahead': '', 'low_latency': 'auto', 'low_latency_auto': True, 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
                 'on_play': 'stay', 'reopen_after_game': False, 'minimize_to_tray': False, 'discord_status': True,
+                'discord_stats': True,
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
                 'check_updates': True, 'save_backups': False, 'online': False, 'online_server': 'srv.shadps4.net:31313',
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True, 'online_relay': False,
@@ -1317,6 +1318,7 @@ def game_environment(s, graphics=None):
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
     env['BB_DISCORD'] = '1' if DISCORD_APPLICATION_ID and s.get('discord_status', True) else '0'  # src/runtime_discord.c
+    env['BB_DISCORD_STATS'] = '1' if s.get('discord_stats', True) else '0'
     if DISCORD_APPLICATION_ID:
         env['BB_DISCORD_APP_ID'] = DISCORD_APPLICATION_ID
     env['BB_MENU_KEY'] = str(s.get('menu_key') or 'Insert')  # the in-game menu's key and combination
@@ -3113,6 +3115,15 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.check(f, 'discord_status', 'app', _("Show what I'm playing on Discord"),
                        _('Your area, the boss you fight and your level on your Discord profile, while the Discord '
                          'app runs.'))
+            stats = self.check(f, 'discord_stats', 'app', _("Show my hunter's stats on Discord"),
+                               _('Your level, Blood Echoes and Insight the area and boss still show.'))
+            status = self.var('discord_status', 'app')
+
+            def sync_stats(*_args):
+                stats.configure(state='normal' if status.get() else 'disabled')
+
+            status.trace_add('write', sync_stats)
+            sync_stats()
         self.check(f, 'minimize_to_tray', 'app', _('Minimize to the system tray'),
                    _('Minimized, the launcher leaves the task bar for an icon next to the clock: click it to '
                      'open the launcher again.'))
