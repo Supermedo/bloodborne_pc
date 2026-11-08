@@ -274,6 +274,7 @@ import bbport_lang_195  # noqa: E402,F401 (the 1.9.5 texts: the shadNet server t
 import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts)
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
+import bbport_lang_borderless  # noqa: E402,F401 (the borderless fullscreen switch)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
 import bbport_lang_yharnam  # noqa: E402,F401 (the Seamless co-op page, BBSC 1.0.0)
 import bbport_lang_gpu  # noqa: E402,F401 (a graphics card Windows has and Vulkan does not see)
@@ -419,7 +420,9 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'voice_language': 'auto',
-                'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
+                'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False,
+                'borderless_fullscreen': False,  # a window without a frame over the monitor (bbport_display)
+                'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '', 'low_vram': '', 'vram_warning': True,
                 'frames_ahead': '', 'low_latency': 'auto', 'low_latency_auto': True, 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,

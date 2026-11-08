@@ -1908,6 +1908,12 @@ class SetupMixin:
         self.section(f, _('Screen'))
         self.check(f, 'fullscreen', 'app', _('Fullscreen', 'Полноэкранный режим'),
                    _('Recommended: the game gets the display to itself (smoother, and 4K downsampling works).'))
+        self.check(f, 'borderless_fullscreen', 'app', _('Borderless fullscreen', 'Полноэкранный без рамки'),
+                   _('The game in a window without a frame over the whole monitor: Alt+Tab is instant and other '
+                     'windows can be on top of it. Turns Fullscreen off.',
+                     'Игра в окне без рамки на весь монитор: Alt+Tab срабатывает сразу, другие окна можно открыть '
+                     'поверх игры. Выключает полноэкранный режим.'))
+        self.one_screen_mode()
         self.check(f, 'exclusive_fullscreen', 'app', _('Exclusive fullscreen'),
                    _('Fullscreen takes the display over instead of covering the desktop: frames can arrive more evenly, '
                      'but switching to another window takes a moment. Only with Fullscreen on.'))
@@ -1927,6 +1933,15 @@ class SetupMixin:
             self.check(f, key, 'ini', _(*flags[key]))
         self.check(f, 'show_fps', 'ini', _('Show the FPS counter', 'Показывать FPS'))
         self.link_row(f, _('Every graphics setting one by one:'), 'graphics')
+
+    def one_screen_mode(self):
+        """Fullscreen and Borderless fullscreen turn each other off (an older file with both: Fullscreen stays,
+        as the game starts with it)."""
+        full, borderless = self.var('fullscreen', 'app'), self.var('borderless_fullscreen', 'app')
+        if full.get() and borderless.get():
+            borderless.set(False)
+        full.trace_add('write', lambda *_a: full.get() and borderless.get() and borderless.set(False))
+        borderless.trace_add('write', lambda *_a: borderless.get() and full.get() and full.set(False))
 
     WINDOW_SIZES = [('output', ('Same as the output resolution',)), ('last', ('As I left it',)),
                     ('custom', ('Custom size…',)), ('game', ('As the game opens it',))]
