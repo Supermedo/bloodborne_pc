@@ -40,6 +40,8 @@ public:
                         AmdGpu::Liverpool* liverpool);
     ~Rasterizer();
 
+    /// bbport: the queue of the dispatch being recorded (0 graphics, others compute), for log lines.
+    s32 CsQueue() const;
     [[nodiscard]] Runtime& GetRuntime() noexcept {
         return runtime;
     }
@@ -485,6 +487,7 @@ private:
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;
     static inline thread_local const AmdGpu::ComputeProgram* stage_cs = nullptr;
+    static inline thread_local s32 stage_queue = 0;
     AmdGpu::Regs pipe_regs{};
     bool pipe_synced = false;
     std::array<AmdGpu::CbDbExtent, AmdGpu::NUM_COLOR_BUFFERS> pipe_cb_extent{};
