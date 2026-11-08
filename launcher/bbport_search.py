@@ -35,6 +35,7 @@ def _(*texts):
 WORDS = {
     'fullscreen': 'vollbild fenster fullscreen window borderless randlos',
     'exclusive_fullscreen': 'exklusiv exclusive display mode bildwiederholrate refresh',
+    'borderless_fullscreen': 'borderless randlos rahmenlos ohne rahmen fenster window windowed alt tab vollbild',
     'hdr': 'hdr helligkeit brightness',
     'vram_warning': 'vram videospeicher grafikspeicher warnung warning popup banner meldung hinweis',
     'fps_mode': 'fps bildrate framerate frame rate 30 60 120 unbegrenzt unlock uncap uncapped flussig ruckelt lag',
