@@ -166,7 +166,13 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     // Reject unsupported shaders before allocating resources or recording a frame.
     BbSettings::ConfigureUpscalerSupport(instance.IsFsr4Int8Supported(),
                                          instance.IsFsr411Supported(), instance.Fsr411Problem());
+    // Discovery already initializes this selection. A user change during the
+    // queries is still detected on frame start, without a redundant initial owner.
+    const int initial_upscaler = BbSettings::Get().upscaler.load();
+    const unsigned initial_request = BbSettings::Get().upscaler_request.load();
     fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
+    applied_upscaler = initial_upscaler;
+    applied_upscaler_request = initial_request;
     {
         const Dlss* dlss = Dlss::Get();
         static std::string problem;
@@ -298,6 +304,8 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool active = Active();
     const bool jitter_on = active && settings.jitter && !BbToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
+    const unsigned request = settings.upscaler_request.load();
+    const bool selection_changed = applied_upscaler != upscaler || applied_upscaler_request != request;
     const int backend = settings.fsr411_backend;
     const bool method_changed = (upscaler == BbSettings::UpscalerFsr411 ||
                                  upscaler == BbSettings::UpscalerFsr412) &&
@@ -311,17 +319,24 @@ bool TemporalUpscaler::OnFrameStart() {
         target_height = BbSettings::OutputHeights[output];
         std::printf("Output resolution: %ux%u (live)\n", target_width, target_height);
         failed = false;
-        fsr4_failed = false;
     }
+    // A failed dispatch is not retried on every resize/frame. Only an explicit
+    // selection or backend change retries it, with a fresh provider context.
+    const bool retry = selection_changed || (method_changed && fsr4_failed);
     const bool changed = output_changed || applied_preset != preset || active != last_active ||
-                         jitter_on != last_jitter || applied_upscaler != upscaler || method_changed;
-    if (applied_upscaler != upscaler) {
+                         jitter_on != last_jitter || retry || method_changed;
+    if (retry) {
+        const bool refresh_support = applied_upscaler == upscaler &&
+            (applied_upscaler_request != request || fsr4_failed);
         // A failed provider keeps a fatal flag internally; a user retry gets a fresh context.
         scheduler.Finish();
-        fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
-        if (BbSettings::IsFsr4(upscaler)) BbSettings::Get().fsr4_problem = nullptr;
+        fsr4_failed = false;
+        BbSettings::Get().fsr4_fallback_source = -1;
+        fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler, refresh_support);
+        if (UseFsr4()) BbSettings::Get().fsr4_problem = nullptr;
     }
-    if (applied_upscaler != upscaler) fsr4_failed = false; // retry after a menu change
+    if (BbSettings::IsFsr4(upscaler) && !UseFsr4()) BbSettings::UpscalerFailure(upscaler);
+    else BbSettings::Get().fsr4_fallback_source = -1;
     // Dynamic scene resolution scaling (live preset switching) works on all GPUs.
     // On GPUs without D32S8 blit support, UI depth is cleared instead of copied from scene.
     if (!scaled_session) {
@@ -337,6 +352,7 @@ bool TemporalUpscaler::OnFrameStart() {
     applied_preset = preset;
     applied_output = output;
     applied_upscaler = upscaler;
+    applied_upscaler_request = request;
     applied_fsr_backend = backend;
     last_active = active;
     last_jitter = jitter_on;
@@ -2217,6 +2233,7 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer &cmdbuf, Fsr4Upscaler::Image
                                   Fsr4Upscaler::Image depth, u32 w, u32 h, u32 ow, u32 oh,
                                   float frame_ms, bool hdr, Fsr4Upscaler::Image *produced) {
     const auto& settings = BbSettings::Get();
+    const int requested = settings.upscaler.load();
     // Same jitter convention as FSR 3; the menu (or toggle 1 << 26) flips it for tests.
     const float sign =
         BbToggle::Disabled(1u << 26) != settings.fsr4_invert_jitter.load() ? -1.0f : 1.0f;
@@ -2259,8 +2276,9 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer &cmdbuf, Fsr4Upscaler::Image
         next = (next + 1) % kept.size();
     }
     if (!ok && fsr4->Fatal()) {
-        std::printf("Upscaler: falling back to FSR 3.1\n");
-        BbSettings::Get().upscaler = BbSettings::UpscalerFsr3;
+        std::printf("Upscaler: falling back to FSR 3.1 for this session; selected %s retained\n",
+                    BbSettings::UpscalerName(requested));
+        BbSettings::UpscalerFailure(requested);
         fsr4_failed = true; // EnsureResources creates the FSR 3 context next frame
         reset = true;
     }

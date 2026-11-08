@@ -5,8 +5,8 @@ The integration offers one **FSR 4.1 (experimental)** entry in **Upscaler**.
 
 | Order | Method | Runtime |
 |---|---|---|
-| 1 | FSR 4.1.2 — AMD Vulkan | Installed AMD Vulkan driver provider |
-| 2 | FSR 4.1.2 — AMD DX12 | Installed AMD DX12 driver provider, Vulkan/DX12 bridge |
+| 1 | FSR 4.1.2 — AMD Vulkan | Packaged AMD SDK 2.4 Vulkan upscaler |
+| 2 | FSR 4.1.2 — AMD DX12 | Packaged AMD SDK 2.4 DX12 upscaler, Vulkan/DX12 bridge |
 | 3 | FSR 4.1.1 — AMD DX12 | Packaged AMD upscaler library, Vulkan/DX12 bridge |
 | 4 | FSR 4.1.1 — Vulkan (fsr4vk) | Packaged fsr4vk provider and model |
 
@@ -17,9 +17,10 @@ launcher opens Graphics for an unavailable selection. It does not silently save
 a replacement. Launcher and overlay share version/method in `bbport.ini`.
 
 The family is enabled when any method is supported. Each method requires its own
-positive preflight result. Driver files alone or an absent support callback do
-not establish support. The 4.1.2 paths verify the exact provider version and its
-selected-device support query. DX12 also requires matching Vulkan/DXGI adapter
+positive preflight result. File presence alone does not establish support.
+The 4.1.2 paths query available SDK providers for the selected device, then
+verify the exact provider ID and version after context creation.
+DX12 also requires matching Vulkan/DXGI adapter
 LUID and shared memory/fences. fsr4vk checks device features separately from its
 pinned DLL/license hashes. Its download button repairs missing or changed files.
 No FSR 4.1 method is enabled solely from a GPU name or a driver version string.
@@ -35,14 +36,13 @@ the running method can be restored and the overlay reports that outcome.
 Motion-vector cache changes retain their restart requirement. All family/status
 and help text is shared in the 13 launcher languages.
 
-Automatic installed-driver discovery is initialized for GUI launches,
-`Bloodborne.exe --run` and `python run.py`. Direct CLI launches retain explicit
-`BB_TEST_AMD_VK_RUNTIME` / `BB_TEST_AMD_DX_RUNTIME` overrides. The GUI discovers installed driver paths for its selected environment.
-Existing profile, data-directory, save and cache conventions remain unchanged.
-
-The 4.1.2 integration uses the installed AMD driver provider ABI and a local
-process import lookup adjustment. It is experimental and does not bundle a new
-public Vulkan SDK. Actual support is determined by the selected driver/device.
+The 4.1.2 methods use the public SDK API, with separate effect libraries under
+`bin/fsr24`. They do not use the previous internal driver ABI or import lookup
+adjustment. [SDK pinning, loading and verification](FSR24_UPSCALING.md).
+Installed-driver discovery contributes to support-cache invalidation; the
+SDK can also expose official driver-provided versions. Existing profile, data-directory, save and cache
+conventions remain unchanged. Actual support still depends on the selected GPU
+and its driver.
 Both ML-FG 4.0.1 and 4.0.2 remain separate choices with their existing RX 9000,
 Windows 11, exact-provider and SDR requirements.
 

@@ -51,6 +51,8 @@ class PreferenceTests(unittest.TestCase):
             port = Path(temp)
             driver = port/'driver.dll'; driver.write_bytes(b'driver')
             paths = {'vulkan': str(driver)}
+            runtime=port/'out/gpu/fsr24/amd_fidelityfx_upscaler_vk.dll'
+            runtime.parent.mkdir(parents=True);runtime.write_bytes(b'mocked SDK file')
             provider._cache.clear()
             result = subprocess.CompletedProcess([], 0, 'provider diagnostics\n{"supported":true,"reason":"ready","detail":"4.1.2"}\n', '')
             with patch.object(provider.subprocess, 'run', return_value=result) as run:

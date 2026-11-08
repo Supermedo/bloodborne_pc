@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "native_fsr411.h"
-#include "driver_provider.h"
+#include "sdk24_upscaling.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -54,16 +54,26 @@ uint32_t ApiFormat(DXGI_FORMAT format) {
     case DXGI_FORMAT_R16G16_FLOAT: return FFX_API_SURFACE_FORMAT_R16G16_FLOAT;
     case DXGI_FORMAT_R32_FLOAT: return FFX_API_SURFACE_FORMAT_R32_FLOAT;
     case DXGI_FORMAT_R16_UNORM: return FFX_API_SURFACE_FORMAT_R16_UNORM;
-    default: throw std::runtime_error("unsupported FSR 4.1.1 input format");
+    default: throw std::runtime_error("unsupported AMD FSR input format " + std::to_string(uint32_t(format)));
     }
 }
 }
 
 struct NativeFsr411::Impl {
+    const char* VersionLabel() const noexcept {
+        return config.model_version == ((4u << 22) | (1u << 12) | 2u) ? "4.1.2" : "4.1.1";
+    }
     NativeFsr411Config config;
     HMODULE module{};
     ffxFunctions ffx{};
     ffxContext context{};
+    const FsrSdk24::Api* sdk24{};
+    FsrSdk24::Version sdk_selected{};
+    // Keep the creation chain together; descriptor pointers are needed through CreateContext.
+    ffxCreateBackendDX12Desc sdk_backend{};
+    ffxOverrideVersion sdk_override{};
+    ffxCreateContextDescUpscaleVersion sdk_version{};
+    ffxCreateContextDescUpscale sdk_create{};
     IDXGIFactory4* factory{};
     IDXGIAdapter1* adapter{};
     ID3D12Device* device{};
@@ -130,7 +140,7 @@ struct NativeFsr411::Impl {
         if (fence->GetCompletedValue() >= value) return;
         Check(fence->SetEventOnCompletion(value, event), "Set D3D12 fence event");
         if (WaitForSingleObject(event, 30000) != WAIT_OBJECT_0)
-            throw std::runtime_error("FSR 4.1.1 D3D12 GPU wait timed out");
+            throw std::runtime_error(std::string("FSR ")+VersionLabel()+" D3D12 GPU wait timed out");
         Check(device->GetDeviceRemovedReason(), "D3D12 device");
     }
     void Submit(bool synchronous = true, uint64_t input_value = 0) {
@@ -177,7 +187,7 @@ struct NativeFsr411::Impl {
         }
         DXGI_ADAPTER_DESC1 adapter_desc{};
         adapter->GetDesc1(&adapter_desc);
-        std::printf("FSR 4.1.1 native: DXGI adapter %ls\n", adapter_desc.Description);
+        std::printf("FSR %s native: DXGI adapter %ls\n", VersionLabel(), adapter_desc.Description);
         Check(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)), "Create D3D12 device");
         D3D12_COMMAND_QUEUE_DESC q{};
         q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -194,12 +204,10 @@ struct NativeFsr411::Impl {
         Check(device->CreateSharedHandle(input_fence, nullptr, GENERIC_ALL, nullptr, &input_handle), "Share input fence");
         event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!event) throw std::runtime_error("Create fence event failed");
-        DriverFsr::External direct{};
-        if(driver412){
-            direct=DriverFsr::Get(DriverFsr::Runtime(true),FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE);
-            if((uint32_t(direct.provider.versionId)&0x7fffffffu)!=config.model_version ||
-               !DriverFsr::Supported(direct,device))
-                throw std::runtime_error("AMD DX12 4.1.2 provider unavailable on this device");
+        if (driver412) {
+            sdk24 = &FsrSdk24::Runtime(true);
+            sdk_selected = FsrSdk24::Select(*sdk24, device);
+            ffx = sdk24->functions;
         }
         uint64_t chosen{};
         if (!driver412) {
@@ -235,12 +243,6 @@ struct NativeFsr411::Impl {
         ffxCreateContextDescUpscaleVersion version{};
         version.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
         version.version=config.model_version;
-        if(driver412){
-            ffx.CreateContext=direct.provider.createContext;ffx.DestroyContext=direct.provider.destroyContext;
-            ffx.Configure=direct.provider.configure;ffx.Query=direct.provider.query;ffx.Dispatch=direct.provider.dispatch;
-            override.header.pNext=nullptr;
-            backend.header.pNext=&version.header;
-        }
         ffxCreateContextDescUpscale create{};
         create.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
         create.header.pNext = driver412 ? &backend.header : &override.header;
@@ -249,18 +251,33 @@ struct NativeFsr411::Impl {
         else create.flags |= FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
         create.maxRenderSize = {config.render_width, config.render_height};
         create.maxUpscaleSize = {config.output_width, config.output_height};
-        const auto rc = ffx.CreateContext(&context, &create.header, nullptr);
+        auto* create_desc = &create;
+        if (driver412) {
+            sdk_backend = backend; sdk_version = version; sdk_override = override; sdk_create = create;
+            sdk_override.versionId = sdk_selected.id;
+            sdk_override.header.pNext = nullptr;
+            sdk_version.header.pNext = &sdk_override.header;
+            sdk_backend.header.pNext = &sdk_version.header;
+            sdk_create.header.pNext = &sdk_backend.header;
+            FsrSdk24::ConfigureDiagnostics(sdk_create);
+            create_desc = &sdk_create;
+        }
+        const auto rc = ffx.CreateContext(&context, &create_desc->header, nullptr);
         if (rc != FFX_API_RETURN_OK)
-            throw std::runtime_error("FSR 4.1.1 context creation returned " + std::to_string(rc));
+            throw std::runtime_error(std::string("FSR ")+VersionLabel()+" context creation returned " + std::to_string(rc));
         ffxQueryGetProviderVersion provider{};
         provider.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
         if (!driver412 && (ffx.Query(&context, &provider.header) != FFX_API_RETURN_OK || !provider.versionName ||
             !std::strstr(provider.versionName, "4.1.1")))
             throw std::runtime_error("AMD context did not select FSR4 4.1.1");
-        if(driver412) provider.versionName=direct.provider.versionName;
-        std::printf("FSR %s native: ACTIVE %s, %ux%u -> %ux%u, %s\n",driver412?"4.1.2":"4.1.1", provider.versionName,
+        if (driver412) {
+            sdk_selected = FsrSdk24::Verify(*sdk24, &context, sdk_selected);
+            FsrSdk24::LogMemory(*sdk24, &context, "AMD DX12");
+            provider.versionName = sdk_selected.name.c_str();
+        }
+        std::printf("FSR %s native: ACTIVE %s, %ux%u -> %ux%u, %s%s\n",driver412?"4.1.2":"4.1.1", provider.versionName,
                     config.render_width, config.render_height, config.output_width, config.output_height,
-                    config.hdr ? "HDR" : "sRGB");
+                    config.hdr ? "HDR" : "sRGB", driver412 ? "; SDK 2.4 public API" : "");
         formats = {DXGI_FORMAT(config.color_format), DXGI_FORMAT(config.depth_format),
                    DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
         for (unsigned i = 0; i < textures.size(); ++i) {
@@ -347,7 +364,7 @@ struct NativeFsr411::Impl {
         d.flags = config.hdr ? 0 : FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;
         const auto rc = ffx.Dispatch(&context, &d.header);
         if (rc != FFX_API_RETURN_OK)
-            throw std::runtime_error("FSR 4.1.1 dispatch returned " + std::to_string(rc));
+            throw std::runtime_error(std::string("FSR ")+VersionLabel()+" dispatch returned " + std::to_string(rc));
         if (Shared(3)) {
             Transition(list, shared, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
             Transition(list, textures[3], D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -372,7 +389,7 @@ struct NativeFsr411::Impl {
             Transition(list, textures[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                        Shared(i) ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_COPY_DEST);
         Submit(!input_value, input_value);
-        if (!dispatched) std::printf("FSR 4.1.1 native: first AMD 4.1.1 dispatch submitted (%s)\n", input_value ? "GPU fences" : "CPU waits");
+        if (!dispatched) std::printf("FSR %s native: first AMD dispatch submitted (%s)\n", VersionLabel(), input_value ? "GPU fences" : "CPU waits");
         dispatched = true;
     }
 };

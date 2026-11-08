@@ -87,7 +87,7 @@ struct Fsr4Upscaler::Impl {
     int attempted_method = -1;
 #endif
 
-    Impl(const Instance& instance_, Scheduler& scheduler_)
+    Impl(const Instance& instance_, Scheduler& scheduler_, bool refresh_support)
         : instance{instance_}, scheduler{scheduler_} {
 #ifdef _WIN32
         auto& s = BbSettings::Get();
@@ -96,19 +96,27 @@ struct Fsr4Upscaler::Impl {
         s.fsr41_backend_supported[0][BbSettings::Fsr411Dx12] = dx12;
         const auto id = instance.GetPhysicalDevice().getProperties2<vk::PhysicalDeviceProperties2,
             vk::PhysicalDeviceIDProperties>().get<vk::PhysicalDeviceIDProperties>();
-        const auto direct = instance.GetVendorID() != 0x1002
-            ? Fsr411Support{false, "hardware", "AMD GPU required"}
-            : ProbeFsr412Dx12(id.deviceLUID.data());
-        s.fsr41_backend_supported[1][BbSettings::Fsr411Dx12] =
-            instance.IsFsr411AsyncSupported() && direct.supported;
-        int vulkan_status{};
-        s.fsr41_backend_supported[1][BbSettings::Fsr411Vulkan] = Fsr412Driver::Available(instance, &vulkan_status);
-        s.fsr41_status[1][BbSettings::Fsr411Vulkan] = vulkan_status;
+        std::filesystem::path directory;
+        try { directory=Fsr412Driver::RuntimeDirectory(); } catch (const std::exception&) { /* probe reports the error */ }
+        const auto direct=instance.Fsr412SupportCache().Get(1,directory/L"amd_fidelityfx_upscaler_dx12.dll",refresh_support,[&] {
+            const auto result=instance.GetVendorID()!=0x1002 ? Fsr411Support{false,"hardware","AMD GPU required"}
+                : !id.deviceLUIDValid ? Fsr411Support{false,"adapter","Vulkan/DX12 adapter LUID"}
+                : ProbeFsr412Dx12(id.deviceLUID.data());
+            return FsrSupportResult{instance.IsFsr411AsyncSupported() && result.supported,
+                result.supported ? instance.FsrDx12InteropStatus() : FsrSupportCode(result)};
+        });
+        const auto vulkan=instance.Fsr412SupportCache().Get(0,directory/L"amd_fidelityfx_upscaler_vk.dll",refresh_support,[&] {
+            int status{};const bool ready=Fsr412Driver::Available(instance,&status);
+            return FsrSupportResult{ready,status};
+        });
+        s.fsr41_backend_supported[1][BbSettings::Fsr411Dx12] = direct.supported;
+        s.fsr41_backend_supported[1][BbSettings::Fsr411Vulkan] = vulkan.supported;
+        s.fsr41_status[1][BbSettings::Fsr411Vulkan] = vulkan.status;
         s.fsr41_status[0][BbSettings::Fsr411Dx12] = instance.Fsr411NativeStatus();
-        s.fsr41_status[1][BbSettings::Fsr411Dx12] = direct.supported ?
-            instance.FsrDx12InteropStatus() : FsrSupportCode(direct);
+        s.fsr41_status[1][BbSettings::Fsr411Dx12] = direct.status;
         s.fsr41_status[0][BbSettings::Fsr411Vulkan] = instance.Fsr4VkStatus();
 #endif
+        (void)refresh_support;
     }
 
     ~Impl() {
@@ -538,8 +546,8 @@ struct Fsr4Upscaler::Impl {
     }
 };
 
-Fsr4Upscaler::Fsr4Upscaler(const Instance& instance, Scheduler& scheduler)
-    : impl{std::make_unique<Impl>(instance, scheduler)} {}
+Fsr4Upscaler::Fsr4Upscaler(const Instance& instance, Scheduler& scheduler, bool refresh_support)
+    : impl{std::make_unique<Impl>(instance, scheduler, refresh_support)} {}
 
 Fsr4Upscaler::~Fsr4Upscaler() = default;
 

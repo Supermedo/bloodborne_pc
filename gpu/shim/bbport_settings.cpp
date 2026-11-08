@@ -143,6 +143,9 @@ Values& Get() {
 
 void Load() {
     auto& v = Get();
+    v.fsr4_fallback_source = -1;
+    v.upscaler_request = 0;
+    v.fsr4_problem = nullptr;
     v.fg401_fallback = -1;
     v.fg401_fallback_source = -1;
     v.frame_gen_hdr = false;
@@ -246,8 +249,24 @@ void ConfigureUpscalerSupport(bool fsr4, bool fsr411, const char* fsr411_problem
                     UpscalerName(requested), kept.c_str());
         kept += "; using FSR 3.1";
         v.fsr4_problem = kept.c_str();
-        v.upscaler = UpscalerFsr3;
+        UpscalerFailure(requested);
     }
+}
+
+void SelectUpscaler(int provider) {
+    auto& v = Get();
+    provider = std::clamp(provider, int(UpscalerOff), UpscalerCount - 1);
+    const bool retry = v.upscaler != provider || v.fsr4_fallback_source >= 0;
+    v.upscaler = provider;
+    if (retry) {
+        v.fsr4_fallback_source = -1;
+        ++v.upscaler_request;
+    }
+}
+
+void UpscalerFailure(int provider) {
+    auto& v = Get();
+    if (IsFsr4(provider) && v.upscaler == provider) v.fsr4_fallback_source = provider;
 }
 
 void ConfigureFg401Support(bool available, const char* problem, int provider) {

@@ -22,7 +22,7 @@ class DriverProviderTests(unittest.TestCase):
         for method in ('vk','dx12'):
             self.assertTrue(bbport_fsr412.method_status(method,caps,paths)['supported'])
         caps.pop('fsr412_vulkan')
-        self.assertEqual(bbport_fsr412.method_status('vk',caps,{})['reason'],'driver')
+        self.assertEqual(bbport_fsr412.method_status('vk',caps,{})['reason'],'check')
 
     def test_selected_adapter_and_pending_checks(self):
         self.assertEqual(bbport_fsr412.method_status('vk',None,{})['reason'],'checking')

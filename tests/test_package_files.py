@@ -47,6 +47,20 @@ class PackageFilesTests(unittest.TestCase):
         self.assertEqual(help_.hints_in_log(note), ['mixed_versions'])
         self.assertEqual(help_.hints_in_log('ERROR: bad patch entry'), ['mixed_versions'])
 
+    def test_separate_sdk_runtime_is_checked(self):
+        runtime = self.port / 'bin' / 'fsr24' / 'amd_fidelityfx_upscaler_vk.dll'
+        runtime.parent.mkdir()
+        runtime.write_bytes(b'pinned SDK runtime')
+        P.write(self.port, '1.9.5')
+        self.assertIn(runtime.relative_to(self.port).as_posix(),
+                      json.loads((self.port / P.MANIFEST).read_text())['files'])
+        runtime.write_bytes(b'wrong version')
+        self.assertEqual(P.check(self.port),
+                         ('1.9.5', ['bin/fsr24/amd_fidelityfx_upscaler_vk.dll']))
+        runtime.unlink()
+        self.assertEqual(P.check(self.port),
+                         ('1.9.5', ['bin/fsr24/amd_fidelityfx_upscaler_vk.dll']))
+
     def test_what_a_player_may_change_or_what_a_start_does_not_need(self):
         (self.port / 'bin' / 'nvngx_dlss.dll').write_bytes(b'a newer DLSS')  # not in the list
         (self.port / 'bin' / 'SDL3.dll').write_bytes(b'other')  # in the list, but not read at every start
