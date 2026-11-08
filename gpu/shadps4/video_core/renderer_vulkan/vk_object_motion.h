@@ -8,6 +8,8 @@
 #pragma once
 
 #include <array>
+#include <deque>
+#include <memory>
 #include "video_core/renderer_vulkan/motion_history.h"
 
 #include "common/types.h"
@@ -53,16 +55,12 @@ public:
     /// holds this frame's vectors at `width` x `height`.
     vk::ImageView PrepareRead(vk::CommandBuffer cmdbuf, u32 width, u32 height, bool& valid);
     /// The image of the last PrepareRead (layout General), or null.
-    [[nodiscard]] vk::ImageView View() const noexcept {
-        return view ? *view : vk::ImageView{};
-    }
-    [[nodiscard]] vk::Image Image(u32 width, u32 height) const noexcept {
-        return written && width == image_width && height == image_height
-            ? vk::Image(image) : vk::Image{};
-    }
+    [[nodiscard]] vk::ImageView View() const noexcept;
+    [[nodiscard]] vk::Image Image(u32 width, u32 height) const noexcept;
 
 private:
     void EnsureImage(u32 width, u32 height);
+    void CollectRetiredImages();
 
     const Instance& instance;
     Scheduler& scheduler;
@@ -90,15 +88,27 @@ private:
     u32 image_width = 0, image_height = 0;
     bool written = false; ///< this frame's vectors are in the image
     vk::ImageLayout image_layout = vk::ImageLayout::eUndefined;
-    // Keep alternate render-target sizes resident; at most four images including the active one.
+    u64 image_last_use{}, cache_clock{};
+    // Four reusable sizes including the active one. Recent uses are ordered within a frame too.
     struct CachedImage {
         VideoCore::UniqueImage image;
         vk::UniqueImageView view;
         u32 width{}, height{};
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
+        u64 last_use{}, last_tick{};
+    };
+    friend struct ObjectMotionCacheTest;
+    void RetireCachedImage(CachedImage& cached);
+    struct RetiredImage {
+        std::unique_ptr<CachedImage> target;
+        u64 tick{};
     };
     std::array<CachedImage, 3> cached_images;
-    u32 eviction_cursor{};
+    // Bound temporary VRAM while old submissions finish. Pressure waits only for retired work.
+    static constexpr size_t MaxRetiredImages = 2;
+    static constexpr u64 MaxRetiredBytes = 128ull << 20;
+    std::deque<RetiredImage> retired_images;
+    u64 retired_bytes{};
     bool cache_enabled = false; ///< opt-in, read once from BB_OBJECT_MOTION_CACHE
 };
 
