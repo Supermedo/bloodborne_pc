@@ -23,6 +23,20 @@ def notes(version):
 
 
 NOTES = {
+    '1.9.8.3': (
+        None,
+        [('Online', [
+            "Russia route (Online page, SuperMedo Server): for players whose network in Russia cannot reach the "
+            'SuperMedo server. The game and the launcher connect through a relay in Kazakhstan to the same server '
+            'and the same players. Leave it off if online already works for you.',
+        ]),
+         ('Seamless co-op', [
+             "Your own world's progress stays yours: after helping in another hunter's world, your world came back "
+             "with their world's state (bosses, doors, Chalice items they did not have). The host's world written "
+             "into the guest is no longer kept as the guest's own progress.",
+             "The Bath Messengers in the Hunter's Dream talk again in seamless co-op: they waited for the 'hat' "
+             'event to end, which stayed on as a world flag shared by the team.',
+         ])]),
     '1.9.8.2': (
         None,
         [('Online', [

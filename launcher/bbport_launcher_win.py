@@ -42,7 +42,7 @@ PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '1.9.8.2'
+VERSION = '1.9.8.3'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
 BETA = 0
@@ -56,6 +56,19 @@ COMMUNITY_SERVER = 'https://game.supermedo.com'
 # SuperMedo Server: the shadNet server (accounts, bells and summons) and the game server above,
 # both supermedo.com's own.
 SUPERMEDO_SERVER, SUPERMEDO_WEBAPI = 'np.supermedo.com:31313', 'http://np.supermedo.com:31315'
+# The Russia route (Online page, SuperMedo Server only): a relay in Almaty, Kazakhstan that forwards the SuperMedo
+# server's game ports (31313, 31314 UDP, 31315, 443, 18671, 20443) to it, for players whose network blocks the
+# server's own address (2026-11-08). Only the address the game and the launcher connect to changes: TLS still
+# names game.supermedo.com and checks its certificate.
+RUSSIA_RELAY = '89.126.206.250'
+RUSSIA_RELAY_HOSTS = ('np.supermedo.com', 'game.supermedo.com')
+
+
+def relay_routes(s):
+    """{host: relay address} while the Russia route is on with SuperMedo Server, else {}."""
+    if s.get('online_relay') and s.get('online_pool', 'supermedo') == 'supermedo':
+        return {host: RUSSIA_RELAY for host in RUSSIA_RELAY_HOSTS}
+    return {}
 # SuperMedo Seamless co-op (beta): BBSC's seamless co-op on supermedo.com's own seamless server, with the same
 # SuperMedo account (both servers share one account database). The game starts through BBSC's bbsc-launch.exe
 # (bbsc\ next to the launcher), which runs bin\bb-probe.exe with its mod; its game server speaks HTTP.
@@ -413,7 +426,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'on_play': 'stay', 'reopen_after_game': False, 'minimize_to_tray': False, 'discord_status': True,
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
                 'check_updates': True, 'save_backups': False, 'online': False, 'online_server': 'srv.shadps4.net:31313',
-                'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True,
+                'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True, 'online_relay': False,
                 'online_custom_servers': False, 'supermedo_npid': '', 'supermedo_pass': '', 'party_key': '',
                 'online_community': COMMUNITY_SERVER, 'online_pool': 'supermedo',
                 # The setup guide ran (or the launcher was set up before it existed); a graphics card
@@ -1360,6 +1373,10 @@ def game_environment(s, graphics=None):
             env['BB_SHADNET_WEBAPI'] = SUPERMEDO_WEBAPI
             env['BB_SHADNET_NPID'] = str(s.get('supermedo_npid', '')).strip()
             env['BB_SHADNET_PASSWORD'] = str(s.get('supermedo_pass', ''))
+            if routes := relay_routes(s):  # the Russia route: the relay's address, the hosts' names
+                env['BB_SHADNET_SERVER'] = f'{RUSSIA_RELAY}:31313'
+                env['BB_SHADNET_WEBAPI'] = f'http://{RUSSIA_RELAY}:31315'
+                env['BB_HOST_ROUTES'] = ','.join(f'{host}={address}' for host, address in routes.items())
         if s.get('online_pool') == 'seamless':  # BBSC with the SuperMedo account on the seamless server
             env['BB_SHADNET_SERVER'] = SEAMLESS_SERVER
             env['BB_SHADNET_WEBAPI'] = SEAMLESS_WEBAPI
@@ -1444,6 +1461,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.app['low_latency'] = 'auto'
             self.app['low_latency_auto'] = True
         self.app.update(settled_online(self.app, saved))  # dead ends to SuperMedo Server
+        bbport_tls.set_routes(relay_routes(self.app))  # the Russia route for the launcher's own connections
         self.online_written = {key: saved.get(key) for key in SHADNET_KEYS + OWN_ONLINE_KEYS}
         # 1.9.2's account (the password in plain text) and the sign-in of a server no longer offered.
         for key in ('supermedo_user', 'supermedo_password', 'thd_online_id', 'thd_token', 'bridge_live_map'):
@@ -3518,6 +3536,19 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.check(f, 'online_upnp', 'app', _('UPnP (open a port on the router automatically)'),
                    _('Turn it off on Tailscale or another VPN.'))
         group('upnp')
+        self.check(f, 'online_relay', 'app', _('Russia route (through a relay in Kazakhstan)',
+                                               'Маршрут для России (через ретранслятор в Казахстане)'),
+                   _('Only if your network in Russia cannot reach the SuperMedo server: the connection goes '
+                     'through a relay to the same server and players. Leave it off otherwise.',
+                     'Только если ваша сеть в России не может подключиться к серверу SuperMedo: соединение идёт '
+                     'через ретранслятор к тому же серверу и игрокам. В остальных случаях не включайте.'))
+        group('relay')
+
+        def route_changed(*_args):
+            bbport_tls.set_routes(relay_routes({'online_relay': self.var('online_relay', 'app').get(),
+                                                'online_pool': pool.get()}))
+        self.var('online_relay', 'app').trace_add('write', route_changed)
+        pool.trace_add('write', route_changed)
         result = ttk.Label(f, text='', style='Muted.TLabel', justify='left')
 
         def check():
@@ -3554,7 +3585,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.note(f, _('Everyone in a session needs the same game version (1.09) and the same server.') + ' ' +
                   _('Cheats, debug features and third-party patches run offline only.'))
         shown = {'shadnet': {'account', 'shadnet', 'servers', 'upnp'},
-                 'supermedo': {'supermedo', 'supermedo_out', 'register', 'party', 'upnp'},
+                 'supermedo': {'supermedo', 'supermedo_out', 'register', 'party', 'upnp', 'relay'},
                  'seamless': {'supermedo', 'supermedo_out', 'register', 'party', 'seamless', 'upnp'}}
 
         def show_state(*_args):

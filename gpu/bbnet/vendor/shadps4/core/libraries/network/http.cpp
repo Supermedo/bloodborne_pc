@@ -6,9 +6,11 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -795,6 +797,33 @@ struct HttpClientPool {
 static HttpClientPool g_client_pool;
 constexpr size_t kIdleClientsPerKey = 4;
 
+// bbport (2026-11-08): BB_HOST_ROUTES="host=address,host=address" (the launcher's Russia route):
+// the connection to such a host goes to that address, a relay that forwards it to the server,
+// while the TLS name, its certificate check and the Host header stay the host's. For players whose
+// network blocks the server's own address.
+static const std::map<std::string, std::string>& HostRoutes() {
+    static const std::map<std::string, std::string> routes = [] {
+        std::map<std::string, std::string> parsed;
+        const char* text = std::getenv("BB_HOST_ROUTES");
+        std::string_view rest = text ? text : "";
+        while (!rest.empty()) {
+            const size_t end = rest.find(',');
+            const std::string_view item = rest.substr(0, end);
+            rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+            const size_t equals = item.find('=');
+            if (equals != std::string_view::npos && equals > 0 && equals + 1 < item.size()) {
+                parsed.emplace(std::string{item.substr(0, equals)},
+                               std::string{item.substr(equals + 1)});
+            }
+        }
+        for (const auto& [host, address] : parsed) {
+            LOG_INFO(Lib_Http, "HTTP: {} goes through {}", host, address);
+        }
+        return parsed;
+    }();
+    return routes;
+}
+
 class PooledHttpClient {
 public:
     PooledHttpClient(std::string key, const std::string& base_url) : key_(std::move(key)) {
@@ -809,6 +838,9 @@ public:
         }
         if (!client_) {
             client_ = std::make_unique<httplib::Client>(base_url);
+            if (!HostRoutes().empty()) {
+                client_->set_hostname_addr_map(HostRoutes());
+            }
         }
         client_->set_keep_alive(true);
     }

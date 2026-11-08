@@ -54,6 +54,33 @@ def bind(module):
     L = module
 
 
+# ---- routes: a host reached through another address ---------------------------------------------
+# The Russia route (Online page): the launcher's connections to the SuperMedo hosts go to a relay that
+# forwards them to the server, for players whose network blocks the server's own address. Only the
+# address changes: TLS still names the host and checks its certificate, HTTP still sends its Host.
+_routes = {}
+_create_connection = socket.create_connection
+
+
+def set_routes(routes):
+    """{host: address} from now on; {} for none."""
+    global _routes
+    _routes = {str(host).lower(): str(address) for host, address in (routes or {}).items()}
+
+
+def routed(address):
+    """(host, port) as it is connected to: a routed host's address in its place."""
+    host, port = address[0], address[1]
+    return (_routes.get(str(host).lower(), host), port) + tuple(address[2:])
+
+
+def _routed_connection(address, *args, **kwargs):
+    return _create_connection(routed(address), *args, **kwargs)
+
+
+socket.create_connection = _routed_connection
+
+
 def _(*texts):
     """In the launcher's language; English without the launcher (a script run on its own)."""
     return L._(*texts) if L else texts[0]
