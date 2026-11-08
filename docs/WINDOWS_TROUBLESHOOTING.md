@@ -51,7 +51,7 @@ Object motion vectors: off
 
 - `HandleLoginReply: Login rejected error code 8`: shadNet error 8 is `LoginInvalidPassword`
   (7 would be an unknown account name). Re-enter the password under **Online co-op**.
-- `cpp-httplib failed for GET https://thehuntersdream.com:20443/bb-eu/ss.info: error=10
+- `cpp-httplib failed for GET https://<game server>:20443/bb-eu/ss.info: error=10
   (SSL server verification failed)`, shown in the game as a failure to get server
   information. The server's certificate is valid (Let's Encrypt `YE2` → `Root YE` →
   `ISRG Root X2` → `ISRG Root X1`). cpp-httplib checks it twice on Windows: with OpenSSL

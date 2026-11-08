@@ -154,38 +154,6 @@ class ServerCheckTests(unittest.TestCase):
         self.assertIn('Game server https://game.example.net: not reachable (BadStatusLine)', lines)
         self.assertTrue(all('not reachable' in line for line in lines), lines)
 
-    def test_the_hunters_dream_too(self):
-        with mock.patch.object(L.bbport_tls, 'urlopen', side_effect=broken_reply):
-            text = L.server_check_hunters_dream()
-        self.assertEqual(text.count('not reachable (BadStatusLine)'), 2)
-
-    def test_the_player_count_is_none_after_a_broken_reply(self):
-        reply = mock.MagicMock()
-        reply.__enter__.return_value.read.side_effect = http.client.IncompleteRead(b'{"active')
-        with mock.patch.object(L.bbport_tls, 'urlopen', return_value=reply):
-            self.assertIsNone(L.hunters_online())
-
-    def test_the_player_count_is_asked_again_after_any_failure(self):
-        """hunters_asking stayed True when the thread died: the count was never asked again."""
-        app = bare_launcher(process=None, hunters=None, hunters_when=0, hunters_asking=False,
-                            root=types.SimpleNamespace(state=lambda: 'normal'), show_hunters=mock.Mock(),
-                            var=lambda key, store: types.SimpleNamespace(get=lambda: 'huntersdream'))
-        errors = []
-        # The Hunter's Dream's count is only asked while it is offered (BB_HUNTERS_DREAM=1 since 1.9.7).
-        with mock.patch.object(L, 'hunters_online', side_effect=RuntimeError('a bug')), \
-                mock.patch.object(L, 'HUNTERS_DREAM_POOL', True), \
-                mock.patch.object(threading, 'excepthook', lambda args: errors.append(args.exc_type)):
-            app.ask_hunters()
-            self.assertTrue(app.hunters_asking)
-            run_ui_calls(app)
-            for _i in range(100):  # the thread's own end, still inside the patched hook
-                if errors:
-                    break
-                time.sleep(0.02)
-        self.assertFalse(app.hunters_asking)
-        self.assertEqual(errors, [RuntimeError])
-        app.show_hunters.assert_called_once()
-
 
 class UpdateCheckTests(unittest.TestCase):
     def setUp(self):
@@ -386,7 +354,7 @@ class DrainTests(unittest.TestCase):
         self.assertEqual(len(app.root.scheduled), 1)
 
     def game_end(self, **attributes):
-        steps = ('append', 'sync_ini', 'refresh_fsr411', 'refresh_saves', 'stop_button', 'forget_refused_sign_in',
+        steps = ('append', 'sync_ini', 'refresh_fsr411', 'refresh_saves', 'stop_button',
                  'refresh_status', 'bring_back', 'show', 'drop_tray')
         app = self.drained(process=mock.Mock(), job=None, placer=None, hidden=False, follow_shared_ini=mock.Mock(),
                            setting=lambda key: False, **{name: mock.Mock() for name in steps})
@@ -599,15 +567,14 @@ class SteamTests(unittest.TestCase):
 
 class SetupGuideTests(unittest.TestCase):
     """The guide's sign-ins (its online step) answer after the guide closed or moved to another step: its widgets
-    are gone then (a code.pack_forget() raised before the sign-in was saved)."""
+    are gone then."""
 
     def setUp(self):
         import bbport_setup
         import tkinter
         from tkinter import ttk
         root = hidden_root(self)
-        for patcher in (mock.patch.object(L, 'LANG', 'en'), mock.patch.object(L, 'HUNTERS_DREAM_POOL', True),
-                        mock.patch('webbrowser.open')):
+        for patcher in (mock.patch.object(L, 'LANG', 'en'), mock.patch('webbrowser.open')):
             patcher.start()
             self.addCleanup(patcher.stop)
         variables = {}
@@ -627,33 +594,6 @@ class SetupGuideTests(unittest.TestCase):
         self.app.var('online_pool', 'app').set(pool)
         self.guide.step_carry(self.body)
         return button(self.body, 'Sign in with Discord')
-
-    def test_the_hunters_dream_sign_in_is_saved_after_the_guide_closed(self):
-        def sign_in(on_code):
-            on_code('https://example.net/link', 'ABCD-1234')
-            return 'Hunter', 'token'
-        sign = self.step('huntersdream')
-        with mock.patch.object(L, 'thd_sign_in', side_effect=sign_in):
-            sign.invoke()
-            self.body.destroy()
-            run_ui_calls(self.app, count=2)  # the code to enter, then the account
-        self.assertEqual(self.app.var('thd_token', 'app').get(), 'token')
-        self.app.collect.assert_called_once()
-
-    def test_its_failure_after_the_guide_closed(self):
-        sign = self.step('huntersdream')
-        with mock.patch.object(L, 'thd_sign_in', side_effect=http.client.BadStatusLine('')):
-            sign.invoke()
-            self.body.destroy()
-            run_ui_calls(self.app)
-        self.app.collect.assert_not_called()
-
-    def test_its_failure_on_the_step_shown(self):
-        sign = self.step('huntersdream')
-        with mock.patch.object(L, 'thd_sign_in', side_effect=http.client.BadStatusLine('')):
-            sign.invoke()
-            run_ui_calls(self.app)
-        self.assertIn('Sign-in failed: BadStatusLine', texts(self.body))
 
     def test_the_supermedo_sign_in_after_the_guide_closed(self):
         def sign_in(_server, on_page):
@@ -675,13 +615,12 @@ class OnlinePageTests(unittest.TestCase):
         import tkinter
         from tkinter import ttk
         root = hidden_root(self)
-        for patcher in (mock.patch.object(L, 'LANG', 'en'), mock.patch.object(L, 'HUNTERS_DREAM_POOL', True),
-                        mock.patch('webbrowser.open')):
+        for patcher in (mock.patch.object(L, 'LANG', 'en'), mock.patch('webbrowser.open')):
             patcher.start()
             self.addCleanup(patcher.stop)
         app = self.app = bare_launcher(root=root, tk=tkinter, ttk=ttk, dpi=1, app=dict(L.APP_DEFAULTS), vars={},
                                        pages={}, content=ttk.Frame(root), refresh_status=mock.Mock(),
-                                       ask_hunters=mock.Mock(), collect=mock.Mock())
+                                       collect=mock.Mock())
         app.build_online()
         self.page = app.pages['online']
 
@@ -694,16 +633,14 @@ class OnlinePageTests(unittest.TestCase):
         with mock.patch.object(L, 'server_check', side_effect=RuntimeError('a bug')):
             self.assertIn('The check stopped: RuntimeError: a bug', self.click('Test connection'))
 
-    def test_the_hunters_dream_sign_in(self):
-        with mock.patch.object(L, 'thd_sign_in', side_effect=http.client.BadStatusLine('')):
-            self.assertIn('Sign-in failed: BadStatusLine', self.click('Sign in with Discord'))
-
     def test_the_supermedo_sign_in(self):
         with mock.patch.object(L, 'discord_sign_in', side_effect=http.client.IncompleteRead(b'')):
-            self.assertIn('Sign-in failed: IncompleteRead(0 bytes read)', self.click('Sign in with Discord', 1))
+            self.assertIn('Sign-in failed: IncompleteRead(0 bytes read)', self.click('Sign in with Discord'))
 
     def test_a_new_account(self):
         import struct
+        # Its boxes are folded until "No account yet? Make one" opens them (as the search's jump does).
+        next(e for e in self.app.search_settings if e['key'] == 'button:create_account')['reveal']()
         for title, value in (('New Online ID', 'NewHunter'), ('New password', 'secret'),
                              ('Email address', 'hunter@example.net')):
             label, = [w for w in widgets(self.page) if w.winfo_class() == 'TLabel' and w.cget('text') == title]

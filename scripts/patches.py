@@ -116,6 +116,29 @@ def validate_patch_requirements(names, game):
                              'or turn the debug menu off')
 
 
+# Fair play: cheats and the developer's debug features change the game for the other players, so they run offline
+# only. Decided here, on the final list (bbport.ini, the launcher's BB_PATCHES), because every start passes this
+# script: the launcher's Play, Steam and shortcut starts, the in-game "Apply and restart" (it keeps BB_ONLINE) and
+# BBSC's own scripts. Players went online with them on (2026-11-02). Comfort and view tweaks stay allowed.
+OFFLINE_ONLY=('Player No Dead (Read note)','Player Stealth (Read note)','Player Silent (Read note)','No Rally Decay',
+              'Enemy Control','Restore Debug Camera',DEBUG_MENU)
+
+
+def online():
+    """The game goes online this start: the launcher's BB_ONLINE (inherited by the in-game restart), or seamless
+    co-op, which is always played with others (BBSC's bbsc-launch.exe is the game program, also from BBSC's own
+    scripts that set no BB_ONLINE; run.py's seamless_coop)."""
+    return (os.environ.get('BB_ONLINE')=='1'
+            or Path(os.environ.get('BB_PROBE','')).name.lower()=='bbsc-launch.exe')
+
+
+def fair_play(names, playing_online):
+    """(the patches that apply, those left out): online, OFFLINE_ONLY ones are left out."""
+    if not playing_online:
+        return list(names),[]
+    return [n for n in names if n not in OFFLINE_ONLY],[n for n in names if n in OFFLINE_ONLY]
+
+
 def effect_patches(settings):
     names=[]
     for key,(off,on) in EFFECTS.items():
@@ -413,7 +436,7 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
 
 
 # Patches only the port's own file has (patches/Bloodborne.xml of any version since 1.8).
-PORT_ONLY_PATCHES={"Live map (The Hunter's Dream)",'Larger Frame Heaps'}
+PORT_ONLY_PATCHES={'Larger Frame Heaps'}
 
 
 def port_patch_file(path, root):
@@ -435,7 +458,7 @@ def external_patches(directory, app_version='01.09', exclude=Path(__file__).reso
     directory=Path(directory)
     for path in sorted(directory.glob('*.xml')) if directory.is_dir() else []:
         if path.resolve()==Path(exclude).resolve(): continue  # the built-in file (patches/ in a checkout)
-        # Left by bbbridge's app: play logs every 5 s to The Hunter's Dream.
+        # Left by another online app (a live map's play-log patch): not a patch for this port.
         if path.name.lower()=='bbbridge-live-map.xml': continue
         try:
             root=ET.parse(path).getroot()
@@ -546,6 +569,10 @@ def main():
     if whole:  # the fixes' and other patches' code is not fingerprinted
         names+=FIXES+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names and GROUP_OF.get(n) in groups]
+    names,left_out=fair_play(names,online())
+    if left_out:
+        print(f'Patches: online play: {", ".join(left_out)} stay off (cheats and debug features are for offline '
+              'play only, fair to the other players)')
     try:
         validate_patch_requirements(names,a.game_dir)
     except ValueError as error:
@@ -685,6 +712,12 @@ def main():
     if a.patches_dir and whole:
         # After the built-in ones: an external patch of the same bytes wins.
         selected=external_selection(external_patches(a.patches_dir,a.app_version,a.xml),a.patches_config)
+        if selected and online():
+            # Third-party patches can change anything, cheats included: offline only, like the port's own cheats.
+            # The port's FPS presets and graphics settings cover online play.
+            print(f'Patches: online play: the third-party patches {", ".join(item[0] for item in selected)} stay off '
+                  '(offline only)')
+            selected=[]
         fps_ranges=[(offset,offset+len(data)) for offset,data in writes[:fps_count]]
         # The resolution code (the template's sites, whatever size): the port sets it from the output
         # resolution and lays out its UI and upscaler for that size. An external resolution patch

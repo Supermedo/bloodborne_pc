@@ -337,8 +337,8 @@ HELP = {'de': {
         'Hinzugefügt. Wähle es unter Szenario (die Liste wird beim nächsten Launcher-Start aktualisiert).',
     'the settings for your PC': 'die Einstellungen für deinen PC', 'up to 7 runs': 'bis zu 7 Durchläufe',
     'Start the test': 'Test starten', 'Cancel': 'Abbrechen', 'The save to start from': 'Der Spielstand zum Starten',
-    'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-        'In diesem Ordner ist kein Spielstand dieses Ports, von shadPS4 oder bbhost (SPRJ0005 mit userdata0000 …).',
+    'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+        'In diesem Ordner ist kein Spielstand dieses Ports oder von shadPS4 (SPRJ0005 mit userdata0000 …).',
     'A test scenario (scenario.json, a .json or a .zip)': 'Ein Testszenario (scenario.json, eine .json oder eine .zip)',
     'Close the game first.': 'Schließe zuerst das Spiel.',
     'The test needs your game folder and a save to start from: play until the game has saved once.':

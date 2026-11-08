@@ -48,17 +48,14 @@ Data
 - Generated files (prepared game image, patches): out\.
 
 Online play (beta)
-- In the launcher open "Online play" and tick "Play online". Then choose who you play with:
-  - The Hunter's Dream (the default): co-op together with bbhost players. Press "Sign in with
-    Discord" once and enter the code on the page that opens.
-  - shadNet server: register an account at https://shadnet.shadps4.net and enter the account
-    name (not the email) and password.
+- In the launcher open "Online play" and tick "Play online". You play on SuperMedo Server:
+  sign in with Discord, or with your Online ID and password, or make a free account there.
   Press "Test connection", then PLAY and choose online at the title screen.
-- Messages, bloodstains and ghosts come from The Hunter's Dream (https://thehuntersdream.com).
-  Everyone in a session needs game version 1.09 and the same co-op pool.
-- Please don't ask The Hunter's Dream for help with bbport: ask in Help & Support on our forum
+- Messages, bloodstains and ghosts come from SuperMedo Server's game server.
+  Everyone in a session needs game version 1.09 and the same server.
+- For help with online play ask in Help & Support on our forum
   (https://forum.bbport.de/t/help-support) or on our Discord server
-  (https://discord.gg/WtYT4fXhEN) instead.
+  (https://discord.gg/WtYT4fXhEN).
 
 Cheats
 - The "Cheats" page (expert view) has cheats (never die, enemies do not see or hear you,
@@ -114,12 +111,10 @@ Mods and patches
 
 Credits
 - Online play: shadPS4 0.20's network code and shadNet by the shadPS4 team, put together by
-  Awaken (https://github.com/Awakenchan/BloodBorneButPc) with the backend for The Hunter's Dream
-  from bbhost by droogie (GPL-3.0-or-later); thanks to Metr1k and The Hunter's Dream team.
+  Awaken (https://github.com/Awakenchan/BloodBorneButPc).
   The first online version was built on shadp2p by Wozzardman.
 - bbport (the Linux port this is built on): https://github.com/deadinside28/bloodborne_pc
 - Windows port: https://github.com/Supermedo/bloodborne_pc
 - The full list of projects and patch authors is in README.md (Credits and licenses).
-- License: the port's own code is GPL-2.0-or-later; with its GPL-3.0-or-later parts (the online
-  code from bbhost, the FSR 4.1 launcher files) the program as distributed is GPL-3.0-or-later
-  (licenses\GPL-3.0-bbhost-online-code.txt).
+- License: the port's own code is GPL-2.0-or-later; with its GPL-3.0-or-later parts (the FSR 4.1
+  launcher files) the program as distributed is GPL-3.0-or-later (licenses\GPL-3.0.txt).

@@ -116,8 +116,8 @@ class TranslationTests(unittest.TestCase):
         for language in ['en'] + LANGUAGES:
             for name, facts in (('clock', clock), ('issuer', issuer)):
                 with self.subTest(language=language, text=name), mock.patch.object(L, 'LANG', language), \
-                        mock.patch.object(bbport_tls, 'certificate_facts', return_value=facts):
-                    text = bbport_tls.explain([b'leaf'], 'thehuntersdream.com', now=now)
+                        mock.patch.object(bbport_tls, 'certificate_facts', return_value=facts),                         mock.patch.dict(bbport_tls.EXPECTED_ISSUERS, {'game.supermedo.com': "Let's Encrypt"}):
+                    text = bbport_tls.explain([b'leaf'], 'game.supermedo.com', now=now)
                     if language == 'en':
                         english[name] = text
                     else:

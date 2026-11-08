@@ -34,7 +34,7 @@ https://nativeretro.com/
   its reason, and "Measure on this PC" checks them in the game.
 - **Search** (Ctrl+F): settings and help by your own words ("stutters", "black screen",
   "controller").
-- **Saves from other versions:** characters from shadPS4, Awaken's port, bbhost or a PS4 export
+- **Saves from other versions:** characters from shadPS4, Awaken's port or a PS4 export
   are found and imported (your own saves are backed up first).
 - **Help page:** checks your installation (a clean 1.09 `eboot.bin`, a complete game folder, the
   page file, the port's location) and shows the fix for each problem step by step; after a
@@ -115,15 +115,13 @@ made for shadPS4 can be copied over it), including mouse look: see [docs/INPUT.m
 2. In the launcher, open **Online play**, tick **Play online** and enter your account name
    (not your email) and password.
 3. Press **Test connection**: all three lines should say "reachable". Then press **PLAY** and
-   choose online at the title screen. The Hunter's Dream welcome message means you are online.
+   choose online at the title screen.
 
 Everyone you want to play with needs game version 1.09 and the same co-op server. A private
 shadNet server (from the [shadp2p](https://github.com/Wozzardman/shadp2p) project) works too:
 put its address in **Server address**.
 
-Playing with bbhost players on The Hunter's Dream's co-op pool is off in this port until it
-works properly with their server. Please don't ask The Hunter's Dream for help with bbport: use
-our [Discord server](https://discord.gg/WtYT4fXhEN) instead.
+For help with online play, use our [Discord server](https://discord.gg/WtYT4fXhEN).
 
 ## Known issues
 
@@ -160,11 +158,13 @@ renderer. The original README is in [docs/original-readme](docs/original-readme/
 Online play uses the network, NP and shadNet code of [shadPS4](https://github.com/shadps4-emu/shadPS4)
 0.20 and the shadNet server of the [shadPS4](https://shadps4.net) team, put together for this port
 by **Awaken** ([BloodBorneButPc](https://github.com/Awakenchan/BloodBorneButPc)), whose online code
-bbport now uses, including the backend for [The Hunter's Dream](https://thehuntersdream.com)
-adapted from [bbhost](https://github.com/droogie/bbhost) by droogie (GPL-3.0-or-later; see
-[gpu/bbnet/SHADNET-PORT.md](gpu/bbnet/SHADNET-PORT.md)). Thanks to Metr1k and The Hunter's Dream
-team for their guidance, and to Wozzardman's [shadp2p](https://github.com/Wozzardman/shadp2p),
-which bbport's first online version was built on.
+bbport now uses (see [gpu/bbnet/SHADNET-PORT.md](gpu/bbnet/SHADNET-PORT.md)). Thanks to Wozzardman's
+[shadp2p](https://github.com/Wozzardman/shadp2p), which bbport's first online version was built on.
+
+Seamless co-op is **BBSC: Yharnam Together** by **CLSAMG22** ([CLSAMG22/BBSC](https://github.com/CLSAMG22/BBSC),
+GPL-2.0): this port runs BBSC's game files, co-op event patcher and HUD with its own engine
+(`bin\bb-probe-seamless.exe`) and launcher. This port's change to BBSC's files is listed in the
+package's `seamless\bbport-seamless.txt`.
 
 The low-VRAM profile for 4 GB graphics cards comes from the 4 GB mod by **fixdag** and
 **bashiku**.
@@ -191,8 +191,7 @@ artwork.
 ## License
 
 The port's own code is GNU GPL v2 or later ([LICENSE](LICENSE)). Some parts are GPL v3 or later:
-The Hunter's Dream online code (`gpu/bbnet/thd/`, from droogie's bbhost) and the FSR 4.1 launcher files
-(`launcher/bbport_fsr41*.py`, `launcher/bbport_fsr412.py`, `launcher/bbport_driver_runtime.py`). The
-program built from them together is therefore distributed under the GNU GPL v3 or later
-(`licenses\GPL-3.0-bbhost-online-code.txt` in the download). Third-party components keep their own
+the FSR 4.1 launcher files (`launcher/bbport_fsr41*.py`, `launcher/bbport_fsr412.py`,
+`launcher/bbport_driver_runtime.py`). The program built from them together is therefore distributed
+under the GNU GPL v3 or later (`licenses\GPL-3.0.txt` in the download). Third-party components keep their own
 licenses (see `licenses\` in the download).

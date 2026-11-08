@@ -211,8 +211,8 @@ WORLD = {
             'Отмена',
         'Cards with 6 GB or less, or the log says ErrorOutOfDeviceMemory or "memory pressure": textures no longer fit, the game stutters, shows broken faces or crashes.':
             'Видеокарты с 6 ГБ и меньше, или в журнале есть ErrorOutOfDeviceMemory или «memory pressure»: текстуры больше не помещаются, игра подтормаживает, показывает искажённые лица или вылетает.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Персонажи из shadPS4, порта от Awaken, bbhost или экспорта с PS4: лаунчер находит их на этом ПК и копирует в папку сохранений этого порта. Перед этим создаётся резервная копия ваших текущих сохранений.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Персонажи из shadPS4, порта от Awaken или экспорта с PS4: лаунчер находит их на этом ПК и копирует в папку сохранений этого порта. Перед этим создаётся резервная копия ваших текущих сохранений.',
         'Cheats on: {}':
             'Включены читы: {}',
         'Check again':
@@ -274,8 +274,6 @@ WORLD = {
             'Во время игры закрывайте браузер и другие программы.',
         'Co-op pool':
             'Пул кооператива',
-        'Co-op service {0}':
-            'Сервис кооператива {0}',
         'Coming from another version, your characters are found in step IV.':
             'Если вы переходите с другой версии, ваши персонажи найдутся на шаге IV.',
         'Compare one setting: pictures and frame rate':
@@ -456,10 +454,6 @@ WORLD = {
             'В игре меню порта открывается клавишей Insert (клавиатура) или L3 + R3 (геймпад).',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'В игре «{}» загружает последнего персонажа, за которого вы играли; «{}» на титульном экране показывает всех.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'На открывшейся странице ({0}) войдите через Discord и введите этот код:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'На открывшейся странице войдите через Discord и введите этот код:',
         'Install guide and FAQ on bbport.de':
             'Руководство по установке и FAQ на bbport.de',
         'Integrated graphics share your RAM: 16 GB or more is a must.':
@@ -574,8 +568,8 @@ WORLD = {
             'Файлы игры не входят в комплект и не распространяются, и мы не помогаем их найти.',
         'No run finished; the report has the logs.':
             'Ни один прогон не завершился; журналы — в отчёте.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'На этом ПК не найдено сохранений shadPS4, порта от Awaken или bbhost. Если ваши лежат в другом месте (резервная копия, экспорт с PS4), выберите их папку.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'На этом ПК не найдено сохранений shadPS4 или порта от Awaken. Если ваши лежат в другом месте (резервная копия, экспорт с PS4), выберите их папку.',
         'No setting kept the goal; this one came closest.':
             'Ни один вариант не достиг цели; этот ближе всего.',
         'None beaten yet':
@@ -592,8 +586,6 @@ WORLD = {
             'Вход не выполнен',
         'Not signed in yet':
             'Вход ещё не выполнен',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Вход не выполнен: нажмите «Войти через Discord» выше.',
         'Not supported':
             'Не поддерживается',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -624,8 +616,6 @@ WORLD = {
             'OneDrive («Рабочий стол» и «Документы» часто синхронизируются) и Program Files блокируют или перемещают файлы, пока порт их записывает.',
         'Online (SuperMedo Server)':
             'Онлайн (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Онлайн (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Онлайн включён, но вход ещё не выполнен: войдите сейчас',
         'Online play':
@@ -810,8 +800,8 @@ WORLD = {
             'Экран',
         'Search again':
             'Искать снова',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Поиск сохранений shadPS4, порта от Awaken и bbhost на этом ПК…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Поиск сохранений shadPS4 и порта от Awaken на этом ПК…',
         'Search…':
             'Поиск…',
         'Set everything up again, step by step.':
@@ -840,8 +830,6 @@ WORLD = {
             'Показать меньше',
         'Show in folder':
             'Показать в папке',
-        'Show me on the live map':
-            'Показывать меня на карте в реальном времени',
         'Show the fix?':
             'Показать решение?',
         'Show the log':
@@ -950,14 +938,6 @@ WORLD = {
             'Папки DLC не существует.',
         'The Dream':
             'Сон охотника',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (с игроками bbhost)",
-        "The Hunter's Dream account":
-            "Учётная запись The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: кооператив вместе с игроками bbhost после бесплатного входа через Discord. shadNet: любой сервер shadNet и его учётная запись.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: сейчас в сети {} охотников ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Меню «Загрузить игру» пустое, персонажа нет или игра сообщает о повреждённом сохранении. Перед каждым запуском лаунчер делает копию сохранений, так что можно вернуть всё как было.',
         'The Old Hunters found ({}).':
@@ -976,8 +956,6 @@ WORLD = {
             'Проверка прервана: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Патчи сообщества (60 FPS и выше, параметры эффектов) есть только для 1.09; другие версии работают в 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "Подключение к The Hunter's Dream — это порт сетевого кода bbhost от Awaken; автор bbhost и The Hunter's Dream — droogie.",
         'The controller does nothing':
             'Геймпад не работает',
         'The controller test cannot start: {}':
@@ -1084,8 +1062,8 @@ WORLD = {
             'Рекомендация сайта для ожидаемой частоты кадров.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'В этой папке нет eboot.bin. Выберите папку, в которой прямо лежит eboot.bin, а не папку уровнем выше.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'В этой папке нет сохранений этого порта, shadPS4 или bbhost (SPRJ0005 с userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'В этой папке нет сохранений этого порта или shadPS4 (SPRJ0005 с userdata0000 …).',
         'There is no save to back up yet.':
             'Пока нет сохранения для копии.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -1118,8 +1096,6 @@ WORLD = {
             'Отметьте «Автоматически выбирать объем файла подкачки». Если игра всё ещё вылетает: снимите флажок, выберите диск со свободным местом, «Указать размер»: исходный 16384, максимальный 32768, затем «Задать».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Чтобы играть на SuperMedo Server, введите имя пользователя и пароль от supermedo.com на странице «Онлайн-игра» (если учётной записи нет, там же можно зарегистрироваться).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Чтобы играть онлайн на The Hunter's Dream, сначала войдите через Discord.",
         'Under 30 FPS':
             'Ниже 30 FPS',
         'Undo':
@@ -1198,8 +1174,6 @@ WORLD = {
             'Windows показывает это для программ, которые ещё не знает.',
         "Windows' title bar instead of the launcher's own":
             'Заголовок окна Windows вместо собственного заголовка лаунчера',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Через The Hunter's Dream, вместе с игроками bbhost. Нужен однократный бесплатный вход через Discord.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'С вашими собственными настройками. Вылет, зависание или постоянно растущее потребление памяти попадают в отчёт вместе с соседними строками журнала.',
         'Wrong graphics card?':
@@ -1375,16 +1349,10 @@ WORLD = {
             'прервано: ваш ввод',
         'the settings for your PC':
             'настройки для вашего ПК',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map показывает, где находятся игроки и какие колокола звонят: для этого во время игры чаще отправляется ваше местоположение.',
         'twice, interleaved (more exact)':
             'дважды, с чередованием (точнее)',
         'up to 7 runs':
             'до 7 прогонов',
-        '{0}: not reachable ({1})':
-            '{0}: недоступен ({1})',
-        '{0}: reachable':
-            '{0}: доступен',
         '{} GB free on {}':
             'Свободно {} ГБ на {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -1407,8 +1375,6 @@ WORLD = {
             '{} снова в этом состоянии.',
         '{} minutes':
             '{} мин',
-        '{} online':
-            '{} в сети',
         '{} runs':
             'прогонов: {}',
         '{} settings differ from the recommendation.':
@@ -1795,8 +1761,8 @@ WORLD = {
             'في المنتصف (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'تُطبَّق التغييرات عند تشغيل اللعبة في المرة القادمة، أو اضغط F8 داخل اللعبة لإعادة تحميل input.ini دون إعادة التشغيل.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'شخصيات من shadPS4 أو منفذ Awaken أو bbhost أو من تصدير PS4: يُعثر عليها في هذا الحاسوب وتُنسخ إلى مجلد الحفظ الخاص بهذا المنفذ. تُنسخ ملفات حفظك الحالية احتياطيًا أولًا.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'شخصيات من shadPS4 أو منفذ Awaken أو من تصدير PS4: يُعثر عليها في هذا الحاسوب وتُنسخ إلى مجلد الحفظ الخاص بهذا المنفذ. تُنسخ ملفات حفظك الحالية احتياطيًا أولًا.',
         'Cheats on: {}':
             'الغش مفعّل: {}',
         'Check again':
@@ -1861,8 +1827,6 @@ WORLD = {
             'أغلق المتصفح والبرامج الأخرى أثناء اللعب.',
         'Co-op pool':
             'مجموعة اللعب التعاوني',
-        'Co-op service {0}':
-            'خدمة اللعب التعاوني {0}',
         'Combat':
             'القتال',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -2101,10 +2065,6 @@ WORLD = {
             'داخل اللعبة، يفتح Insert (لوحة المفاتيح) أو L3 + R3 (يد التحكم) قائمة المنفذ.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'في اللعبة، يحمّل «{}» آخر شخصية لعبت بها؛ ويعرض «{}» في شاشة العنوان جميع الشخصيات.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'في الصفحة التي فُتحت ({0})، سجّل الدخول باستخدام Discord وأدخل هذا الرمز:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'في الصفحة التي فُتحت، سجّل الدخول باستخدام Discord وأدخل هذا الرمز:',
         'Install':
             'تثبيت',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -2282,8 +2242,8 @@ WORLD = {
             'بدون حد  ⚠',
         'No run finished; the report has the logs.':
             'لم تكتمل أي جولة؛ السجلات موجودة في التقرير.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'لم يُعثر على ملفات حفظ من shadPS4 أو منفذ Awaken أو bbhost على هذا الحاسوب. إن كانت ملفاتك في مكان آخر (نسخة احتياطية، تصدير من PS4)، فاختر مجلدها.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'لم يُعثر على ملفات حفظ من shadPS4 أو منفذ Awaken على هذا الحاسوب. إن كانت ملفاتك في مكان آخر (نسخة احتياطية، تصدير من PS4)، فاختر مجلدها.',
         'No setting kept the goal; this one came closest.':
             'لم يحقق أي إعداد الهدف؛ هذا هو الأقرب.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -2306,8 +2266,6 @@ WORLD = {
             'لم يتم تسجيل الدخول',
         'Not signed in yet':
             'لم يتم تسجيل الدخول بعد',
-        'Not signed in: use "Sign in with Discord" above.':
-            'لم يتم تسجيل الدخول: استخدم «تسجيل الدخول باستخدام Discord» أعلاه.',
         'Not supported':
             'غير مدعوم',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -2340,8 +2298,6 @@ WORLD = {
             'OneDrive (غالبًا ما تتم مزامنة «سطح المكتب» و«المستندات») ومجلد Program Files يقفلان الملفات أو ينقلانها أثناء كتابة المنفذ لها.',
         'Online (SuperMedo Server)':
             'عبر الإنترنت (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "عبر الإنترنت (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'اللعب عبر الإنترنت مفعّل، لكنك لم تسجّل الدخول بعد: سجّل الدخول الآن',
         'Online play':
@@ -2546,8 +2502,8 @@ WORLD = {
             'حواف الشاشة',
         'Search again':
             'البحث مجددًا',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'جارٍ البحث في هذا الحاسوب عن ملفات حفظ shadPS4 ومنفذ Awaken وbbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'جارٍ البحث في هذا الحاسوب عن ملفات حفظ shadPS4 ومنفذ Awaken…',
         'Search…':
             'بحث…',
         'Sensitivity (direct)':
@@ -2580,8 +2536,6 @@ WORLD = {
             'عرض أقل',
         'Show in folder':
             'إظهار في المجلد',
-        'Show me on the live map':
-            'إظهاري على الخريطة المباشرة',
         'Show the fix?':
             'عرض الحل؟',
         'Show the log':
@@ -2708,14 +2662,6 @@ WORLD = {
             'مجلد المحتوى الإضافي غير موجود.',
         'The Dream':
             'الحلم',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (مع لاعبي bbhost)",
-        "The Hunter's Dream account":
-            "حساب The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: لعب تعاوني مع لاعبي bbhost بعد تسجيل دخول مجاني عبر Discord. shadNet: خادم shadNet تختاره وحسابه.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} صيادًا متصلًا الآن ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'قائمة «تحميل اللعبة» فارغة، أو شخصية مفقودة، أو تقول اللعبة إن ملف الحفظ تالف. قبل كل تشغيل ينسخ المشغّل ملفات حفظك احتياطيًا، لذا يمكنك العودة إلى ما كانت عليه.',
         'The Old Hunters found ({}).':
@@ -2734,8 +2680,6 @@ WORLD = {
             'توقف الفحص: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'رقع المجتمع (60 FPS وأكثر، وخيارات المؤثرات) متاحة للإصدار 1.09 فقط؛ وتعمل الإصدارات الأخرى بـ 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "الاتصال بـ The Hunter's Dream هو منفذ Awaken لشيفرة الشبكة الخاصة بـ bbhost؛ وbbhost وThe Hunter's Dream من تطوير droogie.",
         'The controller does nothing':
             'وحدة التحكم لا تستجيب',
         'The controller test cannot start: {}':
@@ -2844,8 +2788,8 @@ WORLD = {
             'اقتراح الموقع لمعدل الإطارات المتوقع.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'لا يوجد eboot.bin في هذا المجلد. اختر المجلد الذي يحتوي eboot.bin مباشرةً، لا المجلد الذي فوقه.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'لا يوجد ملف حفظ لهذا المنفذ أو لـ shadPS4 أو bbhost في هذا المجلد (SPRJ0005 مع userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'لا يوجد ملف حفظ لهذا المنفذ أو لـ shadPS4 في هذا المجلد (SPRJ0005 مع userdata0000 …).',
         'There is no save to back up yet.':
             'لا يوجد ملف حفظ لنسخه بعد.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -2878,8 +2822,6 @@ WORLD = {
             'حدّد «إدارة حجم ملف ترحيل الصفحات تلقائيًا لكافة محركات الأقراص». إن استمر التعطل: ألغِ التحديد، واختر محرك أقراص به مساحة فارغة، ثم «حجم مخصص»: الحجم الأولي 16384، والحجم الأقصى 32768، ثم «تعيين».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'للعب على SuperMedo Server، أدخل اسم المستخدم وكلمة المرور الخاصين بـ supermedo.com في صفحة «اللعب عبر الإنترنت» (أنشئ حسابًا هناك إن لم يكن لديك حساب).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "للعب عبر الإنترنت مع The Hunter's Dream، سجّل الدخول باستخدام Discord أولًا.",
         'Transform weapon (L1)':
             'تحويل السلاح (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -2984,8 +2926,6 @@ WORLD = {
             'يعرض Windows هذا للبرامج التي لا يعرفها بعد.',
         "Windows' title bar instead of the launcher's own":
             'شريط عنوان Windows بدلًا من شريط المشغّل',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "مع The Hunter's Dream، جنبًا إلى جنب مع لاعبي bbhost. يتطلب تسجيل دخول مجانيًا باستخدام Discord، مرة واحدة.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'بإعداداتك الخاصة. أي تعطّل أو تجمّد أو ذاكرة تستمر في النمو يُسجَّل في التقرير مع أسطر السجل المحيطة به.',
         'Wrong graphics card?':
@@ -3162,16 +3102,10 @@ WORLD = {
             'أُوقف: إدخالك',
         'the settings for your PC':
             'الإعدادات المناسبة لحاسوبك',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'يعرض thehuntersdream.com/map أماكن اللاعبين والأجراس التي تُقرع: ترسل اللعبة موقعك بشكل أكثر تكرارًا أثناء اللعب.',
         'twice, interleaved (more exact)':
             'مرتين بالتناوب (أدق)',
         'up to 7 runs':
             'حتى 7 جولات',
-        '{0}: not reachable ({1})':
-            '{0}: غير متاح ({1})',
-        '{0}: reachable':
-            '{0}: متاح',
         '{} GB free on {}':
             '{} GB متاحة على {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -3198,8 +3132,6 @@ WORLD = {
             '{} دقيقة',
         '{} of {} trophies earned':
             'تم الحصول على {} من {} جائزة',
-        '{} online':
-            '{} متصل',
         '{} runs':
             '{} جولات',
         '{} settings differ from the recommendation.':
@@ -3465,8 +3397,8 @@ WORLD = {
             'Centrado (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Los cambios se aplican la próxima vez que se inicie el juego, o pulsa F8 en el juego para recargar input.ini sin reiniciar.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personajes de shadPS4, el port de Awaken, bbhost o una exportación de PS4: se buscan en este PC y se copian en la carpeta de partidas de este port. Antes se hace una copia de seguridad de tus partidas actuales.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personajes de shadPS4, el port de Awaken o una exportación de PS4: se buscan en este PC y se copian en la carpeta de partidas de este port. Antes se hace una copia de seguridad de tus partidas actuales.',
         'Cheats on: {}':
             'Trucos activados: {}',
         'Check again':
@@ -3532,8 +3464,6 @@ WORLD = {
             'Cierra el navegador y otros programas mientras juegas.',
         'Co-op pool':
             'Grupo cooperativo',
-        'Co-op service {0}':
-            'Servicio cooperativo {0}',
         'Combat':
             'Combate',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -3772,10 +3702,6 @@ WORLD = {
             'En el juego, Insert (teclado) o L3 + R3 (mando) abre el menú del port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'En el juego, «{}» carga el último personaje con el que jugaste; «{}» en la pantalla de título los muestra todos.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'En la página que se abrió ({0}), inicia sesión con Discord e introduce este código:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'En la página que se abrió, inicia sesión con Discord e introduce este código:',
         'Install':
             'Instalar',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -3956,8 +3882,8 @@ WORLD = {
             'Sin límite  ⚠',
         'No run finished; the report has the logs.':
             'Ninguna pasada terminó; el informe contiene los registros.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'No se encontraron partidas de shadPS4, el port de Awaken ni bbhost en este PC. Si las tuyas están en otro sitio (una copia de seguridad, una exportación de PS4), elige su carpeta.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'No se encontraron partidas de shadPS4 ni el port de Awaken en este PC. Si las tuyas están en otro sitio (una copia de seguridad, una exportación de PS4), elige su carpeta.',
         'No setting kept the goal; this one came closest.':
             'Ningún ajuste alcanzó el objetivo; este fue el que más se acercó.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -3980,8 +3906,6 @@ WORLD = {
             'Sin iniciar sesión',
         'Not signed in yet':
             'Aún no has iniciado sesión',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Sin iniciar sesión: usa «Iniciar sesión con Discord» arriba.',
         'Not supported':
             'No compatible',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -4014,8 +3938,6 @@ WORLD = {
             'OneDrive (Escritorio y Documentos suelen estar sincronizados) y Archivos de programa bloquean o mueven archivos mientras el port los escribe.',
         'Online (SuperMedo Server)':
             'En línea (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "En línea (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'El juego en línea está activado, pero aún no has iniciado sesión: inicia sesión ahora',
         'Online play':
@@ -4220,8 +4142,8 @@ WORLD = {
             'Bordes de la pantalla',
         'Search again':
             'Volver a buscar',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Buscando en este PC partidas de shadPS4, el port de Awaken y bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Buscando en este PC partidas de shadPS4 y el port de Awaken…',
         'Search…':
             'Buscar…',
         'Sensitivity (direct)':
@@ -4254,8 +4176,6 @@ WORLD = {
             'Mostrar menos',
         'Show in folder':
             'Mostrar en la carpeta',
-        'Show me on the live map':
-            'Mostrarme en el mapa en directo',
         'Show the fix?':
             '¿Mostrar la solución?',
         'Show the log':
@@ -4382,14 +4302,6 @@ WORLD = {
             'La carpeta de DLC no existe.',
         'The Dream':
             'El Sueño',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (con jugadores de bbhost)",
-        "The Hunter's Dream account":
-            "Cuenta de The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativo junto con jugadores de bbhost, tras un inicio de sesión gratuito con Discord. shadNet: un servidor shadNet de tu elección y su cuenta.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} cazadores en línea ahora mismo ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'El menú Cargar partida está vacío, falta un personaje o el juego dice que la partida está dañada. Antes de cada inicio el lanzador hace una copia de tus partidas, así que puedes volver a como estaban.',
         'The Old Hunters found ({}).':
@@ -4408,8 +4320,6 @@ WORLD = {
             'La comprobación se detuvo: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Los parches de la comunidad (60 FPS y más, las opciones de efectos) solo existen para la 1.09; las demás versiones van a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La conexión con The Hunter's Dream es el port de Awaken del código de red de bbhost; bbhost y The Hunter's Dream son obra de droogie.",
         'The controller does nothing':
             'El mando no hace nada',
         'The controller test cannot start: {}':
@@ -4519,8 +4429,8 @@ WORLD = {
             'La sugerencia del sitio web para los FPS esperados.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'No hay eboot.bin en esta carpeta. Elige la carpeta que tiene eboot.bin directamente dentro, no la que está por encima.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'No hay ninguna partida de este port, de shadPS4 ni de bbhost en esa carpeta (SPRJ0005 con userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'No hay ninguna partida de este port ni de shadPS4 en esa carpeta (SPRJ0005 con userdata0000 …).',
         'There is no save to back up yet.':
             'Aún no hay ninguna partida que copiar.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -4553,8 +4463,6 @@ WORLD = {
             'Marca «Administrar automáticamente el tamaño del archivo de paginación para todas las unidades». Si sigue cerrándose: desmárcala, elige una unidad con espacio libre, «Tamaño personalizado»: tamaño inicial 16384, tamaño máximo 32768, y luego «Establecer».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Para jugar en SuperMedo Server, introduce tu nombre de usuario y tu contraseña de supermedo.com en la página Juego en línea (regístrate allí si no tienes cuenta).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Para jugar en línea con The Hunter's Dream, primero inicia sesión con Discord.",
         'Transform weapon (L1)':
             'Transformar arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -4659,8 +4567,6 @@ WORLD = {
             'Windows muestra esto con los programas que aún no conoce.',
         "Windows' title bar instead of the launcher's own":
             'Barra de título de Windows en lugar de la del lanzador',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Con The Hunter's Dream, junto a jugadores de bbhost. Hay que iniciar sesión gratis con Discord una vez.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Con tus propios ajustes. Un cierre, una congelación o una memoria que no para de crecer acaban en el informe con las líneas del registro de alrededor.',
         'Wrong graphics card?':
@@ -4842,16 +4748,10 @@ WORLD = {
             'detenido: tu entrada',
         'the settings for your PC':
             'los ajustes para tu PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map muestra dónde están los jugadores y qué campanas suenan: el juego envía tu posición con más frecuencia mientras juegas.',
         'twice, interleaved (more exact)':
             'dos veces, alternadas (más preciso)',
         'up to 7 runs':
             'hasta 7 pasadas',
-        '{0}: not reachable ({1})':
-            '{0}: no accesible ({1})',
-        '{0}: reachable':
-            '{0}: accesible',
         '{} GB free on {}':
             '{} GB libres en {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -4878,8 +4778,6 @@ WORLD = {
             '{} minutos',
         '{} of {} trophies earned':
             '{} de {} trofeos obtenidos',
-        '{} online':
-            '{} en línea',
         '{} runs':
             '{} pasadas',
         '{} settings differ from the recommendation.':
@@ -5143,8 +5041,8 @@ WORLD = {
             'Centralizado (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'As alterações valem na próxima vez que o jogo iniciar; ou pressione F8 no jogo para recarregar o input.ini sem reiniciar.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personagens do shadPS4, do port do Awaken, do bbhost ou de uma exportação do PS4: encontrados neste PC e copiados para a pasta de saves deste port. Antes, é feito um backup dos seus saves atuais.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personagens do shadPS4, do port do Awaken ou de uma exportação do PS4: encontrados neste PC e copiados para a pasta de saves deste port. Antes, é feito um backup dos seus saves atuais.',
         'Cheats on: {}':
             'Trapaças ativas: {}',
         'Check again':
@@ -5210,8 +5108,6 @@ WORLD = {
             'Feche o navegador e outros programas enquanto joga.',
         'Co-op pool':
             'Grupo de jogadores',
-        'Co-op service {0}':
-            'Serviço cooperativo {0}',
         'Combat':
             'Combate',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -5450,10 +5346,6 @@ WORLD = {
             'No jogo, Insert (teclado) ou L3 + R3 (controle) abre o menu do port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'No jogo, "{}" carrega o último personagem que você jogou; "{}" na tela de título mostra todos.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Na página que abriu ({0}), entre com o Discord e digite este código:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Na página que abriu, entre com o Discord e digite este código:',
         'Install':
             'Instalar',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -5633,8 +5525,8 @@ WORLD = {
             'Sem limite  ⚠',
         'No run finished; the report has the logs.':
             'Nenhuma execução terminou; o relatório traz os registros.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nenhum save do shadPS4, do port do Awaken ou do bbhost foi encontrado neste PC. Se os seus estão em outro lugar (um backup, uma exportação do PS4), escolha a pasta deles.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nenhum save do shadPS4 ou do port do Awaken foi encontrado neste PC. Se os seus estão em outro lugar (um backup, uma exportação do PS4), escolha a pasta deles.',
         'No setting kept the goal; this one came closest.':
             'Nenhuma configuração manteve o objetivo; esta foi a que chegou mais perto.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -5657,8 +5549,6 @@ WORLD = {
             'Não conectado',
         'Not signed in yet':
             'Ainda não conectado',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Não conectado: use "Entrar com o Discord" acima.',
         'Not supported':
             'Não suportado',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -5691,8 +5581,6 @@ WORLD = {
             'O OneDrive (Área de Trabalho e Documentos costumam ser sincronizados) e Arquivos de Programas bloqueiam ou movem arquivos enquanto o port os grava.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'O online está ligado, mas você ainda não fez login: entrar agora',
         'Online play':
@@ -5897,8 +5785,8 @@ WORLD = {
             'Bordas da tela',
         'Search again':
             'Pesquisar de novo',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Procurando neste PC saves do shadPS4, do port do Awaken e do bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Procurando neste PC saves do shadPS4 e do port do Awaken…',
         'Search…':
             'Pesquisar…',
         'Sensitivity (direct)':
@@ -5931,8 +5819,6 @@ WORLD = {
             'Mostrar menos',
         'Show in folder':
             'Mostrar na pasta',
-        'Show me on the live map':
-            'Mostrar-me no mapa ao vivo',
         'Show the fix?':
             'Mostrar a solução?',
         'Show the log':
@@ -6057,14 +5943,6 @@ WORLD = {
             'A pasta de DLC não existe.',
         'The Dream':
             'O Sonho',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (com jogadores do bbhost)",
-        "The Hunter's Dream account":
-            "Conta do The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativo junto com jogadores do bbhost, após um login gratuito com o Discord. shadNet: um servidor shadNet à sua escolha e a conta dele.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} caçadores online agora ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'O menu Carregar jogo está vazio, falta um personagem ou o jogo diz que o save está danificado. Antes de cada início o launcher faz backup dos seus saves, então você pode voltar ao que eram.',
         'The Old Hunters found ({}).':
@@ -6083,8 +5961,6 @@ WORLD = {
             'A verificação parou: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Os patches da comunidade (60 FPS e mais, as opções de efeitos) existem só para a 1.09; outras versões rodam a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "A conexão com o The Hunter's Dream é o port do Awaken do código de rede do bbhost; o bbhost e o The Hunter's Dream são de droogie.",
         'The controller does nothing':
             'O controle não faz nada',
         'The controller test cannot start: {}':
@@ -6193,8 +6069,8 @@ WORLD = {
             'A sugestão do site para a taxa de quadros esperada.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Não há eboot.bin nesta pasta. Escolha a pasta que tem o eboot.bin diretamente dentro, não a pasta acima dela.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Não há save deste port, do shadPS4 ou do bbhost nessa pasta (SPRJ0005 com userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Não há save deste port ou do shadPS4 nessa pasta (SPRJ0005 com userdata0000 …).',
         'There is no save to back up yet.':
             'Ainda não há save para fazer backup.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -6227,8 +6103,6 @@ WORLD = {
             'Marque Gerenciar automaticamente o tamanho do arquivo de paginação de todas as unidades. Se continuar travando: desmarque, selecione uma unidade com espaço livre, Tamanho personalizado: inicial 16384, máximo 32768 e depois Definir.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Para jogar no SuperMedo Server, digite o seu nome de usuário e a sua senha do supermedo.com na página Jogo online (crie uma conta lá se não tiver).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Para jogar online com o The Hunter's Dream, primeiro entre com o Discord.",
         'Transform weapon (L1)':
             'Transformar arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -6331,8 +6205,6 @@ WORLD = {
             'O Windows mostra isso para programas que ainda não conhece.',
         "Windows' title bar instead of the launcher's own":
             'Barra de título do Windows em vez da do launcher',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Com o The Hunter's Dream, junto com jogadores do bbhost. Precisa de um login gratuito com o Discord, uma vez só.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Com as suas próprias configurações. Um travamento, um congelamento ou uma memória que só cresce vão para o relatório com as linhas do registro ao redor.',
         'Wrong graphics card?':
@@ -6514,16 +6386,10 @@ WORLD = {
             'parado: sua entrada',
         'the settings for your PC':
             'as configurações para o seu PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map mostra onde os jogadores estão e quais sinos estão tocando: o jogo envia a sua posição com mais frequência enquanto você joga.',
         'twice, interleaved (more exact)':
             'duas vezes, intercaladas (mais exato)',
         'up to 7 runs':
             'até 7 execuções',
-        '{0}: not reachable ({1})':
-            '{0}: inacessível ({1})',
-        '{0}: reachable':
-            '{0}: acessível',
         '{} GB free on {}':
             '{} GB livres em {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -6550,8 +6416,6 @@ WORLD = {
             '{} minutos',
         '{} of {} trophies earned':
             '{} de {} troféus obtidos',
-        '{} online':
-            '{} online',
         '{} runs':
             '{} execuções',
         '{} settings differ from the recommendation.':
@@ -6817,8 +6681,8 @@ WORLD = {
             'Centré (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Les changements s’appliquent au prochain lancement du jeu ; vous pouvez aussi appuyer sur F8 en jeu pour recharger input.ini sans redémarrer.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personnages de shadPS4, du portage d’Awaken, de bbhost ou d’un export PS4 : trouvés sur ce PC et copiés dans le dossier des sauvegardes de ce portage. Vos sauvegardes actuelles sont d’abord mises à l’abri.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personnages de shadPS4, du portage d’Awaken ou d’un export PS4 : trouvés sur ce PC et copiés dans le dossier des sauvegardes de ce portage. Vos sauvegardes actuelles sont d’abord mises à l’abri.',
         'Cheats on: {}':
             'Triches activées : {}',
         'Check again':
@@ -6884,8 +6748,6 @@ WORLD = {
             'Fermez votre navigateur et les autres programmes pendant que vous jouez.',
         'Co-op pool':
             'Pool de coopération',
-        'Co-op service {0}':
-            'Service de coopération {0}',
         'Combat':
             'Combat',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -7124,10 +6986,6 @@ WORLD = {
             'En jeu, Inser (clavier) ou L3 + R3 (manette) ouvre le menu du portage.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Dans le jeu, « {} » charge le dernier personnage joué ; « {} » sur l’écran titre les affiche tous.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Sur la page qui s’est ouverte ({0}), connectez-vous avec Discord et saisissez ce code :',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Sur la page qui s’est ouverte, connectez-vous avec Discord et saisissez ce code :',
         'Install':
             'Installer',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -7308,8 +7166,8 @@ WORLD = {
             'Aucune limite  ⚠',
         'No run finished; the report has the logs.':
             'Aucun essai n’a abouti ; le rapport contient les journaux.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Aucune sauvegarde de shadPS4, du portage d’Awaken ou de bbhost trouvée sur ce PC. Si les vôtres sont ailleurs (une copie de sauvegarde, un export PS4), choisissez leur dossier.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Aucune sauvegarde de shadPS4 ou du portage d’Awaken trouvée sur ce PC. Si les vôtres sont ailleurs (une copie de sauvegarde, un export PS4), choisissez leur dossier.',
         'No setting kept the goal; this one came closest.':
             'Aucun réglage n’a tenu l’objectif ; celui-ci s’en est le plus approché.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -7332,8 +7190,6 @@ WORLD = {
             'Non connecté',
         'Not signed in yet':
             'Pas encore connecté',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Non connecté : utilisez « Se connecter avec Discord » ci-dessus.',
         'Not supported':
             'Non pris en charge',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -7366,8 +7222,6 @@ WORLD = {
             'OneDrive (le Bureau et les Documents sont souvent synchronisés) et Program Files verrouillent ou déplacent des fichiers pendant que le portage les écrit.',
         'Online (SuperMedo Server)':
             'En ligne (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "En ligne (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Le jeu en ligne est activé, mais vous n’êtes pas encore connecté : connectez-vous maintenant',
         'Online play':
@@ -7573,8 +7427,8 @@ WORLD = {
             'Bords de l’écran',
         'Search again':
             'Rechercher à nouveau',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Recherche sur ce PC de sauvegardes de shadPS4, du portage d’Awaken et de bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Recherche sur ce PC de sauvegardes de shadPS4 et du portage d’Awaken…',
         'Search…':
             'Rechercher…',
         'Sensitivity (direct)':
@@ -7607,8 +7461,6 @@ WORLD = {
             'Afficher moins',
         'Show in folder':
             'Afficher dans le dossier',
-        'Show me on the live map':
-            'M’afficher sur la carte en direct',
         'Show the fix?':
             'Afficher la solution ?',
         'Show the log':
@@ -7735,14 +7587,6 @@ WORLD = {
             "Le dossier des DLC n'existe pas.",
         'The Dream':
             'Le Rêve',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (avec les joueurs bbhost)",
-        "The Hunter's Dream account":
-            "Compte The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream : coopération avec les joueurs bbhost, après une connexion gratuite avec Discord. shadNet : un serveur shadNet de votre choix et son compte.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream : {} chasseurs en ligne en ce moment ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             "Le menu « Charger une partie » est vide, un personnage manque ou le jeu dit que la sauvegarde est endommagée. Avant chaque lancement, le lanceur copie vos sauvegardes : vous pouvez revenir à leur état d'avant.",
         'The Old Hunters found ({}).':
@@ -7761,8 +7605,6 @@ WORLD = {
             'La vérification s’est arrêtée : {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Les patchs de la communauté (60 FPS et plus, les options d’effets) n’existent que pour la 1.09 ; les autres versions tournent à 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La connexion à The Hunter's Dream est le portage par Awaken du code réseau de bbhost ; bbhost et The Hunter's Dream sont l’œuvre de droogie.",
         'The controller does nothing':
             'La manette ne fait rien',
         'The controller test cannot start: {}':
@@ -7873,8 +7715,8 @@ WORLD = {
             'La suggestion du site pour la fréquence d’images attendue.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Il n’y a pas de eboot.bin dans ce dossier. Choisissez le dossier qui contient directement eboot.bin, pas celui du dessus.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Il n’y a aucune sauvegarde de ce portage, de shadPS4 ou de bbhost dans ce dossier (SPRJ0005 avec userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Il n’y a aucune sauvegarde de ce portage ou de shadPS4 dans ce dossier (SPRJ0005 avec userdata0000 …).',
         'There is no save to back up yet.':
             "Il n'y a pas encore de sauvegarde à copier.",
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -7907,8 +7749,6 @@ WORLD = {
             'Cochez Gestion automatique du fichier d’échange pour les lecteurs. Si le jeu plante encore : décochez-la, sélectionnez un lecteur avec de l’espace libre, Taille personnalisée : taille initiale 16384, taille maximale 32768, puis Définir.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Pour jouer sur SuperMedo Server, saisissez votre nom d’utilisateur et votre mot de passe supermedo.com sur la page Jeu en ligne (inscrivez-vous-y si vous n’avez pas de compte).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Pour jouer en ligne avec The Hunter's Dream, connectez-vous d’abord avec Discord.",
         'Transform weapon (L1)':
             'Transformer l’arme (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -8013,8 +7853,6 @@ WORLD = {
             'Windows affiche ce message pour les programmes qu’il ne connaît pas encore.',
         "Windows' title bar instead of the launcher's own":
             'Barre de titre de Windows au lieu de celle du lanceur',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Avec The Hunter's Dream, aux côtés des joueurs bbhost. Nécessite une connexion gratuite avec Discord, une seule fois.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Avec vos propres réglages. Un plantage, un blocage ou une mémoire qui ne cesse d’augmenter apparaît dans le rapport avec les lignes du journal correspondantes.',
         'Wrong graphics card?':
@@ -8196,16 +8034,10 @@ WORLD = {
             'arrêté : votre saisie',
         'the settings for your PC':
             'les réglages pour votre PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map montre où se trouvent les joueurs et quelles cloches sonnent : le jeu envoie votre position plus souvent pendant que vous jouez.',
         'twice, interleaved (more exact)':
             'deux fois, en alternance (plus précis)',
         'up to 7 runs':
             'jusqu’à 7 essais',
-        '{0}: not reachable ({1})':
-            '{0} : inaccessible ({1})',
-        '{0}: reachable':
-            '{0} : accessible',
         '{} GB free on {}':
             '{} Go libres sur {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -8232,8 +8064,6 @@ WORLD = {
             '{} minutes',
         '{} of {} trophies earned':
             '{} trophées obtenus sur {}',
-        '{} online':
-            '{} en ligne',
         '{} runs':
             '{} essais',
         '{} settings differ from the recommendation.':
@@ -8499,8 +8329,8 @@ WORLD = {
             'Centrato (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Le modifiche valgono dal prossimo avvio del gioco, oppure premi F8 nel gioco per ricaricare input.ini senza riavviare.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personaggi da shadPS4, dal port di Awaken, da bbhost o da un’esportazione PS4: trovati su questo PC e copiati nella cartella dei salvataggi di questo port. Prima viene fatto un backup dei tuoi salvataggi attuali.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personaggi da shadPS4, dal port di Awaken o da un’esportazione PS4: trovati su questo PC e copiati nella cartella dei salvataggi di questo port. Prima viene fatto un backup dei tuoi salvataggi attuali.',
         'Cheats on: {}':
             'Trucchi attivi: {}',
         'Check again':
@@ -8566,8 +8396,6 @@ WORLD = {
             'Chiudi il browser e gli altri programmi mentre giochi.',
         'Co-op pool':
             'Pool cooperativo',
-        'Co-op service {0}':
-            'Servizio cooperativo {0}',
         'Combat':
             'Combattimento',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -8806,10 +8634,6 @@ WORLD = {
             'Nel gioco, Ins (tastiera) o L3 + R3 (controller) apre il menu del port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Nel gioco, «{}» carica l’ultimo personaggio usato; «{}» nella schermata del titolo li mostra tutti.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Nella pagina che si è aperta ({0}), accedi con Discord e inserisci questo codice:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Nella pagina che si è aperta, accedi con Discord e inserisci questo codice:',
         'Install':
             'Installa',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -8990,8 +8814,8 @@ WORLD = {
             'Nessun limite  ⚠',
         'No run finished; the report has the logs.':
             'Nessuna esecuzione completata; il rapporto contiene i registri.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nessun salvataggio di shadPS4, del port di Awaken o di bbhost trovato su questo PC. Se i tuoi sono altrove (un backup, un’esportazione PS4), scegli la loro cartella.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nessun salvataggio di shadPS4 o del port di Awaken trovato su questo PC. Se i tuoi sono altrove (un backup, un’esportazione PS4), scegli la loro cartella.',
         'No setting kept the goal; this one came closest.':
             'Nessuna impostazione ha raggiunto l’obiettivo; questa ci è andata più vicino.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -9014,8 +8838,6 @@ WORLD = {
             'Accesso non effettuato',
         'Not signed in yet':
             'Accesso non ancora effettuato',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Accesso non effettuato: usa "Accedi con Discord" qui sopra.',
         'Not supported':
             'Non supportato',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -9048,8 +8870,6 @@ WORLD = {
             'OneDrive (Desktop e Documenti sono spesso sincronizzati) e Programmi bloccano o spostano i file mentre il port li scrive.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Il gioco online è attivo, ma non hai ancora effettuato l’accesso: accedi ora',
         'Online play':
@@ -9254,8 +9074,8 @@ WORLD = {
             'Bordi dello schermo',
         'Search again':
             'Cerca di nuovo',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Ricerca su questo PC dei salvataggi di shadPS4, del port di Awaken e di bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Ricerca su questo PC dei salvataggi di shadPS4 e del port di Awaken…',
         'Search…':
             'Cerca…',
         'Sensitivity (direct)':
@@ -9288,8 +9108,6 @@ WORLD = {
             'Mostra meno',
         'Show in folder':
             'Mostra nella cartella',
-        'Show me on the live map':
-            'Mostrami sulla mappa dal vivo',
         'Show the fix?':
             'Mostrare la soluzione?',
         'Show the log':
@@ -9416,14 +9234,6 @@ WORLD = {
             'La cartella DLC non esiste.',
         'The Dream':
             'Il Sogno',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (con i giocatori di bbhost)",
-        "The Hunter's Dream account":
-            "Account The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativa insieme ai giocatori bbhost, dopo un accesso gratuito con Discord. shadNet: un server shadNet a tua scelta e il suo account.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} cacciatori online adesso ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Il menu "Carica partita" è vuoto, manca un personaggio o il gioco dice che il salvataggio è danneggiato. Prima di ogni avvio il launcher fa un backup dei salvataggi, quindi puoi tornare a com\'erano.',
         'The Old Hunters found ({}).':
@@ -9442,8 +9252,6 @@ WORLD = {
             'La verifica si è interrotta: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Le patch della community (60 FPS e oltre, le opzioni degli effetti) esistono solo per la 1.09; le altre versioni girano a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La connessione a The Hunter's Dream è il port del codice di rete di bbhost realizzato da Awaken; bbhost e The Hunter's Dream sono di droogie.",
         'The controller does nothing':
             'Il controller non fa nulla',
         'The controller test cannot start: {}':
@@ -9553,8 +9361,8 @@ WORLD = {
             'Il suggerimento del sito per la frequenza fotogrammi prevista.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'In questa cartella non c’è eboot.bin. Scegli la cartella che contiene direttamente eboot.bin, non quella sopra.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'In quella cartella non c’è alcun salvataggio di questo port, di shadPS4 o di bbhost (SPRJ0005 con userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'In quella cartella non c’è alcun salvataggio di questo port o di shadPS4 (SPRJ0005 con userdata0000 …).',
         'There is no save to back up yet.':
             'Non c’è ancora un salvataggio di cui fare il backup.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -9587,8 +9395,6 @@ WORLD = {
             'Spunta Gestisci automaticamente dimensioni file di paging per tutte le unità. Se va ancora in crash: togli la spunta, seleziona un’unità con spazio libero, Dimensioni personalizzate: iniziali 16384, massime 32768, poi Imposta.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Per giocare su SuperMedo Server, inserisci nome utente e password di supermedo.com nella pagina Gioco online (lì puoi anche registrarti se non hai un account).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Per giocare online con The Hunter's Dream, accedi prima con Discord.",
         'Transform weapon (L1)':
             'Trasforma l’arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -9693,8 +9499,6 @@ WORLD = {
             'Windows mostra questo messaggio per i programmi che non conosce ancora.',
         "Windows' title bar instead of the launcher's own":
             'Barra del titolo di Windows invece di quella del launcher',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Con The Hunter's Dream, insieme ai giocatori di bbhost. Richiede un accesso gratuito con Discord, una sola volta.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Con le tue impostazioni. Un crash, un blocco o una memoria che continua a crescere finiscono nel rapporto con le righe di registro circostanti.',
         'Wrong graphics card?':
@@ -9875,16 +9679,10 @@ WORLD = {
             'interrotto: tuo input',
         'the settings for your PC':
             'le impostazioni per il tuo PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map mostra dove sono i giocatori e quali campane suonano: il gioco invia la tua posizione più spesso mentre giochi.',
         'twice, interleaved (more exact)':
             'due volte, alternando i valori (più preciso)',
         'up to 7 runs':
             'fino a 7 esecuzioni',
-        '{0}: not reachable ({1})':
-            '{0}: non raggiungibile ({1})',
-        '{0}: reachable':
-            '{0}: raggiungibile',
         '{} GB free on {}':
             '{} GB liberi su {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -9911,8 +9709,6 @@ WORLD = {
             '{} minuti',
         '{} of {} trophies earned':
             '{} su {} trofei ottenuti',
-        '{} online':
-            '{} online',
         '{} runs':
             '{} esecuzioni',
         '{} settings differ from the recommendation.':
@@ -10178,8 +9974,8 @@ WORLD = {
             'Na środku (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Zmiany zadziałają przy następnym uruchomieniu gry; możesz też nacisnąć F8 w grze, aby ponownie wczytać input.ini bez restartu.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Postacie z shadPS4, portu Awakena, bbhost lub eksportu z PS4: wyszukiwane na tym PC i kopiowane do folderu zapisów tego portu. Najpierw tworzona jest kopia zapasowa twoich obecnych zapisów.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Postacie z shadPS4, portu Awakena lub eksportu z PS4: wyszukiwane na tym PC i kopiowane do folderu zapisów tego portu. Najpierw tworzona jest kopia zapasowa twoich obecnych zapisów.',
         'Cheats on: {}':
             'Włączone kody: {}',
         'Check again':
@@ -10245,8 +10041,6 @@ WORLD = {
             'Podczas gry zamknij przeglądarkę i inne programy.',
         'Co-op pool':
             'Pula kooperacji',
-        'Co-op service {0}':
-            'Serwis kooperacji {0}',
         'Combat':
             'Walka',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -10485,10 +10279,6 @@ WORLD = {
             'W grze Insert (klawiatura) lub L3 + R3 (kontroler) otwiera menu portu.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'W grze „{}” wczytuje postać, którą grano ostatnio; „{}” na ekranie tytułowym pokazuje wszystkie.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Na stronie, która się otworzyła ({0}), zaloguj się przez Discord i wpisz ten kod:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Na stronie, która się otworzyła, zaloguj się przez Discord i wpisz ten kod:',
         'Install':
             'Zainstaluj',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -10667,8 +10457,8 @@ WORLD = {
             'Bez limitu  ⚠',
         'No run finished; the report has the logs.':
             'Żaden przebieg się nie zakończył; raport zawiera dzienniki.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nie znaleziono na tym PC zapisów z shadPS4, portu Awakena ani bbhost. Jeśli twoje są gdzie indziej (kopia zapasowa, eksport z PS4), wybierz ich folder.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nie znaleziono na tym PC zapisów z shadPS4 ani portu Awakena. Jeśli twoje są gdzie indziej (kopia zapasowa, eksport z PS4), wybierz ich folder.',
         'No setting kept the goal; this one came closest.':
             'Żadne ustawienie nie utrzymało celu; to było najbliżej.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -10691,8 +10481,6 @@ WORLD = {
             'Nie zalogowano',
         'Not signed in yet':
             'Jeszcze nie zalogowano',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Nie zalogowano: użyj powyżej „Zaloguj się przez Discord”.',
         'Not supported':
             'Nieobsługiwane',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -10725,8 +10513,6 @@ WORLD = {
             'OneDrive (Pulpit i Dokumenty są często synchronizowane) oraz Program Files blokują lub przenoszą pliki, gdy port je zapisuje.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Tryb online jest włączony, ale nie zalogowano: zaloguj się teraz',
         'Online play':
@@ -10931,8 +10717,8 @@ WORLD = {
             'Krawędzie ekranu',
         'Search again':
             'Szukaj ponownie',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Szukanie na tym PC zapisów z shadPS4, portu Awakena i bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Szukanie na tym PC zapisów z shadPS4 i portu Awakena…',
         'Search…':
             'Szukaj…',
         'Sensitivity (direct)':
@@ -10965,8 +10751,6 @@ WORLD = {
             'Pokaż mniej',
         'Show in folder':
             'Pokaż w folderze',
-        'Show me on the live map':
-            'Pokazuj mnie na mapie na żywo',
         'Show the fix?':
             'Pokazać rozwiązanie?',
         'Show the log':
@@ -11093,14 +10877,6 @@ WORLD = {
             'Folder DLC nie istnieje.',
         'The Dream':
             'Sen',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (z graczami bbhost)",
-        "The Hunter's Dream account":
-            "Konto The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: kooperacja razem z graczami bbhost po darmowym logowaniu przez Discord. shadNet: wybrany serwer shadNet i jego konto.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: teraz online {} łowców ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Menu „Wczytaj grę” jest puste, brakuje postaci albo gra zgłasza uszkodzony zapis. Przed każdym uruchomieniem launcher tworzy kopię zapisów, więc możesz wrócić do poprzedniego stanu.',
         'The Old Hunters found ({}).':
@@ -11119,8 +10895,6 @@ WORLD = {
             'Sprawdzanie przerwane: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Łatki społeczności (60 FPS i więcej, opcje efektów) istnieją tylko dla 1.09; inne wersje działają w 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "Połączenie z The Hunter's Dream to wykonany przez Awakena port kodu sieciowego bbhost; bbhost i The Hunter's Dream są autorstwa droogie.",
         'The controller does nothing':
             'Kontroler nie działa',
         'The controller test cannot start: {}':
@@ -11229,8 +11003,8 @@ WORLD = {
             'Sugestia witryny dotycząca oczekiwanej liczby klatek.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'W tym folderze nie ma eboot.bin. Wybierz folder, w którym bezpośrednio znajduje się eboot.bin, a nie folder nadrzędny.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'W tym folderze nie ma zapisu tego portu, shadPS4 ani bbhost (SPRJ0005 z userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'W tym folderze nie ma zapisu tego portu ani shadPS4 (SPRJ0005 z userdata0000 …).',
         'There is no save to back up yet.':
             'Nie ma jeszcze zapisu do skopiowania.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -11263,8 +11037,6 @@ WORLD = {
             'Zaznacz „Automatycznie zarządzaj rozmiarem pliku stronicowania dla wszystkich dysków”. Jeśli awarie nadal występują: odznacz to, wybierz dysk z wolnym miejscem, „Rozmiar niestandardowy”: rozmiar początkowy 16384, rozmiar maksymalny 32768, potem „Ustaw”.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Aby grać na SuperMedo Server, wpisz nazwę użytkownika i hasło z supermedo.com na stronie „Gra online” (jeśli nie masz konta, zarejestruj się tam).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Aby grać online przez The Hunter's Dream, najpierw zaloguj się przez Discord.",
         'Transform weapon (L1)':
             'Przekształcenie broni (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -11369,8 +11141,6 @@ WORLD = {
             'Windows pokazuje to przy programach, których jeszcze nie zna.',
         "Windows' title bar instead of the launcher's own":
             'Pasek tytułu Windows zamiast własnego paska launchera',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Przez The Hunter's Dream, razem z graczami bbhost. Wymaga jednorazowego, darmowego logowania przez Discord.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Z twoimi własnymi ustawieniami. Awaria, zawieszenie lub stale rosnące zużycie pamięci trafią do raportu wraz z otaczającymi wierszami dziennika.',
         'Wrong graphics card?':
@@ -11550,16 +11320,10 @@ WORLD = {
             'przerwano: twoje sterowanie',
         'the settings for your PC':
             'ustawienia dla twojego PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map pokazuje, gdzie są gracze i które dzwony rozbrzmiewają: podczas gry gra częściej wysyła twoją pozycję.',
         'twice, interleaved (more exact)':
             'dwa razy, naprzemiennie (dokładniej)',
         'up to 7 runs':
             'do 7 przebiegów',
-        '{0}: not reachable ({1})':
-            '{0}: niedostępny ({1})',
-        '{0}: reachable':
-            '{0}: dostępny',
         '{} GB free on {}':
             '{} GB wolnego miejsca na {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -11586,8 +11350,6 @@ WORLD = {
             '{} min',
         '{} of {} trophies earned':
             'Zdobyte trofea: {} z {}',
-        '{} online':
-            '{} online',
         '{} runs':
             'przebiegi: {}',
         '{} settings differ from the recommendation.':
@@ -11853,8 +11615,8 @@ WORLD = {
             'Ortada (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Değişiklikler oyun bir sonraki başlatıldığında uygulanır; yeniden başlatmadan input.ini dosyasını yeniden yüklemek için oyunda F8’e de basabilirsiniz.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4, Awaken’ın portu, bbhost veya bir PS4 dışa aktarımından karakterler: bu bilgisayarda bulunur ve bu portun kayıt klasörüne kopyalanır. Mevcut kayıtlarınız önce yedeklenir.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4, Awaken’ın portu veya bir PS4 dışa aktarımından karakterler: bu bilgisayarda bulunur ve bu portun kayıt klasörüne kopyalanır. Mevcut kayıtlarınız önce yedeklenir.',
         'Cheats on: {}':
             'Açık hileler: {}',
         'Check again':
@@ -11920,8 +11682,6 @@ WORLD = {
             'Oynarken tarayıcınızı ve diğer programları kapatın.',
         'Co-op pool':
             'Ortak oyun havuzu',
-        'Co-op service {0}':
-            'Ortak oyun hizmeti {0}',
         'Combat':
             'Dövüş',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -12160,10 +11920,6 @@ WORLD = {
             'Oyunda Insert (klavye) veya L3 + R3 (kumanda) portun menüsünü açar.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Oyunda “{}” en son oynadığın karakteri yükler; başlık ekranındaki “{}” hepsini listeler.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Açılan sayfada ({0}) Discord ile oturum açın ve şu kodu girin:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Açılan sayfada Discord ile oturum açın ve şu kodu girin:',
         'Install':
             'Kur',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -12343,8 +12099,8 @@ WORLD = {
             'Sınır yok  ⚠',
         'No run finished; the report has the logs.':
             'Hiçbir çalıştırma tamamlanmadı; günlükler raporda.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Bu bilgisayarda shadPS4, Awaken’ın portu veya bbhost kaydı bulunamadı. Kayıtlarınız başka bir yerdeyse (bir yedek, bir PS4 dışa aktarımı) klasörlerini seçin.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Bu bilgisayarda shadPS4 veya Awaken’ın portu kaydı bulunamadı. Kayıtlarınız başka bir yerdeyse (bir yedek, bir PS4 dışa aktarımı) klasörlerini seçin.',
         'No setting kept the goal; this one came closest.':
             'Hiçbir ayar hedefi tutturamadı; en yakın olan bu.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -12367,8 +12123,6 @@ WORLD = {
             'Oturum açılmadı',
         'Not signed in yet':
             'Henüz oturum açılmadı',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Oturum açılmadı: yukarıdaki "Discord ile oturum aç" düğmesini kullanın.',
         'Not supported':
             'Desteklenmiyor',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -12401,8 +12155,6 @@ WORLD = {
             'OneDrive (Masaüstü ve Belgeler çoğu zaman eşitlenir) ve Program Files, port dosyaları yazarken onları kilitler veya taşır.',
         'Online (SuperMedo Server)':
             'Çevrim içi (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Çevrim içi (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Çevrim içi açık ama henüz oturum açmadınız: şimdi oturum açın',
         'Online play':
@@ -12607,8 +12359,8 @@ WORLD = {
             'Ekran kenarları',
         'Search again':
             'Yeniden ara',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Bu bilgisayarda shadPS4, Awaken’ın portu ve bbhost kayıtları aranıyor…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Bu bilgisayarda shadPS4 ve Awaken’ın portu kayıtları aranıyor…',
         'Search…':
             'Ara…',
         'Sensitivity (direct)':
@@ -12641,8 +12393,6 @@ WORLD = {
             'Daha az göster',
         'Show in folder':
             'Klasörde göster',
-        'Show me on the live map':
-            'Beni canlı haritada göster',
         'Show the fix?':
             'Çözüm gösterilsin mi?',
         'Show the log':
@@ -12769,14 +12519,6 @@ WORLD = {
             'DLC klasörü mevcut değil.',
         'The Dream':
             'Rüya',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (bbhost oyuncularıyla)",
-        "The Hunter's Dream account":
-            "The Hunter's Dream hesabı",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: Discord ile ücretsiz giriş yaptıktan sonra bbhost oyuncularıyla birlikte ortak oyun. shadNet: seçtiğin bir shadNet sunucusu ve hesabı.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: şu an {} avcı çevrimiçi ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Load Game menüsü boş, bir karakter eksik ya da oyun kaydın bozuk olduğunu söylüyor. Başlatıcı her başlatmadan önce kayıtlarını yedekler; böylece eski haline dönebilirsin.',
         'The Old Hunters found ({}).':
@@ -12795,8 +12537,6 @@ WORLD = {
             'Kontrol durdu: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Topluluk yamaları (60 FPS ve üzeri, efekt seçenekleri) yalnızca 1.09 için mevcut; diğer sürümler 30 FPS’te çalışır.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream bağlantısı, bbhost’un ağ kodunun Awaken tarafından yapılmış portudur; bbhost ve The Hunter's Dream droogie’ye aittir.",
         'The controller does nothing':
             'Kumanda hiçbir şey yapmıyor',
         'The controller test cannot start: {}':
@@ -12905,8 +12645,8 @@ WORLD = {
             'Web sitesinin beklenen kare hızı önerisi.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Bu klasörde eboot.bin yok. Bir üst klasörü değil, eboot.bin’in doğrudan içinde bulunduğu klasörü seçin.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Bu klasörde bu portun, shadPS4’ün veya bbhost’un kaydı yok (userdata0000 … içeren SPRJ0005).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Bu klasörde bu portun veya shadPS4’ün kaydı yok (userdata0000 … içeren SPRJ0005).',
         'There is no save to back up yet.':
             'Henüz yedeklenecek bir kayıt yok.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -12939,8 +12679,6 @@ WORLD = {
             '"Tüm sürücüler için disk belleği dosyası boyutunu otomatik olarak yönet" seçeneğini işaretleyin. Hâlâ çöküyorsa: işareti kaldırın, boş alanı olan bir sürücü seçin, Özel boyut: başlangıç 16384, en büyük 32768, ardından Ayarla.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server’da oynamak için Çevrim içi oyun sayfasında supermedo.com kullanıcı adınızı ve parolanızı girin (hesabınız yoksa orada hesap oluşturun).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream ile çevrim içi oynamak için önce Discord ile oturum açın.",
         'Transform weapon (L1)':
             'Silahı dönüştür (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -13046,8 +12784,6 @@ WORLD = {
             'Windows bunu henüz tanımadığı programlar için gösterir.',
         "Windows' title bar instead of the launcher's own":
             'Başlatıcının kendi başlık çubuğu yerine Windows başlık çubuğu',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream ile, bbhost oyuncularıyla birlikte. Bir kez ücretsiz olarak Discord ile oturum açmanız gerekir.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Kendi ayarlarınızla. Bir çökme, donma veya sürekli artan bellek kullanımı, etrafındaki günlük satırlarıyla birlikte rapora eklenir.',
         'Wrong graphics card?':
@@ -13227,16 +12963,10 @@ WORLD = {
             'durduruldu: sizin girdiniz',
         'the settings for your PC':
             'bilgisayarınız için ayarlar',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map oyuncuların nerede olduğunu ve hangi çanların çaldığını gösterir: oyun, siz oynarken konumunuzu daha sık gönderir.',
         'twice, interleaved (more exact)':
             'iki kez, dönüşümlü (daha kesin)',
         'up to 7 runs':
             'en fazla 7 çalıştırma',
-        '{0}: not reachable ({1})':
-            '{0}: erişilemiyor ({1})',
-        '{0}: reachable':
-            '{0}: erişilebilir',
         '{} GB free on {}':
             '{} GB boş ({})',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -13263,8 +12993,6 @@ WORLD = {
             '{} dakika',
         '{} of {} trophies earned':
             '{}/{} kupa kazanıldı',
-        '{} online':
-            '{} çevrimiçi',
         '{} runs':
             '{} çalıştırma',
         '{} settings differ from the recommendation.':
@@ -13525,8 +13253,8 @@ WORLD = {
             '居中（16:9）',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '更改将在下次启动游戏时生效；也可以在游戏中按 F8，无需重启即可重新加载 input.ini。',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            '来自 shadPS4、Awaken 的移植版、bbhost 或 PS4 导出的角色：在这台电脑上找到后复制到本移植版的存档文件夹。你当前的存档会先被备份。',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            '来自 shadPS4、Awaken 的移植版或 PS4 导出的角色：在这台电脑上找到后复制到本移植版的存档文件夹。你当前的存档会先被备份。',
         'Cheats on: {}':
             '已开启作弊：{}',
         'Check again':
@@ -13591,8 +13319,6 @@ WORLD = {
             '游玩时请关闭浏览器和其他程序。',
         'Co-op pool':
             '合作匹配池',
-        'Co-op service {0}':
-            '合作服务 {0}',
         'Combat':
             '战斗',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -13831,10 +13557,6 @@ WORLD = {
             '在游戏中，按 Insert（键盘）或 L3 + R3（手柄）可打开移植版菜单。',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             '在游戏中，“{}”会载入你上次游玩的角色；标题画面的“{}”会列出所有角色。',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '在已打开的页面（{0}）中使用 Discord 登录，并输入此代码：',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '在已打开的页面中使用 Discord 登录，并输入此代码：',
         'Install':
             '安装',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -14011,8 +13733,8 @@ WORLD = {
             '不限制  ⚠',
         'No run finished; the report has the logs.':
             '没有一次运行完成；日志见报告。',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            '在这台电脑上未找到 shadPS4、Awaken 的移植版或 bbhost 的存档。如果你的存档在其他位置（备份、PS4 导出），请选择其所在文件夹。',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            '在这台电脑上未找到 shadPS4、Awaken 的移植版的存档。如果你的存档在其他位置（备份、PS4 导出），请选择其所在文件夹。',
         'No setting kept the goal; this one came closest.':
             '没有任何设置达到目标；这个最接近。',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -14035,8 +13757,6 @@ WORLD = {
             '未登录',
         'Not signed in yet':
             '尚未登录',
-        'Not signed in: use "Sign in with Discord" above.':
-            '未登录：请使用上方的“使用 Discord 登录”。',
         'Not supported':
             '不支持',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -14069,8 +13789,6 @@ WORLD = {
             'OneDrive（桌面和文档通常会被同步）和 Program Files 会在移植版写入文件时锁定或移动文件。',
         'Online (SuperMedo Server)':
             '在线（SuperMedo 服务器）',
-        "Online (The Hunter's Dream)":
-            "在线（The Hunter's Dream）",
         'Online is on, but you are not signed in yet: sign in now':
             '在线已开启，但你尚未登录：立即登录',
         'Online play':
@@ -14275,8 +13993,8 @@ WORLD = {
             '屏幕边缘',
         'Search again':
             '重新搜索',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            '正在这台电脑上搜索 shadPS4、Awaken 的移植版和 bbhost 的存档…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            '正在这台电脑上搜索 shadPS4、Awaken 的移植版的存档…',
         'Search…':
             '搜索…',
         'Sensitivity (direct)':
@@ -14309,8 +14027,6 @@ WORLD = {
             '收起',
         'Show in folder':
             '在文件夹中显示',
-        'Show me on the live map':
-            '在实时地图上显示我',
         'Show the fix?':
             '显示解决方法？',
         'Show the log':
@@ -14432,14 +14148,6 @@ WORLD = {
             'DLC 文件夹不存在。',
         'The Dream':
             '梦境',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream（与 bbhost 玩家一起）",
-        "The Hunter's Dream account":
-            "The Hunter's Dream 账户",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream：使用 Discord 免费登录后，与 bbhost 玩家一起联机合作。shadNet：你选择的 shadNet 服务器及其账号。",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream：当前 {} 名猎人在线（{} bbhost · {} shadNet）",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '“读取游戏”菜单为空、缺少角色，或游戏提示存档损坏。每次启动前启动器都会备份你的存档，所以你可以恢复到之前的状态。',
         'The Old Hunters found ({}).':
@@ -14458,8 +14166,6 @@ WORLD = {
             '检查已中止：{}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             '社区补丁（60 FPS 及以上、效果选项）仅适用于 1.09；其他版本以 30 FPS 运行。',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "与 The Hunter's Dream 的连接是 Awaken 对 bbhost 网络代码的移植；bbhost 和 The Hunter's Dream 的作者是 droogie。",
         'The controller does nothing':
             '手柄没有反应',
         'The controller test cannot start: {}':
@@ -14565,8 +14271,8 @@ WORLD = {
             '网站对预期帧率的建议。',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             '此文件夹中没有 eboot.bin。请选择直接包含 eboot.bin 的文件夹，而不是它的上一级文件夹。',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            '该文件夹中没有本移植版、shadPS4 或 bbhost 的存档（包含 userdata0000 … 的 SPRJ0005）。',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            '该文件夹中没有本移植版或 shadPS4 的存档（包含 userdata0000 … 的 SPRJ0005）。',
         'There is no save to back up yet.':
             '还没有可备份的存档。',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -14599,8 +14305,6 @@ WORLD = {
             '勾选“自动管理所有驱动器的分页文件大小”。如果仍然崩溃：取消勾选，选择一个有可用空间的驱动器，选择“自定义大小”：初始大小 16384，最大值 32768，然后点击“设置”。',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             '要在 SuperMedo 服务器上游玩，请在“在线游玩”页面输入你的 supermedo.com 用户名和密码（如果没有账户，可在那里注册）。',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "要通过 The Hunter's Dream 在线游玩，请先使用 Discord 登录。",
         'Transform weapon (L1)':
             '变形武器（L1）',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -14703,8 +14407,6 @@ WORLD = {
             'Windows 会对它尚不认识的程序显示此提示。',
         "Windows' title bar instead of the launcher's own":
             '使用 Windows 标题栏，而非启动器自带的标题栏',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "通过 The Hunter's Dream，与 bbhost 玩家一起。只需使用 Discord 免费登录一次。",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '使用你自己的设置。崩溃、卡死或持续增长的内存都会连同前后的日志行记录在报告中。',
         'Wrong graphics card?':
@@ -14882,16 +14584,10 @@ WORLD = {
             '已中止：你的操作',
         'the settings for your PC':
             '适合你电脑的设置',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map 会显示玩家所在位置以及哪些铃铛正在响起：游玩时，游戏会更频繁地发送你的位置。',
         'twice, interleaved (more exact)':
             '两次，交替进行（更精确）',
         'up to 7 runs':
             '最多 7 次运行',
-        '{0}: not reachable ({1})':
-            '{0}：无法连接 ({1})',
-        '{0}: reachable':
-            '{0}：可连接',
         '{} GB free on {}':
             '{1} 上有 {0} GB 可用空间',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -14918,8 +14614,6 @@ WORLD = {
             '{} 分钟',
         '{} of {} trophies earned':
             '已获得 {}/{} 个奖杯',
-        '{} online':
-            '{} 人在线',
         '{} runs':
             '{} 次运行',
         '{} settings differ from the recommendation.':
@@ -15180,8 +14874,8 @@ WORLD = {
             '中央（16:9）',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '変更はゲームの次回起動時に反映されます。ゲーム中に F8 を押すと、再起動せずに input.ini を再読み込みできます。',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4、Awaken の移植版、bbhost、または PS4 からエクスポートしたキャラクターを、この PC 上で見つけてこの移植版のセーブフォルダーにコピーします。現在のセーブデータは事前にバックアップされます。',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4、Awaken の移植版、または PS4 からエクスポートしたキャラクターを、この PC 上で見つけてこの移植版のセーブフォルダーにコピーします。現在のセーブデータは事前にバックアップされます。',
         'Cheats on: {}':
             'チート有効：{}',
         'Check again':
@@ -15246,8 +14940,6 @@ WORLD = {
             'プレイ中はブラウザーやその他のプログラムを閉じてください。',
         'Co-op pool':
             '協力プレイの接続先',
-        'Co-op service {0}':
-            '協力プレイサービス {0}',
         'Combat':
             '戦闘',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -15486,10 +15178,6 @@ WORLD = {
             'ゲーム中に Insert（キーボード）または L3 + R3（コントローラー）を押すと、移植版メニューが開きます。',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'ゲーム内では「{}」で最後に遊んだキャラクターを読み込み、タイトル画面の「{}」ですべてのキャラクターを表示します。',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '開いたページ（{0}）で Discord でサインインし、次のコードを入力してください：',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '開いたページで Discord でサインインし、次のコードを入力してください：',
         'Install':
             'インストール',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -15666,8 +15354,8 @@ WORLD = {
             '上限なし  ⚠',
         'No run finished; the report has the logs.':
             '完了した実行はありません。ログはレポートにあります。',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'この PC で shadPS4、Awaken の移植版、bbhost のセーブデータが見つかりませんでした。別の場所（バックアップや PS4 からのエクスポート）にある場合は、そのフォルダーを選択してください。',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'この PC で shadPS4、Awaken の移植版のセーブデータが見つかりませんでした。別の場所（バックアップや PS4 からのエクスポート）にある場合は、そのフォルダーを選択してください。',
         'No setting kept the goal; this one came closest.':
             '目標を維持できた設定はありませんでした。これが最も近い結果です。',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -15690,8 +15378,6 @@ WORLD = {
             '未サインイン',
         'Not signed in yet':
             'まだサインインしていません',
-        'Not signed in: use "Sign in with Discord" above.':
-            '未サインイン：上の「Discord でサインイン」を使ってください。',
         'Not supported':
             '非対応',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -15724,8 +15410,6 @@ WORLD = {
             'OneDrive（デスクトップやドキュメントは同期されていることが多い）や Program Files は、移植版がファイルを書き込んでいる最中にロックしたり移動したりします。',
         'Online (SuperMedo Server)':
             'オンライン（SuperMedo Server）',
-        "Online (The Hunter's Dream)":
-            "オンライン（The Hunter's Dream）",
         'Online is on, but you are not signed in yet: sign in now':
             'オンラインがオンですが、まだサインインしていません：今すぐサインイン',
         'Online play':
@@ -15930,8 +15614,8 @@ WORLD = {
             '画面の端',
         'Search again':
             '再検索',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'この PC で shadPS4、Awaken の移植版、bbhost のセーブデータを検索中…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'この PC で shadPS4、Awaken の移植版のセーブデータを検索中…',
         'Search…':
             '検索…',
         'Sensitivity (direct)':
@@ -15964,8 +15648,6 @@ WORLD = {
             '表示を減らす',
         'Show in folder':
             'フォルダーで表示',
-        'Show me on the live map':
-            'ライブマップに自分を表示',
         'Show the fix?':
             '解決方法を表示しますか？',
         'Show the log':
@@ -16087,14 +15769,6 @@ WORLD = {
             'DLC フォルダーが存在しません。',
         'The Dream':
             '狩人の夢',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream（bbhost のプレイヤーと）",
-        "The Hunter's Dream account":
-            "The Hunter's Dream のアカウント",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream：Discord で無料サインインすると、bbhost のプレイヤーとも協力プレイできます。shadNet：選んだ shadNet サーバーとそのアカウント。",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream：現在 {} 人の狩人がオンライン（{} bbhost · {} shadNet）",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '「ロード」メニューが空、キャラクターがいない、またはセーブデータが破損しているとゲームが表示します。ランチャーは起動のたびにセーブデータをバックアップするので、元の状態に戻せます。',
         'The Old Hunters found ({}).':
@@ -16113,8 +15787,6 @@ WORLD = {
             '確認が中断されました：{}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'コミュニティパッチ（60 FPS 以上、エフェクトのオプション）は 1.09 専用です。他のバージョンは 30 FPS で動作します。',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream への接続は、bbhost のネットワークコードを Awaken が移植したものです。bbhost と The Hunter's Dream は droogie によるものです。",
         'The controller does nothing':
             'コントローラーが反応しない',
         'The controller test cannot start: {}':
@@ -16221,8 +15893,8 @@ WORLD = {
             'ウェブサイトが示す予想フレームレート。',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'このフォルダーには eboot.bin がありません。その上の階層ではなく、eboot.bin が直下にあるフォルダーを選択してください。',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'そのフォルダーには、この移植版、shadPS4、bbhost のセーブデータがありません（userdata0000 … を含む SPRJ0005）。',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'そのフォルダーには、この移植版、shadPS4 のセーブデータがありません（userdata0000 … を含む SPRJ0005）。',
         'There is no save to back up yet.':
             'バックアップするセーブデータがまだありません。',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -16255,8 +15927,6 @@ WORLD = {
             '「すべてのドライブのページング ファイルのサイズを自動的に管理する」にチェックを入れます。それでもクラッシュする場合：チェックを外し、空き容量のあるドライブを選んで「カスタム サイズ」を選択し、初期サイズ 16384、最大サイズ 32768 を入力して「設定」を押します。',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server でプレイするには、「オンラインプレイ」ページで supermedo.com のユーザー名とパスワードを入力してください（アカウントがない場合はそこで登録できます）。',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream でオンラインプレイするには、先に Discord でサインインしてください。",
         'Transform weapon (L1)':
             '武器の変形 (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -16359,8 +16029,6 @@ WORLD = {
             'Windows は、まだ認識していないプログラムに対してこの表示を出します。',
         "Windows' title bar instead of the launcher's own":
             'ランチャー独自のタイトルバーの代わりに Windows のタイトルバーを使う',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream で、bbhost のプレイヤーと一緒に遊べます。Discord での無料サインインが一度だけ必要です。",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '自分の設定で実行します。クラッシュ、フリーズ、増え続けるメモリ使用量は、前後のログとともにレポートに記録されます。',
         'Wrong graphics card?':
@@ -16539,16 +16207,10 @@ WORLD = {
             '中断：あなたの入力',
         'the settings for your PC':
             'この PC 向けの設定',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map では、プレイヤーの居場所と鳴らされている鐘を確認できます。プレイ中、ゲームはあなたの位置をより頻繁に送信します。',
         'twice, interleaved (more exact)':
             '2 回、交互に（より正確）',
         'up to 7 runs':
             '最大 7 回の実行',
-        '{0}: not reachable ({1})':
-            '{0}：接続できません ({1})',
-        '{0}: reachable':
-            '{0}：接続可能',
         '{} GB free on {}':
             '{} GB の空き（{}）',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -16575,8 +16237,6 @@ WORLD = {
             '{} 分',
         '{} of {} trophies earned':
             '{} / {} 個のトロフィーを獲得',
-        '{} online':
-            '{} 人オンライン',
         '{} runs':
             '{} 回の実行',
         '{} settings differ from the recommendation.':
@@ -16838,8 +16498,8 @@ WORLD = {
             '가운데 (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '변경 사항은 다음에 게임을 시작할 때 적용됩니다. 게임 중에 F8을 누르면 재시작 없이 input.ini를 다시 불러옵니다.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4, Awaken의 포트, bbhost 또는 PS4에서 내보낸 캐릭터: 이 PC에서 찾아 이 포트의 세이브 폴더로 복사합니다. 현재 세이브는 먼저 백업됩니다.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4, Awaken의 포트 또는 PS4에서 내보낸 캐릭터: 이 PC에서 찾아 이 포트의 세이브 폴더로 복사합니다. 현재 세이브는 먼저 백업됩니다.',
         'Cheats on: {}':
             '치트 켜짐: {}',
         'Check again':
@@ -16904,8 +16564,6 @@ WORLD = {
             '플레이하는 동안에는 브라우저와 다른 프로그램을 닫으세요.',
         'Co-op pool':
             '플레이어 풀',
-        'Co-op service {0}':
-            '협동 서비스 {0}',
         'Combat':
             '전투',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -17144,10 +16802,6 @@ WORLD = {
             '게임 중에 Insert (키보드) 또는 L3 + R3 (컨트롤러)를 누르면 포트 메뉴가 열립니다.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             '게임에서 "{}"는 마지막으로 플레이한 캐릭터를 불러오고, 타이틀 화면의 "{}"는 모든 캐릭터를 보여 줍니다.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '열린 페이지 ({0})에서 Discord로 로그인하고 이 코드를 입력하세요:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '열린 페이지에서 Discord로 로그인하고 이 코드를 입력하세요:',
         'Install':
             '설치',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -17325,8 +16979,8 @@ WORLD = {
             '제한 없음  ⚠',
         'No run finished; the report has the logs.':
             '완료된 실행이 없습니다. 보고서에 로그가 있습니다.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            '이 PC에서 shadPS4, Awaken의 포트, bbhost의 세이브를 찾지 못했습니다. 세이브가 다른 곳 (백업, PS4에서 내보낸 파일)에 있다면 그 폴더를 선택하세요.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            '이 PC에서 shadPS4, Awaken의 포트의 세이브를 찾지 못했습니다. 세이브가 다른 곳 (백업, PS4에서 내보낸 파일)에 있다면 그 폴더를 선택하세요.',
         'No setting kept the goal; this one came closest.':
             '목표를 유지한 설정이 없습니다. 이 설정이 가장 근접했습니다.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -17349,8 +17003,6 @@ WORLD = {
             '로그인 안 됨',
         'Not signed in yet':
             '아직 로그인 안 됨',
-        'Not signed in: use "Sign in with Discord" above.':
-            '로그인 안 됨: 위의 "Discord로 로그인"을 사용하세요.',
         'Not supported':
             '지원되지 않음',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -17383,8 +17035,6 @@ WORLD = {
             'OneDrive (바탕 화면과 문서가 동기화되는 경우가 많음)와 Program Files는 포트가 파일을 쓰는 동안 파일을 잠그거나 옮깁니다.',
         'Online (SuperMedo Server)':
             '온라인 (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "온라인 (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             '온라인이 켜져 있지만 아직 로그인하지 않았습니다: 지금 로그인',
         'Online play':
@@ -17589,8 +17239,8 @@ WORLD = {
             '화면 가장자리',
         'Search again':
             '다시 검색',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            '이 PC에서 shadPS4, Awaken의 포트, bbhost의 세이브를 찾는 중…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            '이 PC에서 shadPS4, Awaken의 포트의 세이브를 찾는 중…',
         'Search…':
             '검색…',
         'Sensitivity (direct)':
@@ -17623,8 +17273,6 @@ WORLD = {
             '간단히 보기',
         'Show in folder':
             '폴더에서 보기',
-        'Show me on the live map':
-            '실시간 지도에 내 위치 표시',
         'Show the fix?':
             '해결 방법을 볼까요?',
         'Show the log':
@@ -17746,14 +17394,6 @@ WORLD = {
             'DLC 폴더가 없습니다.',
         'The Dream':
             '꿈',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (bbhost 플레이어와 함께)",
-        "The Hunter's Dream account":
-            "The Hunter's Dream 계정",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: Discord로 무료 로그인한 뒤 bbhost 플레이어와 함께 협동 플레이. shadNet: 원하는 shadNet 서버와 그 계정.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: 지금 {}명의 사냥꾼이 온라인({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '불러오기 메뉴가 비어 있거나, 캐릭터가 없거나, 게임이 세이브가 손상되었다고 합니다. 런처는 시작할 때마다 세이브를 백업하므로 이전 상태로 되돌릴 수 있습니다.',
         'The Old Hunters found ({}).':
@@ -17772,8 +17412,6 @@ WORLD = {
             '검사 중단: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             '커뮤니티 패치 (60 FPS 등과 효과 옵션)는 1.09 전용입니다. 다른 버전은 30 FPS로 실행됩니다.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream 연결 기능은 Awaken이 bbhost의 네트워크 코드를 이식한 것입니다. bbhost와 The Hunter's Dream은 droogie가 만들었습니다.",
         'The controller does nothing':
             '컨트롤러가 반응하지 않음',
         'The controller test cannot start: {}':
@@ -17880,8 +17518,8 @@ WORLD = {
             '예상 프레임 속도에 대한 웹사이트의 제안.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             '이 폴더에 eboot.bin이 없습니다. 상위 폴더가 아니라 eboot.bin이 바로 안에 있는 폴더를 선택하세요.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            '이 폴더에 이 포트, shadPS4 또는 bbhost의 세이브가 없습니다 (userdata0000 … 이 들어 있는 SPRJ0005).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            '이 폴더에 이 포트 또는 shadPS4의 세이브가 없습니다 (userdata0000 … 이 들어 있는 SPRJ0005).',
         'There is no save to back up yet.':
             '아직 백업할 세이브가 없습니다.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -17914,8 +17552,6 @@ WORLD = {
             '"모든 드라이브에 대한 페이징 파일 크기 자동 관리"를 체크하세요. 그래도 충돌하면: 체크를 해제하고 여유 공간이 있는 드라이브를 선택한 뒤 "사용자 지정 크기"에 처음 크기 16384, 최대 크기 32768을 입력하고 "설정"을 누르세요.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server에서 플레이하려면 온라인 플레이 페이지에서 supermedo.com 사용자 이름과 비밀번호를 입력하세요 (계정이 없으면 그곳에서 가입하세요).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream에서 온라인으로 플레이하려면 먼저 Discord로 로그인하세요.",
         'Transform weapon (L1)':
             '무기 변형 (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -18018,8 +17654,6 @@ WORLD = {
             'Windows는 아직 모르는 프로그램에 대해 이 메시지를 표시합니다.',
         "Windows' title bar instead of the launcher's own":
             '런처 자체 제목 표시줄 대신 Windows 제목 표시줄 사용',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream에서 bbhost 플레이어와 함께. 한 번만 Discord로 무료 로그인하면 됩니다.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '직접 정한 설정으로 실행합니다. 충돌, 멈춤, 계속 늘어나는 메모리는 그 전후의 로그와 함께 보고서에 기록됩니다.',
         'Wrong graphics card?':
@@ -18197,16 +17831,10 @@ WORLD = {
             '중단됨: 사용자 입력',
         'the settings for your PC':
             'PC에 맞는 설정',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map에서 플레이어 위치와 울리는 종을 볼 수 있습니다: 플레이 중에는 게임이 위치를 더 자주 보냅니다.',
         'twice, interleaved (more exact)':
             '두 번, 번갈아 (더 정확)',
         'up to 7 runs':
             '최대 7회 실행',
-        '{0}: not reachable ({1})':
-            '{0}: 연결 불가 ({1})',
-        '{0}: reachable':
-            '{0}: 연결 가능',
         '{} GB free on {}':
             '여유 공간 {} GB ({})',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -18233,8 +17861,6 @@ WORLD = {
             '{}분',
         '{} of {} trophies earned':
             '트로피 {}/{}개 획득',
-        '{} online':
-            '{}명 온라인',
         '{} runs':
             '{}회 실행',
         '{} settings differ from the recommendation.':

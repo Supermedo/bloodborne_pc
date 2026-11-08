@@ -148,7 +148,7 @@ class PickerTests(PickerFixture, unittest.TestCase):
 
     def test_play_enabled_only_with_valid_selected_method(self):
         self.ui.process,self.ui.fsr411_downloading,self.ui.gpu_text=None,False,'GPU'
-        self.ui.check_line,self.ui.show_hunters,self.ui.test_running=Mock(),Mock(),Mock(return_value=False)
+        self.ui.check_line,self.ui.test_running=Mock(),Mock(return_value=False)
         self.ui.play_button=self.ui.ttk.Button(self.parent);self.ui.status=self.ui.tk.Label(self.parent)
         with patch.object(launcher,'game_info',return_value=('fixture',launcher.PATCH_VERSION)),patch.object(launcher,'fsr4_missing',return_value=[]):
             self.ui.refresh_status();self.assertTrue(self.ui.play_button.instate(['disabled']))

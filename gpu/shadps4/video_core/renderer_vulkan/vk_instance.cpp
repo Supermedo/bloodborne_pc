@@ -11,9 +11,11 @@
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_checkpoints.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_fsr4vk.h"
+#include "video_core/renderer_vulkan/vk_low_latency.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 #include <vk_mem_alloc.h>
@@ -28,7 +30,6 @@
 #include "fsr411_vulkan_support.h"
 #include "sdk24_upscaling.h"
 #include "sdk24_vulkan_features.h"
-#include "video_core/renderer_vulkan/vk_low_latency.h"
 #endif
 
 namespace Vulkan {
@@ -224,6 +225,7 @@ void Instance::ReportDeviceLost(const char* where) const {
     if (!device_fault) {
         std::printf("GPU: the driver gives no fault details (VK_EXT_device_fault unavailable)\n");
         std::fflush(stdout);
+        Checkpoints::Dump(graphics_queue);
         return;
     }
     vk::DeviceFaultCountsEXT counts{};
@@ -231,6 +233,7 @@ void Instance::ReportDeviceLost(const char* where) const {
         counts.addressInfoCount == 0 && counts.vendorInfoCount == 0) {
         std::printf("GPU: no fault details from the driver\n");
         std::fflush(stdout);
+        Checkpoints::Dump(graphics_queue);
         return;
     }
     std::vector<vk::DeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
@@ -253,6 +256,7 @@ void Instance::ReportDeviceLost(const char* where) const {
                     static_cast<unsigned long long>(item.vendorFaultData));
     }
     std::fflush(stdout);
+    Checkpoints::Dump(graphics_queue); // which draw or dispatch the GPU was on
 }
 
 std::string Instance::GetDriverVersionName() {
@@ -490,7 +494,7 @@ bool Instance::CreateDevice(bool presentation) {
     }
     // bbport: low latency (BB_LOW_LATENCY=on or boost): NVIDIA Reflex, else AMD Anti-Lag 2.
     // Only enabled when chosen; see vk_low_latency.cpp.
-    if (presentation && LowLatency::Wanted()) {
+    if (presentation && LowLatency::Wanted(GetVendorID())) {
         present_id = feature_chain.get<vk::PhysicalDevicePresentIdFeaturesKHR>().presentId &&
                      add_extension(VK_KHR_PRESENT_ID_EXTENSION_NAME);
         nv_low_latency = present_id &&
@@ -499,6 +503,12 @@ bool Instance::CreateDevice(bool presentation) {
         amd_anti_lag = !nv_low_latency &&
                        feature_chain.get<vk::PhysicalDeviceAntiLagFeaturesAMD>().antiLag &&
                        add_extension(VK_AMD_ANTI_LAG_EXTENSION_NAME);
+    }
+    // bbport: GPU checkpoints (BB_GPU_CHECKPOINTS=1): NVIDIA's, else AMD's buffer markers. Only
+    // enabled when asked for; see vk_checkpoints.cpp.
+    if (Checkpoints::Wanted()) {
+        nv_checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+        amd_buffer_marker = !nv_checkpoints && add_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
     }
     const bool calibrated_timestamps =
         TRACY_GPU_ENABLED ? add_extension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) : false;
@@ -949,6 +959,7 @@ bool Instance::CreateDevice(bool presentation) {
     }
 
     CreateAllocator();
+    Checkpoints::Init(*this); // AMD's markers need the allocator
     return true;
 }
 

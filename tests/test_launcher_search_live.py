@@ -13,8 +13,8 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from test_launcher_search_questions import MORE_QUESTIONS, QUESTIONS  # noqa: E402  (the players' questions)
 
 # Settings without a row of their own: internal state, or a part of another setting's row.
-INTERNAL = {'setup_done', 'auto_hw', 'bench_goal', 'test_compare', 'test_mode', 'test_scenario', 'thd_token',
-            'supermedo_pass', 'online_custom_servers',
+INTERNAL = {'setup_done', 'auto_hw', 'bench_goal', 'test_compare', 'test_mode', 'test_scenario',
+            'supermedo_pass', 'party_key', 'online_custom_servers',
             'output_display', 'window_custom', 'eboot_check', 'seen_version', 'ui_mode', 'auto_undo', 'test_saves',
             'test_repeats', 'test_minutes', 'last_measure', 'window_last'}
 
@@ -130,23 +130,6 @@ class LiveSearchTests(unittest.TestCase):
             with self.subTest(query):
                 found = [self.key(e) for e in self.app.search(query)[:3]]
                 self.assertTrue(keys & set(found), f'{query!r} found {found}')
-
-    def test_a_row_of_another_pool_is_found_and_leads_to_the_pool(self):
-        """The Hunter's Dream's sign-in while SuperMedo Server is chosen: found with its note, and the jump
-        shows "Play with" without switching the pool."""
-        pool = self.app.var('online_pool', 'app')
-        if pool.get() != 'supermedo' or not self.L.HUNTERS_DREAM_POOL:
-            self.skipTest("SuperMedo Server is not chosen, or The Hunter's Dream is off")
-        entry = next(e for e in self.app.search_entries if e.get('key') == 'button:signin_thd')
-        self.assertTrue(self.app.hidden_for_now(entry))
-        self.assertIn(entry, self.app.search('sign in hunters dream'))
-        self.assertIn(self.L._("only with The Hunter's Dream"), self.app.search_where(entry))
-        self.app.jump(entry)
-        self.root.update()
-        self.assertEqual(self.app.current_page, 'online')
-        self.assertEqual(pool.get(), 'supermedo')
-        choice = next(e for e in self.app.search_entries if e.get('key') == 'online_pool')
-        self.assertTrue(choice['widget'].winfo_ismapped())
 
     def test_the_side_bar_buttons_are_marked_where_they_are(self):
         page, mode = self.app.current_page, self.app.app['ui_mode']

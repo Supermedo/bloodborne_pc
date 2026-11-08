@@ -236,10 +236,27 @@ TOPICS = {
         "shadPS4's public shadNet server checks which program connects and doesn't accept this port's version at the "
         'moment. The game then plays offline. Your account and your settings are fine.',
         ['Online play: Play with SuperMedo Server, then Sign in with Discord.',
+          'Seamless co-op: choose SuperMedo Seamless co-op under Co-op pool, with the same account.',
          # The page offers an own server only when Seamless co-op opened the launcher (started_by_bbsc).
-         "Seamless co-op or a friend's server: open this launcher from Seamless co-op (OPEN BBPORT LAUNCHER + "
-         "BBSC), then choose Own server under Play with. For a friend's server, enter the address from the person "
-         'who runs it under Server address.']),
+         "A friend's own server: open this launcher from Seamless co-op (OPEN BBPORT LAUNCHER + BBSC), then "
+         'choose Own server and enter the address from the person who runs it under Server address.']),
+    # Playing with others: the account, the party code, and the bells in the game (BBSC's for Seamless co-op).
+    'play_together': (
+        'Playing together online',
+        'Online play needs a free SuperMedo account and the same game version (1.09) for everyone. Friends find '
+        'each other with a party code from this launcher.',
+        ['Online play: tick Play online, choose SuperMedo Server or SuperMedo Seamless co-op (everyone the same), '
+         'and sign in: with Discord, with your Online ID and password, or with a new account.',
+         "Party: one of you makes a party code and sends it, the others join with it. Leave the password in the "
+         "game's network settings empty: the party brings you together.",
+         'SuperMedo Server: in the game, summon and join as on the PS4, with the Beckoning Bell and the Small '
+         'Resonant Bell.',
+         'Seamless co-op: in the game, any of you can host. The host rings the Hunt Bell, the others ring the Kin '
+         "Bell. The host's Seamless co-op settings count for the session.",
+         "A new character in Seamless co-op: ring the bells for the first time in the Hunter's Dream, at the Doll, "
+         'once you have chosen your weapon.',
+         'Nobody shows up: Test connection on the Online play page, and when Windows asks about the firewall, '
+         'click Allow.']),
     'steam_layout': (
         'Steam turns the controller into a mouse and keyboard',
         "With Steam open, its Desktop Layout sends mouse movement and key presses for a controller it manages, on "
@@ -257,7 +274,7 @@ TOPICS = {
 TOPIC_ORDER = ['eboot_modified', 'eboot_truncated', 'eboot_unreadable', 'program_files', 'version', 'update_only',
                'empty_files', 'game_files', 'page_file', 'antivirus', 'location', 'game_location', 'save_lost',
                'controller', 'black_screen', 'vram', 'gpu_unseen', 'driver', 'vc_runtime', 'shader_cache',
-               'firewall', 'smartscreen']
+               'play_together', 'firewall', 'smartscreen']
 # Buttons under a topic's steps: (text, launcher method). They do the step for the player.
 TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'page_file': [('Open the memory settings', 'open_memory_settings')],
@@ -274,7 +291,8 @@ TOPIC_ACTIONS = {'black_screen': [('Clear the shader cache', 'clear_cache')],
                  'game_location': [('Choose the game folder', 'choose_game_page')],
                  'game_files': [('Check the game files', 'check_game_files')],
                  'firewall': [('Open the firewall settings', 'open_firewall_settings')],
-                 'shadnet_rejected': [('Open Online play', 'open_online_page')]}
+                 'shadnet_rejected': [('Open Online play', 'open_online_page')],
+                 'play_together': [('Open Online play', 'open_online_page')]}
 TOPIC_ORDER += [key for key in TOPICS if key not in TOPIC_ORDER]  # topics added later: at the end
 
 # The game's and run.py's messages that name the cause of a failed start or crash.
@@ -1288,9 +1306,21 @@ def report_tool():
     return None
 
 
-SECRET = re.compile(r'password|token|secret|npid|online_id|user$', re.I)
+# Keys whose values are secret or name the player. 'pass' and 'key' too: supermedo_pass and party_key went into the
+# zip in clear text (2026-11-02), as 'password' alone did not match them. A harmless key hidden by mistake (menu_key)
+# costs less than a password in a forum post.
+SECRET = re.compile(r'pass|token|secret|key|npid|online_id|mail|session|auth|cookie|user$', re.I)
+# Variables in extra_env ("NAME=value ..."): the value of a secret-sounding name is hidden as well.
+SECRET_ASSIGNMENT = re.compile(r'(\b\w*(?:PASS|TOKEN|SECRET|KEY|NPID|ONLINE_ID|AUTH)\w*\s*=\s*)("[^"]*"|\S+)', re.I)
 
 
 def private_free(settings):
-    """The launcher settings without passwords, tokens and account names."""
-    return {key: ('(hidden)' if SECRET.search(key) and value else value) for key, value in settings.items()}
+    """The launcher settings without passwords, tokens, keys and account names."""
+    clean = {}
+    for key, value in settings.items():
+        if SECRET.search(key) and value:
+            value = '(hidden)'
+        elif isinstance(value, str):
+            value = SECRET_ASSIGNMENT.sub(r'\1(hidden)', value)
+        clean[key] = value
+    return clean

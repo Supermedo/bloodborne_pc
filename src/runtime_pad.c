@@ -15,6 +15,7 @@
 #include "runtime.h"
 #include "gpu/bbgpu.h"
 #include "runtime_input_config.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

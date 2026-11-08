@@ -1,6 +1,7 @@
 from paths import ROOT
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 EXE = ROOT / 'out/runtime-test'
@@ -42,3 +43,16 @@ class RuntimeTests(unittest.TestCase):
     def test_rwlock_timeouts_use_orbis_errors(self):
         r=self.run_case('--rwlock-timeouts')
         self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+
+    def test_rwlock_nested_read_passes_waiting_writer(self):
+        r=self.run_case('--rwlock-nested-read')
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+
+    def test_trophy_logged_once_and_platinum_after_base_game(self):
+        with tempfile.TemporaryDirectory() as user:
+            r=self.run_case('--trophy-unlock', user)
+            self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        # The launcher reads these lines: the awarded platinum is reported like the game's own
+        # calls (one for the award, one for the game's later call), every call is reported.
+        self.assertEqual(r.stdout.count('Runtime: trophy 0 unlocked'),2)
+        self.assertEqual(r.stdout.count('Runtime: trophy 1 unlocked'),2)

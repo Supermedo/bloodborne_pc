@@ -762,8 +762,7 @@ class Test:
 
     def environment(self):
         env = dict(self.base_env)
-        for key in [k for k in env if k.startswith(('BB_SHADNET', 'BB_THD', 'BB_COMMUNITY', 'BB_PAD_RECORD'))] + [
-                'BB_ONLINE', 'BB_NET_BACKEND']:
+        for key in [k for k in env if k.startswith(('BB_SHADNET', 'BB_COMMUNITY', 'BB_PAD_RECORD'))] + ['BB_ONLINE']:
             env.pop(key, None)
         env.update(BB_USER_DIR=str(self.work / 'user'), BB_CONFIG=str(self.work / 'bbport.ini'),
                    BB_PAD_FILE=str(self.work / 'pad'), BB_PAD_REPLAY=str(self.work / 'route.txt'),

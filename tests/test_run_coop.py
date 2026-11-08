@@ -18,8 +18,8 @@ import bbport_launcher_win as launcher  # noqa: E402
 
 # As BBSC 0.0.2's tools/play-bbport.ps1 writes it.
 BBSC_CUSTOM = {'https://ss4.scej-network.jp:20443': 'http://199.195.193.131:20443',
-               'http://thehuntersdream.com:18671/summon_messenger': 'http://199.195.193.131:31315',
-               'https://thehuntersdream.com:18671/summon_messenger': 'http://199.195.193.131:31315'}
+               'http://game.example.net:18671/summon_messenger': 'http://199.195.193.131:31315',
+               'https://game.example.net:18671/summon_messenger': 'http://199.195.193.131:31315'}
 BBSC = r'C:\BBSC\bbsc\bbsc-launch.exe'
 
 
@@ -60,6 +60,21 @@ class CoopTests(unittest.TestCase):
         self.assertEqual(env['BB_DLC_DIR'], str(self.user / 'addcont' / 'CUSA03173'))
 
 
+class SavesFolderTests(unittest.TestCase):
+    """The launcher's Saves page and its backups use the saves the start plays (launcher.saves_user_dir)."""
+    def test_seamless_co_op_has_its_own(self):
+        user = Path('C:/port/user')
+        with unittest.mock.patch.object(launcher, 'BBSC_LAUNCH', Path(__file__)):  # BBSC is there
+            self.assertEqual(launcher.saves_user_dir({'user_dir': str(user), 'online': True, 'online_pool': 'seamless'}),
+                             user / run.COOP_SAVES)
+            for other in ({'online': False, 'online_pool': 'seamless'}, {'online': True, 'online_pool': 'supermedo'}):
+                self.assertEqual(launcher.saves_user_dir({'user_dir': str(user), **other}), user)
+        with unittest.mock.patch.object(launcher, 'BBSC_LAUNCH', Path('C:/nowhere/bbsc-launch.exe')):
+            self.assertEqual(launcher.saves_user_dir({'user_dir': str(user), 'online': True, 'online_pool': 'seamless'}),
+                             user)
+        self.assertEqual(launcher.saves.COOP_SAVES, run.COOP_SAVES)
+
+
 class ItsScriptTests(unittest.TestCase):
     """A launcher opened by BBSC's script keeps BBSC for a start on BBSC's server only."""
     def start(self, **settings):
@@ -72,7 +87,7 @@ class ItsScriptTests(unittest.TestCase):
     def test_kept_for_its_server_only(self):
         on_it = {'online': True, 'online_pool': 'shadnet', 'online_server': 'play.seamlesshunt.com:31313'}
         self.assertEqual(self.start(**on_it)['BB_PROBE'], BBSC)
-        for other in ({**on_it, 'online': False}, {**on_it, 'online_pool': 'huntersdream'},
+        for other in ({**on_it, 'online': False}, {**on_it, 'online_pool': 'supermedo'},
                       {**on_it, 'online_server': 'rpcn.example.org:31313'}):
             env = self.start(**other)
             self.assertNotIn('BB_PROBE', env)

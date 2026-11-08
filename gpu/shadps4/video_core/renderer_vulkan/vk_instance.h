@@ -338,6 +338,16 @@ public:
         return amd_anti_lag;
     }
 
+    /// bbport: GPU checkpoints (vk_checkpoints.cpp): NVIDIA's diagnostic checkpoints are enabled.
+    bool HasNvCheckpoints() const {
+        return nv_checkpoints;
+    }
+
+    /// bbport: GPU checkpoints: AMD's buffer markers are enabled.
+    bool HasAmdBufferMarker() const {
+        return amd_buffer_marker;
+    }
+
     /// Returns the vendor ID of the physical device
     u32 GetVendorID() const {
         return properties.vendorID;
@@ -614,6 +624,8 @@ private:
     bool present_id{};
     bool nv_low_latency{};
     bool amd_anti_lag{};
+    bool nv_checkpoints{};
+    bool amd_buffer_marker{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool fsr4vk{};

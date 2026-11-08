@@ -21,6 +21,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderer_vulkan/vk_checkpoints.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -1140,13 +1141,18 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
+    const auto* marked_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    const u32 checkpoint = Checkpoints::Note("draw vs/ps/indices", vs_info.pgm_hash,
+                                       marked_ps ? marked_ps->pgm_hash : 0, num_indices);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        Checkpoints::Start(cmdbuf, checkpoint);
         if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
         }
+        Checkpoints::Finish(cmdbuf, checkpoint);
     });
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
@@ -1271,8 +1277,13 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u64 args_offset = base;
     const vk::Buffer counts = count_address != 0 ? count_buffer->Handle() : vk::Buffer{};
     const u64 counts_offset = count_address != 0 ? count_offset : 0;
+    const auto* marked_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    const u32 checkpoint = Checkpoints::Note("draw indirect vs/ps/count",
+                                       pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
+                                       marked_ps ? marked_ps->pgm_hash : 0, max_count);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        Checkpoints::Start(cmdbuf, checkpoint);
         if (is_indexed) {
             if (counts) {
                 cmdbuf.drawIndexedIndirectCount(args, args_offset, counts, counts_offset, max_count,
@@ -1285,6 +1296,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         } else {
             cmdbuf.drawIndirect(args, args_offset, max_count, stride);
         }
+        Checkpoints::Finish(cmdbuf, checkpoint);
     });
     DebugState.IncDrawCall();
 
@@ -1353,9 +1365,12 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (FrameCapture::Active()) {
         FrameCapture::Dispatch(cs.pgm_hash, dim_x, dim_y, dim_z);
     }
+    const u32 checkpoint = Checkpoints::Note("dispatch cs/groups", cs.pgm_hash, 0, u64(dim_x) * dim_y * dim_z);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
+        Checkpoints::Start(cmdbuf, checkpoint);
         cmdbuf.dispatch(dim_x, dim_y, dim_z);
+        Checkpoints::Finish(cmdbuf, checkpoint);
     });
     DebugState.IncDispatch();
 
@@ -1404,9 +1419,13 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const vk::Pipeline handle = pipeline->Handle();
     const vk::Buffer args = buffer->Handle();
     const u64 args_offset = base;
+    const u32 checkpoint = Checkpoints::Note("dispatch indirect cs",
+                                       pipeline->GetStage(Shader::SwStage::Compute).pgm_hash);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
+        Checkpoints::Start(cmdbuf, checkpoint);
         cmdbuf.dispatchIndirect(args, args_offset);
+        Checkpoints::Finish(cmdbuf, checkpoint);
     });
     DebugState.IncDispatch();
 

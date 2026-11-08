@@ -47,6 +47,10 @@ void SetTextEntry(bool active, const std::string& prompt, const std::string& tex
 /// under it. Drawn by the present thread; replaces a banner still showing.
 void Warn(const std::string& headline, const std::string& detail, float used_fraction);
 
+/// Any thread, also before Init: a trophy unlocked for the first time (0 = platinum). Queued,
+/// then shown for a few seconds in the top-left corner as the console does, one after another.
+void TrophyUnlocked(int id);
+
 /// Any thread: video memory in use, the limit it is compared against (0: no limit known), the
 /// collector's pressure and critical marks (0: none) and what the card can still give this
 /// process beyond that limit, all shown in the FPS counter. The collector calls it once per pass.

@@ -15,7 +15,8 @@ from patches import (EBOOT_BASE, FIXES, FPS_PRESETS, OUTPUT_SIZE, RESOLUTION_TEM
                      render_size, resolution_writes, scaled_sizes, effect_patches,
                      validate_patch_requirements, external_patches, external_selection,
                      compile_external, eboot_bytes, eboot_matches_patches, patch_fingerprint,
-                     patch_sites, PATCH_GROUPS, image_groups, matching_groups, game_app_version, eboot_is_109)
+                     patch_sites, PATCH_GROUPS, image_groups, matching_groups, game_app_version, eboot_is_109,
+                     EFFECTS, OFFLINE_ONLY, DEBUG_MENU, fair_play, online)
 
 XML = ROOT / 'patches/Bloodborne.xml'
 SEGMENTS = [(0, 0x6000000)]
@@ -146,6 +147,64 @@ class DebugPatchTests(unittest.TestCase):
     def test_conflicting_enemy_control_patch_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'conflicts with Enemy Control'):
             validate_patch_requirements(['Enemy Control', 'Restore Debug Camera'], Path('.'))
+
+
+class FairPlayTests(unittest.TestCase):
+    """Cheats and debug features run offline only, whichever way they were turned on."""
+
+    def test_online_leaves_cheats_and_debug_features_out(self):
+        settings = {key: '1' for key in ('cheat_no_death', 'cheat_stealth', 'cheat_silent', 'cheat_rally_no_decay',
+                                         'debug_menu', 'skip_intro', 'tweak_camera_distance')}
+        names = FPS_PRESETS['60'] + effect_patches(settings) + ['Enemy Control']
+        kept, left_out = fair_play(names, True)
+        self.assertEqual(sorted(left_out), sorted(OFFLINE_ONLY[:4] + (DEBUG_MENU, 'Enemy Control')))
+        self.assertEqual(kept, FPS_PRESETS['60'] + ['Skip Intro', 'Increased camera distance'])
+        self.assertEqual(fair_play(names, False), (names, []))
+
+    def test_every_cheat_and_debug_setting_is_offline_only(self):
+        # A cheat added to the launcher later must not go online by being missing here.
+        for key, (_off, on) in EFFECTS.items():
+            if key.startswith(('cheat_', 'debug_')):
+                self.assertIn(on, OFFLINE_ONLY, key)
+        names = {element.get('Name') for element in ET.parse(XML).getroot().iter('Metadata')}
+        self.assertLessEqual(set(OFFLINE_ONLY), names)
+
+    def test_online_follows_the_launcher_and_seamless_co_op(self):
+        for env, expected in (({'BB_ONLINE': '1'}, True), ({'BB_ONLINE': '0'}, False), ({}, False),
+                              ({'BB_PROBE': r'C:\Port\bbsc\BBSC-Launch.exe'}, True),
+                              ({'BB_PROBE': r'C:\Port\bin\bb-probe.exe'}, False)):
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(online(), expected, env)
+
+    def test_patches_py_online_drops_cheats_and_third_party_patches(self):
+        # The launcher's bbport.ini, its BB_PATCHES (--extra) and a player's patch file, on a blank image the size
+        # of the game's (the in-game patches find unexpected code there and skip themselves).
+        header = bytearray(elf_image(bytes(0x1000)))
+        struct.pack_into('<Q', header, 0x40 + 0x28, 0x6000000)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / 'eboot.elf').write_bytes(bytes(header))
+            settings = folder / 'bbport.ini'
+            settings.write_text('cheat_no_death=1\ndebug_camera=1\nskip_intro=1\n')
+            patches = folder / 'patches'
+            patches.mkdir()
+            (patches / 'extra.xml').write_text(EXTERNAL)
+            command = [sys.executable, str(ROOT / 'scripts/patches.py'), '--out', str(folder), '--fps', '30',
+                       '--settings', str(settings), '--game-dir', str(folder), '--extra', 'Player Stealth (Read note)',
+                       '--patches-dir', str(patches), '--patches-config', str(folder / 'patches.json')]
+            env = {k: v for k, v in os.environ.items() if k not in ('BB_ONLINE', 'BB_PROBE')}
+            env['BB_FORCE_PATCHES'] = '1'
+            played = subprocess.run(command, capture_output=True, text=True, env={**env, 'BB_ONLINE': '1'})
+            self.assertEqual(played.returncode, 0, played.stderr)
+            self.assertIn('online play: Player Stealth (Read note), Restore Debug Camera, Player No Dead (Read note) '
+                          'stay off', played.stdout)
+            self.assertIn('the third-party patches extra.xml/On, extra.xml/Mask stay off', played.stdout)
+            self.assertIn("from ['Larger Frame Heaps', 'Skip Intro']", played.stdout)
+            played = subprocess.run(command, capture_output=True, text=True, env=env)
+            self.assertEqual(played.returncode, 0, played.stderr)
+            self.assertNotIn('online play', played.stdout)
+            self.assertIn("'Player Stealth (Read note)', 'Skip Intro', 'Restore Debug Camera'", played.stdout)
+            self.assertIn('external extra.xml/On', played.stdout)
 
 
 EXTERNAL = """<?xml version="1.0"?>

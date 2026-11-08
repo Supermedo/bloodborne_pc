@@ -37,7 +37,7 @@ inline std::string HostOf(const std::string& url) {
 }
 
 // The roots Let's Encrypt's chains end in, carried by the port so a server with a Let's Encrypt
-// certificate (game.supermedo.com, The Hunter's Dream) is trusted before Windows has fetched them:
+// certificate (game.supermedo.com) is trusted before Windows has fetched them:
 // ISRG Root X1 and X2 (in every trust store, but on a fresh Windows only fetched when something
 // first needs them) and Root YE and YR (Let's Encrypt's 2025 roots, which issue its certificates
 // since 2026 through YE1-YE3 and YR1-YR3). Self-signed, from letsencrypt.org/certificates, SHA-256:

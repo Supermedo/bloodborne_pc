@@ -36,7 +36,6 @@ def vulkan_driver_note(env):
 # Co-op: the community service that answers Bloodborne's own game-server requests
 # (messages, bloodstains, sign-in); summon requests go to the shadNet server instead.
 COMMUNITY_SERVER = 'https://game.supermedo.com'
-HUNTERS_DREAM_SERVER = 'https://thehuntersdream.com'  # The Hunter's Dream pool's own (BB_HUNTERS_DREAM=1)
 GAME_SERVER = 'https://ss4.scej-network.jp:20443'
 # The server's ss.info sends the game to this port for its API (summons among them).
 COMMUNITY_API_PORT = 18671
@@ -74,10 +73,10 @@ def online_overrides(env, user_dir):
         if '://' not in community:
             community = 'https://' + community
         scheme, host = community.split('://', 1)
+        host = host.split('/', 1)[0].rsplit(':', 1)[0] if re.search(r':\d+$', host) else host  # its API port below
         # The game's own server functions (messages, bloodstains, summon signs) go over HTTP to
-        # the game server only, as bbhost and Awaken's port send them; never through a shadNet
-        # WebAPI (Metr1k, The Hunter's Dream). Play logs go to its API port instead of
-        # FromSoftware's old storage buckets.
+        # the game server only, as Awaken's port sends them; never through a shadNet WebAPI.
+        # Play logs go to its API port instead of FromSoftware's old storage buckets.
         overrides = {GAME_SERVER: community}
         overrides.update({f'https://{bucket}:443': f'{scheme}://{host}:{COMMUNITY_API_PORT}'
                           for bucket in ('bb-playlog-prod.s3.amazonaws.com',
@@ -87,39 +86,85 @@ def online_overrides(env, user_dir):
     env['SHADPS4_HTTP_HOST_OVERRIDES_JSON'] = str(path)
 
 
-# The Hunter's Dream co-op pool (BB_NET_BACKEND=thd, with bbhost players): the engine's own
-# backend for it (gpu/bbnet/thd, bbhost's protocol, from Awaken's port). The game's servers and
-# play logs go to the game server over HTTP; the account comes from the launcher's Discord sign-in.
-LIVE_MAP_PATCH = "Live map (The Hunter's Dream)"
-PLAY_LOG_HOSTS = ('bb-playlog-prod.s3.amazonaws.com', 'bb-playlog-test.s3.amazonaws.com')
-
-
-def hunters_dream(env, user_dir):
-    if not env.get('BB_THD_TOKEN') or not env.get('BB_THD_ONLINE_ID'):
-        fail("The Hunter's Dream: not signed in. Sign in with Discord on the launcher's Online page.")
-    community = (env.get('BB_COMMUNITY_SERVER') or HUNTERS_DREAM_SERVER).rstrip('/')
-    if '://' not in community:
-        community = 'https://' + community
-    base = community
-    overrides = {'*.scej-network.jp': base}
-    overrides.update({host: f'{base}:{COMMUNITY_API_PORT}' for host in PLAY_LOG_HOSTS})
-    path = user_dir / 'host_overrides.json'
-    path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
-    for key in ('BB_SHADNET_SERVER', 'BB_SHADNET_WEBAPI', 'BB_SHADNET_NPID', 'BB_SHADNET_PASSWORD',
-                'BB_SHADNET_TOKEN'):
-        env.pop(key, None)
-    env.update(SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(path), BB_THD_SERVER=f'{base}:{COMMUNITY_API_PORT}',
-               BB_THD_AUTH=base)
-    env.setdefault('BB_THD_RULESET', 'vanilla')
-    env.setdefault('BB_P2P_PORT', '3658')
-    env.setdefault('BB_SIGN_TIMEOUT', '30')
-    print(f"Co-op: The Hunter's Dream as {env['BB_THD_ONLINE_ID']} ({base})")
-
-
 # The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
 # (seen on US CUSA00900): one of its edits inverts a branch in the menu code (+0xf6d90d) and the
 # gestures menu crashes the game. The port has its own 60 fps; the clean 1.09 eboot.bin is needed.
 LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
+
+
+# The in-game trophy pop-up (gpu/shim/bbport_overlay.cpp) speaks the game's text language (BB_LANGUAGE
+# codes, launcher LANGUAGES): the trophy names' translations (launcher/bbport_lang_trophies.py) and its heading.
+TROPHY_LANGUAGES = {'1': 'en', '8': 'ru', '0': 'ja', '2': 'fr', '3': 'es', '4': 'de', '5': 'it', '9': 'ko',
+                    '10': 'zh', '11': 'zh', '17': 'pt'}
+TROPHY_HEADINGS = {'1': 'Trophy earned', '8': 'Получен приз', '0': 'トロフィーを獲得しました',
+                   '2': 'Trophée obtenu', '3': 'Trofeo obtenido', '4': 'Trophäe erhalten', '5': 'Trofeo ottenuto',
+                   '9': '트로피를 획득했습니다', '10': '獲得獎盃', '11': '获得奖杯', '17': 'Troféu conquistado'}
+
+
+def write_trophy_text(path, language):
+    """The pop-up's texts, read through BB_TROPHY_TEXT: "lang", "heading" and one "id grade name
+    description" line per trophy, tab-separated (the translations' line breaks joined)."""
+    sys.path.insert(0, str(PORT / 'launcher'))
+    import bbport_trophies
+    from bbport_lang_trophies import TRANSLATIONS
+    language = str(language or '1')
+    code = TROPHY_LANGUAGES.get(language, 'en')
+    words = TRANSLATIONS.get(code, {})
+    joiner = '' if code in ('zh', 'ja') else ' '
+
+    def text(english):
+        lines = words.get(english, english).replace('\t', ' ').splitlines()
+        return joiner.join(part.strip() for part in lines if part.strip())
+
+    rows = [f'lang\t{code}', f'heading\t{TROPHY_HEADINGS.get(language, TROPHY_HEADINGS["1"])}']
+    rows += [f'{trophy}\t{grade[0]}\t{text(name)}\t{text(description)}'
+             for trophy, name, description, grade, _ in bbport_trophies.TROPHIES]
+    Path(path).write_text('\n'.join(rows) + '\n', encoding='utf-8')
+    return Path(path)
+
+
+# The pop-up's pictures: the game's own trophy icons, the ones the launcher's trophy page shows, as raw
+# TROPHY_ICON_SIZE x TROPHY_ICON_SIZE RGBA (the overlay has no PNG decoder).
+TROPHY_ICON_SIZE = 128
+
+
+def write_trophy_icons(folder, game):
+    """<folder>/<id>.rgba for each trophy whose PNG the player's sce_sys/trophy/trophy00.trp holds, read
+    through BB_TROPHY_ICONS; a trophy without one keeps the pop-up's cup. Done again only when the
+    trophy file changed (source.txt). Nothing of the game is shipped: the pictures come from its copy."""
+    sys.path.insert(0, str(PORT / 'launcher'))
+    import bbport_trophies
+    from bbport_trophy_icons import TrophyIcons
+    from PIL import Image
+    folder = Path(folder)
+    source = Path(game) / 'sce_sys' / 'trophy' / 'trophy00.trp'
+    stat = source.stat()
+    stamp = f'{stat.st_size} {stat.st_mtime_ns} {TROPHY_ICON_SIZE}'
+    ids = [trophy for trophy, *_ in bbport_trophies.TROPHIES]
+    done = folder / 'source.txt'  # the stamp, then the ids written
+    try:
+        lines = done.read_text(encoding='utf-8').splitlines()
+        if (len(lines) == 2 and lines[0] == stamp
+                and all((folder / f'{trophy}.rgba').is_file() for trophy in lines[1].split())):
+            return folder
+    except OSError:
+        pass
+    folder.mkdir(parents=True, exist_ok=True)
+    icons = TrophyIcons(game)
+    written = []
+    for trophy in ids:
+        target = folder / f'{trophy}.rgba'
+        png = icons.get(trophy)
+        if not png:
+            target.unlink(missing_ok=True)
+            continue
+        with Image.open(io.BytesIO(png)) as image:
+            pixels = image.convert('RGBA').resize((TROPHY_ICON_SIZE, TROPHY_ICON_SIZE), Image.LANCZOS).tobytes()
+        target.write_bytes(pixels)
+        written.append(str(trophy))
+    done.write_text(f'{stamp}\n{" ".join(written)}\n', encoding='utf-8')
+    print(f'Trophy pictures for the pop-up: {len(written)} of {len(ids)} from {source.name}')
+    return folder
 
 
 def eboot_image(game):
@@ -427,7 +472,10 @@ SAVE_BACKUPS_KEPT = 10
 
 
 # Seamless co-op's own saves: <user>/seamless-coop is the game's user folder while BBSC plays
-# (its saves, its rebirth targets), so co-op never writes the player's normal characters.
+# (its saves, its rebirth targets), so co-op never writes the player's normal characters: BBSC swaps the
+# game's bells for its own items in the character it plays, which the game without BBSC cannot name
+# ("?GoodsName?"), and takes the bells out (1.9.8 beta 3 played the normal saves and showed it). The
+# launcher's Saves page follows the chosen mode (bbport_setup.save_user_dir).
 COOP_SAVES = 'seamless-coop'
 
 
@@ -695,6 +743,13 @@ def main():
             shutil.rmtree(rebirth_layer, ignore_errors=True)
             env['BB_REBIRTH'] = '0'  # patches.py: no eboot hooks without the Doll's script
             print("Rebirth: the Doll's script could not be written; the game starts without it")
+    # BBSC's items (Seamless co-op's bells): their names in every language's item texts, so a
+    # character played in Seamless co-op shows no "?GoodsName?" elsewhere (bbsc_items.py), a layer
+    # below the mods.
+    items_layer = out / 'bbsc_items'
+    shutil.rmtree(items_layer, ignore_errors=True)
+    if not run_script('bbsc_items.py', game, '--out', items_layer, optional=True):
+        shutil.rmtree(items_layer, ignore_errors=True)
     # The Discord status (src/runtime_discord.c): the game's own place, boss and level texts.
     if env.get('BB_DISCORD') != '0':
         names = out / 'discord-names.txt'
@@ -729,7 +784,11 @@ def main():
     mod_args = [game, '--out', out, '--mods-dir', env.get('BB_MODS_DIR', data / 'mods'),
                 '--config', env.get('BB_MODS_CONFIG', data / 'mods.json'),
                 '--enabled', env.get('BB_MODS_ENABLED', '1')]
-    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', rebirth_layer, '--layer', hud_layer,
+    if env.get('BB_MODS_GAME_LAST') == '1':
+        # Seamless co-op (bbport_yharnam.environment): the game's -mods folder, the co-op events, over the mods.
+        mod_args.append('--game-mods-last')
+    view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', rebirth_layer, '--layer', items_layer,
+                      '--layer', hud_layer,
                       '--layer', fov_layer, capture=True, optional=True, timeout=60)
     if view is None:
         # The game view could not be made with the port's own layers (Quit to Desktop's texts,
@@ -828,12 +887,18 @@ def main():
                         notes.append('no draw-preparation workers')
             print(f'Low-VRAM profile ({vram} MiB card): {", ".join(notes)}; BB_LOW_VRAM=0 turns it off')
         extra = env.get('BB_PATCHES', '')
-        if env.get('BB_ONLINE') == '1' and env.get('BB_NET_BACKEND') == 'thd' and env.get('BB_BRIDGE_LIVE_MAP') == '1':
-            extra = ';'.join(filter(None, (extra, LIVE_MAP_PATCH)))
         lang = env.get('BB_LANGUAGE') or read_settings(config).get('language')
         if lang in ('10', '11'):
             if 'Unlock Game Region' not in extra:
                 extra = ';'.join(filter(None, (extra, 'Unlock Game Region')))
+        try:
+            env['BB_TROPHY_TEXT'] = str(write_trophy_text(out / 'trophies.tsv', lang))
+        except Exception as error:  # the pop-up then says "Trophy <id>"
+            print(f'Trophy names for the pop-up: {error}')
+        try:
+            env['BB_TROPHY_ICONS'] = str(write_trophy_icons(out / 'trophy_icons', original_game))
+        except Exception as error:  # the pop-up then shows the cup in the grade's colour
+            print(f'Trophy pictures for the pop-up: {error}')
         run_script('patches.py', '--out', out, '--fps', fps, '--extra', extra,
                    '--settings', config, '--game-dir', game, '--render-res', env.get('BB_RENDER_RES', ''),
                    '--output-res', env.get('BB_OUTPUT_RES', ''),
@@ -848,9 +913,13 @@ def main():
         writable_saves(saves_dir)
         if env.get('BB_SAVE_BACKUPS') == '1' and not restarted:  # not again for an in-game restart
             backup_saves(saves_dir)
-        if env.get('BB_ONLINE') == '1' and env.get('BB_NET_BACKEND') == 'thd':
-            hunters_dream(env, user_dir)
-        elif env.get('BB_ONLINE') == '1':
+        if not seamless_coop(env):
+            # BBSC's bells in a character played normally (its Seamless co-op saves used here, or
+            # copied over): the game's own bells back, the saves copied first (bbsc_items.py).
+            for save in sorted(Path(saves_dir).glob('savedata/*/*/SPRJ0005')):
+                run_script('bbsc_items.py', '--repair', save, '--backups',
+                           Path(saves_dir) / 'bbsc-repair-backups', optional=True)
+        if env.get('BB_ONLINE') == '1':
             online_overrides(env, user_dir)
         this = ['--run'] if getattr(sys, 'frozen', False) else [str(Path(__file__).resolve())]
         restart = [sys.executable, *this, '--after', str(os.getpid()), *args]

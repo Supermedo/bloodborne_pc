@@ -3467,10 +3467,4 @@
             <Line Type="bytes" Address="0x01de368b" Value="c3" />
         </PatchList>
     </Metadata>
-    <Metadata Title="Bloodborne" Name="Live map (The Hunter's Dream)" Note="Uploads the play log every 5 s instead of 300 s and samples the position every 0.5 s instead of 1.5 s, as bbhost does, so the player shows on thehuntersdream.com's live map. Only with The Hunter's Dream co-op pool (bbbridge)." Author="bbbridge (from bbhost)" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
-        <PatchList>
-            <Line Type="float32" Address="0x023F9B8C" Value="5.0"/>
-            <Line Type="float32" Address="0x023F9B6E" Value="0.5"/>
-        </PatchList>
-    </Metadata>
 </Patch>

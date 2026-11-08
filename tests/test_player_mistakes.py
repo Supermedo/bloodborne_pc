@@ -366,7 +366,7 @@ class MisplacedSaveTests(unittest.TestCase):
         line, encrypted = L.misplaced_saves(ui.app)
         self.assertIsNone(line)
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self):')]
+        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self')]
         self.assertIn("self.app['encrypted_told'] = encrypted", play)
         self.assertIn('Apollo Save Tool', play)
 
@@ -425,15 +425,15 @@ class HandEditedFileTests(unittest.TestCase):
 
     def test_a_broken_settings_json_comes_back_from_the_last_good_start(self):
         import json
-        good = dict(game_dir=r'D:\Games\CUSA03173', thd_token='secret', thd_online_id='Maria')
+        good = dict(game_dir=r'D:\Games\CUSA03173', supermedo_pass='secret', supermedo_npid='Maria')
         L.write_settings(good)
         self.assertEqual(L.load_settings(), good)  # a good load keeps a copy
         backup = L.CONFIG_FILE.with_name('settings.json.bak')
         self.assertEqual(json.loads(backup.read_text(encoding='utf-8')), good)
-        L.CONFIG_FILE.write_text('{"game_dir": "D:\\Games\\CUSA03173", "thd_token": ', encoding='utf-8')  # cut off
+        L.CONFIG_FILE.write_text('{"game_dir": "D:\\Games\\CUSA03173", "supermedo_pass": ', encoding='utf-8')  # cut off
         self.assertEqual(L.load_settings(), good)
         self.assertEqual(json.loads(L.CONFIG_FILE.read_text(encoding='utf-8')), good)  # written back
-        self.assertIn('thd_token', L.CONFIG_FILE.with_name('settings.json.bad').read_text(encoding='utf-8'))
+        self.assertIn('supermedo_pass', L.CONFIG_FILE.with_name('settings.json.bad').read_text(encoding='utf-8'))
         self.assertIn('settings.json.bad', self.textfile.REPAIRS[-1])
 
     def test_without_a_copy_the_defaults_and_the_broken_file_is_kept(self):
@@ -477,7 +477,7 @@ class HandEditedFileTests(unittest.TestCase):
 
     def test_the_repairs_go_into_the_next_starts_log(self):
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self):')]
+        play = source[source.index('    def play(self):'):source.index('    def auto_backup(self')]
         self.assertIn('for line in textfile.REPAIRS:', play)
         self.assertIn("args=(self.process, self.log.get('1.0', 'end-1c'))", play)
         self.textfile.REPAIRS.append('Settings: repaired')
@@ -511,9 +511,6 @@ class HandEditedFileTests(unittest.TestCase):
         self.assertFalse(env['online'])
         self.assertIn("Online: not signed in to SuperMedo Server, so this start plays offline; sign in on the "
                       "launcher's Online play page to play online", log)
-        env, log = self.start_without_window(online=True, online_pool='huntersdream', thd_token='')
-        self.assertFalse(env['online'])
-        self.assertIn("not signed in to The Hunter's Dream", log)
 
     def test_a_shortcut_start_with_an_account_stays_online(self):
         env, log = self.start_without_window(online=True, online_pool='supermedo', supermedo_npid='hunter',
@@ -589,90 +586,6 @@ class OwnOutputSizeTests(unittest.TestCase):
         self.assertIn('2560x1600', (self.folder / 'user' / 'last_run.log').read_text(encoding='utf-8'))
 
 
-class RefusedSignInTests(unittest.TestCase):
-    """The Hunter's Dream refused the saved token: the game said so only in its log and played offline, and the
-    launcher still showed "Signed in"."""
-    LINE = ("THD: the server refused this PC's sign-in as Maria (401 token revoked): sign in again on the launcher's "
-            "Online page; until then nobody can summon or invite this player\n")
-
-    def setUp(self):
-        import tempfile
-        from pathlib import Path
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        self.folder = Path(temp.name)
-        self.user = self.folder / 'user'
-        self.user.mkdir()
-        patch = mock.patch.multiple(L, CONFIG_DIR=self.folder / 'launcher',
-                                    CONFIG_FILE=self.folder / 'launcher' / 'settings.json',
-                                    HUNTERS_DREAM_POOL=True)  # off by default since SuperMedo Server
-        patch.start()
-        self.addCleanup(patch.stop)
-        self.settings = dict(L.APP_DEFAULTS, user_dir=str(self.user), online=True, online_pool='huntersdream',
-                             thd_online_id='Maria', thd_token='old-token', game_dir='D:\\CUSA03173')
-        L.write_settings(self.settings)
-
-    def test_the_refusal_is_found_in_the_log(self):
-        self.assertFalse(L.sign_in_refused(self.settings))  # no log yet
-        (self.user / 'last_run.log').write_text('Runtime: started\n' + self.LINE, encoding='utf-8')
-        self.assertTrue(L.sign_in_refused(self.settings))
-        L.forget_sign_in()
-        saved = L.load_settings()
-        self.assertEqual((saved['thd_token'], saved['thd_online_id'], saved['game_dir']), ('', 'Maria', 'D:\\CUSA03173'))
-        self.assertTrue(L.needs_sign_in(saved))
-        self.assertFalse(L.needs_sign_in(dict(saved, online_pool='shadnet')))
-
-    def test_after_the_launchers_game(self):
-        import types
-        (self.user / 'last_run.log').write_text(self.LINE, encoding='utf-8')
-        token = types.SimpleNamespace(value='old-token')
-        token.get, token.set = (lambda: token.value), (lambda value: setattr(token, 'value', value))
-        ui = bare_launcher()
-        ui.app.update(self.settings)
-        ui.var = lambda key, store: token
-        ui.forget_refused_sign_in()
-        self.assertEqual((token.value, ui.app['thd_token'], L.load_settings()['thd_token']), ('', '', ''))
-        self.assertIn('sign in again', ui.logged[0])
-        ui.logged.clear()
-        ui.forget_refused_sign_in()  # nothing more to forget
-        self.assertEqual(ui.logged, [])
-        source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        self.assertIn("thd_token.trace_add('write', lambda *_a: show_accounts())", source)  # "Not signed in"
-
-    def test_after_play_bloodborne_exe_and_the_next_start_asks(self):
-        line = self.LINE.encode('utf-8')
-        with mock.patch.object(L, 'game_underway', return_value=False), mock.patch.object(L, 'attach_stdio'), \
-                mock.patch.object(L, 'load_ini', return_value=(dict(L.INI_DEFAULTS), [])), \
-                mock.patch.object(L.display, 'Placer'), mock.patch.object(L.trophies, 'Tracker'), \
-                mock.patch.object(L.subprocess, 'Popen') as popen:
-            popen.return_value.stdout.readline.side_effect = [line, b'']
-            popen.return_value.wait.return_value = 0
-            self.assertEqual(L.play_without_window(dict(self.settings, auto_backup=False)), 0)
-        self.assertEqual(L.load_settings()['thd_token'], '')
-        self.assertIn('the next start asks to sign in', (self.user / 'last_run.log').read_text(encoding='utf-8'))
-        # The next Play Bloodborne.exe opens the launcher, whose Play asks: sign in now or play offline.
-        import tempfile
-        from pathlib import Path
-        with tempfile.TemporaryDirectory() as temp:
-            game = Path(temp)
-            (game / 'eboot.bin').touch()
-            for folder in ('sce_module', 'sce_sys'):
-                (game / folder).mkdir()
-            (game / 'sce_sys' / 'param.sfo').touch()
-            root, ui = mock.Mock(), mock.Mock()
-            import tkinter as tk
-            # main() sets the language from Windows: put back for the other tests
-            with mock.patch.object(L, 'LANG', L.LANG), mock.patch.object(L.saves, 'WORDS', dict(L.saves.WORDS)), \
-                    mock.patch.object(L.sys, 'argv', ['Bloodborne.exe', '--play']), mock.patch.object(L, 'FROZEN', False), \
-                    mock.patch.object(L, 'load_settings', return_value=dict(self.settings, thd_token='', game_dir=temp)), \
-                    mock.patch.object(L, 'play_without_window') as play, mock.patch.object(L, 'one_launcher', return_value=True), \
-                    mock.patch.object(L, 'bring_to_front_on_request'), mock.patch.object(tk, 'Tk', return_value=root), \
-                    mock.patch.object(L, 'Launcher', return_value=ui):
-                L.main()
-            play.assert_not_called()
-            root.after.assert_any_call(500, ui.play)
-
-
 class WrongClockTests(unittest.TestCase):
     """A PC whose clock is wrong: its newest backup lay in the future and stopped every automatic backup, and every
     certificate looked expired."""
@@ -708,8 +621,8 @@ class WrongClockTests(unittest.TestCase):
         error = OSError("<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has "
                         "expired (_ssl.c:1006)>")
         with mock.patch.object(L, 'clock_off', return_value=3 * 86400) as asked:
-            self.assertIn("Your PC's date is wrong", L.connection_error(error, 'https://thehuntersdream.com'))
-        asked.assert_called_once_with('thehuntersdream.com')
+            self.assertIn("Your PC's date is wrong", L.connection_error(error, 'https://game.supermedo.com'))
+        asked.assert_called_once_with('game.supermedo.com')
         with mock.patch.object(L, 'clock_off', return_value=30):  # the clock is right: Windows' root store, not the date
             self.assertEqual(L.connection_error(error, 'https://api.github.com/x'), str(error))
         with mock.patch.object(L, 'clock_off', side_effect=[None, -2 * 86400]) as asked:  # no time from that server

@@ -30,10 +30,8 @@ UI = {'de': {
         'Online ist an, aber du bist noch nicht angemeldet: jetzt anmelden',
     'not signed in ›': 'nicht angemeldet ›', 'signed in as {}': 'angemeldet als {}', 'Cheats on: {}': 'Cheats an: {}',
     'New in version {}: what has changed': 'Neu in Version {}: was sich geändert hat',
-    "Online (The Hunter's Dream)": "Online (The Hunter's Dream)", 'Online (SuperMedo Server)': 'Online (SuperMedo Server)',
+    'Online (SuperMedo Server)': 'Online (SuperMedo Server)',
     'Sign in now? (No: play offline this time.)': 'Jetzt anmelden? (Nein: diesmal offline spielen.)',
-    "To play online with The Hunter's Dream, sign in with Discord first.":
-        "Um online mit The Hunter's Dream zu spielen, melde dich zuerst mit Discord an.",
     'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up '
     'there if you have no account).':
         'Für den SuperMedo Server gib auf der Seite „Online spielen“ deinen supermedo.com-Benutzernamen und dein Passwort '
@@ -174,28 +172,12 @@ UI = {'de': {
         'shadNet: ein shadNet-Server mit seinem Konto. Der SuperMedo Server nutzt ein Konto von supermedo.com.',
     'SuperMedo Server account': 'SuperMedo-Server-Konto', 'Username': 'Benutzername',
     'The account you made at supermedo.com.': 'Das Konto, das du auf supermedo.com angelegt hast.',
-    "The Hunter's Dream account": "The-Hunter's-Dream-Konto", 'Sign up for SuperMedo Server': 'Beim SuperMedo Server registrieren',
-    "The Hunter's Dream (with bbhost players)": "The Hunter's Dream (mit bbhost-Spielern)",
-    'Show me on the live map': 'Mich auf der Live-Karte zeigen',
-    'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while '
-    'you play.':
-        'thehuntersdream.com/map zeigt, wo Spieler sind und welche Glocken läuten: Das Spiel sendet beim Spielen öfter '
-        'deine Position.',
-    "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are "
-    'by droogie.':
-        "Die Verbindung zu The Hunter's Dream ist Awakens Port des Netzwerkcodes von bbhost; bbhost und The Hunter's Dream "
-        'sind von droogie.',
+    'Sign up for SuperMedo Server': 'Beim SuperMedo Server registrieren',
     'Not signed in': 'Nicht angemeldet', 'Signed in as {}': 'Angemeldet als {}', 'Sign in with Discord': 'Mit Discord anmelden',
     'Starting the sign-in…': 'Anmeldung startet…', 'Sign-in failed: {}': 'Anmeldung fehlgeschlagen: {}',
-    'In the page that opened ({0}), sign in with Discord and enter this code:':
-        'Melde dich auf der geöffneten Seite ({0}) mit Discord an und gib diesen Code ein:',
-    'Not signed in: use "Sign in with Discord" above.': 'Nicht angemeldet: Nutze oben „Mit Discord anmelden“.',
     'SuperMedo Server could not be reached. Check your internet connection and try again.':
         'Der SuperMedo Server war nicht erreichbar. Prüfe deine Internetverbindung und versuch es erneut.',
-    'Game server {0}': 'Spielserver {0}', 'Co-op service {0}': 'Koop-Dienst {0}', '{0}: reachable': '{0}: erreichbar',
-    '{0}: not reachable ({1})': '{0}: nicht erreichbar ({1})',
-    # ---- Achievements ----
-    'Trophies the game unlocks while you play; updated live, kept with your saves.':
+    'Game server {0}': 'Spielserver {0}', 'Trophies the game unlocks while you play; updated live, kept with your saves.':
         'Trophäen, die das Spiel beim Spielen freischaltet; live aktualisiert, bei deinen Spielständen gespeichert.',
     'All': 'Alle', 'Earned': 'Erhalten', 'Locked': 'Gesperrt', "You've earned a trophy.": 'Du hast eine Trophäe erhalten.',
     'Trophy {}': 'Trophäe {}', '{} of {} trophies earned': '{} von {} Trophäen erhalten',
@@ -349,11 +331,7 @@ UI = {'de': {
     'Bring your saves along, and play with others.': 'Bring deine Spielstände mit und spiel mit anderen.',
     'Your characters from other versions': 'Deine Charaktere aus anderen Versionen', 'Play with others': 'Mit anderen spielen',
     'Play online: messages, bloodstains, summons and co-op': 'Online spielen: Nachrichten, Blutflecken, Beschwörungen und Koop',
-    "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-        "Mit The Hunter's Dream, zusammen mit bbhost-Spielern. Dafür einmal kostenlos mit Discord anmelden.",
     'Not signed in yet': 'Noch nicht angemeldet', 'Sign in again': 'Erneut anmelden',
-    'In the page that opened, sign in with Discord and enter this code:':
-        'Melde dich auf der geöffneten Seite mit Discord an und gib diesen Code ein:',
     'Other servers (shadNet, SuperMedo) and every option: the Online play page. Offline needs nothing: untick it.':
         'Andere Server (shadNet, SuperMedo) und alle Optionen: Seite „Online spielen“. Offline braucht nichts: Haken weg.',
     'On, signed in as {}': 'An, angemeldet als {}', 'On, sign-in still missing': 'An, Anmeldung fehlt noch', 'Picture': 'Bild',
@@ -531,10 +509,6 @@ UI = {'de': {
         'Die automatische Sicherung der Spielstände ist fehlgeschlagen: {}',
     'Saves backed up: {}':
         'Spielstände gesichert: {}',
-    '{} online':
-        '{} online',
-    "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-        "The Hunter's Dream: gerade {} Jäger online ({} bbhost · {} shadNet)",
     'A character is gone or the save is broken':
         'Ein Charakter ist weg oder der Spielstand kaputt',
     'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
@@ -573,8 +547,6 @@ UI = {'de': {
         'Der Controller-Test kann nicht starten: {}',
     'No controller found. Connect it by cable or Bluetooth.':
         'Kein Controller gefunden. Verbinde ihn per Kabel oder Bluetooth.',
-    "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-        "The Hunter's Dream: Koop zusammen mit bbhost-Spielern, nach einer kostenlosen Anmeldung mit Discord. shadNet: ein shadNet-Server deiner Wahl und sein Konto.",
     'A shadNet server instead, and every option: the Online play page. Offline needs nothing: untick it.':
         'Stattdessen ein shadNet-Server und alle Optionen: Seite „Online spielen“. Offline braucht nichts: Haken weg.',
     'Fullscreen, HDR and the taste effects are on Picture & performance.':

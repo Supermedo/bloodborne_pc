@@ -41,6 +41,12 @@ PART_ICONS = {'gpu': theme.ICON['display'], 'cpu': theme.ICON['cpu'], 'ram': the
 PART_TITLES = {'gpu': 'Graphics card', 'cpu': 'Processor', 'ram': 'Memory'}
 
 
+def saves_by_bbsc(save):
+    """A copy Seamless co-op (BBSC) made in its bbsc/save-backups before it changed a character: its own
+    characters, with its items in them."""
+    return '/bbsc/save-backups/' in Path(save.folder).as_posix().lower()
+
+
 def tier_color(tier):
     return (theme.BLOOD_LIGHT, theme.AMBER, theme.TEXT, theme.TEXT_STRONG, theme.GOLD_LIGHT, theme.GOLD_LIGHT)[tier]
 
@@ -688,7 +694,7 @@ class SetupMixin:
             return
         found, _encrypted = saves.find_in(folder)
         if not found:
-            self.messagebox.showinfo('Bloodborne', _('There is no save of this port, shadPS4 or bbhost in that folder '
+            self.messagebox.showinfo('Bloodborne', _('There is no save of this port or shadPS4 in that folder '
                                                      '(SPRJ0005 with userdata0000 …).'))
             return
         self.app.setdefault('test_saves', {})[scenario.id] = str(found[0])
@@ -782,7 +788,7 @@ class SetupMixin:
                 'Settings': self.diagnostics().split('Settings: ', 1)[-1].split('\n', 1)[0]}
         folder = self.tests_dir() / (clock.strftime('%Y-%m-%d_%H%M%S') + '_' + mode)
         settings = {**self.app, 'online': False, 'fullscreen': True}
-        test = bench.Test(L.PORT_DIR, L.run_command(), L.game_environment(settings), self.save_user_dir(),
+        test = bench.Test(L.PORT_DIR, L.run_command(), L.game_environment(settings), self.normal_user_dir(),
                           self.var('game_dir', 'app').get(),
                           L.ini_path().read_text(encoding='utf-8') if L.ini_path().is_file() else '',
                           scenario, plan, folder,
@@ -938,30 +944,59 @@ class SetupMixin:
         self.result_buttons(folder)
 
     # ---- saves from other versions -------------------------------------------------------------
-    def save_user_dir(self):
+    def normal_user_dir(self):
         return Path(self.var('user_dir', 'app').get() or L.DATA_DIR / 'user')
+
+    def plays_seamless(self):
+        return L.plays_seamless({'online': self.var('online', 'app').get(),
+                                 'online_pool': self.var('online_pool', 'app').get()})
+
+    def save_user_dir(self):
+        """The saves the next start plays: Seamless co-op's own while it is chosen (L.saves_user_dir)."""
+        return self.normal_user_dir() / saves.COOP_SAVES if self.plays_seamless() else self.normal_user_dir()
 
     def save_target(self):
         return saves.target_dir(self.save_user_dir(), self.var('game_dir', 'app').get())
 
-    def find_saves(self, on_done):
+    def shows_seamless(self):
+        """The Saves page shows Seamless co-op's characters: as its switch is set (both kinds stay reachable
+        there), else as the next start plays."""
+        view = getattr(self, 'saves_view', None)
+        return view.get() == 'seamless' if view is not None else self.plays_seamless()
+
+    def shown_user_dir(self):
+        """The saves the Saves page shows and works on (backups, imports): its switch's kind."""
+        return self.normal_user_dir() / saves.COOP_SAVES if self.shows_seamless() else self.normal_user_dir()
+
+    def shown_target(self):
+        return saves.target_dir(self.shown_user_dir(), self.var('game_dir', 'app').get())
+
+    def find_saves(self, on_done, seamless=None):
         """Searches this PC for saves in a helper thread (it walks folders), then calls on_done(sets)
-        in the Tk thread; one search at a time, its result kept for the next card."""
+        in the Tk thread; one search at a time, its result kept for the next card. `seamless`: for Seamless
+        co-op's characters (the Saves page's switch), else for what the next start plays."""
         import threading
         self.save_waiters = getattr(self, 'save_waiters', []) + [on_done]
         if getattr(self, 'save_searching', False):
             return
         self.save_searching = True
-        port, game, mine = L.PORT_DIR, self.var('game_dir', 'app').get(), self.save_target()
+        seamless = self.plays_seamless() if seamless is None else seamless
+        port, game = L.PORT_DIR, self.var('game_dir', 'app').get()
+        user = self.normal_user_dir() / saves.COOP_SAVES if seamless else self.normal_user_dir()
+        mine = saves.target_dir(user, game)
+        # Seamless co-op is offered the normal characters to copy in (never the other way: BBSC changes the
+        # items of the characters it plays).
+        normal = saves.target_dir(self.normal_user_dir(), game) if seamless else None
 
         def work():
             try:
-                found = saves.scan(port, game, exclude=[mine])
+                found = saves.scan(port, game, exclude=[mine],
+                                   extra=[(_('Your normal characters'), normal)] if normal else (), seamless=seamless)
             except Exception:  # a search must never take the launcher down
                 found = []
 
             def done():
-                self.save_searching, self.save_found = False, found
+                self.save_searching, self.save_found, self.save_found_seamless = False, found, seamless
                 waiters, self.save_waiters = self.save_waiters, []
                 for waiter in waiters:
                     waiter(found)
@@ -994,7 +1029,7 @@ class SetupMixin:
             if title:
                 tk.Label(body, text=title, bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.HEAD, 12)).pack(
                     anchor='w', pady=(0, px(6)))
-            here = self.save_target()
+            here = self.shown_target() if manager else self.save_target()
             mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
             if not manager:
                 self.state_line(body, 'ok' if mine and mine.slots else 'info',
@@ -1003,29 +1038,41 @@ class SetupMixin:
             sets = state['sets']
             top = 0 if manager else px(10)
             if sets is None:
-                tk.Label(body, text=_('Searching this PC for saves of shadPS4, Awaken\'s port and bbhost…'),
+                tk.Label(body, text=_('Searching this PC for saves of shadPS4 and Awaken\'s port…'),
                          bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9)).pack(anchor='w', pady=(top, 0))
             elif not sets:
-                self.wrap_within(tk.Label(body, text=_('No saves from shadPS4, Awaken\'s port or bbhost found on this '
+                self.wrap_within(tk.Label(body, text=_('No saves from shadPS4 or Awaken\'s port found on this '
                                                        'PC. If yours are somewhere else (a backup, a PS4 export), '
                                                        'choose their folder.'),
                                           bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9), justify='left',
                                           anchor='w'), 640).pack(fill='x', pady=(top, 0))
-            for save in (sets or [])[:limit or None]:
-                tk.Frame(body, bg=theme.BORDER, height=1).pack(fill='x', pady=(px(10), px(8)))
-                line = tk.Frame(body, bg=theme.CARD)
-                line.pack(fill='x')
-                ttk.Button(line, text=_('Import'), style='Card.TButton',
-                           command=lambda s=save: self.import_save(s, search)).pack(side='right', anchor='center')
-                words = tk.Frame(line, bg=theme.CARD)
-                words.pack(side='left', fill='x', expand=True)
-                # wrapped at the room beside the Import button: a long folder was cut off there in a narrow window
-                for text, fg, font, top in ((save.source, theme.GOLD_LIGHT, (theme.BODY_SEMI, 10), 0),
-                                            (self.describe_save(save) + '  ·  ' + _('last played {}').format(
-                                                save.when()), theme.TEXT, (theme.BODY, 9), px(1)),
-                                            (str(save.folder), theme.MUTED, (theme.BODY, 8), px(2))):
-                    self.wrap_within(tk.Label(words, text=text, bg=theme.CARD, fg=fg, font=font, anchor='w',
-                                              justify='left'), 520).pack(fill='x', pady=(top, 0))
+            # On the Saves page by kind: for Seamless co-op the normal characters first (to copy in), then its own
+            # safety copies, then other versions; for the normal saves never Seamless co-op's copies (its items).
+            seamless = self.shows_seamless() if manager else self.plays_seamless()
+            normal = _('Your normal characters')
+            groups = [(None, list(sets or []))]
+            if manager:
+                copies = [s for s in sets or [] if saves_by_bbsc(s)]
+                rest = [s for s in sets or [] if not saves_by_bbsc(s)]
+                groups = ([(None, [s for s in rest if s.source == normal]),
+                           (_('Safety copies Seamless co-op made before it changed a character'), copies),
+                           (_('Other versions on this PC'), [s for s in rest if s.source != normal])]
+                          if seamless else [(None, rest)])
+            listed = [save for _heading, items in groups for save in items][:limit or None]
+            for index, (heading, items) in enumerate(groups):
+                items = [save for save in items if save in listed]
+                if heading and items:
+                    tk.Label(body, text=heading, bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY_SEMI, 10),
+                             anchor='w').pack(fill='x', pady=(px(16), 0))
+                # Other versions (the last group) folded to a few: a PC with many old installs listed dozens.
+                folded = manager and not state.get('all') and index == len(groups) - 1 and len(items) > 4
+                for save in items[:4] if folded else items:
+                    self.found_line(body, save, search, seamless and manager and save.source == normal, manager)
+                if folded:
+                    more = tk.Label(body, text=_('Show all {}').format(len(items)) + '  ›', bg=theme.CARD, fg=theme.GOLD,
+                                    cursor='hand2', font=(theme.BODY_MEDIUM, 9))
+                    more.pack(anchor='w', pady=(px(10), 0))
+                    more.bind('<Button-1>', lambda _e: (state.__setitem__('all', True), draw()))
             buttons = tk.Frame(body, bg=theme.CARD)
             buttons.pack(anchor='w', pady=(px(12), 0))
             ttk.Button(buttons, text=_('Search again'), style='Card.TButton', command=search).pack(side='left')
@@ -1047,10 +1094,13 @@ class SetupMixin:
             if hide_empty and not card.winfo_ismapped():
                 card.pack(**card.pack_options)
 
+        def kind():
+            return self.shows_seamless() if manager else self.plays_seamless()
+
         def search():
             state['sets'] = None
             draw()
-            self.find_saves(show)
+            self.find_saves(show, kind())
 
         def choose():
             chosen = self.choose_save_folder()
@@ -1060,15 +1110,37 @@ class SetupMixin:
                 if hide_empty and not card.winfo_ismapped():
                     card.pack(**card.pack_options)
         def start():  # after the caller placed the card (and gave hide_empty its pack_options)
-            if getattr(self, 'save_found', None) is not None and not getattr(self, 'save_searching', False):
+            if getattr(self, 'save_found', None) is not None and not getattr(self, 'save_searching', False)                     and getattr(self, 'save_found_seamless', None) == kind():
                 show(self.save_found)
             else:
                 if not hide_empty:
                     draw()
-                self.find_saves(show)
+                self.find_saves(show, kind())
         self.root.after_idle(start)
         card.redraw = draw
+        card.search = search
         return card
+
+    def found_line(self, body, save, search, copy_in, manager):
+        """One found save: where it is from, its characters and when they were played, its folder, and Import
+        (Copy into Seamless co-op for the normal characters on Seamless co-op's side)."""
+        tk, ttk, px = self.tk, self.ttk, self.px
+        tk.Frame(body, bg=theme.BORDER, height=1).pack(fill='x', pady=(px(10), px(8)))
+        line = tk.Frame(body, bg=theme.CARD)
+        line.pack(fill='x')
+        ttk.Button(line, text=_('Copy into Seamless co-op') if copy_in else _('Import'),
+                   style='Card.Accent.TButton' if copy_in else 'Card.TButton',
+                   command=lambda: self.import_save(save, search, shown=manager)).pack(side='right', anchor='center')
+        words = tk.Frame(line, bg=theme.CARD)
+        words.pack(side='left', fill='x', expand=True)
+        source = _('Safety copy by Seamless co-op') if saves_by_bbsc(save) else save.source
+        # wrapped at the room beside the Import button: a long folder was cut off there in a narrow window
+        for text, fg, font, top in ((source, theme.GOLD_LIGHT, (theme.BODY_SEMI, 10), 0),
+                                    (self.describe_save(save) + '  ·  ' + _('last played {}').format(save.when()),
+                                     theme.TEXT, (theme.BODY, 9), px(1)),
+                                    (str(save.folder), theme.MUTED, (theme.BODY, 8), px(2))):
+            self.wrap_within(tk.Label(words, text=text, bg=theme.CARD, fg=fg, font=font, anchor='w',
+                                      justify='left'), 520).pack(fill='x', pady=(top, 0))
 
     def choose_save_folder(self):
         """[SaveSet] in a folder the player picks (a backup, a PS4 export), or None."""
@@ -1088,11 +1160,20 @@ class SetupMixin:
             return None
         return sorted(usable, key=lambda s: -s.modified)
 
-    def import_save(self, save, refresh):
+    def import_save(self, save, refresh, shown=False):
+        """`shown`: into the kind the Saves page shows (its switch), else into what the next start plays."""
         if self.game_running():
             self.messagebox.showinfo('Bloodborne', _('Close the game first; it writes its saves while it runs.'))
             return
-        user, here = self.save_user_dir(), self.save_target()
+        user, here = (self.shown_user_dir(), self.shown_target()) if shown else (self.save_user_dir(),
+                                                                                 self.save_target())
+        if saves.from_seamless(save.folder) and user.name != saves.COOP_SAVES:
+            # Checked where the saves are written, whichever card or chosen folder offered it (the setup guide
+            # offered BBSC's copies for the normal saves, 2026-11-02).
+            self.messagebox.showerror('Bloodborne', _("These are Seamless co-op's characters, with its own items in "
+                                                      "them: they can only go into Seamless co-op's characters "
+                                                      '(Saves page, Seamless co-op characters).'))
+            return
         mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
         question = _('Import the saves from {} ({}, last played {})?').format(
             save.source, self.describe_save(save), save.when())
@@ -1129,8 +1210,27 @@ class SetupMixin:
 
     def refresh_saves(self, only_if_changed=False):
         """The characters and the backups drawn anew (on a page change only when the files changed)."""
-        made_from = (str(self.save_target()), L.folder_entries(self.save_target()),
-                     L.folder_entries(saves.backup_dir(self.save_user_dir())), self.var('game_dir', 'app').get(),
+        if getattr(self, 'saves_mode', None) is not None and self.saves_mode.winfo_exists():
+            self.saves_mode.configure(text=self.saves_mode_text())
+        if getattr(self, 'saves_pills', None):
+            self.saves_pills()
+        seamless = self.shows_seamless()
+        if getattr(self, 'found_title', None) is not None and self.found_title.winfo_exists():
+            self.found_title.configure(text=_('Bring characters into Seamless co-op') if seamless
+                                       else _('From other versions'))
+            self.found_note.configure(text=_("Copies a save into Seamless co-op's characters: your normal characters, a "
+                                             "copy Seamless co-op made, or another version. Seamless co-op's "
+                                             'characters are backed up first; the copied save stays as it is.')
+                                      if seamless else
+                                      _('Characters from shadPS4, Awaken\'s port or a PS4 export: found on '
+                                        'this PC and copied into this port\'s saves folder. Your current saves are '
+                                        'backed up first.'))
+        found = getattr(self, 'found_view', None)
+        if found is not None and found.winfo_exists() and getattr(self, 'found_kind', None) != seamless:
+            self.found_kind = seamless
+            found.search()  # the other kind's list (Seamless co-op is offered the normal characters)
+        made_from = (str(self.shown_target()), L.folder_entries(self.shown_target()),
+                     L.folder_entries(saves.backup_dir(self.shown_user_dir())), self.var('game_dir', 'app').get(),
                      self.var('language', 'app').get())
         if only_if_changed and made_from == getattr(self, 'saves_made_from', None):
             return
@@ -1139,6 +1239,23 @@ class SetupMixin:
             card = getattr(self, view, None)
             if card is not None and card.winfo_exists():
                 card.redraw()
+
+    def saves_mode_text(self):
+        """Which characters the page shows, and which ones Play starts with (they can differ: the switch only
+        looks; Online play chooses)."""
+        if getattr(self, 'saves_view', None) is None:
+            return ''
+        shown, played = self.shows_seamless(), self.plays_seamless()
+        if shown and played:
+            return _('Play starts with these characters: Seamless co-op is chosen on Online play. Your normal '
+                     'characters stay apart and untouched.')
+        if shown:
+            return _("These are Seamless co-op's own characters. Play starts with your normal ones: Seamless co-op "
+                     'is not chosen on Online play.')
+        if played:
+            return _("These are your normal characters, untouched by Seamless co-op. Play starts with Seamless "
+                     "co-op's characters: it is chosen on Online play.")
+        return _('Play starts with these characters.')
 
     def characters_card(self, parent):
         """This port's characters: what each is now (level, attributes, weapons, the bosses it beat)
@@ -1154,14 +1271,14 @@ class SetupMixin:
                 return
             for child in body.winfo_children():
                 child.destroy()
-            here = self.save_target()
+            here = self.shown_target()
             mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
             if not mine or not mine.slots:
                 self.state_line(body, 'info', _('No characters yet. The game makes them, or bring yours from another '
                                                 'version (below).'), theme.CARD, wrap=640).pack(fill='x')
             else:
                 words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
-                items = [b for b in saves.backups(self.save_user_dir()) if b.ok]
+                items = [b for b in saves.backups(self.shown_user_dir()) if b.ok]
                 for index, slot in enumerate(mine.slots):
                     if index:
                         tk.Frame(body, bg=theme.BORDER, height=1).pack(fill='x', pady=px(16))
@@ -1176,7 +1293,7 @@ class SetupMixin:
                 ttk.Button(buttons, text=_('Back up now'), style='Card.Accent.TButton', command=self.backup_now).pack(
                     side='left', padx=(0, px(6)))
             ttk.Button(buttons, text=_('Open the folder'), style='Card.TButton',
-                       command=lambda: self.open_path(here if here.is_dir() else self.save_user_dir())).pack(side='left')
+                       command=lambda: self.open_path(here if here.is_dir() else self.shown_user_dir())).pack(side='left')
         draw()
         card.redraw = draw
         return card
@@ -1334,7 +1451,7 @@ class SetupMixin:
                                       bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9), justify='left', anchor='w'),
                              640).pack(fill='x', padx=(px(26), 0))
 
-            items = [b for b in saves.backups(self.save_user_dir()) if b.ok]
+            items = [b for b in saves.backups(self.shown_user_dir()) if b.ok]
             if not items:
                 tk.Label(body, text=_('No backups yet.'), bg=theme.CARD, fg=theme.MUTED,
                          font=(theme.BODY, 10)).pack(anchor='w', pady=(px(12), 0))
@@ -1352,8 +1469,8 @@ class SetupMixin:
             ttk.Button(buttons, text=_('Add a backup file…'), style='Card.TButton', command=self.add_backup_file).pack(
                 side='left', padx=(px(6), 0))
             ttk.Button(buttons, text=_('Open the folder'), style='Card.TButton',
-                       command=lambda: self.open_path(saves.backup_dir(self.save_user_dir()))
-                       if saves.backup_dir(self.save_user_dir()).is_dir() else None).pack(side='left', padx=(px(6), 0))
+                       command=lambda: self.open_path(saves.backup_dir(self.shown_user_dir()))
+                       if saves.backup_dir(self.shown_user_dir()).is_dir() else None).pack(side='left', padx=(px(6), 0))
         draw()
         card.redraw = draw
         return card
@@ -1420,7 +1537,7 @@ class SetupMixin:
             self.messagebox.showinfo('Bloodborne', _('Close the game first; it writes its saves while it runs.'))
             return
         try:
-            made = saves.backup(self.save_user_dir(), self.var('game_dir', 'app').get(), reason='manual')
+            made = saves.backup(self.shown_user_dir(), self.var('game_dir', 'app').get(), reason='manual')
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('Could not back up the saves: {}').format(error))
             return
@@ -1435,7 +1552,7 @@ class SetupMixin:
         if self.game_running():
             self.messagebox.showinfo('Bloodborne', _('Close the game first; it writes its saves while it runs.'))
             return
-        here = self.save_target()
+        here = self.shown_target()
         mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
         question = _('Put this backup back?') + '\n\n' + self.backup_title(item) + '\n' + '  ·  '.join(
             [item.created.strftime('%d.%m.%Y %H:%M'), ', '.join(item.names) or _('no characters')])
@@ -1447,7 +1564,7 @@ class SetupMixin:
         if not self.messagebox.askyesno('Bloodborne', question):
             return
         try:
-            saves.restore(item.path, self.save_user_dir(), self.var('game_dir', 'app').get())
+            saves.restore(item.path, self.shown_user_dir(), self.var('game_dir', 'app').get())
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('Could not put the backup back: {}').format(error))
             return
@@ -1470,7 +1587,7 @@ class SetupMixin:
         if not self.messagebox.askyesno('Bloodborne', question):
             return
         try:
-            saves.restore_character(item.path, slot, self.save_user_dir(), self.var('game_dir', 'app').get())
+            saves.restore_character(item.path, slot, self.shown_user_dir(), self.var('game_dir', 'app').get())
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('This character cannot be put back on its own ({}). Restore the '
                                                       'whole backup under Backups instead.').format(error))
@@ -1485,7 +1602,7 @@ class SetupMixin:
         if not chosen:
             return
         try:
-            saves.add_backup_file(chosen, self.save_user_dir())
+            saves.add_backup_file(chosen, self.shown_user_dir())
         except OSError as error:
             self.messagebox.showerror('Bloodborne', _('This file is no Bloodborne save backup: {}').format(error))
             return
@@ -1850,9 +1967,47 @@ class SetupMixin:
         f = self.scrolled_page('saves', _('Saves'),
                                _('Your characters: bring them from another version, back them up, put a backup back.'))
         self.section(f, _('Your characters'), top=4)
+        tk = self.tk
+        if L.BBSC_LAUNCH.exists():
+            # Two kinds of characters with Seamless co-op: a switch to look at either; Online play decides which
+            # one Play starts with (marked ▶ here).
+            self.saves_view = tk.StringVar(value='seamless' if self.plays_seamless() else 'normal')
+            strip = tk.Frame(f, bg=L.PANEL)
+            strip.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(0, px(8)))
+            pills = {}
+            for value, text in (('normal', _('Normal characters')), ('seamless', _('Seamless co-op characters'))):
+                pill = tk.Label(strip, text=text, bg=theme.CARD, font=(theme.BODY_SEMI, 10), padx=px(14),
+                                pady=px(6), cursor='hand2', highlightthickness=px(1))
+                pill.pack(side='left', padx=(0, px(6)))
+                pill.bind('<Button-1>', lambda _e, v=value: self.saves_view.set(v))
+                pills[value] = (pill, text)
+
+            def show_pills():
+                for value, (pill, text) in pills.items():
+                    on = self.saves_view.get() == value
+                    played = (value == 'seamless') == self.plays_seamless()
+                    pill.configure(text=text + ('  ▶' if played else ''), fg=theme.GOLD_LIGHT if on else theme.MUTED,
+                                   highlightbackground=theme.GOLD if on else theme.BORDER,
+                                   highlightcolor=theme.GOLD if on else theme.BORDER)
+            self.saves_pills = show_pills
+            self.saves_view.trace_add('write', lambda *_a: self.refresh_saves())
+            show_pills()
+        self.saves_mode = self.ttk.Label(f, text=self.saves_mode_text(), style='Muted.TLabel', justify='left',
+                                         wraplength=px(640))
+        self.saves_mode.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
         self.characters_view = self.characters_card(f)
         self.characters_view.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
         self.index_entry(self.characters_view, _('Your characters'), _('Saves'), 'characters')
+        # Getting characters before keeping copies of them: the found saves (Seamless co-op: bringing them in)
+        # above the backups.
+        self.found_title = self.section(f, _('From other versions'))
+        self.found_note = self.wrap_within(self.ttk.Label(f, text='', style='Muted.TLabel', justify='left',
+                                                          anchor='w'), 680)
+        self.found_note.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
+        found = self.found_view = self.saves_card(f, manager=True)  # drawn anew too: the search points at the card
+        self.found_kind = self.shows_seamless()
+        found.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(8), 0))
+        self.index_entry(found, _('Import saves from other versions'), _('From other versions'), 'button:import')
         self.section(f, _('Backups'))
         self.backups_view = self.backups_card(f)
         self.backups_view.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(4), 0))
@@ -1862,12 +2017,6 @@ class SetupMixin:
         self.index_entry(self.backups_view, _('Back up now'), _('Backups'), 'button:backup')
         self.index_entry(self.backups_view, _('Restore a backup'), _('Backups'), 'button:restore')
         self.index_entry(self.backups_view, _('Add a backup file…'), _('Backups'), 'button:add_backup')
-        self.section(f, _('From other versions'))
-        self.note(f, _('Characters from shadPS4, Awaken\'s port, bbhost or a PS4 export: found on this PC and copied '
-                       'into this port\'s saves folder. Your current saves are backed up first.'), top=0)
-        found = self.saves_card(f, manager=True)  # drawn anew too: the search points at the card
-        found.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(px(8), 0))
-        self.index_entry(found, _('Import saves from other versions'), _('From other versions'), 'button:import')
         self.section(f, _('Saves folder'))
         self.folder(f, 'user_dir', _('Saves folder', 'Папка сохранений'),
                     _('Choose the saves folder', 'Выберите папку сохранений'),
@@ -2421,7 +2570,7 @@ class SetupGuide:
             anchor='w', pady=(0, self.px(8)))
 
     # -- I: welcome --
-    ORIGINS = [('new', 'I am new to the port'), ('shadps4', 'shadPS4'), ('bbhost', 'bbhost'),
+    ORIGINS = [('new', 'I am new to the port'), ('shadps4', 'shadPS4'),
                ('awaken', "Awaken's port"), ('ps4', 'A PS4 (exported save)')]
 
     def step_welcome(self, body):
@@ -2697,110 +2846,34 @@ class SetupGuide:
         ttk.Checkbutton(online, text=_('Play online: messages, bloodstains, summons and co-op'),
                         variable=app.var('online', 'app'), style='Card.TCheckbutton').pack(anchor='w')
         pool = app.var('online_pool', 'app')
-        if pool.get() == 'supermedo':
-            # Its Discord sign-in here: online on without an account stayed offline without a word.
-            tk.Label(online, text=_('With SuperMedo Server. Sign in once with Discord (free): your account is '
-                                    'made for you.'), bg=theme.CARD, fg=theme.TEXT_SOFT, font=(theme.BODY, 9),
-                     justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
+        if pool.get() in ('supermedo', 'seamless'):
+            # The account's three ways in (bbport_signin): online on without an account stayed offline without a
+            # word, and Discord alone left a player with an account of their own to find the Online page.
+            tk.Label(online, text=_('With SuperMedo Server or Seamless co-op: one free account. Sign in with '
+                                    'Discord or with your Online ID and password, or make one.'), bg=theme.CARD,
+                     fg=theme.TEXT_SOFT, font=(theme.BODY, 9), justify='left',
+                     wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
             status = tk.Label(online, text='', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10))
             status.pack(anchor='w', pady=(px(8), 0))
-            row = tk.Frame(online, bg=theme.CARD)
-            row.pack(anchor='w', pady=(px(8), 0))
+            again = ttk.Button(online, text=_('Sign in again'), style='Card.TButton',
+                               command=lambda: (again.pack_forget(), ways.pack(anchor='w', fill='x', pady=(px(8), 0))))
+            ways = tk.Frame(online, bg=theme.CARD)
             npid, password = app.var('supermedo_npid', 'app'), app.var('supermedo_pass', 'app')
 
             def show_supermedo():
+                # A sign-in may answer after the guide closed or moved to another step: its widgets are gone then.
                 if status.winfo_exists():
                     signed = npid.get().strip() and password.get()
                     status.configure(text=_('Signed in as {}').format(npid.get().strip()) if signed else
                                      _('Not signed in yet'), fg=theme.GOLD_LIGHT if signed else theme.AMBER)
-                    button.configure(text=_('Sign in again') if signed else _('Sign in with Discord'),
-                                     style='Card.TButton' if signed else 'Card.Accent.TButton')
-
-            def say(text, color):
-                # The answer may come after the guide closed or moved to another step: its line is gone then.
-                if status.winfo_exists():
-                    status.configure(text=text, fg=color)
-
-            def sign_in_supermedo():
-                say(_('Starting the sign-in…'), theme.MUTED)
-
-                def on_page(page):
-                    import webbrowser
-                    webbrowser.open(page)
-                    app.ui_calls.put(lambda: say(
-                        _('Sign in with Discord in the page that opened, then come back here.'), theme.TEXT))
-
-                def work():
-                    try:
-                        name, secret = L.discord_sign_in(L.COMMUNITY_SERVER, on_page)
-                    except Exception as error:  # a broken reply too (BadStatusLine): the line always answers
-                        app.ui_calls.put(lambda e=L.connection_error(error, L.COMMUNITY_SERVER): say(
-                            _('Sign-in failed: {}').format(e), theme.BLOOD_LIGHT))
-                        return
-                    app.ui_calls.put(lambda: (npid.set(name), password.set(secret), show_supermedo(), app.collect()))
-                import threading
-                threading.Thread(target=work, daemon=True).start()
-            button = ttk.Button(row, text=_('Sign in with Discord'), style='Card.Accent.TButton',
-                                command=sign_in_supermedo)
-            button.pack(side='left')
+                    for widget in (again, ways):
+                        widget.pack_forget()
+                    (again.pack(anchor='w', pady=(px(8), 0)) if signed else
+                     ways.pack(anchor='w', fill='x', pady=(px(8), 0)))
+            L.bbport_signin.build(app, ways, theme.CARD, show_supermedo, accent='Card.Accent.TButton')
             show_supermedo()
-        elif L.HUNTERS_DREAM_POOL and pool.get() == 'huntersdream':
-            tk.Label(online, text=_("With The Hunter's Dream, together with bbhost players. It needs a free sign-in "
-                                    'with Discord, once.'), bg=theme.CARD, fg=theme.TEXT_SOFT, font=(theme.BODY, 9),
-                     justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(6), 0))
-            status = tk.Label(online, text='', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10))
-            status.pack(anchor='w', pady=(px(8), 0))
-            code = tk.Label(online, text='', bg=theme.CARD, fg=theme.TEXT_STRONG, font=(theme.HEAD_BOLD, 18))
-            row = tk.Frame(online, bg=theme.CARD)
-            row.pack(anchor='w', pady=(px(8), 0))
-            thd_id, thd_token = app.var('thd_online_id', 'app'), app.var('thd_token', 'app')
-
-            def show():
-                if status.winfo_exists():
-                    code.pack_forget()  # a sign-in's code, done with
-                    status.configure(text=_('Signed in as {}').format(thd_id.get()) if thd_token.get() else
-                                     _('Not signed in yet'), fg=theme.GOLD_LIGHT if thd_token.get() else theme.AMBER)
-                    button.configure(text=_('Sign in again') if thd_token.get() else _('Sign in with Discord'),
-                                     style='Card.TButton' if thd_token.get() else 'Card.Accent.TButton')
-
-            def say(text, color, shown_code=None):
-                # The answer may come after the guide closed or moved to another step: its widgets are gone then
-                # (code.pack_forget() on a gone one raised before the sign-in was saved).
-                if not status.winfo_exists():
-                    return
-                status.configure(text=text, fg=color)
-                if shown_code:
-                    code.configure(text=shown_code)
-                    code.pack(anchor='w', pady=(px(4), 0), before=row)
-                else:
-                    code.pack_forget()
-
-            def sign_in():
-                say(_('Starting the sign-in…'), theme.MUTED)
-
-                def on_code(page, text):
-                    app.ui_calls.put(lambda: say(
-                        _('In the page that opened, sign in with Discord and enter this code:'), theme.TEXT, text))
-                    import webbrowser
-                    webbrowser.open(page)
-
-                def work():
-                    try:
-                        name, token = L.thd_sign_in(on_code)
-                    except Exception as error:  # a broken reply too (BadStatusLine): the line always answers
-                        app.ui_calls.put(lambda e=L.connection_error(error, L.COMMUNITY_SERVER): say(
-                            _('Sign-in failed: {}').format(e), theme.BLOOD_LIGHT))
-                        return
-                    app.ui_calls.put(lambda: (thd_id.set(name), thd_token.set(token), show(), app.collect()))
-                import threading
-                threading.Thread(target=work, daemon=True).start()
-            button = ttk.Button(row, text=_('Sign in with Discord'), style='Card.Accent.TButton', command=sign_in)
-            button.pack(side='left')
-            show()
-        tk.Label(online, text=_("The Hunter's Dream (the previous server), your own server, and every option: the "
-                                'Online play page. Offline needs nothing: untick it.') if L.HUNTERS_DREAM_POOL else
-                 _('A shadNet server instead, and every option: the Online play page. Offline needs '
-                   'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
+        tk.Label(online, text=_('A shadNet server instead, and every option: the Online play page. Offline needs '
+                                'nothing: untick it.'), bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9),
                  justify='left', wraplength=px(660)).pack(anchor='w', pady=(px(10), 0))
 
     # -- V: ready --

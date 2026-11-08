@@ -22,8 +22,11 @@ SLOT, PROFILE = 1310720, 262144
 
 
 def make_save(folder, name='Hunter', slots=(0,), extra=()):
-    """A save folder like the game writes: ten slots (unused ones zero) and the profile."""
+    """A save folder like the game writes: ten slots (unused ones zero) and the profile, which marks the
+    used slots."""
     folder.mkdir(parents=True, exist_ok=True)
+    profile = bytearray(PROFILE)
+    profile[0] = 0x1a
     for i in range(10):
         data = bytearray(SLOT)
         if i in slots:
@@ -31,12 +34,20 @@ def make_save(folder, name='Hunter', slots=(0,), extra=()):
             text = name.encode('utf-16-le') + b'\0\0'
             data[0x8000:0x8008] = bytes(8)
             data[0x8008:0x8008 + len(text)] = text
+            profile[saves.PROFILE_LISTED + i] = 1
         (folder / f'userdata{i:04d}').write_bytes(bytes(data))
-    (folder / 'userdata0010').write_bytes(b'\x1a' + bytes(PROFILE - 1))
+    (folder / 'userdata0010').write_bytes(bytes(profile))
     (folder / 'backup0000').write_bytes(bytes(SLOT))
     for name_ in extra:
         (folder / name_).write_bytes(b'meta')
     return folder
+
+
+def delete_in_game(folder, slot):
+    """What the game's Load Game > Delete does: the slot's byte in the profile to 0, its file stays."""
+    profile = bytearray((folder / 'userdata0010').read_bytes())
+    profile[saves.PROFILE_LISTED + slot] = 0
+    (folder / 'userdata0010').write_bytes(bytes(profile))
 
 
 class SaveTests(unittest.TestCase):
@@ -64,13 +75,40 @@ class SaveTests(unittest.TestCase):
         appdata, local = self.root / 'Roaming', self.root / 'Local'
         make_save(appdata / 'shadPS4' / 'home' / '1000' / 'savedata' / 'CUSA00207' / 'SPRJ0005')
         make_save(appdata / 'shadPS4' / 'savedata' / '1' / 'CUSA03173' / 'SPRJ0005')
-        make_save(local / 'bbhost' / 'data' / 'saves' / 'SPRJ0005')
         make_save(self.root / 'BB.Other' / 'user' / 'savedata' / '1' / 'CUSA00207' / 'SPRJ0005')
         (self.root / 'BB.Other' / 'run.py').write_text('')
         mine = make_save(saves.target_dir(self.user))
         with mock.patch.dict(os.environ, {'APPDATA': str(appdata), 'LOCALAPPDATA': str(local)}):
             found = saves.scan(self.root / 'port', exclude=[mine])
-        self.assertEqual(sorted(s.source for s in found), ['bbhost', 'bbport (BB.Other)', 'shadPS4', 'shadPS4'])
+        self.assertEqual(sorted(s.source for s in found), ['bbport (BB.Other)', 'shadPS4', 'shadPS4'])
+
+    def test_seamless_coops_own_characters_stay_apart(self):
+        """BBSC changes the items of the characters it plays: its own (user/seamless-coop) are never offered to
+        the normal saves, and Seamless co-op is offered the normal characters, first, to copy in."""
+        normal = make_save(saves.target_dir(self.user), 'Normal')
+        coop = make_save(saves.target_dir(self.user / saves.COOP_SAVES), 'Coop')
+        with mock.patch.dict(os.environ, {'APPDATA': '', 'LOCALAPPDATA': ''}):
+            self.assertEqual(saves.scan(self.root / 'port', exclude=[normal]), [])
+            found = saves.scan(self.root / 'port', exclude=[coop], extra=[('Your normal characters', normal)])
+            self.assertEqual(saves.misplaced(self.root / 'empty'), ([], []))
+        self.assertEqual([(s.source, s.folder) for s in found], [('Your normal characters', normal)])
+
+    def test_bbsc_copies_are_only_offered_to_seamless_coop(self):
+        """BBSC's copies before it changes a character (bbsc/save-backups/<moment>/save-dir/SPRJ0005), here and in
+        an older installation, hold its items: the setup guide offered them for the normal saves (2026-11-02)."""
+        mine = make_save(saves.target_dir(self.user), 'Normal')
+        copy = make_save(self.root / 'port' / 'bbsc' / 'save-backups' / 'before-duel-bell-1' / 'save-dir' / 'SPRJ0005',
+                         'Coop')
+        old = make_save(self.root / 'BB.Old' / 'bbsc' / 'save-backups' / 'before-duel-bell-2' / 'save-dir' /
+                        'SPRJ0005', 'Coop')
+        (self.root / 'BB.Old' / 'run.py').write_text('')
+        self.assertTrue(saves.from_seamless(copy) and saves.from_seamless(saves.target_dir(self.user / 'seamless-coop')))
+        self.assertFalse(saves.from_seamless(mine))
+        with mock.patch.dict(os.environ, {'APPDATA': '', 'LOCALAPPDATA': ''}):
+            for_normal = saves.scan(self.root / 'port', exclude=[mine])
+            for_coop = saves.scan(self.root / 'port', exclude=[mine], seamless=True)
+        self.assertEqual(for_normal, [])
+        self.assertEqual(sorted(s.folder for s in for_coop), sorted([copy, old]))
 
     def test_benchmark_characters_are_not_offered(self):
         """A port build's bundled benchmark character (benchmark/savedata/…) and recorded test routes are
@@ -92,13 +130,13 @@ class SaveTests(unittest.TestCase):
 
     def test_import_backs_up_copies_and_restores(self):
         mine = make_save(saves.target_dir(self.user), 'Old')
-        other = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
-                                                  extra=('sce_param.bin', 'icon0.png')))
+        other = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
+                                                         extra=('sce_param.bin', 'icon0.png')))
         archive = saves.import_set(other, self.user)
         self.assertTrue(archive.is_file())
         self.assertEqual(saves.SaveSet('', mine).names, ['New'])
         meta = mine.with_name('SPRJ0005.sce_sys')
-        self.assertEqual((meta / 'param.bin').read_bytes(), b'meta')  # bbhost's sce_param.bin
+        self.assertEqual((meta / 'param.bin').read_bytes(), b'meta')  # the save's own sce_param.bin
         self.assertFalse((mine / 'sce_param.bin').exists())  # only the game's own files go into the save
         self.assertFalse((self.user / 'save_import').exists())
         self.assertEqual(sorted(p.name for p in mine.parent.iterdir()), ['SPRJ0005', 'SPRJ0005.sce_sys'])
@@ -117,9 +155,9 @@ class SaveTests(unittest.TestCase):
         self.assertEqual((old_user / 'trophies.log').read_text(encoding='utf-8'), '14 100\n15 200\n')  # source as it was
 
     def test_no_achievements_from_elsewhere_or_from_this_folder(self):
-        bbhost = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005'))
+        elsewhere = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005'))
         (self.root / 'data' / 'trophies.log').write_text('14 100\n', encoding='utf-8')
-        self.assertEqual(saves.bring_trophies(bbhost, self.user), 0)
+        self.assertEqual(saves.bring_trophies(elsewhere, self.user), 0)
         mine = saves.SaveSet('', make_save(saves.target_dir(self.user)))
         (self.user / 'trophies.log').write_text('14 100\n', encoding='utf-8')
         self.assertEqual(saves.bring_trophies(mine, self.user), 0)
@@ -266,6 +304,37 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(kinds.count('auto'), 3)
         self.assertTrue(mine.exists())
 
+    def test_a_named_automatic_backup_is_kept(self):
+        """Renamed by the player ("before Orphan"), an automatic backup is theirs: it was deleted ten starts later
+        like any other (2026-11-02)."""
+        first = saves.auto_backup(self.user)
+        named = saves.rename_backup(first, 'Before Orphan')
+        for number in range(5):
+            stamp = time.time() + 120 * (number + 1)
+            os.utime(self.save / 'userdata0000', (stamp, stamp))
+            with mock.patch.object(saves.datetime, 'datetime', wraps=saves.datetime.datetime) as clock:
+                clock.now.return_value = saves.datetime.datetime.fromtimestamp(stamp + 1)
+                saves.auto_backup(self.user, keep=2)
+        self.assertTrue(named.exists())
+        unnamed = [b for b in saves.backups(self.user) if b.reason == 'auto' and not b.label]
+        self.assertEqual(len(unnamed), 2)
+
+    def test_a_backup_added_from_a_file_does_not_stop_the_next_automatic_one(self):
+        """A friend's zip added after playing is dated now but holds another save: the session played before it
+        still gets its automatic backup at the next start (2026-11-02)."""
+        saves.auto_backup(self.user)
+        stamp = time.time() + 120
+        os.utime(self.save / 'userdata0000', (stamp, stamp))  # played
+        friend = self.root / 'friend.zip'
+        with zipfile.ZipFile(friend, 'w') as zipped:
+            for path in self.save.iterdir():
+                zipped.write(path, f'savedata/1/CUSA00207/SPRJ0005/{path.name}')
+        with mock.patch.object(saves.datetime, 'datetime', wraps=saves.datetime.datetime) as clock:
+            clock.now.return_value = saves.datetime.datetime.fromtimestamp(stamp + 60)
+            saves.add_backup_file(friend, self.user)
+            made = saves.auto_backup(self.user)
+        self.assertIsNotNone(made)
+
     def test_restore_takes_only_the_games_files(self):
         archive = self.root / 'other.zip'
         with zipfile.ZipFile(archive, 'w') as zipped:
@@ -299,6 +368,30 @@ class BackupTests(unittest.TestCase):
         item = saves.Backup(added)
         self.assertEqual((item.reason, item.detail, item.names), ('file', 'from a friend', ['Nick', 'Nick']))
 
+    def test_a_character_deleted_in_the_game_is_not_listed(self):
+        """Load Game > Delete keeps the slot file; only the profile's byte says it is gone."""
+        delete_in_game(self.save, 3)
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000'])
+        made = saves.backup(self.user)
+        self.assertTrue(made.name.endswith(' - Nick.zip'))
+        self.assertIn('savedata/1/CUSA00207/SPRJ0005/userdata0003', zipfile.ZipFile(made).namelist())  # kept
+        old = saves.backup_dir(self.user) / 'saves_2026-10-12_101500.zip'
+        with zipfile.ZipFile(old, 'w') as zipped:  # without the launcher's notes: names from the files
+            for path in self.save.iterdir():
+                zipped.write(path, f'savedata/1/CUSA00207/SPRJ0005/{path.name}')
+        self.assertEqual(saves.Backup(old).names, ['Nick'])
+        copy = self.root / 'from a friend.zip'
+        copy.write_bytes(made.read_bytes())
+        self.assertEqual(saves.Backup(saves.add_backup_file(copy, self.user)).names, ['Nick'])
+
+    def test_a_profile_that_cannot_tell_leaves_it_to_the_files(self):
+        profile = bytearray((self.save / 'userdata0010').read_bytes())
+        profile[saves.PROFILE_LISTED + 5] = 0x1a  # not 0 or 1 there: another layout
+        (self.save / 'userdata0010').write_bytes(bytes(profile))
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000', 'userdata0003'])
+        (self.save / 'userdata0010').write_bytes(b'\x1a' + bytes(16))  # too short to tell
+        self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000', 'userdata0003'])
+
 
 def contents(folder):
     """{file name: SHA-256} of a folder's files (a failed comparison of the files' bytes takes minutes to show)."""
@@ -319,8 +412,8 @@ class SwapTests(unittest.TestCase):
         self.meta.mkdir()
         (self.meta / 'param.bin').write_bytes(b'old meta')
         self.before = contents(self.mine), contents(self.meta)
-        self.other = saves.SaveSet('bbhost', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
-                                                       slots=(0, 5), extra=('backup0002',)))
+        self.other = saves.SaveSet('Backup (data)', make_save(self.root / 'data' / 'saves' / 'SPRJ0005', 'New',
+                                                              slots=(0, 5), extra=('backup0002',)))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -442,7 +535,7 @@ class ImportWindowTests(unittest.TestCase):
                                                showerror=lambda title, text: said.append(text))
 
             def var(self, key, store):
-                return types.SimpleNamespace(get=lambda: {'user_dir': str(user), 'game_dir': ''}[key])
+                return types.SimpleNamespace(get=lambda: {'user_dir': str(user), 'game_dir': '', 'online': False, 'online_pool': 'supermedo'}[key])
 
             def trophies_changed(self, new, announce=True):
                 changed.append((new, announce))
