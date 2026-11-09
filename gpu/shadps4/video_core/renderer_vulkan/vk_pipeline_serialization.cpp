@@ -140,7 +140,12 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
         return false;
     }
 
-    fetch_shader_data = spec.fetch_shader_data;
+    // bbport: only a stage with a fetch shader sets it, as the run-time path does
+    // (PipelineCache::RefreshGraphicsStages). The geometry stage loads after the vertex stage and
+    // has none, so it cleared the vertex stage's: preloaded geometry pipelines read no vertices.
+    if (spec.fetch_shader_data) {
+        fetch_shader_data = spec.fetch_shader_data;
+    }
     return true;
 }
 

@@ -665,9 +665,35 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
             image_id = {};
         } else if (image_resolved.info.resources < info.resources) {
             // The image was clearly picked up wrong.
-            FreeImage(image_id);
-            image_id = {};
-            LOG_WARNING(Render_Vulkan, "Image overlap resolve failed");
+            // bbport: it may hold what the GPU drew into it (rainbow tiles on enemies being hit, once
+            // it was freed and made again empty). When the GPU's copy is the current one
+            // (SafeToDownload), with the same size, type and sample count in a compatible format,
+            // resolved at its first level and layer, the new image gets its levels and layers copied
+            // (ExpandImage, as ResolveOverlap does for larger images). Otherwise it is made empty
+            // and takes what is in guest memory, also what the CPU wrote since. Either way the new
+            // image is made for this request, so it is viewed from its first level and layer.
+            const auto& old = image_resolved.info;
+            const bool keep = image_resolved.SafeToDownload() && old.size == info.size &&
+                              old.type == info.type &&
+                              old.num_samples == info.num_samples &&
+                              IsVulkanFormatCompatible(old.pixel_format, info.pixel_format) &&
+                              view_mip <= 0 && view_slice <= 0;
+            LOG_WARNING(Render_Vulkan,
+                        "Image overlap resolve failed: {} {}x{}x{}, {} levels, {} layers (view at "
+                        "level {}, layer {}) -> {} {}x{}x{}, {} levels, {} layers: {}",
+                        vk::to_string(old.pixel_format), old.size.width, old.size.height,
+                        old.size.depth, old.resources.levels, old.resources.layers, view_mip,
+                        view_slice, vk::to_string(info.pixel_format), info.size.width, info.size.height,
+                        info.size.depth, info.resources.levels, info.resources.layers,
+                        keep ? "copied into the new image" : "new image made empty");
+            if (keep) {
+                image_id = ExpandImage(info, image_id); // looks the old image up again itself
+            } else {
+                FreeImage(image_id);
+                image_id = {};
+            }
+            view_mip = -1;
+            view_slice = -1;
         }
     }
     // Create and register a new image
