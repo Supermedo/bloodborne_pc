@@ -131,7 +131,7 @@ class PlayersPcTests(unittest.TestCase):
         self.assertEqual(r.levels['1080p'], 2)  # the card and processor decide the frame rate, not the RAM
         settings = profile(r, (1920, 1080))
         self.assertEqual((settings['output_res'], settings['upscaler'], settings['preset'], settings['fps_mode']),
-                         ('1920x1080', 'fsr3', '3', '60'))
+                         ('1920x1080', 'dlss', '3', '60'))  # a 4 GB RTX gets DLSS (R82)
 
     def test_a_gtx_1060_3_gb(self):
         """A player's GTX 1060 3 GB that got up to the Blood-Starved Beast on older versions."""
@@ -150,11 +150,11 @@ class PlayersPcTests(unittest.TestCase):
         r = rate_detected('AMD Radeon RX 570 Series', 8, 'AMD Ryzen 3 3200G with Radeon Vega Graphics', 8)
         self.assertEqual(r.gpu.id, 'amd-rx-570-8-gb')
         self.assertRunsBelowTheMinimum(r, 'ram')
-        self.assertEqual(r.levels['1080p'], 2)
+        self.assertEqual(r.levels['1080p'], 3)  # players' RX 570/580 hold 55–65 FPS (R82)
         settings = profile(r, (1920, 1080))
         self.assertEqual((settings['output_res'], settings['upscaler'], settings['preset'], settings['fps_mode']),
-                         ('1920x1080', 'fsr3', '3', '30'))
-        self.assertEqual(settings['model_lod'], '1')
+                         ('1920x1080', 'fsr3', '2', '60'))
+        self.assertEqual(settings['model_lod'], '0')
 
     def test_no_vulkan_1_3_still_stops_the_port(self):
         r = rate_detected('NVIDIA GeForce GTX 780', 3, 'AMD Ryzen 7 5800X 8-Core Processor', 32)
@@ -168,7 +168,7 @@ class PlayersPcTests(unittest.TestCase):
         for card in hardware.GPU_LIST:
             for ram in (4, 8, 12, 16):
                 r = hardware.assess(card, cpu, ram)
-                blocked = not card.vulkan13 or card.score < 25
+                blocked = not card.vulkan13 or card.score < 12
                 self.assertEqual(r.tier == 0, blocked, (card.label, ram))
                 self.assertEqual(r.levels['1080p'] > 0, not blocked, (card.label, ram))
 
@@ -235,10 +235,10 @@ class ProfileTests(unittest.TestCase):
         settings down to 640x360. Expect under 30 FPS and cap at 30; the picture follows the card."""
         r = rate('nvidia-gtx-1080', 'Intel(R) Core(TM) i7-7820HK CPU @ 2.90GHz', 32)
         self.assertEqual((r.tier_label, r.limit, r.levels['1080p'], r.picture_levels['1080p']),
-                         ('Below minimum', 'cpu', 1, 3))
+                         ('Below minimum', 'cpu', 1, 4))
         self.assertTrue(any(part == 'cpu' and 'Laptop processor' in text for _s, part, text in r.checks))
         settings = profile(r)
-        self.assertEqual((settings['output_res'], settings['fps_mode'], settings['preset']), ('1920x1080', '30', '2'))
+        self.assertEqual((settings['output_res'], settings['fps_mode'], settings['preset']), ('2560x1440', '30', '1'))  # the output follows the card (R82)
         self.assertTrue(settings['effect_ssao'] and settings['effect_dynamic_shadows'])
         self.assertEqual(settings['model_lod'], '0')
         same_card = profile(rate('nvidia-gtx-1080', 'AMD Ryzen 7 5800X', 32))
