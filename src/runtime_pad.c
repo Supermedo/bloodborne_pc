@@ -16,6 +16,7 @@
 #include "gpu/bbgpu.h"
 #include "runtime_input_config.h"
 #include <errno.h>
+#include "runtime_atlas_release.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -624,7 +625,9 @@ static void sample_host(PadData *d) {
     /* The controller as it is now, not as the window thread last took its events (up to a
      * millisecond or two before): SDL locks its joysticks for this itself. */
     if (g) SDL_UpdateGamepads();
-    if (bbgpu_overlay_captures_input()) return; /* settings menu open: neutral input */
+    /* Atlas consumes the same mapped controls as the game. Keep sampling while
+     * it owns input; the completed sample is neutralized after routing below. */
+    if (bbgpu_overlay_captures_input() && !bbgpu_atlas_captures_input()) return;
     const InputConfig *cfg=active_config();
     BbMouseInput mouse; bbgpu_mouse_take(&mouse); /* MOU-008: drains dx/dy; buttons/wheel persist */
     static HostState host; /* ~1 KB with the held-combo list: kept off the game thread's stack */
@@ -876,6 +879,7 @@ static void replay_sample(PadData *d) {
 /* After the menu or the text dialog closes, buttons still held (the Cross that accepted a
  * name) stay hidden until released: the game would take them as a new press. */
 static int hold_after_capture;
+static BbAtlasRelease atlas_release;
 /* Touches as the DualShock 4 reports them: every finger that goes down gets a new id (1..127, kept
  * while it stays down) and the time since the first one went down. With id 0 and no hold time
  * the game ignores touchpad presses: no gesture menu from the touchpad, Back or a key. */
@@ -896,7 +900,7 @@ static void sample(PadData *d) {
     bbgpu_input_note_read();
     reload_config_if_requested();
     sample_host(d);
-    if (bbgpu_overlay_captures_input()) { hold_after_capture=1; return; }
+    if (bbgpu_overlay_captures_input() && !bbgpu_atlas_captures_input()) { hold_after_capture=1; return; }
     record_sample(d);
     read_inject();
     replay_sample(d);
@@ -907,6 +911,23 @@ static void sample(PadData *d) {
     if (injected.buttons & BTN_R2) d->r2=255;
     uint8_t *axes[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
+    const uint32_t raw_buttons=d->buttons;
+    uint8_t sampled_axes[4]={d->left_x,d->left_y,d->right_x,d->right_y};
+    uint8_t sampled_triggers[2]={d->l2,d->r2};
+    const int atlas_capture_before=bbgpu_atlas_captures_input();
+    d->buttons=bbgpu_atlas_route_pad(d->buttons,d->left_x,d->left_y,d->right_x,d->right_y);
+    if (atlas_capture_before || bbgpu_atlas_captures_input()) {
+        bb_atlas_remember(&atlas_release,raw_buttons,sampled_axes,sampled_triggers);
+        d->buttons=0;d->left_x=d->left_y=d->right_x=d->right_y=128;
+        d->l2=d->r2=0;d->touch_count=0;
+        touch_ids(d);
+        return;
+    }
+    bb_atlas_release_filter(&atlas_release,raw_buttons,&d->buttons,sampled_axes,sampled_triggers);
+    d->left_x=sampled_axes[0];d->left_y=sampled_axes[1];
+    d->right_x=sampled_axes[2];d->right_y=sampled_axes[3];
+    d->l2=sampled_triggers[0];d->r2=sampled_triggers[1];
+    if (!(d->buttons & BTN_TOUCHPAD))d->touch_count=0;
     touch_ids(d);
     if (hold_after_capture) {
         if (d->buttons) d->buttons=0;

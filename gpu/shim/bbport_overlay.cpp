@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_overlay.h"
+#include "bbport_native_mods.h"
 
 #include <algorithm>
 #include <array>
@@ -1681,6 +1682,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         std::scoped_lock trophy_lock{trophy_mutex};
         overlay_ready = std::chrono::steady_clock::now();
     }
+    BbNativeMods::Init(instance, format, image_count);
     std::printf("Overlay: menu ready (%s)\n", MenuOpeners().c_str());
 }
 
@@ -1700,6 +1702,9 @@ void UpdateTextInput(SDL_Window* window) {
 }
 
 bool HandleEvent(const SDL_Event& event) {
+    if (BbNativeMods::HandleEvent(event)) {
+        return true;
+    }
     std::scoped_lock lock{imgui_mutex};
     if (!initialized) {
         return false;
@@ -1806,12 +1811,13 @@ bool Visible() {
     // First and every frame: it also retires a pop-up whose time is up (and starts BB_TROPHY_TEST),
     // which an FPS counter that is on must not skip.
     const bool trophy = TrophyActive();
-    return initialized &&
-           (trophy || menu_open || text_entry_active || WarningActive() || ReadoutsOn());
+    if (!initialized) return false;
+    const bool native = BbNativeMods::TickAndVisible(menu_open || text_entry_active);
+    return trophy || native || menu_open || text_entry_active || WarningActive() || ReadoutsOn();
 }
 
 bool CapturesInput() {
-    return menu_open || text_entry_active;
+    return menu_open || text_entry_active || BbNativeMods::CapturesInput();
 }
 
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text) {
@@ -1894,7 +1900,8 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     // What is actually presented: follows a window resize, unlike the configured output.
     output_width = extent.width;
     output_height = extent.height;
-    if (!Visible()) {
+    BbNativeMods::Render(cmdbuf, view, extent);
+    if (!(menu_open || text_entry_active || WarningActive() || ReadoutsOn())) {
         return;
     }
     std::scoped_lock lock{imgui_mutex};

@@ -792,6 +792,19 @@ def main():
     if env.get('BB_MODS_GAME_LAST') == '1':
         # Seamless co-op (bbport_yharnam.environment): the game's -mods folder, the co-op events, over the mods.
         mod_args.append('--game-mods-last')
+    # Native modules use the same enabled/order list as file mods. Validate and
+    # prepare their launch-only DLL list before the game view changes `game`.
+    from native_mods import digest as native_mod_digest, prepare as prepare_native_mods
+    try:
+        # Native manifests identify the complete SELF file, as Atlas 3.1 does;
+        # its host services independently fingerprint every mapped code entry.
+        native_game_sha256 = native_mod_digest(original_game / 'eboot.bin')
+    except OSError:
+        native_game_sha256 = None
+    prepare_native_mods(env.get('BB_MODS_DIR', data / 'mods'),
+                        env.get('BB_MODS_CONFIG', data / 'mods.json'),
+                        native_game_sha256, out, env,
+                        enabled=env.get('BB_MODS_ENABLED', '1') == '1')
     view = run_script('mods.py', *mod_args, '--layer', text_layer, '--layer', rebirth_layer, '--layer', items_layer,
                       '--layer', hud_layer,
                       '--layer', fov_layer, capture=True, optional=True, timeout=60)

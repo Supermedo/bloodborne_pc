@@ -1,6 +1,7 @@
 #include "bbport_write_log.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
+#include "bbport_native_mods.h"
 #include "bbport_settings.h"
 #include "bbport_copy.h"
 #ifndef _WIN32
@@ -424,6 +425,15 @@ extern "C" int bbgpu_overlay_captures_input(void) {
 
 extern "C" void bbgpu_trophy_unlocked(int id) {
     BbOverlay::TrophyUnlocked(id);
+}
+
+extern "C" uint32_t bbgpu_atlas_route_pad(uint32_t buttons, uint8_t lx, uint8_t ly,
+                                            uint8_t rx, uint8_t ry) {
+    return BbNativeMods::RoutePad(buttons, lx, ly, rx, ry);
+}
+
+extern "C" int bbgpu_atlas_captures_input(void) {
+    return BbNativeMods::CapturesInput() ? 1 : 0;
 }
 
 extern "C" int bbgpu_audio_muted(void) {

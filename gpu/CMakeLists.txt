@@ -265,6 +265,7 @@ if (WIN32)
     target_link_libraries(bbnet PUBLIC ws2_32 iphlpapi bcrypt crypt32)
 endif()
 target_link_libraries(bbgpu PUBLIC bbnet)
+target_link_libraries(bbgpu PRIVATE nlohmann_json::nlohmann_json)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
 target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp

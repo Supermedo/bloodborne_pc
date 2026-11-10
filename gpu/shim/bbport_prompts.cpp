@@ -199,6 +199,10 @@ void OnControllerConnected(Device value) {
     if (device.compare_exchange_strong(unknown, value, std::memory_order_relaxed)) dirty = true;
 }
 
+bool UsingController() {
+    return device.load(std::memory_order_relaxed) > Keyboard;
+}
+
 void OnUpload(uintptr_t address, size_t size, uint32_t width, uint32_t height, uint32_t levels,
               uint32_t bits) {
     static const bool trace = [] {
