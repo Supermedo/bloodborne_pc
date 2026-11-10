@@ -91,7 +91,8 @@ WORDS = {
                            'grafikfehler treiber driver',
     'button:versions': 'version versionen andere altere alte fruhere older old previous rollback downgrade upgrade '
                        'zuruck installieren',
-    'button:respec': 'respec umverteilen neu verteilen attribute attributpunkte punkte stats skillung',
+    'button:appearance': 'appearance aussehen look face gesicht haare hair gender geschlecht voice stimme '
+                         'mirror spiegel character creation charaktererstellung',
     'button:fsr4': 'fsr4 fsr 4 herunterladen download dateien fehlen assets',
     'button:fsr4vk': 'fsr4vk fsr 4.1 fsr411 herunterladen download reparieren vulkan',
     'online': 'online koop coop co-op multiplayer seamless freunde friends friend glocke bell beschworen summon '

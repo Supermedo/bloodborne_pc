@@ -15,7 +15,7 @@ import bbport_search as search  # noqa: E402
 IMPORTANT = {
     'clear_cache': 'button:shader_cache',
     'save_report': 'button:report',
-    'open_respec': 'button:respec',
+    'open_appearance': 'button:appearance',
     'choose_version': 'button:versions',
     'download_fsr4': 'button:fsr4',
     'download_fsr411': 'button:fsr4vk',

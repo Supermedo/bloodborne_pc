@@ -342,10 +342,11 @@ def find_in(root, depth=6):
 
 
 # ---- put where the game does not read it ---------------------------------------------------------------
-# Copies of this port's own saves in its saves folder (the backups, a respec's copy, an import's staging, the
-# files an import or a restore replaced): never taken for a save the player put in the wrong place.
+# Copies of this port's own saves in its saves folder (the backups, the copies an appearance change and the
+# respec of earlier versions kept, an import's staging, the files an import or a restore replaced): never taken
+# for a save the player put in the wrong place.
 REPLACED_DIR = 'save_replaced'
-OWN_COPIES = {'save_backups', 'save-backups', 'respec-backups', 'save_import', REPLACED_DIR,
+OWN_COPIES = {'save_backups', 'save-backups', 'respec-backups', 'appearance-backups', 'save_import', REPLACED_DIR,
               'savedata.benchmark-backup'}
 
 
@@ -407,9 +408,10 @@ def adopt_misplaced(user_dir, game_dir=''):
 # apart in Explorer too. Backups from before (saves_<date>.zip) have no such file: 'old'.
 BACKUP_DIR = 'save_backups'
 BACKUP_META = 'bbport-backup.json'
+# 'respec': the launcher's respec of earlier versions; its backups are still listed.
 REASONS = {'manual': 'Saved by hand', 'auto': 'Before playing', 'exit': 'After playing',
            'import': 'Before an import', 'restore': 'Before a restore', 'respec': 'Before a respec',
-           'file': 'From a file', 'old': 'Earlier backup'}
+           'appearance': 'Before an appearance change', 'file': 'From a file', 'old': 'Earlier backup'}
 WORDS = dict(REASONS)  # the words for file names; the launcher puts its translations here
 AUTO_KEEP = 10  # automatic backups kept; the player's own are never removed by the launcher
 META_FILES = {'param.bin', 'icon0.png'}
