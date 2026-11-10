@@ -317,7 +317,7 @@ from bbport_input_config import (STICK_OUTPUTS, OUTPUT_LABELS, ACTION_GROUPS, SL
                                   load_controller_bindings, save_controller_bindings,
                                   keyboard_layout, windows_mouse_poller)  # noqa: E402
 import bbport_gamepad  # noqa: E402
-import bbport_respec as respec  # noqa: E402
+import bbport_appearance as appearance  # noqa: E402
 import bbport_textfile as textfile  # noqa: E402
 
 LANG = 'en'
@@ -3170,31 +3170,40 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         camera.trace_add('write', lambda *_a: camera.get() and control.set(False))
         for key, _title, _on in CHEATS:
             self.var(key, 'ini').trace_add('write', lambda *_a: self.refresh_status())
-        self.section(f, _('Respec', 'Перераспределение'))
+        self.section(f, _('Change appearance', 'Изменение внешности'))
         holder = self.ttk.Frame(f)
-        self.ttk.Button(holder, text=_('Respec a character…', 'Перераспределить характеристики…'),
-                        command=self.open_respec).pack(side='left')
-        self.index_entry(holder, _('Respec a character…', 'Перераспределить характеристики…'), key='button:respec')
+        self.ttk.Button(holder, text=_("Change a character's appearance…", 'Изменить внешность персонажа…'),
+                        command=self.open_appearance).pack(side='left')
+        self.index_entry(holder, _("Change a character's appearance…", 'Изменить внешность персонажа…'),
+                         key='button:appearance')
         self.row(f, '', holder,
-                 _("Spread a character's attribute points again: same level, same Blood Echoes. Changes the save "
-                   'while the game is closed; the saves from before go into your backups (Saves).',
-                   'Заново распределить очки характеристик персонажа: тот же уровень и Отголоски крови. Меняет '
-                   'сохранение, пока игра закрыта; прежние сохранения попадают в ваши резервные копии (Сохранения).'))
+                 _('Give a character the look of another one: start a new game in an empty slot, make the look you '
+                   'want, then copy it here. Only the appearance, gender and voice change. Changes the save while the '
+                   'game is closed; the saves from before go into your backups (Saves).',
+                   'Передать персонажу внешность другого: начните новую игру в пустой ячейке, создайте нужную '
+                   'внешность и скопируйте её здесь. Меняются только внешность, пол и голос. Меняет сохранение, '
+                   'пока игра закрыта; прежние сохранения попадают в ваши резервные копии (Сохранения).'))
 
-    def open_respec(self):
-        """The respec dialog (bbport_respec): a character, its six attributes, Apply."""
+    def open_appearance(self):
+        """The appearance dialog (bbport_appearance): the character whose look to take, the one to give it to."""
         tk, ttk = self.tk, self.ttk
-        title = _('Respec', 'Перераспределение')
+        title = _('Change appearance', 'Изменение внешности')
         if self.game_running():
             self.messagebox.showinfo(title, _('Close the game first: it would save over the change.',
                                               'Сначала закройте игру: она запишет сохранение поверх.'))
             return
         user = Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user')
-        found = [(folder, slot, who) for folder in respec.save_folders(user)
+        found = [(folder, slot, who) for folder in appearance.save_folders(user)
                  for listed in [saves.slots_in_use(folder)]  # not the ones deleted in the game
-                 for slot, who in respec.characters(folder) if saves.SLOTS[slot] in listed]
+                 for slot, who in appearance.characters(folder) if saves.SLOTS[slot] in listed]
         if not found:
             self.messagebox.showinfo(title, _('No characters found in {}.', 'Персонажи не найдены в {}.').format(user))
+            return
+        if len(found) < 2:
+            self.messagebox.showinfo(title, _('Make a second character with the look you want first: a new game in '
+                                              'an empty slot. Its appearance can then be copied onto this one.',
+                                              'Сначала создайте второго персонажа с нужной внешностью: новая игра в '
+                                              'пустой ячейке. Затем её можно скопировать на этого.'))
             return
         win = tk.Toplevel(self.root)
         win.title(title)
@@ -3203,70 +3212,54 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         win.resizable(False, False)
         body = ttk.Frame(win, padding=16)
         body.pack(fill='both', expand=True)
-        labels = [_('Slot {}: {} (level {})', 'Ячейка {}: {} (уровень {})').format(slot + 1, who['name'] or '—', who['level'])
+        labels = [_('Slot {}: {} (level {})', 'Ячейка {}: {} (уровень {})').format(slot + 1, who.name or '—', who.level)
                   for _folder, slot, who in found]
-        chosen = tk.StringVar(value=labels[0])
-        ttk.Combobox(body, textvariable=chosen, values=labels, state='readonly', width=36).grid(
-            row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-        # the attributes as the game names them in its text language (as on the Saves page)
-        words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
-        values = {a: tk.IntVar() for a in respec.ATTRIBUTES}
-        for row, a in enumerate(respec.ATTRIBUTES, start=1):
-            ttk.Label(body, text=words.attribute(a)).grid(row=row, column=0, sticky='w', padx=(0, 16), pady=2)
-            ttk.Spinbox(body, from_=respec.FLOORS[a], to=respec.MAX, textvariable=values[a], width=6).grid(
+        donor, target = tk.StringVar(value=labels[-1]), tk.StringVar(value=labels[0])
+        for row, (text, var) in enumerate(((_('Take the look of', 'Взять внешность'), donor),
+                                           (_('Give it to', 'Передать'), target))):
+            ttk.Label(body, text=text).grid(row=row, column=0, sticky='w', padx=(0, 16), pady=2)
+            ttk.Combobox(body, textvariable=var, values=labels, state='readonly', width=36).grid(
                 row=row, column=1, sticky='w', pady=2)
-        left = ttk.Label(body, style='Muted.TLabel')
-        left.grid(row=8, column=0, columnspan=2, sticky='w', pady=(10, 0))
+        ttk.Label(body, style='Muted.TLabel', wraplength=420, justify='left',
+                  text=_('Only the appearance, gender and voice change: the level, attributes, items and progress '
+                         'stay. The character the look comes from stays as it is.',
+                         'Меняются только внешность, пол и голос: уровень, характеристики, предметы и прогресс '
+                         'остаются. Персонаж, у которого берётся внешность, не меняется.')).grid(
+            row=2, column=0, columnspan=2, sticky='w', pady=(10, 0))
         buttons = ttk.Frame(body)
-        buttons.grid(row=9, column=0, columnspan=2, sticky='e', pady=(12, 0))
+        buttons.grid(row=3, column=0, columnspan=2, sticky='e', pady=(12, 0))
 
-        def current():
-            return found[labels.index(chosen.get())]
+        def pick(var):
+            return found[labels.index(var.get())]
 
-        def load(*_a):
-            for a in respec.ATTRIBUTES:
-                values[a].set(current()[2]['attributes'][a])
-
-        def points(*_a):
-            try:
-                spent = sum(values[a].get() for a in respec.ATTRIBUTES)
-            except tk.TclError:
-                left.configure(text='')
-                return
-            remaining = sum(current()[2]['attributes'].values()) - spent
-            left.configure(text=_('Points to place: {}', 'Осталось распределить: {}').format(remaining) if remaining >= 0
-                           else _('{} points too many', 'Лишних очков: {}').format(-remaining))
-            apply.state(['!disabled'] if remaining == 0 else ['disabled'])
+        def allowed(*_a):
+            (from_folder, _s, _w), (to_folder, _t, _v) = pick(donor), pick(target)
+            apply.state(['!disabled'] if donor.get() != target.get() and from_folder == to_folder else ['disabled'])
 
         def save():
-            folder, slot, who = current()
+            (folder, slot, who), (_f, source, _w) = pick(target), pick(donor)
             try:
-                new = {a: values[a].get() for a in respec.ATTRIBUTES}
-                respec.check(who['attributes'], new)
-                # The saves from before in the backups (Saves: restorable there) when the backups cover
-                # this folder; else respec keeps a copy beside them.
+                # The saves from before in the backups (Saves: restorable there) when the backups cover this
+                # folder; else bbport_appearance keeps a copy beside them.
                 game = self.var('game_dir', 'app').get()
-                made = saves.backup(user, game, reason='respec', detail=who.get('name', '')) \
-                    if saves.target_dir(user, game).resolve() == Path(folder).resolve() else None
-                backup = respec.respec(folder, slot, new, copy=made is None)
-            except (ValueError, OSError, tk.TclError) as error:
+                covered = saves.target_dir(user, game).resolve() == Path(folder).resolve()
+                appearance.check(folder, source, slot)  # nothing to copy: no backup for it either
+                made = saves.backup(user, game, reason='appearance', detail=who.name) if covered else None
+                backup = appearance.copy(folder, source, slot, backup=made is None)
+            except (ValueError, OSError) as error:
                 self.messagebox.showerror(title, str(error), parent=win)
                 return
-            who['attributes'] = new
             self.refresh_saves()  # the new backup in the list
             self.messagebox.showinfo(title, _('Done. A copy of the saves from before is in {}.',
                                               'Готово. Копия прежних сохранений: {}.').format(made or backup.parent),
                                      parent=win)
             win.destroy()
 
-        ttk.Button(buttons, text=_('Reset', 'Сбросить'), command=load).pack(side='left', padx=(0, 8))
-        apply = ttk.Button(buttons, text=_('Apply', 'Применить'), command=save)
+        apply = ttk.Button(buttons, text=_('Copy the look', 'Скопировать внешность'), command=save)
         apply.pack(side='left')
-        chosen.trace_add('write', load)
-        for var in values.values():
-            var.trace_add('write', points)
-        load()
-        points()
+        donor.trace_add('write', allowed)
+        target.trace_add('write', allowed)
+        allowed()
         win.grab_set()
 
     def build_online(self):

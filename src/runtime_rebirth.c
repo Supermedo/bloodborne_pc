@@ -14,7 +14,7 @@
  * The patched game calls in through sceSystemServiceLaunchWebBrowser (runtime_services.c):
  * "bb:b" when the Doll's script asks for the rebirth, "bb:f" with a level when the level-up
  * screen prices that level. The player's data is GameDataMan (a global of the game image)
- * -> +0x8; its layout is the save's (launcher/bbport_respec.py) 0x40 bytes further in. The
+ * -> +0x8; its layout is the save's (launcher/bbport_character.py) 0x40 bytes further in. The
  * targets are kept per character (origin and name) in <user>/rebirth.txt, so levels not spent
  * yet stay free after quitting. A rebirth whose target could not be saved is refused (it would
  * take the levels with nothing to regain them by), and the target last read or written is kept
