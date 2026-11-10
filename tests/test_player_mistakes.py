@@ -75,13 +75,13 @@ class GameRunsAlreadyTests(unittest.TestCase):
         popen.assert_not_called()
         save_ini.assert_not_called()
 
-    def test_import_respec_and_update_wait_for_any_game(self):
+    def test_import_appearance_and_update_wait_for_any_game(self):
         source = (ROOT / 'launcher' / 'bbport_launcher_win.py').read_text(encoding='utf-8')
-        respec = source[source.index('def open_respec'):source.index('user = Path(', source.index('def open_respec'))]
+        looks = source[source.index('def open_appearance'):source.index('user = Path(', source.index('def open_appearance'))]
         update = source[source.index('def install_version'):source.index('if not FROZEN or not url')]
         setup = (ROOT / 'launcher' / 'bbport_setup.py').read_text(encoding='utf-8')
         imports = setup[setup.index('def import_save'):setup.index('user, here =', setup.index('def import_save'))]
-        for text in (respec, update, imports):
+        for text in (looks, update, imports):
             self.assertIn('self.game_running()', text)
         ui = bare_launcher()
         with mock.patch.object(L, 'game_underway', return_value=True):
@@ -347,7 +347,7 @@ class MisplacedSaveTests(unittest.TestCase):
         self.assertEqual((self.target / 'userdata0000').read_bytes(), b'own')
         import shutil
         shutil.rmtree(self.user)
-        for copy in ('respec-backups/20261024-120000/SPRJ0005', 'save-backups/20261024-120000/savedata/1/CUSA00207/'
+        for copy in ('respec-backups/20261024-120000/SPRJ0005', 'appearance-backups/20261110-120000/SPRJ0005', 'save-backups/20261024-120000/savedata/1/CUSA00207/'
                      'SPRJ0005', 'save_import'):
             self.save(self.user / copy)
         self.assertEqual(self.saves.misplaced(self.user, ''), ([], []))
