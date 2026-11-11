@@ -70,6 +70,13 @@ int runtime_atlas_flag(uint32_t id) {
     if(!data || !read_mem(data+(bit>>3),&value,1) || man!=ptr(base+0x553b100))return -1;
     return (value&(0x80u>>(bit&7)))?1:0;
 }
+/* The warp entry points only make sense for a living player with a readable
+ * transform. This replaces the old requirement that the game's own quick menu
+ * be open, which is false when Atlas opens the map straight from gameplay. */
+static int player_alive(void) {
+    uintptr_t data=ptr(base+0x553b130),record=data?ptr(data+8):0;int32_t hp=0;
+    return record && read_mem(record+0x14,&hp,4) && hp>0;
+}
 static int eligible(const BbAtlasTravelDestination *d) {
     if(d->return_point<=0 || d->on_count>8 || d->off_count>8)return 0;
     if(d->unlock_flag && runtime_atlas_flag(d->unlock_flag)!=1)return 0;
@@ -82,8 +89,7 @@ int runtime_atlas_travel_status(void){return atomic_load_explicit(&travel_status
 int runtime_atlas_travel_request(const BbAtlasTravelDestination *d) {
 #ifdef _WIN32
     BbMapLocation loc={0};
-    BbMapMenu menu={0};
-    if(!travel_ready || !d || !runtime_map_location(&loc) || !runtime_map_menu_state(&menu) || !menu.top_level || !eligible(d))return 0;
+    if(!travel_ready || !d || !runtime_map_location(&loc) || !player_alive() || !eligible(d))return 0;
     for(int i=0;i<3;++i)if(!isfinite(d->arrival[i])||fabsf(d->arrival[i])>20000)return 0;
     AcquireSRWLockExclusive(&request_lock);
     int status=atomic_load(&travel_status);
@@ -113,10 +119,7 @@ static void game_tick(void) {
     }
     AcquireSRWLockExclusive(&request_lock);
     if(atomic_load(&travel_status)!=1){ReleaseSRWLockExclusive(&request_lock);return;}
-    BbMapMenu menu={0};
-    uintptr_t data=ptr(base+0x553b130),record=data?ptr(data+8):0;int32_t hp=0;
-    if(!valid || !record || !read_mem(record+0x14,&hp,4) || hp<=0 ||
-       !runtime_map_menu_state(&menu) || !menu.top_level || runtime_atlas_player_token()!=pending_player ||
+    if(!valid || !player_alive() || runtime_atlas_player_token()!=pending_player ||
        GetTickCount64()-request_time>3000 || !eligible(&pending)) {
         atomic_store(&travel_status,-1);ReleaseSRWLockExclusive(&request_lock);return;
     }
