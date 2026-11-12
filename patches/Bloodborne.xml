@@ -325,10 +325,34 @@
             <Line Type="bytes" Address="0x04b36de2" Value="00a0"/>
         </PatchList>
     </Metadata>
-    <Metadata Title="Bloodborne" Name="Larger Frame Heaps" Note="Raises the two per-frame render heaps from 256 KiB to 1 MiB each. A busy frame used up 256 KiB, and the game copied into the NULL block it got back (crash at 0x025d5b40). The port applies this always." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+    <Metadata Title="Bloodborne" Name="Larger Frame Heaps" Note="Raises the two per-frame render heaps from 256 KiB to 1 MiB each. A busy frame used up 256 KiB, and the game copied into the NULL block it got back (crash at 0x025d5b40). The port applies this always. They come out of the GFX heap, which grows by 2 MiB (276 to 278 MiB) to cover them." Author="bbport" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes32" Address="0x02595c0a" Value="0x00100000"/>
             <Line Type="bytes32" Address="0x02595c47" Value="0x00100000"/>
+            <Line Type="bytes32" Address="0x04b36dc8" Value="0x11600000"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="More Render Commands" Note="The renderer's per-frame command list holds 216 commands. When it is full the game writes the next one through a null pointer (write access to 0x0 at guest offset 0x21b4bb4). This raises it to 864, in line with the 1 MiB heaps. Found reading the code, not seen in play." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02196b26" Value="0x00000360"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="NPC Talk Crash Fix" Note="An event and NPC talk routine looks up its talk targets and calls a method on each without checking the lookup found one (read access to 0x0 at guest offset 0x17bcb59). A missing target now counts as not matching and the loop goes on." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes" Address="0x01BBCB33" Value="EB0B4885C07406488B08EB1D90"/>
+            <Line Type="bytes" Address="0x01BBCB59" Value="EBDA90"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="Laurence Cutscene Hang Fix" Note="The black screen that never ends at the start of the Laurence fight. A job function (0x1467F60) takes a context slot from a pool and gives it back only when its two calls succeed. Each failed job loses a slot, and once they are gone the main thread and the Havok workers spin forever. Failures now give the slot back." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes" Address="0x0146800B" Value="69000000"/>
+            <Line Type="bytes" Address="0x01468040" Value="37"/>
+            <Line Type="bytes" Address="0x01468075" Value="4531FF498BB6200100004C89E7E809E9FEFF4983A620010000000F1F00"/>
+        </PatchList>
+    </Metadata>
+    <Metadata Title="Bloodborne" Name="Black Clear Colour" Note="The game clears the screen to grey (0.5, 0.5, 0.5). It shows as the grey screen before the title and through the top pixel row of the title art at 4K. This loads black instead." Author="Jin-Gu" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
+        <PatchList>
+            <Line Type="bytes32" Address="0x02196aff" Value="0x02b7e3bd"/>
         </PatchList>
     </Metadata>
     <Metadata Title="Bloodborne" Name="Intel 12th Gen+ SFX workaround" Note="Disables part of SFX related code to workaround crash on Windows with newer Intel chips (SFX folder can be used with patch)" Author="emoose" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">

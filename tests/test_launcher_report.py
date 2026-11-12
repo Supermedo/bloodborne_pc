@@ -152,8 +152,9 @@ class ToolHintTests(unittest.TestCase):
     with the Windows events handed in (BBTOOL_EVENTS) instead of this PC's."""
     LOG_TIME = datetime.datetime(2026, 10, 21, 16, 49)
 
-    def hints(self, log, events=(), settings=None, version='1.9.4'):
-        """hints.txt for this last_run.log; events: (Windows event id, seconds after the log's time) of bb-probe.exe."""
+    def hints(self, log, events=(), settings=None, version='1.9.4', ini='', gpu=''):
+        """hints.txt for this last_run.log; events: (Windows event id, seconds after the log's time) of bb-probe.exe;
+        ini: the port's bbport.ini; gpu: the card's name (BBTOOL_GPU) instead of this PC's."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -162,6 +163,8 @@ class ToolHintTests(unittest.TestCase):
         (port / 'user').mkdir()
         (port / 'Bloodborne.exe').write_bytes(b'')
         (port / 'bin' / 'bb-probe.exe').write_bytes(b'')
+        if ini:
+            (port / 'bbport.ini').write_text(ini, encoding='utf-8')
         path = port / 'user' / 'last_run.log'
         path.write_text(log, encoding='utf-8')
         os.utime(path, (self.LOG_TIME.timestamp(), self.LOG_TIME.timestamp()))
@@ -174,6 +177,8 @@ class ToolHintTests(unittest.TestCase):
                'BBTOOL_PORT': str(port), 'BBTOOL_SETTINGS': str(root / 'settings.json'), 'BBTOOL_VERSION': version,
                'BBTOOL_OUT': str(root / 'out'), 'BBTOOL_EVENTS': str(root / 'events.json'),
                'TEMP': str(root), 'TMP': str(root)}
+        if gpu:
+            env['BBTOOL_GPU'] = gpu
         subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
                         'Invoke-Expression ([IO.File]::ReadAllText($env:BBTOOL))'], env=env,
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
@@ -237,6 +242,28 @@ class ToolHintTests(unittest.TestCase):
         hints = self.hints(NORMAL_RUN + drop * 5, version='1.9.6')
         self.assertIn('the server closed the co-op connection 5 times during this game', hints)
         self.assertNotIn('co-op connection', self.hints(NORMAL_RUN + drop * 2, version='1.9.6'))
+
+    def test_fsr4_is_slow_only_on_radeons_before_rx_7000(self):
+        # Measured on an RX 6000 (about 6 FPS at 4K); an Arc B580 runs FSR 4.1.1 at native 1080p at 78 FPS.
+        for upscaler in ('fsr4', 'fsr411'):
+            ini = f'upscaler={upscaler}\n'
+            self.assertIn('FSR 4 is very slow on AMD Radeon RX 6700 XT',
+                          self.hints(NORMAL_RUN, ini=ini, gpu='AMD Radeon RX 6700 XT'))
+            for card in ('Intel(R) Arc(TM) B580 Graphics', 'NVIDIA GeForce GTX 1660', 'AMD Radeon RX 9070 XT'):
+                self.assertNotIn('FSR 4 is very slow', self.hints(NORMAL_RUN, ini=ini, gpu=card), card)
+
+    def test_only_real_drops_count(self):
+        # R92: each refused login (code 6) closes the port's own socket, and its reader then logs error 10038.
+        line = ('GPU [ShadNet] <Warning> client.cpp:241 ReaderThread: Reader header recv failed (recv {}, error {}), '
+                'disconnecting\n')
+        refused = ('GPU [ShadNet] <Error> client.cpp:778 HandleLoginReply: Login rejected error code 6\n'
+                   + line.format(-1, 10038))
+        hints = self.hints(NORMAL_RUN + refused * 6, version='1.9.6')
+        self.assertNotIn('the server closed the co-op connection', hints)
+        self.assertIn('Online login error code 6', hints)
+        real = line.format(-1, 10054) + line.format(-1, 10060) + line.format(0, 0) + refused * 4
+        self.assertIn('the server closed the co-op connection 3 times during this game',
+                      self.hints(NORMAL_RUN + real, version='1.9.6'))
 
 
 if __name__ == '__main__':

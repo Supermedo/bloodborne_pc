@@ -21,13 +21,6 @@ import time
 PORT = Path(__file__).resolve().parent
 
 
-def prepare_driver_environment(env):
-    """The direct/frozen runner needs the same automatic driver lookup as the GUI."""
-    sys.path.insert(0, str(PORT / 'launcher'))
-    import bbport_driver_runtime
-    return bbport_driver_runtime.configure_environment(env)
-
-
 # The Vulkan loader's variables that decide which graphics drivers it loads: one set in Windows' environment
 # variables hides every other card from the game (the launcher's Help: "The game does not use your graphics card").
 VULKAN_DRIVER_VARIABLES = ('VK_ICD_FILENAMES', 'VK_DRIVER_FILES', 'VK_ADD_DRIVER_FILES', 'VK_LOADER_DRIVERS_SELECT',
@@ -190,6 +183,16 @@ def eboot_image(game):
 def image_sha256(game):
     import hashlib
     return hashlib.sha256(eboot_image(game)).hexdigest()
+
+
+def default_game():
+    """Without BB_GAME_DIR: a retail release's folder beside the port (CUSA03173 first, as before)."""
+    sys.path.insert(0, str(PORT / 'scripts'))
+    from patches import BLOODBORNE_IDS
+    for title in sorted(BLOODBORNE_IDS, key=lambda title: (title != 'CUSA03173', title)):
+        if (PORT.parent / title / 'eboot.bin').is_file():
+            return PORT.parent / title
+    return PORT.parent / 'CUSA03173'
 
 
 def fail(message):
@@ -628,7 +631,9 @@ def main():
     note = files_note(PORT)
     if note:
         print(note)
-    prepare_driver_environment(env)
+    # Internal-driver overrides belonged to the old prototype, not the public SDK.
+    env.pop('BB_TEST_AMD_VK_RUNTIME', None)
+    env.pop('BB_TEST_AMD_DX_RUNTIME', None)
     note = vulkan_driver_note(env)
     if note:
         print(note)
@@ -656,7 +661,7 @@ def main():
         if clang64.is_dir():
             env['PATH'] = f'{clang64}{os.pathsep}{env.get("PATH", "")}'
 
-    game = Path(env.get('BB_GAME_DIR', PORT.parent / 'CUSA03173'))
+    game = Path(env['BB_GAME_DIR']) if env.get('BB_GAME_DIR') else default_game()
     if not (game / 'eboot.bin').is_file():
         fail(f'No eboot.bin in {game} (set BB_GAME_DIR).')
     original_game = game.resolve()
@@ -891,6 +896,11 @@ def main():
                         env['BB_PREP_WORKERS'] = '0'
                         notes.append('no draw-preparation workers')
             print(f'Low-VRAM profile ({vram} MiB card): {", ".join(notes)}; BB_LOW_VRAM=0 turns it off')
+        # Offline Chalice Glyphs (docs/LOCAL_CHALICE.md): a package has the catalog beside bb-probe.exe
+        # (bin/LocalChalice); a checkout reads it from data/.
+        catalog = PORT / 'data' / 'local_chalice' / 'catalog.bin'
+        if 'BB_LOCAL_CHALICE_CATALOG' not in env and catalog.is_file():
+            env['BB_LOCAL_CHALICE_CATALOG'] = str(catalog)
         extra = env.get('BB_PATCHES', '')
         lang = env.get('BB_LANGUAGE') or read_settings(config).get('language')
         if lang in ('10', '11'):
@@ -943,6 +953,8 @@ def main():
             if env.get('BB_EXIT_BACKUP') == '1':  # the save as the game left it, also after a crash
                 sys.path.insert(0, str(PORT / 'launcher'))
                 from bbport_exit_backup import run_with_backup
+                import bbport_saves
+                bbport_saves.OUTSIDE = bbport_saves.outside_dir()  # also outside the port folder (R86)
                 return run_with_backup(command, saves_dir, original_game, creationflags=no_console())
             return subprocess.run(command, stdin=subprocess.DEVNULL, creationflags=no_console()).returncode
         finally:

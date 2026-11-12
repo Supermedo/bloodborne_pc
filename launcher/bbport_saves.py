@@ -55,6 +55,20 @@ COOP_SAVES = 'seamless-coop'
 BENCHMARK_SAVE = 'savedata.benchmark'
 
 
+LANGUAGE = ''  # the launcher's language (Launcher.__init__), for the dates it shows
+
+
+def date_format(clock=True):
+    """The strftime format of a date the player reads, in a dialog or on a page. Never for a file name or a text
+    that is read back: those keep %Y-%m-%d."""
+    day = '%Y. %m. %d.' if LANGUAGE == 'ko' else '%d.%m.%Y'
+    return f'{day} %H:%M' if clock else day
+
+
+def date_text(moment, clock=True):
+    return moment.strftime(date_format(clock))
+
+
 def benchmark_save(name):
     """True for a (lower-case) folder name restore_benchmark_backup gives the test's save. Not for
     savedata.benchmark-backup: that one holds the player's own save while a test runs or after it broke off."""
@@ -97,7 +111,7 @@ class SaveSet:
         return PROFILE in names and any(slot in names for slot in SLOTS)
 
     def when(self):
-        return datetime.datetime.fromtimestamp(self.modified).strftime('%d.%m.%Y %H:%M') if self.modified else '?'
+        return date_text(datetime.datetime.fromtimestamp(self.modified)) if self.modified else '?'
 
 
 def used(path):
@@ -419,6 +433,64 @@ def backup_dir(user_dir):
     return Path(user_dir) / BACKUP_DIR
 
 
+# R86: the saves and their backups live in the port folder, so a port extracted into a new folder (or a folder
+# deleted for a reinstall) started without them. Every backup is also kept in OUTSIDE (%APPDATA%\bbport-launcher\
+# save_backups, beside the launcher's settings), under the same file name, and backups() lists those with the port
+# folder's own: the new folder restores from them. A backup written, renamed or removed in the port folder is
+# written, renamed or removed there too. The launcher and run.py set OUTSIDE (outside_dir()); None (tests) keeps
+# everything in the port folder.
+OUTSIDE = None
+
+
+def outside_dir():
+    appdata = os.environ.get('APPDATA')
+    return Path(appdata) / 'bbport-launcher' / BACKUP_DIR if appdata else None
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def outside_copy(path):
+    """Where the copy of a port folder's backup goes outside it; None when there is none (OUTSIDE unset, or the
+    backup is itself one of those copies)."""
+    if OUTSIDE is None or _same(Path(path).parent, OUTSIDE):
+        return None
+    return Path(OUTSIDE) / Path(path).name
+
+
+def keep_outside(path):
+    """The backup copied outside the port folder; a failure (a full or locked drive) costs only the copy."""
+    copy = outside_copy(path)
+    if copy:
+        try:
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, copy)
+        except OSError:
+            pass
+
+
+def drop_outside(path):
+    """The copy outside the port folder of a backup removed from it."""
+    copy = outside_copy(path)
+    if copy:
+        try:
+            copy.unlink()
+        except OSError:
+            pass
+
+
+def copy_outside(user_dir):
+    """The port folder's backups without a copy outside it yet (those from before R86) copied there."""
+    folder = backup_dir(user_dir)
+    if OUTSIDE is None or not folder.is_dir():
+        return
+    for path in folder.glob('*.zip'):
+        copy = outside_copy(path)
+        if copy and not copy.exists():
+            keep_outside(path)
+
+
 def backup_file_name(created, reason, label='', detail='', names=()):
     """'2026-10-20 15.32 - Before playing - Nick, Maria.zip', safe for Windows, at most 120 characters."""
     words = label or WORDS.get(reason, REASONS.get(reason, reason))
@@ -453,6 +525,7 @@ def write_backup(target, files, meta):
     finally:
         if staging.exists():
             staging.unlink()
+    keep_outside(target)
     return target
 
 
@@ -594,10 +667,14 @@ def backup_characters(item):
 
 
 def backups(user_dir):
-    """The backups in save_backups, newest first."""
+    """The backups in save_backups and those kept outside the port folder (OUTSIDE) that it does not have,
+    newest first."""
     folder = backup_dir(user_dir)
-    found = [Backup(p) for p in folder.glob('*.zip')] if folder.is_dir() else []
-    return sorted(found, key=lambda b: b.created, reverse=True)
+    paths = list(folder.glob('*.zip')) if folder.is_dir() else []
+    if OUTSIDE is not None and Path(OUTSIDE).is_dir() and not _same(OUTSIDE, folder):
+        here = {p.name for p in paths}
+        paths += [p for p in Path(OUTSIDE).glob('*.zip') if p.name not in here]
+    return sorted((Backup(p) for p in paths), key=lambda b: b.created, reverse=True)
 
 
 def rename_backup(path, label):
@@ -615,6 +692,7 @@ def rename_backup(path, label):
     write_backup(target, files, meta)
     if target != item.path:
         item.path.unlink()
+        drop_outside(item.path)
     return target
 
 
@@ -633,6 +711,7 @@ def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP, notes=None):
     ones beyond `keep` go. Returns the new backup or None. A backup dated more than a day ahead was made
     while the PC's clock was wrong: it is not taken for the newest (it stopped every automatic backup
     until its date), and `notes` gets a line for the log."""
+    copy_outside(user_dir)
     changed = latest_change(user_dir, game_dir)
     if not changed:
         return None
@@ -660,6 +739,7 @@ def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP, notes=None):
             old.path.unlink()
         except OSError:
             pass
+        drop_outside(old.path)
     return made
 
 

@@ -258,6 +258,8 @@ public:
     Id motion_in_cur{};
     Id motion_in_prev{};
     Id motion_frag_out{};
+    Id motion_params_ssbo{};
+    std::array<Id, 2> motion_history_ssbo{};
     [[nodiscard]] bool VertexMotion() const {
         return sw_stage == SwStage::Vertex && hw_stage == HwStage::Vertex &&
                runtime_info.hw.vs.motion_vectors && MotionVectors::positions_address != 0;
@@ -413,6 +415,7 @@ private:
     void DefineOutputs();
     void DefinePushDataBlock();
     void DefineBuffers();
+    void DefineMotionParameters();
     void DefineImagesAndSamplers();
     void DefineSharedMemory();
     void DefineFunctions();

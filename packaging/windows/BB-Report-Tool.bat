@@ -22,7 +22,7 @@ exit /b
 # ------------------------------------------------------------------------------------------
 $ErrorActionPreference = 'SilentlyContinue'
 [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
-$ToolVersion = '1.7.9'
+$ToolVersion = '1.7.10'
 Add-Type -AssemblyName System.Windows.Forms
 
 $secrets = New-Object System.Collections.ArrayList
@@ -40,7 +40,12 @@ function Hide-Private([string]$text) {
     $text = [regex]::Replace($text, '(?i)\b(addr|peerAddr|localAddr|mappedAddr|server_addr)=0x[0-9a-f]+', '$1=<hidden>')
     $text = [regex]::Replace($text, '(?i)\b(external IP|lan)=[^\s,;)]+', '$1=<ip>')
     $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
+    # The port's own four-part version (1.9.8.4) has an IP address's shape: kept as it is (reports
+    # showed "Port version : <ip>", 2026-11-11).
+    $own = [regex]::Match("$portVersion", '^\d+(\.\d+){3}(?![\d.])').Value
+    if ($own) { $text = $text.Replace($own, '<<port-version>>') }
     $text = [regex]::Replace($text, "(?<![\d.])(?!127\.0\.0\.1(?![\d.]))(?!0\.0\.0\.0(?![\d.]))(?:$octet\.){3}$octet(?![\d.])", '<ip>')
+    if ($own) { $text = $text.Replace('<<port-version>>', $own) }
     foreach ($s in @($env:USERNAME, (Split-Path -Leaf $env:USERPROFILE), $env:COMPUTERNAME) + $secrets) {
         if ($s -and $s.Length -ge 3 -and $s -notin 'user', 'users', 'admin', 'owner', 'game', 'mods') { $text = [regex]::Replace($text, [regex]::Escape($s), '<hidden>', 'IgnoreCase') }
     }
@@ -290,6 +295,8 @@ if (-not $gpuLines) { $gpuLines = @('not found') }
 if (-not $displayLines) { $displayLines = @('unknown') }
 # The card the game most likely runs on: a dedicated one if there is one.
 $gameGpu = @(@($gpuInfo | Where-Object { -not $_.Integrated }) + @($gpuInfo)) | Select-Object -First 1
+# Tests hand in the card (BBTOOL_GPU) instead of this PC's.
+if ($env:BBTOOL_GPU) { $gameGpu = [pscustomobject]@{ Name = $env:BBTOOL_GPU; Date = $null; Vram = 12GB; Integrated = $false } }
 
 # --- Free disk space ----------------------------------------------------------------------
 $space = @()
@@ -600,8 +607,9 @@ if ((Setting 'online') -eq $true -and $pool195) {
         Hint "Online is on, but the launcher is not signed in to ${server}, so the game can't play online: it says it can't connect to the Bloodborne network (1.9.7 and newer start it offline instead).$seen On the launcher's Online play page sign in (Sign in with Discord, or New SuperMedo account), then start the game again." 1 }
 }
 # The server closing the co-op connection (SuperMedo Server, 29.10.2026): the port reconnects at once, but a summon
-# in between fails.
-$drops = if ($logText) { ([regex]::Matches($logText, 'Reader header recv failed')).Count } else { 0 }
+# in between fails. Only real drops count: the server closing (recv 0), a reset (10054) or a timeout (10060). Error
+# 10038 is the port closing its own socket, e.g. after a refused login (code 6), never the server (R92, 1.11.2026).
+$drops = if ($logText) { ([regex]::Matches($logText, 'Reader header recv failed \((recv 0, error 0|recv -1, error (10054|10060))\)')).Count } else { 0 }
 if ($drops -ge 3) {
     Hint "Online: the server closed the co-op connection $drops times during this game (the port reconnected each time). Summons that fail now and then come from that: it is on the server's side, not this PC - nothing to change here." 2 }
 if (LogHas '(cpp-httplib failed.*error=10\b|SSL server verification failed)') {
@@ -637,7 +645,9 @@ if ((LogHas 'DLSS: unavailable \(not an NVIDIA GPU\)') -and ($gpuInfo | Where-Ob
     Hint 'The game ran on the wrong graphics chip, not on your NVIDIA card: Windows Settings > System > Display > Graphics: add Bloodborne.exe, bin\bb-probe.exe and bin\bb-gpu-capabilities.exe from the port folder and set them to High performance.' 1 }
 if (($gpuName -match 'RTX') -and ($upscaler -in @('fsr4', 'fsr411', 'fsr3'))) {
     Hint "RTX card with upscaler '$upscaler': switch to DLSS (Graphics > Upscaler). On RTX cards it looks best and costs far less GPU time than FSR 4." 2 }
-elseif (($upscaler -in @('fsr4', 'fsr411')) -and $gpuName -and ($gpuName -notmatch 'RX (7|9)\d{3}')) {
+# Measured on Radeon RX 6000 only: an Intel Arc B580 runs FSR 4.1.1 at native 1080p at 78 FPS, so the hint stays on
+# Radeons before RX 7000 (1.11.2026).
+elseif (($upscaler -in @('fsr4', 'fsr411')) -and ($gpuName -match 'Radeon|\bRX ') -and ($gpuName -notmatch 'RX (7|9)\d{3}')) {
     Hint "FSR 4 is very slow on $gpuName (RX 6000: about 6 FPS at 4K): use FSR 3 (Graphics > Upscaler)." 2 }
 $vramGb = if ($gameGpu.Vram) { [math]::Round($gameGpu.Vram / 1GB) } else { 0 }
 if ($vramGb -gt 0 -and $vramGb -le 4) {
@@ -743,6 +753,8 @@ Set-Content (Join-Path $stage 'windows-crashes.txt') (Hide-Private ($eventText -
 $hintText = @("Hints for the helper (found automatically by BB Report Tool $ToolVersion - they can be wrong):", '') +
     $(if ($hintList.Count) { $hintList | ForEach-Object { "- $_" } } else { '- nothing obvious, see last_run.log' })
 Set-Content (Join-Path $stage 'hints.txt') (Hide-Private ($hintText -join "`r`n")) -Encoding UTF8
+$filesCheck = if ($userDir) { Join-Path $userDir 'game_files_check.txt' }
+if ($filesCheck -and (Test-Path $filesCheck)) { Copy-Item $filesCheck (Join-Path $stage 'game_files_check.txt') }
 if ($portOk) {
     foreach ($name in 'bbport.ini', 'input.ini', 'mods.json', 'patches.json') {
         $file = Join-Path $port $name

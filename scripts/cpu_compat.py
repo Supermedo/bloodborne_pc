@@ -41,6 +41,27 @@ COUNT_SPANS = {
     0x26adf12: ('f30fbdf1b91f000000', 'lzcnt esi, ecx',
                 '922a7f4f61bdd53b9cab783faebbd114691319f3c223cc857fe54f920f531745'),
 }
+# The plan and the strlen check know each module by its file's SHA-256 (CUSA03173 1.09, SELF).
+# Every retail release runs the same code, but another dump of it is another file: a plain ELF,
+# or another region's SELF (its content ID and signatures differ). Such a module counts as the
+# inspected file when its loaded image (prepare.image_sha256) is the inspected one: measured on
+# US CUSA00900 1.09 dumped as plain ELF files, every plan site holding the inspected bytes.
+INSPECTED_IMAGES = {
+    'eboot.bin': ('071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a',
+                  COUNT_SPAN_MODULE_SHA256),
+    'libc.prx': ('6ad54a1be85bdaaa7db7e3e9de4e659967aa983d808b4beee27fcdc9bf8459e5', LIBC_SHA256),
+    'libSceFios2.prx': ('f8502e888b67112c873ee6e7b4700179b56c58efe4a6cc43c743fd22e9c9bedd',
+                        '3b8eb4d5a5c5a7b381d8d0610077e6cd404c29695a686274802f6b2737f6bf22'),
+}
+
+
+def source_sha256(name, module):
+    """The SHA-256 the plan knows a module by: the inspected file's for the inspected code
+    (INSPECTED_IMAGES), else the module's own file's."""
+    image, inspected = INSPECTED_IMAGES.get(name, (None, None))
+    if image and module.get('image_sha256') == image:
+        return inspected
+    return module.get('sha256')
 
 
 def _unique_fields(pairs):
@@ -260,7 +281,7 @@ def partial_allowed():
 def patch_libc(module):
     if not enabled():
         return []
-    if module['sha256'] != LIBC_SHA256:
+    if source_sha256('libc.prx', module) != LIBC_SHA256:
         raise ValueError('Legacy CPU profile expects the inspected libc dump; its SHA256 changed.')
     matches = [symbol for symbol in module['symbols'] if symbol['section'] and symbol['type'] == 2
                and symbol['name'].split('#')[0] == nid('strlen')]
@@ -405,11 +426,11 @@ def patch_image(image, segments, main, modules, relocations, *, plan=None, activ
         start, size = _uint(item.get('base'), 'module base'), _uint(item.get('size'), 'module size')
         if not size or start + size > len(image):
             raise ValueError(f'Legacy CPU {name}: module is outside the image.')
-        locations[name] = (start, size, item.get('sha256'))
+        locations[name] = (start, size, source_sha256(name, item))
     # The original eboot ends before the first appended module (alignment gap is
     # harmless: site validation below also requires an executable load segment).
     main_size = min((item[0] for item in locations.values()), default=len(image))
-    locations['eboot.bin'] = (0, main_size, main.get('sha256'))
+    locations['eboot.bin'] = (0, main_size, source_sha256('eboot.bin', main))
     occupied = sorted((base, base + size) for base, size, _ in locations.values())
     if any(a[1] > b[0] for a, b in zip(occupied, occupied[1:])):
         raise ValueError('Legacy CPU input modules overlap.')

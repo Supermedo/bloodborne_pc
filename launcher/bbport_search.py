@@ -35,6 +35,7 @@ def _(*texts):
 WORDS = {
     'fullscreen': 'vollbild fenster fullscreen window borderless randlos',
     'exclusive_fullscreen': 'exklusiv exclusive display mode bildwiederholrate refresh',
+    'borderless_fullscreen': 'borderless randlos rahmenlos ohne rahmen fenster window windowed alt tab vollbild',
     'hdr': 'hdr helligkeit brightness',
     'vram_warning': 'vram videospeicher grafikspeicher warnung warning popup banner meldung hinweis',
     'fps_mode': 'fps bildrate framerate frame rate 30 60 120 unbegrenzt unlock uncap uncapped flussig ruckelt lag',
@@ -79,6 +80,8 @@ WORDS = {
     'cheat_no_death': 'unsterblich unverwundbar nie sterben god mode godmode immortal invincible',
     'button:shortcut': 'desktop verknupfung verknuepfung shortcut icon symbol',
     'button:steam': 'steam bibliothek library non-steam deck',
+    'button:seamless_shortcut': 'seamless coop co-op desktop verknupfung verknuepfung shortcut icon symbol',
+    'button:seamless_steam': 'seamless coop co-op steam bibliothek library non-steam deck',
     'button:port_folder': 'ordner port folder installation explorer',
     'button:updates': 'update updates aktualisieren neue neueste version launcher latest newest',
     'button:report': 'bericht report support zip discord fehler bug bugs melden',
@@ -108,6 +111,7 @@ WORDS = {
     'minimize_to_tray': 'tray taskleiste infobereich symbol notification area',
     'reopen_after_game': 'wieder oeffnen reopen back',
     'discord_status': 'discord rich presence status profil profile activity aktivitaet',
+    'discord_stats': 'discord stats statistics level echoes blood echoes insight blut echoe einsicht',
     'menu_key': 'overlay menu insert hotkey taste einstellungen ingame in-game key rebind',
     'menu_pad': 'overlay menu l3 r3 select start controller gamepad combo',
     'windows_title_bar': 'titelleiste title bar caption rahmen fensterrahmen windows',
@@ -209,6 +213,11 @@ WORDS = {
     'topic:play_together': 'zusammen spielen freunde freund friends mitspielen coop co-op koop summon beschworen '
                            'glocke bell party host gast guest multiplayer seamless',
 }
+# Korean players' own words where the Korean titles do not have them.
+for _key, _words in {'ui_language': '한국어 한글', 'language': '한국어 한글 자막', 'voice_language': '음성 더빙',
+                     'fullscreen': '전체화면', 'online': '멀티 협동 코옵', 'online_pool': '멀티 협동 코옵',
+                     'fps_mode': '렉 프레임', 'user_dir': '저장'}.items():
+    WORDS[_key] = WORDS.get(_key, '') + ' ' + _words
 # With the game tests on (bbport_launcher_win.GAME_TESTS): their words, added to their pages.
 GAME_TEST_WORDS = {'page:system': 'benchmark test messen stabilitat beta tests', 'page:picture': 'messen benchmark'}
 # The words of a question around what is meant ("where is", "how do i", "wie kann ich"): every word
@@ -227,7 +236,9 @@ JOINED = {'log in': 'login', 'logged in': 'login', 'log out': 'logout', 'log-in'
 def fold(text):
     """Lower case without accents (ä→a, ß→ss): what the player types matches either way."""
     text = str(text).casefold().replace('ß', 'ss')
-    return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+    # NFC at the end: NFKD splits Hangul into jamo, and near() then took "로그인" for "로그에…".
+    return unicodedata.normalize('NFC', ''.join(c for c in unicodedata.normalize('NFKD', text)
+                                                if not unicodedata.combining(c)))
 
 
 def query_words(query):
@@ -266,9 +277,20 @@ def word_points(word, title, hint, extra):
 
 
 
+# Korean particles a searched word can end in ("해상도를"): without them it is the word the titles have.
+KOREAN_ENDINGS = ('으로', '에서', '에게', '까지', '부터', '에는', '로는', '을', '를', '이', '가', '은', '는', '에', '의', '로', '와',
+                  '과', '도', '만')
+
+
 def near(word, text):
     """A word as the text has it at the start of one of its words, without a plural or inflected
     ending ("details" -> "detail", "einstellungen" -> "einstellung"); None if there is none."""
+    if '가' <= word[-1:] <= '힣':  # by its end: "dlss를" too
+        for ending in KOREAN_ENDINGS:
+            stem = word[:-len(ending)]
+            if word.endswith(ending) and len(stem) >= 2 and f' {stem}' in f' {text}':
+                return stem
+        return None
     for cut in (1, 2):
         stem = word[:-cut]
         if len(stem) >= 5 and f' {stem}' in f' {text}':

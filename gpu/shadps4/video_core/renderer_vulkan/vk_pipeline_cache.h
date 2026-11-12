@@ -118,6 +118,9 @@ struct PrepWorker {
 
 struct PreparedDraw;
 
+/// bbport: counts prepared draws whose V#s were stale; logs the total every 5 s at most.
+void NoteStaleVertexInputs();
+
 class PipelineCache {
 public:
     explicit PipelineCache(const Instance& instance, Scheduler& scheduler,
@@ -126,6 +129,7 @@ public:
 
     void WarmUp();
     void Sync();
+    void NoteMotionFrame();
 
     /// bbport: the driver's own pipeline cache (its compiled GPU code), kept on disk next to the
     /// shader cache: a pipeline the driver built once is not compiled again on the next start.
@@ -201,6 +205,8 @@ private:
     /// bbport: exclusive for program/permutation insertions, shared for worker lookups.
     std::shared_mutex programs_mutex;
     u64 prepared_hits = 0, prepared_misses = 0;
+    std::atomic<u64> motion_selections{}, motion_varying_fallbacks{};
+    u64 motion_frames{}; ///< GPU-thread frame count; selection counters include workers
     const PreparedDraw* used_prepared = nullptr;
     tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
     tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
@@ -219,9 +225,9 @@ private:
     std::condition_variable_any driver_cache_cv;
     std::jthread driver_cache_saver;
 
-    /// bbport: BB_ASYNC_PIPELINES=1: a new graphics pipeline is set up on the GPU thread and
-    /// built by the driver on worker threads; its draws are skipped until it is ready (no
-    /// stutter, objects can appear a moment late). GPU thread only, except the counter.
+    /// bbport: by default (BB_ASYNC_PIPELINES=0: off), a new graphics pipeline is set up on the
+    /// GPU thread and built by the driver on worker threads; its draws are skipped until it is
+    /// ready (no stutter, objects can appear a moment late). GPU thread only, except the counter.
     struct AsyncBuild {
         GraphicsPipelineKey key;
         u64 hash;

@@ -338,6 +338,16 @@ class SetupMixin:
         return [entry for entry in entries if entry[1] not in ('upscaler', 'fsr411_backend')
                 and not (entry[1] == 'sharpen' and kept not in hardware.FSR4_FAMILY)]
 
+    def drop_automatic_highest_lod(self):
+        """R89: up to 1.9.7 the automatic settings chose model detail "Highest" (-2) on strong PCs, which
+        breaks some armor and capes. Where the launcher set it and the player kept it, "As in the game"
+        (0) instead; a -2 the player chose by hand stays."""
+        applied = self.app.get('auto_applied') or {}
+        if applied.get('model_lod') != '-2' or self.var('model_lod', 'ini').get() != '-2':
+            return
+        self.apply_settings({('ini', 'model_lod'): '0'})
+        self.app['auto_applied'] = {**applied, 'model_lod': '0'}
+
     def auto_settings(self):
         """At start, once the PC is rated: new hardware with automatic settings on → the settings for
         it, with an Undo on Picture & performance. The first time (an installation set up before this
@@ -352,6 +362,7 @@ class SetupMixin:
         the defaults, FSR 4 and every effect, which freeze Intel graphics and slow small cards down."""
         if not self.rating or not self.var('setup_done', 'app').get():
             return
+        self.drop_automatic_highest_lod()
         new_ini, self.ini_new = getattr(self, 'ini_new', False), False
         if new_ini:
             chosen = self.recommended()
@@ -1277,7 +1288,7 @@ class SetupMixin:
                 self.state_line(body, 'info', _('No characters yet. The game makes them, or bring yours from another '
                                                 'version (below).'), theme.CARD, wrap=640).pack(fill='x')
             else:
-                words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
+                words = L.game_names(self)
                 items = [b for b in saves.backups(self.shown_user_dir()) if b.ok]
                 for index, slot in enumerate(mine.slots):
                     if index:
@@ -1315,7 +1326,7 @@ class SetupMixin:
             tk.Label(head, text=f'{words.word(character.LEVEL_TEXT)} {info.level}', bg=theme.CARD, fg=theme.GOLD_LIGHT,
                      font=(theme.BODY_SEMI, 13)).pack(side='right')
         try:
-            when = datetime.datetime.fromtimestamp(path.stat().st_mtime).strftime('%d.%m.%Y %H:%M')
+            when = saves.date_text(datetime.datetime.fromtimestamp(path.stat().st_mtime))
         except OSError:
             when = '?'
         facts = [_('Slot {}').format(int(path.name[-4:]) + 1), _('saved {}').format(when)]
@@ -1392,7 +1403,7 @@ class SetupMixin:
             restore.bind('<Button-1>', lambda _e, i=item, t=then: self.restore_character(i, slot, t, words))
             restore.bind('<Enter>', lambda _e, w=restore: w.configure(fg=theme.TEXT))
             restore.bind('<Leave>', lambda _e, w=restore: w.configure(fg=theme.MUTED))
-            tk.Label(line, text=item.created.strftime('%d.%m.%Y %H:%M') + '  ·  ' + self.backup_title(item), bg=bg,
+            tk.Label(line, text=saves.date_text(item.created) + '  ·  ' + self.backup_title(item), bg=bg,
                      fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 9)).pack(side='left')
             if then.summary() == now.summary():
                 tk.Label(line, text=_('same as now'), bg=bg, fg=theme.MUTED, font=(theme.BODY, 9)).pack(
@@ -1512,11 +1523,10 @@ class SetupMixin:
                                       font=(theme.BODY_SEMI, 10), anchor='w', justify='left'), 520).pack(fill='x')
         size = item.size / 1024
         size = f'{size / 1024:.1f} MB' if size >= 1024 else f'{max(1, round(size))} KB'
-        level = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get()).word(
-            character.LEVEL_TEXT)
+        level = L.game_names(self).word(character.LEVEL_TEXT)
         found = saves.backup_characters(item).values()
         who = ', '.join(f'{c.name} ({level} {c.level})' for c in found) if found else ', '.join(item.names)
-        self.wrap_within(tk.Label(words, text='  ·  '.join([item.created.strftime('%d.%m.%Y %H:%M'),
+        self.wrap_within(tk.Label(words, text='  ·  '.join([saves.date_text(item.created),
                                                             who or _('no characters'), size]),
                                   bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 9), anchor='w', justify='left'),
                          520).pack(fill='x', pady=(px(1), 0))
@@ -1555,7 +1565,7 @@ class SetupMixin:
         here = self.shown_target()
         mine = saves.SaveSet('', here) if saves.is_save_folder(here) else None
         question = _('Put this backup back?') + '\n\n' + self.backup_title(item) + '\n' + '  ·  '.join(
-            [item.created.strftime('%d.%m.%Y %H:%M'), ', '.join(item.names) or _('no characters')])
+            [saves.date_text(item.created), ', '.join(item.names) or _('no characters')])
         if len(item.names) > 1:
             question += '\n\n' + _('Every character in this backup goes back to this state.')
         if mine:
@@ -1579,7 +1589,7 @@ class SetupMixin:
             return
         question = '\n'.join([
             _('Put {} back to this state?').format(then.name), '',
-            item.created.strftime('%d.%m.%Y %H:%M') + '  ·  ' + self.backup_title(item),
+            saves.date_text(item.created) + '  ·  ' + self.backup_title(item),
             f'{words.word(character.LEVEL_TEXT)} {then.level}  ·  ' + _('Bosses') + f' {len(then.bosses)}/'
             f'{len(character.BOSSES)}', '',
             _('Only this character changes; your other characters stay as they are. Its current state is backed '
@@ -1625,10 +1635,12 @@ class SetupMixin:
 
     def delete_backup(self, item):
         if not self.messagebox.askyesno('Bloodborne', _('Delete this backup? It goes to the Recycle Bin.') + '\n\n' +
-                                        self.backup_title(item) + '  ·  ' + item.created.strftime('%d.%m.%Y %H:%M')):
+                                        self.backup_title(item) + '  ·  ' + saves.date_text(item.created)):
             return
         if not saves.to_recycle_bin(item.path):
             self.messagebox.showerror('Bloodborne', _('Could not move the backup to the Recycle Bin.'))
+        else:
+            saves.drop_outside(item.path)  # its copy outside the port folder (R86) goes with it
         self.refresh_saves()
 
     # ---- small pieces ----------------------------------------------------------------------------
@@ -1868,7 +1880,7 @@ class SetupMixin:
         def draw():
             chosen = self.recommended()
             get = lambda key, store='ini': self.var(key, store).get()
-            upscaler = dict(L.UPSCALERS).get(get('upscaler'), ('?',))[0].split(' (')[0]
+            upscaler = _(dict(L.UPSCALERS).get(get('upscaler'), ('?',))[0].split(' (')[0])
             preset = dict(L.PRESETS).get(get('preset'), ('',))[0].split(' (')[0]
             fps = _(*dict(L.FPS_MODES).get(get('fps_mode', 'app'), ('?',))).split(' (')[0]
             effects = sum(bool(get(k)) for k in ('effect_ssao', 'effect_dynamic_shadows', 'object_motion'))
@@ -1908,6 +1920,12 @@ class SetupMixin:
         self.section(f, _('Screen'))
         self.check(f, 'fullscreen', 'app', _('Fullscreen', 'Полноэкранный режим'),
                    _('Recommended: the game gets the display to itself (smoother, and 4K downsampling works).'))
+        self.check(f, 'borderless_fullscreen', 'app', _('Borderless fullscreen', 'Полноэкранный без рамки'),
+                   _('The game in a window without a frame over the whole monitor: Alt+Tab is instant and other '
+                     'windows can be on top of it. Turns Fullscreen off.',
+                     'Игра в окне без рамки на весь монитор: Alt+Tab срабатывает сразу, другие окна можно открыть '
+                     'поверх игры. Выключает полноэкранный режим.'))
+        self.one_screen_mode()
         self.check(f, 'exclusive_fullscreen', 'app', _('Exclusive fullscreen'),
                    _('Fullscreen takes the display over instead of covering the desktop: frames can arrive more evenly, '
                      'but switching to another window takes a moment. Only with Fullscreen on.'))
@@ -1927,6 +1945,15 @@ class SetupMixin:
             self.check(f, key, 'ini', _(*flags[key]))
         self.check(f, 'show_fps', 'ini', _('Show the FPS counter', 'Показывать FPS'))
         self.link_row(f, _('Every graphics setting one by one:'), 'graphics')
+
+    def one_screen_mode(self):
+        """Fullscreen and Borderless fullscreen turn each other off (an older file with both: Fullscreen stays,
+        as the game starts with it)."""
+        full, borderless = self.var('fullscreen', 'app'), self.var('borderless_fullscreen', 'app')
+        if full.get() and borderless.get():
+            borderless.set(False)
+        full.trace_add('write', lambda *_a: full.get() and borderless.get() and borderless.set(False))
+        borderless.trace_add('write', lambda *_a: borderless.get() and full.get() and full.set(False))
 
     WINDOW_SIZES = [('output', ('Same as the output resolution',)), ('last', ('As I left it',)),
                     ('custom', ('Custom size…',)), ('game', ('As the game opens it',))]
@@ -2239,14 +2266,22 @@ def game_values(folder):
 
 
 def find_game(start=''):
-    """A folder with eboot.bin near the port or under `start` (CUSA03173 first), or ''."""
+    """A folder with eboot.bin near the port or under `start`, or ''. A retail release first, then
+    a complete one (not the update folder alone), then version 1.09."""
+    from patches import BLOODBORNE_IDS
     places = []
     if start:
         places += [Path(start)] + _children(Path(start))
     for base in (L.PORT_DIR, L.PORT_DIR.parent):
-        places += [base / 'CUSA03173'] + _children(base)
+        places += [base / title for title in sorted(BLOODBORNE_IDS)] + _children(base)
     found = [p for p in places if (p / 'eboot.bin').is_file()]
-    found.sort(key=lambda p: game_values(p).get('TITLE_ID') != 'CUSA03173')
+
+    def order(folder):
+        values = game_values(folder)
+        complete = all((folder / name).is_dir() for name in ('sce_module', 'sce_sys', 'dvdroot_ps4'))
+        return (values.get('TITLE_ID') not in BLOODBORNE_IDS, not complete,
+                values.get('APP_VER') != L.PATCH_VERSION)
+    found.sort(key=order)
     return str(found[0]) if found else ''
 
 
@@ -2269,12 +2304,23 @@ def game_checks(folder):
     checks = []
     values = game_values(folder)
     title, version = values.get('TITLE_ID', '?'), values.get('APP_VER', '?')
+    try:
+        # game_app_version: Game of the Year dumps say APP_VER 01.00 over the 1.09 code.
+        from patches import game_app_version
+        version = game_app_version(folder) or version
+    except ImportError:
+        pass
     checks.append(('ok', _('eboot.bin found.')))
-    if title == 'CUSA03173':
-        checks.append(('ok', _('CUSA03173: the Game of the Year Edition, with The Old Hunters.')))
+    # Every retail release runs the same 1.09 executable (scripts/patches.py BLOODBORNE_IDS).
+    from patches import BLOODBORNE_IDS, OLD_HUNTERS_IDS
+    if title in OLD_HUNTERS_IDS:
+        checks.append(('ok', _('{}: a Game of the Year Edition, with The Old Hunters.').format(title)))
+    elif title in BLOODBORNE_IDS:
+        checks.append(('ok', _('{}: the base game. The Old Hunters, if you own it, comes from its DLC folder '
+                               '(Game files).').format(title)))
     else:
-        checks.append(('warn', _('{}: the port is made for CUSA03173, the Game of the Year Edition. Other '
-                                 'editions may not work.').format(title)))
+        checks.append(('warn', _('{}: not a retail release of Bloodborne. The port runs Bloodborne of every '
+                                 'region, the Game of the Year editions too.').format(title)))
     if version == L.PATCH_VERSION:
         checks.append(('ok', _('Version 01.09: every community patch is available.')))
     else:
@@ -2606,8 +2652,7 @@ class SetupGuide:
                       bg=theme.CARD, fg=theme.MUTED, font=(theme.BODY, 9)).pack(anchor='w', pady=(px(6), 0))
         need = self.card(body, pady=(px(14), 0))
         self.heading(need, _('What you need'))
-        for state, text in (('ok', _('Your own Bloodborne game files (CUSA03173, Game of the Year Edition) '
-                                     'with the 1.09 update.')),
+        for state, text in (('ok', _('Your own Bloodborne game files (any edition) with the 1.09 update.')),
                             ('ok', _('Windows 10 or 11 (64-bit) and a graphics card with Vulkan 1.3 and at least '
                                      '4 GB of video memory.'))):
             self.app.state_line(need, state, text, theme.CARD, wrap=660).pack(fill='x', pady=px(3))
@@ -2886,7 +2931,7 @@ class SetupGuide:
         grid.columnconfigure(1, weight=1)
         get = lambda key, store: app.var(key, store).get()
         info = L.game_info(get('game_dir', 'app'))
-        upscaler = dict(L.UPSCALERS).get(get('upscaler', 'ini'), ('?',))[0].split(' (')[0]
+        upscaler = _(dict(L.UPSCALERS).get(get('upscaler', 'ini'), ('?',))[0].split(' (')[0])
         preset = dict(L.PRESETS).get(get('preset', 'ini'), ('',))[0].split(' (')[0]
         fps = dict(L.FPS_MODES).get(get('fps_mode', 'app'), ('?',))
         goal = app.goal_name(get('goal', 'app'))

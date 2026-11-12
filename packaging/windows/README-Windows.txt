@@ -1,9 +1,11 @@
 Bloodborne (bbport) for Windows
 ===============================
 
-No game files are included. You need your own decrypted dump of Bloodborne CUSA03173
-(the folder with eboot.bin, sce_module, sce_sys, dvdroot_ps4). Game version 1.09 is needed for
-the community patches (60/90/unlocked FPS, resolution, effects); other versions run at 30 FPS.
+No game files are included. You need your own decrypted dump of Bloodborne, any retail edition
+(US CUSA00900, EU CUSA00207, the Game of the Year editions such as CUSA03173, ...): the folder
+with eboot.bin, sce_module, sce_sys, dvdroot_ps4, the 1.09 update copied over the base game.
+Game version 1.09 is needed for the community patches (60/90/unlocked FPS, resolution,
+effects); other versions run at 30 FPS.
 
 Requirements
 - Windows 10 (1903 or later) or Windows 11, 64-bit.

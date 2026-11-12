@@ -286,6 +286,28 @@ bool Presenter::IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const
     return std::ranges::find(vo_buffers_addr, color_buffer.Address()) != vo_buffers_addr.cend();
 }
 
+// bbport: making a swapchain (and switching HDR) first waits for the whole device to go idle,
+// and Vulkan forbids vkDeviceWaitIdle while another thread submits to one of the device's
+// queues: the GPU thread could submit in the middle of it (a driver crash or a lost device on
+// some drivers). Both therefore hold the scheduler's submit lock, as Present already does
+// around its own Recreate. Not for callers that hold the lock already (std::mutex).
+void Presenter::RecreateSwapchain() {
+    std::scoped_lock submit_lock{Scheduler::submit_mutex};
+    swapchain.Recreate(window.GetWidth(), window.GetHeight());
+}
+
+void Presenter::SetHDR(bool enable) {
+    if (!IsHDRSupported()) {
+        return;
+    }
+    // Only a real switch makes a swapchain, so only a real switch takes the lock.
+    if (enable != swapchain.GetHDR()) {
+        std::scoped_lock submit_lock{Scheduler::submit_mutex};
+        swapchain.SetHDR(enable);
+    }
+    pp_settings.hdr = enable ? 1 : 0;
+}
+
 void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     const vk::Device device = instance.GetDevice();
     if (frame->image_view) {
@@ -788,7 +810,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
         frame_gen != swapchain_frame_gen) {
         swapchain_frame_gen = frame_gen;
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        RecreateSwapchain();
     }
 
     // bbport: frame generation: the generated frames first, then the game's own, evenly
@@ -986,7 +1008,7 @@ void Presenter::UpdateFrameGenLimit(bool wanted, double present_ms) {
 
 bool Presenter::PresentImage(Frame* frame, vk::Image image, bool last) {
     if (!swapchain.AcquireNextImage()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        RecreateSwapchain();
         if (!swapchain.AcquireNextImage()) {
             // User resizes the window too fast and GPU can't keep up. Skip this frame.
             LOG_WARNING(Render_Vulkan, "Skipping frame!");

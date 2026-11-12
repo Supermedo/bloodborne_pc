@@ -9,6 +9,8 @@
 #include "bbport_toggles.h"
 
 #include <condition_variable>
+#include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_set>
@@ -441,6 +443,29 @@ private:
     Common::LeastRecentlyUsedCache<u64, u64> sampler_lru_cache;
     const bool readback_linear_images;
     PageTable page_table;
+    // bbport: registered images per page_table page (1 MiB), written under `mutex` and read
+    // without it by the guest's write faults (InvalidateMemory). Zeroed pages from calloc: only
+    // the pages of the guest's address space that hold images become resident.
+    struct FreeCounts {
+        void operator()(u32* counts) const {
+            std::free(counts);
+        }
+    };
+    static constexpr size_t NumImagePages = 1ULL << (Traits::AddressSpaceBits - Traits::PageBits);
+    std::unique_ptr<u32[], FreeCounts> image_page_counts{
+        static_cast<u32*>(std::calloc(NumImagePages, sizeof(u32)))};
+    /// Whether any image is registered on the 1 MiB pages of [addr, addr + size).
+    bool AnyImageOnPages(VAddr addr, size_t size) const {
+        const u64 page_end =
+            std::min<u64>((addr + size - 1) >> Traits::PageBits, NumImagePages - 1);
+        for (u64 page = addr >> Traits::PageBits; page <= page_end; ++page) {
+            if (std::atomic_ref<u32>(image_page_counts[page]).load(std::memory_order_acquire) !=
+                0) {
+                return true;
+            }
+        }
+        return false;
+    }
     std::mutex mutex;
     // bbport: FindImage results for unchanged image registrations (guarded by `mutex`).
     struct FindImageCacheEntry {

@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
+#include <atomic>
+#include <string>
+
 #include "shader_recompiler/info.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -9,7 +13,9 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/host_shaders/buffer_multi_copy_comp.h"
+#include "bbport_copy_shader.h"
 #include "bbport_toggles.h"
+#include "core/memory.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
@@ -135,6 +141,50 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     return true;
 }
 
+// bbport: what the shortcut did not run as given (bbport_copy_shader.h).
+enum CopyProblem : u32 {
+    CopyForeignBuffers,
+    CopyControlNotMapped,
+    CopyRecordsCut,
+    CopyMemoryNotMapped,
+    NumCopyProblems,
+};
+
+// One log line, with what the next look at it needs. Each kind counts for itself, so that many lines
+// of one do not keep the first of another out. The user data holds every buffer of the dispatch.
+static void ReportCopyShader(CopyProblem problem, const Shader::Info& info,
+                             const AmdGpu::ComputeProgram& cs_program, const Rasterizer& rasterizer,
+                             const AmdGpu::Buffer& ctl_buf_sharp,
+                             const AmdGpu::Buffer& src_buf_sharp,
+                             const AmdGpu::Buffer& dst_buf_sharp, u32 records_cut) {
+    static constexpr std::array<const char*, NumCopyProblems> what = {
+        "dispatch dropped, the buffers are not this shader's",
+        "dispatch dropped, the control buffer is not mapped",
+        "records past the limits",
+        "a copy dropped, its memory is not mapped",
+    };
+    static std::array<std::atomic<u64>, NumCopyProblems> reports{};
+    const u64 count = reports[problem].fetch_add(1, std::memory_order_relaxed) + 1;
+    if (!BbCopyShader::ShouldReport(count)) {
+        return;
+    }
+    std::string user_data;
+    for (const u32 word : info.UserData()) {
+        user_data += fmt::format(" {:08x}", word);
+    }
+    LOG_WARNING(Render_Vulkan,
+                "Copy shader: {} (number {} of this run), {} records cut; queue {}, program {:#x}, "
+                "{} threads, {}x{}x{} groups; control at {:#x} stride {} records {}, source at {:#x} "
+                "stride {} records {}, destination at {:#x} stride {} records {}; user data{}",
+                what[problem], count, records_cut, rasterizer.CsQueue(),
+                cs_program.Address<u64>(), cs_program.num_thread_x.full, cs_program.dim_x,
+                cs_program.dim_y, cs_program.dim_z, u64(ctl_buf_sharp.base_address),
+                ctl_buf_sharp.GetStride(), u32(ctl_buf_sharp.num_records),
+                u64(src_buf_sharp.base_address), src_buf_sharp.GetStride(),
+                u32(src_buf_sharp.num_records), u64(dst_buf_sharp.base_address),
+                dst_buf_sharp.GetStride(), u32(dst_buf_sharp.num_records), user_data);
+}
+
 static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::ComputeProgram& cs_program,
                                  Rasterizer& rasterizer) {
     auto& runtime = rasterizer.GetRuntime();
@@ -145,27 +195,53 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     const auto src_buf_sharp = info.buffers[1].GetSharp(info);
     const auto dst_buf_sharp = info.buffers[2].GetSharp(info);
     const auto buf_stride = src_buf_sharp.GetStride();
-    ASSERT(buf_stride == dst_buf_sharp.GetStride());
 
-    struct CopyShaderControl {
-        u32 dst_idx;
-        u32 src_idx;
-        u32 end;
+    // bbport: these were two ASSERTs that ended the game. Buffers that are not this shader's mean
+    // this dispatch is the wrong one, and returning true drops only it (bbport_copy_shader.h).
+    const auto elements = [](const AmdGpu::Buffer& sharp) {
+        return BbCopyShader::Elements{sharp.GetStride(), u32(sharp.data_format),
+                                      u32(sharp.num_format)};
     };
-    static_assert(sizeof(CopyShaderControl) == 12);
-    ASSERT(ctl_buf_sharp.GetStride() == sizeof(CopyShaderControl));
+    if (!BbCopyShader::ShapeFits(elements(ctl_buf_sharp), elements(src_buf_sharp),
+                                 elements(dst_buf_sharp))) {
+        ReportCopyShader(CopyForeignBuffers, info, cs_program, rasterizer, ctl_buf_sharp,
+                         src_buf_sharp, dst_buf_sharp, 0);
+        return true;
+    }
+    using CopyShaderControl = BbCopyShader::Control;
+    const u32 src_records = src_buf_sharp.num_records;
+    const u32 dst_records = dst_buf_sharp.num_records;
+    // Records past the buffer's end read as zero on the GPU; the memory behind may not be mapped.
+    const u32 num_controls = std::min<u32>(cs_program.dim_x, ctl_buf_sharp.num_records);
+    auto* memory = Core::Memory::Instance();
+    const auto mapped = [memory](VAddr address, u64 size) {
+        // What the normal buffer binding asks (BindBuffers), and with its lookup cache: this runs
+        // for every batch of about 57 dispatches a frame.
+        return memory->ClampRangeSize(address, size) == size;
+    };
+    if (!mapped(ctl_buf_sharp.base_address, u64{num_controls} * sizeof(CopyShaderControl))) {
+        ReportCopyShader(CopyControlNotMapped, info, cs_program, rasterizer, ctl_buf_sharp,
+                         src_buf_sharp, dst_buf_sharp, 0);
+        return true;
+    }
     const auto ctl_buf = reinterpret_cast<const CopyShaderControl*>(ctl_buf_sharp.base_address);
 
     static std::vector<vk::BufferCopy> copies;
     copies.clear();
-    copies.reserve(cs_program.dim_x);
+    copies.reserve(num_controls);
 
-    for (u32 i = 0; i < cs_program.dim_x; i++) {
-        const auto& [dst_idx, src_idx, end] = ctl_buf[i];
-        const u32 local_dst_offset = dst_idx * buf_stride;
-        const u32 local_src_offset = src_idx * buf_stride;
-        const u32 local_size = (end + 1) * buf_stride;
-        copies.emplace_back(local_src_offset, local_dst_offset, local_size);
+    u32 records_cut = cs_program.dim_x - num_controls;
+    for (u32 i = 0; i < num_controls; i++) {
+        const auto range = BbCopyShader::Range(ctl_buf[i], buf_stride, src_records, dst_records);
+        records_cut += range.cut ? 1 : 0;
+        // A copy of no bytes is not allowed in Vulkan.
+        if (range.size != 0) {
+            copies.emplace_back(range.src_offset, range.dst_offset, range.size);
+        }
+    }
+    if (records_cut != 0) {
+        ReportCopyShader(CopyRecordsCut, info, cs_program, rasterizer, ctl_buf_sharp,
+                         src_buf_sharp, dst_buf_sharp, records_cut);
     }
 
     // bbport: 64 KiB instead of 64 MiB. The copies are a few KiB spread over up to 57 MiB, and
@@ -209,6 +285,16 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
             dst_offset_max = new_dst_offset_max;
         }
 
+        // bbport: buffers of a stale dispatch may point at nothing, and the checks above only see
+        // the buffers' own sizes. The game's own copies are always inside mapped memory.
+        if (!mapped(src_buf_sharp.base_address + src_offset_min, src_offset_max - src_offset_min) ||
+            !mapped(dst_buf_sharp.base_address + dst_offset_min, dst_offset_max - dst_offset_min)) {
+            ReportCopyShader(CopyMemoryNotMapped, info, cs_program, rasterizer, ctl_buf_sharp,
+                             src_buf_sharp, dst_buf_sharp, 0);
+            batch_start = batch_end;
+            continue;
+        }
+
         // Obtain buffers for the total source and destination ranges.
         const auto [src_buf, src_buf_offset] = buffer_cache.ObtainBuffer(
             src_buf_sharp.base_address + src_offset_min, src_offset_max - src_offset_min, false);
@@ -232,6 +318,10 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     }
 
     return true;
+}
+
+bool IsShaderHLE(u64 pgm_hash) {
+    return pgm_hash == COPY_SHADER_HASH;
 }
 
 bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,

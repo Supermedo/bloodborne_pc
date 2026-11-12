@@ -65,11 +65,23 @@ for module in argparse base64 bisect collections contextlib hashlib json re shut
               xml.etree.ElementTree urllib.request ctypes.wintypes; do
     hidden+=(--hidden-import "$module")
 done
+# Fail in a console-only frozen check before launching any windowed test. This
+# catches missing SSL data/native libraries that an unfrozen Python test misses.
+out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --console \
+    --name launcher-runtime-check --distpath out/pyi-check --workpath out/pyi-check-work \
+    --specpath out/pyi-check-work --paths "$(cygpath -w "$PWD/launcher")" \
+    "$(cygpath -w "$PWD/packaging/windows/check_launcher_runtime.py")"
+out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe
 out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --windowed \
     --name Bloodborne --icon "$(cygpath -w "$PWD/launcher/bloodborne.ico")" --distpath out/pyi-dist \
     --workpath out/pyi-work --specpath out/pyi-work --paths "$(cygpath -w "$PWD/scripts")" "${hidden[@]}" \
     --add-data "$(cygpath -w "$PWD/launcher/assets");assets" \
     "$(cygpath -w "$PWD/launcher/bbport_launcher_win.py")"
+# Compare native files/data first, then check Python imports in the actual bundle
+# through its existing --script role. The console runner limits it to 30 seconds.
+out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe --launcher \
+    "$(cygpath -w "$PWD/out/pyi-dist/Bloodborne/Bloodborne.exe")" \
+    "$(cygpath -w "$PWD/packaging/windows/check_launcher_runtime.py")"
 
 # The package is assembled in a fresh staging folder and zipped from there; dist/bbport-windows
 # (a playable copy that may hold saves and settings) is only refreshed afterwards.
@@ -95,15 +107,29 @@ cp -r scripts patches "$dest/"
 # The first build downloads AMD's SDK archive; subsequent builds verify the cached DLL.
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr411_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_upscaler_dx12.dll "$dest/bin/"
+# SDK 2.4 is separate: retain the original FSR4.1.1 and FG libraries above/below.
+out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr24_upscaling.py
+mkdir -p "$dest/bin/fsr24"
+cp out/fsr24/amd_fidelityfx_upscaler_dx12.dll out/fsr24/amd_fidelityfx_upscaler_vk.dll "$dest/bin/fsr24/"
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fg401_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_framegeneration_dx12.dll \
    out/fsr411-dx12/amd_fidelityfx_loader_dx12.dll out/fsr411-dx12/D3D12Core.dll "$dest/bin/"
+# SDK 2.4 FG is independent from the retained upscaling and 4.0.1 libraries.
+out/pyenv/Scripts/python.exe packaging/windows/fetch_fg402_sdk24.py
+mkdir -p "$dest/bin/fsr24"
+cp out/fsr24/amd_fidelityfx_framegeneration_dx12.dll "$dest/bin/fsr24/"
 # Vulkan FSR 4.1.1: share the launcher's pinned provider and file checks. Cache the
 # provider and its corresponding source so subsequent package builds work offline.
 out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/fsr4vk"
 # Legacy CPU (Intel 3rd generation and older): the translation plan scripts/cpu_compat.py applies.
 mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
+# Offline Chalice Glyphs (docs/LOCAL_CHALICE.md): the glyph catalog beside bb-probe.exe.
+mkdir -p "$dest/bin/LocalChalice"
+cp data/local_chalice/catalog.bin "$dest/bin/LocalChalice/"
+# Player help only; technical validation stays in docs/development in the repository.
+mkdir -p "$dest/docs"
+cp docs/RX6000_OBJECT_MOTION.md "$dest/docs/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
 # Seamless co-op (BBSC 1.0.0's co-op, github.com/CLSAMG22/BBSC, GPL-2.0) for the launcher's Seamless co-op page
@@ -147,9 +173,12 @@ cp gpu/third_party/wepoll/LICENSE "$dest/licenses/wepoll-LICENSE.txt"
 cp gpu/third_party/httplib/LICENSE "$dest/licenses/cpp-httplib-LICENSE.txt"
 cp packaging/windows/licenses/*.txt "$dest/licenses/"
 cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
+cp data/local_chalice/LICENSE-BB.Chalices.Reborn.txt "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
 cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
+cp docs/FSR24_UPSCALING.md "$dest/docs/"
+cp docs/SDK24_ML_FG.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"

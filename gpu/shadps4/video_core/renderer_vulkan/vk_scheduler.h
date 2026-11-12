@@ -17,6 +17,7 @@
 #include <thread>
 #include <queue>
 
+#include "bbport_copy.h"
 #include "bbport_toggles.h"
 #include "common/assert.h"
 #include "common/interval_set.h"
@@ -814,19 +815,14 @@ public:
     /// bbport: guest memory copies on the recording thread (small ones, RecordHostCopy) or the
     /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
     /// (it may then rewrite the memory, e.g. UI vertices: flickering) and before the
-    /// submission that reads them. Waits for all.
+    /// submission that reads them. Waits for all; with 6 CPUs or more the small ones the
+    /// recording thread has not started yet run here instead (else, or BB_COPY_HELP=0: waits
+    /// for the recording thread to reach them, behind every command recorded before them).
     void WaitHostCopies();
 
-    /// Runs `copy` on the recording thread in order with the commands (the thread spins for
+    /// Runs `item` on the recording thread in order with the commands (the thread spins for
     /// work anyway, so small copies cost no wakeup); WaitHostCopies() covers it.
-    template <typename Func>
-    void RecordHostCopy(Func&& copy) {
-        Record([copy = std::forward<Func>(copy), this,
-                seq = ++host_copies_issued](vk::CommandBuffer) {
-            copy();
-            host_copies_done.store(seq, std::memory_order_release);
-        });
-    }
+    void RecordHostCopy(const BbCopy::Item& item);
 
     /// bbport: runs `signal` once the guest memory copies issued so far are done, without
     /// waiting here: the recording thread reaches it after the copies queued before it and hands
@@ -939,8 +935,28 @@ private:
     std::atomic<size_t> queued_chunks{0}; ///< recorder_queue.size() for lock-free polling
     bool recorder_sleeping = false; ///< waiting on recorder_cv (guarded by recorder_mutex)
     bool direct_mode = false; ///< the command buffer is recorded on the caller's thread
+    /// bbport: small guest copies handed to the recording thread (RecordHostCopy), oldest
+    /// first. Whichever thread claims one runs it: the recording thread when it reaches it, or
+    /// the thread recording commands in WaitHostCopies(). An entry is dropped once the
+    /// recording thread has passed it (host_copies_done), as it holds a pointer to it until then.
+    struct HostCopyJob {
+        BbCopy::Item item;
+        std::atomic<u8> state{0}; ///< 0 queued, 1 running, 2 done
+        explicit HostCopyJob(const BbCopy::Item& item_) : item{item_} {}
+        bool Claim() {
+            u8 queued = 0;
+            return state.compare_exchange_strong(queued, 1, std::memory_order_acq_rel);
+        }
+        void Run() {
+            item.run(item);
+            state.store(2, std::memory_order_release);
+        }
+    };
+    std::deque<HostCopyJob> host_copy_jobs; ///< by the thread recording (A or B)
+    u64 host_copy_jobs_front = 0;           ///< sequence number of host_copy_jobs.front() - 1
+    u64 host_copies_waited = 0;             ///< copies up to this one are done
     u64 host_copies_issued = 0;
-    std::atomic<u64> host_copies_done{0};
+    std::atomic<u64> host_copies_done{0}; ///< copies the recording thread has passed
     std::atomic<u64> deferred_signals_issued{0}; ///< by the thread recording (A or B)
     std::shared_ptr<std::atomic<u64>> deferred_signals_done =
         std::make_shared<std::atomic<u64>>(0);

@@ -2,6 +2,8 @@
 
 The FSR 4.1 integration also retains **ML-FG 4.0.2** as an independent choice.
 Both ML versions require their exact provider and use the existing 2× SDR path.
+ML-FG 4.0.2 now uses the separately packaged SDK 2.4 effect;
+see [loading, API contract and validation](SDK24_ML_FG.md).
 See [FSR 4.1 on Windows](FSR41_WINDOWS.md) for the current combined launcher,
 installed-driver discovery and Windows requirements. Measurements below
 refer to the original 4.0.1 integration.

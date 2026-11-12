@@ -31,6 +31,16 @@
 #include "sdl_window.h"
 #include "bloodborne_cam.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#ifdef _WIN32
+// After the other headers, so that its macros reach none of them.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 // bbport: input freshness (BB_LATENCY_LOG=1 or BB_FRAME_STATS=1): how often the window thread
 // takes the input events and how old they are when the game reads the pad, every 5 seconds.
@@ -255,6 +265,19 @@ std::thread g_window_thread;
 std::mutex g_window_mutex;
 std::condition_variable g_window_cv;
 bool g_window_ready;
+
+// bbport: ends the process at once, without anyone's exit code. On Windows std::_Exit still
+// goes through ExitProcess, which first stops every other thread and then runs each loaded
+// DLL's process-detach code; a driver DLL (DLSS Frame Generation's) that waits there for one of
+// its own threads waits forever, and the game stayed in the background after its window was
+// closed. TerminateProcess runs no detach code, as runtime_restart already ends a process.
+[[noreturn]] void EndProcessNow(int code) {
+    std::fflush(nullptr);
+#ifdef _WIN32
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
+#endif
+    std::_Exit(code);
+}
 } // namespace
 
 u32 BbDisplayRefreshHz() {
@@ -323,8 +346,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
             SDL_Delay(1);
         }
         LOG_INFO(Frontend, "Window closed by user");
-        std::fflush(stdout);
-        std::_Exit(0);
+        EndProcessNow(0);
     });
     g_window_thread.detach();
     {
@@ -446,6 +468,10 @@ extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
         out[n] = 0;
     }
     return state;
+}
+
+extern "C" void bbgpu_text_input_cancel(void) {
+    if (g_window) g_window->CancelTextInput();
 }
 
 extern "C" void bbgpu_mouse_take(BbMouseInput* out) {

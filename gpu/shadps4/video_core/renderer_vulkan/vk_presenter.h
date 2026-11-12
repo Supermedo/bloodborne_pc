@@ -89,13 +89,7 @@ public:
         return swapchain.HasHDR();
     }
 
-    void SetHDR(bool enable) {
-        if (!IsHDRSupported()) {
-            return;
-        }
-        swapchain.SetHDR(enable);
-        pp_settings.hdr = enable ? 1 : 0;
-    }
+    void SetHDR(bool enable);
 
     VideoCore::Image& RegisterVideoOutSurface(
         const Libraries::VideoOut::BufferAttributeGroup& attribute, VAddr cpu_address) {
@@ -121,6 +115,8 @@ private:
     Frame* GetRenderFrame();
 
     void RecreateFrame(Frame* frame, u32 width, u32 height);
+    /// bbport: a new swapchain for the window's size, made under the scheduler's submit lock.
+    void RecreateSwapchain();
     /// bbport: the first `count` images frame generation writes for `frame` (its size), made
     /// when missing; the others are freed. Returns how many there are.
     u32 EnsureGenerated(Frame* frame, u32 count);

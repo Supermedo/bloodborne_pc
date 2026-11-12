@@ -13,6 +13,7 @@
 #include "core/memory.h"
 #include "core/signals.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 #ifndef _WIN64
@@ -113,17 +114,39 @@ struct PageManager::Impl {
         const auto is_gpu_thread = rasterizer->IsGpuSideThread();
         if (is_gpu_thread) {
             BbStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
-        } else if (runtime_fault_recover) {
+        } else if (runtime_fault_recover && Vulkan::DrawPreparation::OnWorkerThread()) {
             // bbport: a draw preparation worker reading ahead of the GPU thread (it holds the
             // shader cache's lock, which the GPU thread takes to add a shader). Serving the fault
             // would drain the draw pipe and download from the GPU: waiting for the GPU thread
             // while blocking it (a freeze). It goes back to its recovery point (probe.c) and the
-            // GPU thread prepares that draw itself.
+            // GPU thread prepares that draw itself. Only workers: other threads' guarded reads
+            // (BbGuest::Read) are served, else a GPU-written table read as an empty descriptor
+            // (from SpartanPort 21db7f29).
             return false;
         }
         if (Common::IsWriteError(context)) {
+            BbStats::write_faults.fetch_add(1, std::memory_order_relaxed);
             BbStats::Timer timer{BbStats::t_write_faults};
+#ifdef __linux__
+            // The faulting thread's own CPU time: the rest of the wall time it was preempted
+            // or asleep (a lock).
+            timespec cpu_start{};
+            if (BbStats::enabled) {
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_start);
+            }
+            const bool handled = rasterizer->OnWriteFault(addr, is_gpu_thread);
+            if (BbStats::enabled) {
+                timespec cpu_end{};
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_end);
+                BbStats::t_write_faults_cpu.fetch_add(
+                    u64(cpu_end.tv_sec - cpu_start.tv_sec) * 1000000000ull +
+                        u64(cpu_end.tv_nsec - cpu_start.tv_nsec),
+                    std::memory_order_relaxed);
+            }
+            return handled;
+#else
             return rasterizer->OnWriteFault(addr, is_gpu_thread);
+#endif
         } else {
             BbStats::read_faults.fetch_add(1, std::memory_order_relaxed);
             BbStats::Timer timer{BbStats::t_read_faults};
@@ -404,6 +427,7 @@ public:
             const VAddr addr = msg.arg.pagefault.address;
             const auto ptid = msg.arg.pagefault.feat.ptid;
             {
+                BbStats::write_faults.fetch_add(1, std::memory_order_relaxed);
                 BbStats::Timer timer{BbStats::t_write_faults};
                 rasterizer->OnWriteFault(addr, rasterizer->IsGpuSideThreadId(ptid));
             }

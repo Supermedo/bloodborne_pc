@@ -42,6 +42,15 @@ bool CapturesInput();
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text);
 
+/// bbport: the text dialog's typed line in the presented image's pixels (cursor: where the next
+/// character goes, from x), and that image's size. The IME's candidate list (Hanja, kanji) goes
+/// next to it.
+struct TextArea {
+    float x, y, w, h, cursor, display_w, display_h;
+};
+/// Window thread: false while no text dialog has been drawn.
+bool TextEntryArea(TextArea& area);
+
 /// Any thread: an amber banner at the top of the screen for ten seconds: `headline` in the
 /// highlight colour, a bar filled to `used_fraction` (0..1; negative draws no bar) and `detail`
 /// under it. Drawn by the present thread; replaces a banner still showing.

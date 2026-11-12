@@ -17,12 +17,14 @@ import webbrowser
 from pathlib import Path
 
 import bbport_theme as theme
+import bbport_lang_motion as motion_text
 
 L = None  # bbport_launcher_win, set by bind()
 DISCORD = 'https://discord.gg/WtYT4fXhEN'  # the community Discord (bbport.de); the old invite expired
 # Help & Support on the community forum: help is asked there since 28 October 2026, not in the Discord any more.
 FORUM_HELP = 'https://forum.bbport.de/t/help-support'
 EBOOT_SIZE = 93_825_704  # the clean 1.09 eboot.bin as the update PKG unpacks it
+EBOOT_ELF_SIZE = 93_667_640  # the same file as a plain ELF, as some dumpers write it (US CUSA00900 seen so)
 # The 1.09 image with Lance McDonald's 60 fps patch built in (run.py LANCE_60FPS_IMAGE).
 LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
 GUEST_MEMORY_GB = {'1080': 6, 'high': 10}  # what the game reserves at its start, with the page file
@@ -36,6 +38,14 @@ def bind(module):
 def _(*texts):
     """Translated; a page named by an older name (Game & language) by its name now."""
     return L.renamed(L._(*texts)) if L else texts[0]
+
+
+def step_text(step):
+    text = _(step)
+    if step == motion_text.HELP_KEYS['Disable']:
+        return text.format(expert=_('Expert view'), graphics=_('All graphics'),
+                           option=_('Object motion vectors'))
+    return text
 
 
 def number(value, digits=0):
@@ -62,21 +72,24 @@ TOPICS = {
          'eboot.bin someone shared.',
          'Copy eboot.bin from it into your game folder (Game & language > Game folder) and replace the old one. '
          'Make sure it is that folder, not another copy of the game.',
-         'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.',
+         'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your '
+         'dump tool wrote it as a plain ELF file).',
          'Mods must not bring their own eboot.bin: the check at the top of this page names any that do.']),
     'eboot_truncated': (
         'eboot.bin is cut off',
         'It is shorter than the clean file: unpacking or copying it stopped early (the log then says "prepare '
         'failed: out of bounds").',
         ['Put the base game and the 1.09 update into two new, empty folders again.',
-         'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).',
+         'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as '
+         'a plain ELF file.',
          'Copy everything from the update folder into the base game folder and replace the files.']),
     'eboot_unreadable': (
         'eboot.bin cannot be read',
-        'It is not the original file (a PS4 SELF file), or it is damaged: another tool has converted it, a copy '
-        'went wrong, or it is not from Bloodborne.',
-        ['Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes). Copy it again even if yours '
-         'has that size: the size alone does not show damage.']),
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, another '
+        'tool has converted it, or it is not from Bloodborne.',
+        ['Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF '
+         'file).',
+         'Copy it again even if yours has that size: the size alone does not show damage.']),
     'program_files': (
         'A program file of the game is not the original',
         'eboot.bin or a file in sce_module was converted by another tool or comes from another release (the log '
@@ -150,6 +163,10 @@ TOPICS = {
         ['All graphics (expert view): Quality preset Balanced or Performance (DLSS on GeForce RTX cards).',
          'Model detail (LOD) "As in the game", object motion vectors off.',
          'Close your browser and other programs while playing.']),
+    'omv_rx6000': (
+        motion_text.HELP_KEYS['Title'],
+        motion_text.HELP_KEYS['Context'],
+        [motion_text.HELP_KEYS[key] for key in ('Disable', 'Repeat', 'Report')]),
     'driver': (
         'The graphics driver stopped (device lost)',
         'The game needs Vulkan 1.3 and a current driver; an old or crashed driver ends the game with '
@@ -323,9 +340,25 @@ NOTICE_INTROS = {'shadnet_rejected': 'Online play was off this time. Its log nam
                  'steam_layout': "The controller's input was doubled this time. Its log names the cause:"}
 
 
+def ssbo_device_loss(text):
+    """Track the active path at device loss; this is context, not a cause diagnosis."""
+    active = False
+    for line in (text or '').splitlines():
+        if 'Object motion: storage path ' in line:
+            active = bool(re.search(r'Object motion: storage path SSBO\b', line))
+        elif re.search(r'Object motion: (?:off\b|.*(?:unsupported|failed), off\b)', line):
+            active = False
+        if active and re.search(r'ErrorDeviceLost|\bdevice lost\b', line):
+            return True
+    return False
+
+
 def hints_in_log(text):
     """The topics whose messages the log has, in the order of LOG_HINTS."""
-    return [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+    topics = [topic for pattern, topic in LOG_HINTS if re.search(pattern, text or '')]
+    if 'driver' in topics and ssbo_device_loss(text):
+        topics.insert(topics.index('driver'), 'omv_rx6000')
+    return topics
 
 
 def hints_for_game(text, game_dir):
@@ -384,6 +417,11 @@ def other_installations(settings, port_dir, data_dir):
 
 
 # ---- the checks ----------------------------------------------------------------------------------
+def clean_size(start):
+    """The clean 1.09 eboot.bin's size in the format of a file that begins with `start`."""
+    return EBOOT_ELF_SIZE if start[:4] == b'\x7fELF' else EBOOT_SIZE
+
+
 def eboot_state(folder):
     """'clean', 'lance' (Lance McDonald's 60 fps patch), 'modified' (another build, or changed),
     'truncated' (shorter than the clean file), 'unreadable' or 'missing'; with the file size."""
@@ -394,7 +432,7 @@ def eboot_state(folder):
         return 'missing', 0
     # Only a file shorter than the clean one is cut off: a full-size one that does not read is damaged or
     # converted, and "cut off (93,825,704 bytes, the clean one has 93,825,704)" told players nothing (R78).
-    broken = 'truncated' if len(data) < EBOOT_SIZE else 'unreadable'
+    broken = 'truncated' if len(data) < clean_size(data) else 'unreadable'
     try:
         from prepare import parse_self, span
         from patches import PATCH_GROUPS, eboot_bytes, matching_groups_of
@@ -644,16 +682,20 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
             state = eboot_state(game)[0]
         eboot = {'key': key, 'state': state}
         size = number(stat.st_size)
-        values = {}
         try:
-            from prepare import sfo
-            values = sfo((game / 'sce_sys' / 'param.sfo').read_bytes())
-        except (OSError, ValueError, ImportError):
-            pass
-        version = values.get('APP_VER')
+            # game_app_version: Game of the Year dumps say APP_VER 01.00 over the 1.09 code.
+            from patches import game_app_version
+            version = game_app_version(game)
+        except ImportError:
+            version = None
         # Another version's eboot.bin is not 1.09's anyway (the base game 1.00): the version line below
         # says what to do, with the update's steps.
         other_version = state == 'modified' and version and version != '01.09'
+        try:
+            with open(game / 'eboot.bin', 'rb') as file:
+                clean = clean_size(file.read(4))
+        except OSError:
+            clean = EBOOT_SIZE
         checks.append(None if other_version else {
             'clean': ('ok', None, _('eboot.bin is the clean 1.09 file ({} bytes).').format(size)),
             'lance': ('bad', 'eboot_modified', _('eboot.bin has Lance McDonald\'s 60 FPS patch built in: the game '
@@ -661,7 +703,7 @@ def run_checks(game_dir, mods_dir, port_dir, output_res, cached=None):
             'modified': ('warn', 'eboot_modified', _('eboot.bin is not the clean 1.09 file ({} bytes): the game runs '
                                                      'at 30 FPS without the effect options.').format(size)),
             'truncated': ('bad', 'eboot_truncated', _('eboot.bin is cut off ({} bytes, the clean one has {}).')
-                          .format(size, number(EBOOT_SIZE))),
+                          .format(size, number(clean))),
             'unreadable': ('bad', 'eboot_unreadable', _('eboot.bin cannot be read ({} bytes).').format(size)),
         }.get(state, ('bad', None, _('eboot.bin cannot be read.'))))
         if checks[-1] is None:
@@ -855,7 +897,7 @@ class HelpMixin:
             line.pack(fill='x', pady=px(2))
             tk.Label(line, text=f'{number}.', bg=theme.CARD, fg=theme.GOLD_LIGHT, font=(theme.BODY_SEMI, 10),
                      width=3, anchor='ne').pack(side='left', anchor='n')
-            self.wrap_within(tk.Label(line, text=_(step), bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 10),
+            self.wrap_within(tk.Label(line, text=step_text(step), bg=theme.CARD, fg=theme.TEXT, font=(theme.BODY, 10),
                                       justify='left', anchor='w'), 660).pack(side='left', fill='x', expand=True)
 
         actions = TOPIC_ACTIONS.get(key, [])
@@ -980,6 +1022,8 @@ class HelpMixin:
             try:
                 import game_files
                 result = game_files.check(game, progress)
+                game_files.write_result(result, Path(self.app.get('user_dir') or L.DATA_DIR / 'user')
+                                        / 'game_files_check.txt')
                 bad = result['differ'] + result['missing']
                 text = (_('All {} game files are those of the clean 1.09.').format(number(result['checked']))
                         if not bad else
@@ -1191,8 +1235,9 @@ class HelpMixin:
                                                          'help.').format(shown))
             return
         title, why, _steps = TOPICS[topics[0]]
-        if self.messagebox.askyesno('Bloodborne', _('The game ended with an error (code {}). Its log names the '
-                                                    'cause:').format(shown) +'\n\n' + _(title) + '\n' + _(why) +
+        intro = (motion_text.HELP_KEYS['Intro'] if topics[0] == 'omv_rx6000' else
+                 'The game ended with an error (code {}). Its log names the cause:')
+        if self.messagebox.askyesno('Bloodborne', _(intro).format(shown) +'\n\n' + _(title) + '\n' + _(why) +
                                     '\n\n' + _('Show the fix?')):
             self.open_topic(topics[0])
 

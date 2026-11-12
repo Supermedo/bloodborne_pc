@@ -223,14 +223,67 @@ void Scheduler::WaitDeferredSignals() {
     }
 }
 
+void Scheduler::RecordHostCopy(const BbCopy::Item& item) {
+    HostCopyJob* job = &host_copy_jobs.emplace_back(item);
+    Record([job, this, seq = ++host_copies_issued](vk::CommandBuffer) {
+        if (job->Claim()) {
+            job->Run();
+        }
+        host_copies_done.store(seq, std::memory_order_release);
+    });
+}
+
 void Scheduler::WaitHostCopies() {
-    if (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
+    // bbport: a guest-visible write (label, fence, counter dump: ~200 a frame) waited here for
+    // the recording thread to reach the last small copy, behind every command recorded before
+    // it, a quarter of the GPU thread's time. Only the copies must be done (the submission that
+    // reads them waits for the recording itself), so the ones the recording thread has not
+    // started run here and only one it is running is waited for. On by default with 6 CPUs or
+    // more for the game (6 cores: +20% FPS; 4 cores with SMT: the same). With 4 the guest's
+    // threads lacked the CPU time the waiting thread had yielded to them (60 FPS cap: 57.7 ->
+    // 55.2 FPS, twice the uneven frames), so it stays off there. BB_COPY_HELP=0: off (as
+    // before); 1: on; 2: on without the hand-over to the recording thread below (comparisons).
+    static const char* const help_env = std::getenv("BB_COPY_HELP");
+    static const bool help = help_env ? help_env[0] != '0' : BbThreads::Available() >= 6;
+    static const bool hand_over = !help_env || help_env[0] != '2';
+    if (help && host_copies_waited < host_copies_issued &&
+        host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
+        BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
+        BbStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
+        // The commands recorded so far go to the recording thread first, as the old wait did:
+        // it keeps recording while the copies run here. Without this hand-over it fell behind
+        // and the submission waited for it instead (4 CPUs: 15-19% of the frame).
+        if (hand_over) {
+            KickRecording(true);
+        }
+        u64 helped = 0;
+        for (u64 seq = std::max(host_copies_waited, host_copy_jobs_front) + 1;
+             seq <= host_copies_issued; ++seq) {
+            HostCopyJob& job = host_copy_jobs[seq - 1 - host_copy_jobs_front];
+            if (job.Claim()) {
+                job.Run();
+                ++helped;
+                continue;
+            }
+            while (job.state.load(std::memory_order_acquire) != 2) {
+                __builtin_ia32_pause();
+            }
+        }
+        BbStats::host_copies_helped.fetch_add(helped, std::memory_order_relaxed);
+    } else if (!help && host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
         BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
         BbStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
         KickRecording(true);
         while (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
             std::this_thread::yield();
         }
+    }
+    host_copies_waited = host_copies_issued;
+    // Entries the recording thread has passed (it no longer points at them).
+    const u64 passed = host_copies_done.load(std::memory_order_acquire);
+    while (host_copy_jobs_front < passed) {
+        host_copy_jobs.pop_front();
+        ++host_copy_jobs_front;
     }
     BbStats::WaitTimer timer{BbStats::copy_threads_wait_ns};
     BbCopy::WaitAsync();

@@ -105,6 +105,10 @@ inline const AmdGpu::ComputeProgram& Rasterizer::CsRegs() const {
     return stage_cs ? *stage_cs : liverpool->GetCsRegs();
 }
 
+s32 Rasterizer::CsQueue() const {
+    return stage_cs ? stage_queue : liverpool->CurrentQueue();
+}
+
 inline AmdGpu::CbDbExtent Rasterizer::DbExtent() const {
     return stage_regs ? pipe_db_extent : liverpool->last_db_extent;
 }
@@ -373,6 +377,7 @@ struct DrawPacket {
     std::array<AmdGpu::CbDbExtent, AmdGpu::NUM_COLOR_BUFFERS> cb_extent;
     AmdGpu::CbDbExtent db_extent;
     u64 ring_end; ///< constant ring position after this packet's copies
+    s32 queue;    ///< the queue being decoded
 };
 struct PacketStage {
     const Shader::Info* info;
@@ -640,6 +645,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     packet.cb_extent = liverpool->last_cb_extent;
     packet.db_extent = liverpool->last_db_extent;
     packet.ring_end = constant_ring ? constant_ring->Position() : 0;
+    packet.queue = liverpool->CurrentQueue();
     out += sizeof(DrawPacket);
     std::memcpy(out, blocks.data(), num_blocks * sizeof(u16));
     out += AlignPacket(num_blocks * sizeof(u16));
@@ -826,6 +832,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
         self.FilterDraw();
     } else if (cs) {
         stage_cs = cs;
+        stage_queue = packet.queue;
         const auto* pipeline = static_cast<const ComputePipeline*>(packet.pipeline);
         if (indirect) {
             self.DispatchIndirectRecord(pipeline, indirect->args, indirect->stride);
@@ -983,6 +990,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         }
         camera_motion->SetJitter(upscaler->Jitter());
         object_motion->OnFrameStart();
+        pipeline_cache.NoteMotionFrame();
         NoteFrameStart();
         static const char* scene_debug = std::getenv("BB_SCENE_DEBUG");
         scene_debug_frame = scene_debug && std::remove(scene_debug) == 0;
@@ -1128,6 +1136,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     SetProjectionJitter(push_data, regs, draw_jitter);
     pipeline->BindResources(set_writes, push_data);
+    if (motion_draw)
+        object_motion->BindParameters(pipeline->GetLayout());
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
@@ -1266,6 +1276,10 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     }
     SetProjectionJitter(push_data, Regs(), draw_jitter);
     pipeline->BindResources(set_writes, push_data);
+    // Indirect motion draws use the zero parameter record (camera-only fallback),
+    // but the SSBO shader still requires its parameter/history descriptors.
+    if (pipeline->GetGraphicsKey().motion_vectors)
+        object_motion->BindParameters(pipeline->GetLayout());
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
     scheduler.BeginRendering(state);
@@ -1803,6 +1817,15 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
                 !BbToggle::Disabled(BbToggle::PreparedResources)
             ? &prepared->vertex
             : nullptr;
+    // bbport: TryPreparedPipeline compared the V#s when the pipeline was chosen, but a write
+    // queued before this draw (WriteData, DMA) can change the table after that. Stale addresses
+    // or strides stretch polygons across the screen: the V#s are read again then (from
+    // Jgamrot/bloodborne_pc 54b2ca589e and SpartanPort bc78995e).
+    if (ready &&
+        !fetch->SharpsUnchanged(pipeline->GetStage(Shader::SwStage::Vertex), ready->buffers)) {
+        NoteStaleVertexInputs();
+        ready = nullptr;
+    }
     if (ready) {
         attributes.assign(ready->attributes, ready->attributes + ready->count);
         bindings.assign(ready->bindings, ready->bindings + ready->count);
@@ -1907,7 +1930,7 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
             host_offsets.push_back(0);
         }
         host_sizes.push_back(buffer.GetSize());
-        host_strides.push_back(buffer.GetStride());
+        host_strides.push_back(LiverpoolToVK::VertexInputStride(buffer));
     }
 
     v.num_buffers = static_cast<u32>(guest_buffers.size());
@@ -1920,8 +1943,13 @@ void Rasterizer::BindIndexBuffer(u32 index_offset) {
 
 void Rasterizer::EmitIndexBuffer() {
     scheduler.Record([handle = index_bind.handle, offset = index_bind.offset,
-                      type = index_bind.type](vk::CommandBuffer cmdbuf) {
-        cmdbuf.bindIndexBuffer(handle, offset, type);
+                      size = index_bind.size, type = index_bind.type,
+                      maint5 = instance.IsMaintenance5Supported()](vk::CommandBuffer cmdbuf) {
+        if (maint5) {
+            cmdbuf.bindIndexBuffer2KHR(handle, offset, size, type);
+        } else {
+            cmdbuf.bindIndexBuffer(handle, offset, type);
+        }
     });
 }
 
@@ -1932,15 +1960,35 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
     const bool is_index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
     const vk::IndexType index_type = is_index16 ? vk::IndexType::eUint16 : vk::IndexType::eUint32;
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
-    const VAddr index_address =
-        regs.index_base_address.Address<VAddr>() + index_offset * index_size;
+    const VAddr base_address = regs.index_base_address.Address<VAddr>();
+    const VAddr index_address = base_address + u64(index_offset) * index_size;
 
     // Bind index buffer.
-    const u32 index_buffer_size = regs.num_indices * index_size;
-    const auto [buffer, offset] =
-        buffer_cache.ObtainBuffer(index_address, index_buffer_size, false);
-    needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
-    index_bind = {buffer->Handle(), offset, index_type};
+    // bbport: a null index base or an unmapped range binds nothing (VK_KHR_maintenance6) or a
+    // zero buffer, and the bound range is clamped to mapped memory (from Jgamrot/yharnam-pc
+    // f62b114e, upstream shadPS4).
+    const u64 requested_size = u64(regs.num_indices) * index_size;
+    const u64 mapped_size =
+        base_address != 0 ? memory->ClampRangeSize(index_address, requested_size) : 0;
+    u32 index_buffer_size = static_cast<u32>(Common::AlignDown(mapped_size, index_size));
+    vk::Buffer index_buffer{};
+    u64 buffer_offset{};
+    if (index_buffer_size != 0) {
+        const auto [buffer, offset] =
+            buffer_cache.ObtainBuffer(index_address, index_buffer_size, false);
+        needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
+        index_buffer = buffer->Handle();
+        buffer_offset = offset;
+    } else if (!instance.IsMaintenance6Supported()) {
+        const auto* null_buffer = buffer_cache.GetNullIndexBuffer();
+        index_buffer_size = static_cast<u32>(null_buffer->SizeBytes());
+        needs_barrier |= runtime.IsBufferAccessed(null_buffer, 0, index_buffer_size);
+        if (bound_buffers.size() < bound_buffers.capacity()) {
+            bound_buffers.emplace_back(null_buffer, 0, index_buffer_size, false);
+        }
+        index_buffer = null_buffer->Handle();
+    }
+    index_bind = {index_buffer, buffer_offset, index_buffer_size, index_type};
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
@@ -2002,10 +2050,12 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
         return false;
     }
 
-    // Ensure shader only has 2 bound buffers
+    // Ensure shader only has 2 bound buffers (plus optional flatbuf; bbport: from
+    // Jgamrot/yharnam-pc f62b114e, upstream shadPS4)
     const auto& cs_pgm = CsRegs();
     const auto& info = pipeline->GetStage(Shader::SwStage::Compute);
-    if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() != 2 || !info.images.empty()) {
+    if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() < 2 || info.buffers.size() > 3 ||
+        !info.images.empty()) {
         return false;
     }
 
@@ -2013,6 +2063,9 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     const auto& desc0 = info.buffers[0];
     const auto& desc1 = info.buffers[1];
     if (!desc0.is_formatted || !desc1.is_formatted || desc0.is_written == desc1.is_written) {
+        return false;
+    }
+    if (info.buffers.size() == 3 && info.buffers[2].buffer_type != Shader::BufferType::Flatbuf) {
         return false;
     }
 
@@ -2055,10 +2108,12 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
         return false;
     }
 
-    // Ensure shader only has 2 bound buffers
+    // Ensure shader only has 2 bound buffers (plus optional flatbuf; bbport: from
+    // Jgamrot/yharnam-pc f62b114e, upstream shadPS4)
     const auto& cs_pgm = CsRegs();
     const auto& info = pipeline->GetStage(Shader::SwStage::Compute);
-    if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() != 2 || !info.images.empty()) {
+    if (cs_pgm.num_thread_x.full != 64 || info.buffers.size() < 2 || info.buffers.size() > 3 ||
+        !info.images.empty()) {
         return false;
     }
 
@@ -2066,6 +2121,9 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
     const auto& desc0 = info.buffers[0];
     const auto& desc1 = info.buffers[1];
     if (desc0.is_formatted || !desc1.is_formatted || desc0.is_written || !desc1.is_written) {
+        return false;
+    }
+    if (info.buffers.size() == 3 && info.buffers[2].buffer_type != Shader::BufferType::Flatbuf) {
         return false;
     }
 
@@ -3190,16 +3248,37 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size, bool assume_locks) {
         // Not GPU mapped memory, can skip invalidation logic entirely.
         return false;
     }
-    buffer_cache.InvalidateMemory(addr, size, assume_locks);
+    {
+        BbStats::Timer timer{BbStats::t_fault_buffer};
+        buffer_cache.InvalidateMemory(addr, size, assume_locks);
+    }
     texture_cache.InvalidateMemory(addr, size);
     return true;
 }
 
 bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks) {
     DrainDrawPipe();
+    // bbport: the faulting page and the window around it are unprotected together, one lock
+    // hold and one protection change; BB_FAULT_MERGE=0: one after the other, as before.
+    static const bool merged = [] {
+        const char* env = std::getenv("BB_FAULT_MERGE");
+        return !env || env[0] != '0';
+    }();
+    if (merged) {
+        if (!IsMapped(addr, 8)) {
+            return false;
+        }
+        {
+            BbStats::Timer timer{BbStats::t_fault_buffer};
+            buffer_cache.InvalidateWriteFault(addr, 8, assume_locks);
+        }
+        texture_cache.InvalidateMemory(addr, 8);
+        return true;
+    }
     if (!InvalidateMemory(addr, 8, assume_locks)) {
         return false;
     }
+    BbStats::Timer timer{BbStats::t_fault_buffer};
     buffer_cache.ExtendWriteFault(addr);
     return true;
 }

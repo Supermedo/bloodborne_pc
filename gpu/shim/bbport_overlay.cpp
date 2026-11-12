@@ -110,6 +110,9 @@ bool dirty = false; // settings changed while open: saved on close
 // The game's text dialog (SetTextEntry), guarded by imgui_mutex.
 bool text_entry_active = false;
 std::string text_entry_prompt, text_entry_text;
+// bbport: where its typed line was drawn last (TextEntryArea), guarded by imgui_mutex.
+bool text_entry_drawn = false;
+BbOverlay::TextArea text_entry_area{};
 // Video memory warning (BbOverlay::Warn): text from the GPU thread, read by the present thread.
 std::mutex warn_mutex;
 std::string warn_headline;
@@ -437,7 +440,7 @@ void Fsr41Settings() {
             const bool ready=s.FsrMethodSupported(route.version,route.backend);
             const bool selected=s.upscaler==route.version && s.fsr411_backend==route.backend;
             int status=ready ? 0 : s.fsr41_status[route.version==BbSettings::UpscalerFsr412][route.backend].load();
-            if(status<0 || status>8 || (!ready && status==0)) status=5;
+            if(status<0 || status>9 || (!ready && status==0)) status=5;
             ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
             if(selected) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,IM_COL32(45,42,34,255));
             ImGui::BeginDisabled(!ready);
@@ -446,6 +449,7 @@ void Fsr41Settings() {
                 Store(s.fsr41_version,route.version,true);
                 Store(s.fsr411_backend,route.backend,true);
                 Store(s.upscaler,route.version,true);
+                BbSettings::SelectUpscaler(route.version);
             }
             ImGui::EndDisabled();
             ImGui::SameLine();
@@ -464,7 +468,7 @@ void Fsr41Settings() {
                 status==1 ? ImVec4(.88f,.47f,.44f,1) :
                 status==5 || status==6 || status==8 ? ImVec4(.54f,.55f,.56f,1) : ImVec4(.85f,.64f,.25f,1);
             ImGui::PushTextWrapPos();
-            ImGui::TextColored(color,"%s",Fsr41Ui::Text(Fsr41Ui::Supported+status));
+            ImGui::TextColored(color,"%s",Fsr41Ui::Status(status));
             ImGui::PopTextWrapPos();
         }
         ImGui::EndTable();
@@ -534,6 +538,7 @@ void Menu() {
                         }
                     }
                 } else Store(s.upscaler, i, true);
+                BbSettings::SelectUpscaler(s.upscaler);
             }
             ImGui::EndDisabled();
             if (!supported) {
@@ -585,9 +590,15 @@ void Menu() {
             ImGui::TextUnformatted("The selected mode is active. You can select FSR 4 again.");
         ImGui::PopTextWrapPos();
     }
+    if (s.UpscalerFallbackActive()) {
+        ImGui::TextWrapped("%s", Fsr41Ui::Text(Fsr41Ui::FallbackActive));
+        if (ImGui::Button(Fsr41Ui::Text(Fsr41Ui::Retry))) {
+            BbSettings::SelectUpscaler(s.upscaler);
+        }
+    }
     if (BbSettings::IsFsr4(s.upscaler)) {
         if (s.upscaler == BbSettings::UpscalerFsr412) {
-            Hint("FSR 4.1.2 uses the original AMD Vulkan driver or AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
+            Hint("FSR 4.1.2 uses AMD SDK 2.4 through Vulkan or the AMD DX12 bridge. Both FSR 4.1.1 methods remain available.");
         } else if (s.upscaler == BbSettings::UpscalerFsr411) {
 #ifdef _WIN32
             Hint("FSR 4.1.1 temporal upscaling uses the method selected above. AMD DX12 is included in the Windows package; Vulkan assets can be downloaded in the launcher. Quality presets and sharpening apply to both methods.");
@@ -597,9 +608,22 @@ void Menu() {
         } else {
             Hint("FSR 4 INT8 uses the v07 model from the AMD FidelityFX SDK. Higher quality than FSR 3.1, with more GPU work. Changing presets rebuilds the model and may pause briefly. Assets: tools/fetch_fsr4_assets.sh.");
         }
-        Checkbox("FSR 4: auto exposure", s.fsr4_auto_exposure);
+        bool fixed_exposure = false;
+#ifdef _WIN32
+        fixed_exposure = BbSettings::WindowsAutoExposureFixed(s.upscaler, s.fsr411_backend);
+#endif
+        if (fixed_exposure) {
+            // Show the active automatic behavior without overwriting the preference
+            // retained for the providers where exposure remains configurable.
+            bool automatic = true;
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("FSR 4: auto exposure", &automatic);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("%s", Fsr41Ui::Text(Fsr41Ui::AutoExposureAutomatic));
+        } else Checkbox("FSR 4: auto exposure", s.fsr4_auto_exposure);
         Checkbox("FSR 4: invert jitter", s.fsr4_invert_jitter);
-        Hint("Ghosting diagnostics: FSR 4 uses exposure to normalize color and decide when to discard history. These options apply immediately.");
+        if (!fixed_exposure)
+            Hint("Ghosting diagnostics: FSR 4 uses exposure to normalize color and decide when to discard history. These options apply immediately.");
     }
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
     const bool taa = s.upscaler == BbSettings::UpscalerTaa;
@@ -689,7 +713,7 @@ void Menu() {
     if (ImGui::Checkbox("Show motion vectors (debug)", &show_motion)) {
         s.debug_view = show_motion ? BbSettings::DebugMotion : BbSettings::DebugNone;
     }
-    Hint("Red/green: horizontal/vertical motion (8 pixels = full brightness). Blue: the pixel has accurate object motion, beyond camera motion. A moving object with no blue or red/green is treated as stationary and may leave trails.");
+    Hint("Red/green: horizontal/vertical motion magnitude (8 render pixels per frame = full brightness). Blue: current-frame object-target coverage; depth validity is checked separately. Static surfaces use camera motion.");
     ImGui::EndDisabled(); // upscaler off
 
     ImGui::SeparatorText("Frame generation");
@@ -813,6 +837,10 @@ void Menu() {
         }
         ImGui::EndCombo();
     }
+    Hint("Model LOD game patch. Highest (-2) asks for a detail level some armor parts don't have: capes vanish and some armor looks wrong.");
+    if (s.model_lod == -2) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Highest can break armor and capes");
+    }
     int fov = s.fov;
     Store(s.fov, fov, ImGui::SliderInt("Field of view", &fov, BbSettings::FovMin, BbSettings::FovMax,
                                        fov == BbSettings::FovDefault ? "%d (game)" : "%d"));
@@ -916,6 +944,14 @@ void TextEntryBox() {
     ImGui::Separator();
     ImGui::SetWindowFontScale(1.4f);
     ImGui::Text("%s_", text_entry_text.c_str());
+    // bbport: the IME places its candidate list next to this line (TextEntryArea), the cursor
+    // where the "_" is drawn.
+    const ImVec2 line_min = ImGui::GetItemRectMin(), line_max = ImGui::GetItemRectMax();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    const float cursor = ImGui::CalcTextSize(text_entry_text.c_str()).x;
+    text_entry_area = {line_min.x, line_min.y, line_max.x - line_min.x, line_max.y - line_min.y,
+                       cursor, display.x, display.y};
+    text_entry_drawn = true;
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Separator();
     ImGui::TextDisabled("Keyboard: type, Backspace to erase, Enter = OK, Esc = cancel");
@@ -1110,10 +1146,11 @@ void FpsCounter() {
         const int out = s.output_res;
         ImGui::TextDisabled("|  %ux%u", output_width ? output_width : u32(BbSettings::OutputWidths[out]),
                             output_height ? output_height : u32(BbSettings::OutputHeights[out]));
-        if (UpscalerLabel(s.upscaler)[0] != '\0') {
+        const int active_upscaler = s.ActiveUpscaler();
+        if (UpscalerLabel(active_upscaler)[0] != '\0') {
             ImGui::SameLine(0.0f, 6.0f * base_scale);
-            ImGui::TextColored(PlainCounter() ? PlainValue : UpscalerColor(s.upscaler), "%s",
-                               UpscalerLabel(s.upscaler));
+            ImGui::TextColored(PlainCounter() ? PlainValue : UpscalerColor(active_upscaler), "%s",
+                               UpscalerLabel(active_upscaler));
         }
         const int generated = s.frame_gen != BbSettings::FrameGenOff ? s.frame_gen_now.load() : 0;
         if (generated > 0 && s.game_fps > 0.0f) {
@@ -1645,6 +1682,34 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         }
     }
 #endif
+    // bbport: DejaVu Sans has no Hangul, kana or Han characters, so the game's text dialog
+    // drew Korean as "?". Windows' own fonts are merged behind it (Korean first, then Japanese
+    // and Chinese); glyphs load as they are drawn (dynamic fonts), the first font that has one
+    // wins, and a missing file is skipped. In Chinese, Japanese and Korean the port has merged them
+    // above: not twice.
+    const std::string shown_language = Fsr41Ui::languages[Fsr41Ui::Language()];
+    if (const char* windir = std::getenv("WINDIR");
+        windir && shown_language != "zh" && shown_language != "ja" && shown_language != "ko") {
+        static const char* const cjk_fonts[][2] = {
+            {"malgun.ttf", "gulim.ttc"},  // Korean: Malgun Gothic, else Gulim
+            {"YuGothM.ttc", "msgothic.ttc"},  // Japanese
+            {"msyh.ttc", "simsun.ttc"},  // Chinese
+        };
+        for (const auto& choices : cjk_fonts) {
+            for (const char* file : choices) {
+                const std::string path = std::string(windir) + "\\Fonts\\" + file;
+                if (FILE* probe = std::fopen(path.c_str(), "rb")) {
+                    std::fclose(probe);
+                    ImFontConfig merge;
+                    merge.MergeMode = true;
+                    if (io.Fonts->AddFontFromFileTTF(path.c_str(), 18.0f, &merge)) {
+                        std::printf("Overlay: font %s merged (Korean, Japanese, Chinese text)\n", file);
+                        break;
+                    }
+                }
+            }
+        }
+    }
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
         instance.ApiVersion(),
@@ -1819,6 +1884,18 @@ void SetTextEntry(bool active, const std::string& prompt, const std::string& tex
     text_entry_active = active;
     text_entry_prompt = prompt;
     text_entry_text = text;
+    if (!active) {
+        text_entry_drawn = false;
+    }
+}
+
+bool TextEntryArea(TextArea& area) {
+    std::scoped_lock lock{imgui_mutex};
+    if (!text_entry_active || !text_entry_drawn) {
+        return false;
+    }
+    area = text_entry_area;
+    return true;
 }
 
 void Warn(const std::string& headline, const std::string& detail, float used_fraction) {

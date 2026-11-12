@@ -393,6 +393,70 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(saves.SaveSet('', self.save).slots, ['userdata0000', 'userdata0003'])
 
 
+class OutsideBackupTests(unittest.TestCase):
+    """R86: every backup also outside the port folder (saves.OUTSIDE), so a port extracted into a new folder, or
+    reinstalled after its folder was deleted, still lists and restores them."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.outside = self.root / 'Roaming' / 'bbport-launcher' / 'save_backups'
+        patch = mock.patch.object(saves, 'OUTSIDE', self.outside)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.old = self.root / 'bbport-1.9.6' / 'user'
+        self.save = make_save(saves.target_dir(self.old), 'Nick', slots=(0, 3))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_a_new_port_folder_restores_the_old_ones_backups(self):
+        made = saves.auto_backup(self.old)
+        self.assertTrue((self.outside / made.name).is_file())
+        import shutil
+        shutil.rmtree(self.root / 'bbport-1.9.6')  # the old folder deleted for the new version
+        new = self.root / 'bbport-1.9.7' / 'user'
+        item, = saves.backups(new)
+        self.assertEqual((item.path.parent, item.names, item.ok), (self.outside, ['Nick', 'Nick'], True))
+        saves.restore(item.path, new)
+        self.assertEqual(saves.SaveSet('', saves.target_dir(new)).names, ['Nick', 'Nick'])
+
+    def test_listed_once_while_the_port_folder_has_it_too(self):
+        made = saves.backup(self.old)
+        self.assertEqual([b.path for b in saves.backups(self.old)], [made])
+
+    def test_renamed_or_removed_there_too(self):
+        made = saves.backup(self.old)
+        renamed = saves.rename_backup(made, 'Before Ludwig')
+        self.assertEqual(sorted(p.name for p in self.outside.iterdir()), [renamed.name])
+        saves.drop_outside(renamed)  # the launcher's Delete, after the Recycle Bin took the port folder's
+        self.assertEqual(list(self.outside.iterdir()), [])
+
+    def test_automatic_ones_beyond_the_kept_go_there_too(self):
+        for number in range(4):
+            stamp = time.time() + 120 * (number + 1)
+            os.utime(self.save / 'userdata0000', (stamp, stamp))
+            with mock.patch.object(saves.datetime, 'datetime', wraps=saves.datetime.datetime) as clock:
+                clock.now.return_value = saves.datetime.datetime.fromtimestamp(stamp + 1)
+                saves.auto_backup(self.old, keep=2)
+        here = sorted(p.name for p in saves.backup_dir(self.old).glob('*.zip'))
+        self.assertEqual(len(here), 2)
+        self.assertEqual(sorted(p.name for p in self.outside.glob('*.zip')), here)
+
+    def test_backups_from_before_are_copied_out_at_the_next_start(self):
+        with mock.patch.object(saves, 'OUTSIDE', None):
+            made = saves.backup(self.old)  # a backup of a version without the copy
+        self.assertFalse(self.outside.exists())
+        saves.auto_backup(self.old)
+        self.assertTrue((self.outside / made.name).is_file())
+
+    def test_without_outside_nothing_leaves_the_port_folder(self):
+        with mock.patch.object(saves, 'OUTSIDE', None):
+            saves.auto_backup(self.old)
+            saves.backup(self.old)
+        self.assertFalse(self.outside.exists())
+
+
 def contents(folder):
     """{file name: SHA-256} of a folder's files (a failed comparison of the files' bytes takes minutes to show)."""
     return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path(folder).iterdir()) if p.is_file()}

@@ -57,7 +57,8 @@ public:
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         IteratePages<false>(window_addr, size,
                             [](RegionManager* manager, u64 offset, size_t size) {
-                                std::scoped_lock lk{manager->lock};
+                                BbStats::LockTimed(manager->lock, BbStats::t_fault_region_wait);
+                                std::scoped_lock lk{std::adopt_lock, manager->lock};
                                 manager->ExtendWriteFault(manager->GetCpuAddr() + offset, size);
                             });
     }
@@ -81,7 +82,8 @@ public:
                     // in case we are racing with GPU thread trying to mark the page as GPU
                     // modified. If we need to flush the flush function is going to perform CPU
                     // state change.
-                    std::scoped_lock lk{manager->lock};
+                    BbStats::LockTimed(manager->lock, BbStats::t_fault_region_wait);
+                    std::scoped_lock lk{std::adopt_lock, manager->lock};
                     if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled &&
                         manager->template IsRegionModified<Type::GPU>(offset, size)) {
                         return true;
@@ -96,9 +98,48 @@ public:
             });
     }
 
+    /// bbport: a guest write fault on [cpu_addr, cpu_addr + size), unprotecting the fault window
+    /// (`window` bytes, aligned; 0: none) with it in one step (RegionManager::OnWriteFault).
+    /// GPU-modified data there is flushed first as in InvalidateRegion, then the window is
+    /// extended on its own.
+    void InvalidateWriteFault(VAddr cpu_addr, u64 size, u64 window, auto&& on_flush) noexcept {
+        const VAddr window_addr = window != 0 ? cpu_addr & ~(window - 1) : cpu_addr;
+        RegionManager* manager = top_tier[cpu_addr >> TRACKER_HIGHER_PAGE_BITS];
+        if (window == 0 || window > TRACKER_HIGHER_PAGE_SIZE || manager == nullptr ||
+            cpu_addr + size > window_addr + window) {
+            InvalidateRegion(cpu_addr, size, on_flush);
+            if (window != 0) {
+                ExtendWriteFault(window_addr, window);
+            }
+            return;
+        }
+        const u64 offset = cpu_addr & TRACKER_HIGHER_PAGE_MASK;
+        bool should_flush = false;
+        {
+            BbStats::LockTimed(manager->lock, BbStats::t_fault_region_wait);
+            std::scoped_lock lk{std::adopt_lock, manager->lock};
+            if (EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Disabled &&
+                manager->template IsRegionModified<Type::GPU>(offset, size)) {
+                should_flush = true;
+            } else {
+                manager->OnWriteFault(cpu_addr, size, window_addr, window);
+            }
+        }
+        if (should_flush) {
+            on_flush();
+            ExtendWriteFault(window_addr, window);
+        }
+    }
+
     /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
     void ForEachUploadRange(VAddr query_cpu_range, u64 query_size, bool is_written, auto&& func,
                             auto&& on_upload) {
+        // Guest write faults in a region wait while it is locked here (re-protecting the
+        // uploaded pages; a written binding keeps it across the upload): the time held is
+        // counted with BB_FRAME_STATS=1.
+        const bool time_held = is_written && BbStats::enabled;
+        const auto held_since =
+            time_held ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         IteratePages<true>(query_cpu_range, query_size,
                            [&func, is_written](RegionManager* manager, u64 offset, size_t size) {
                                // bbport: read-only bindings skip the region lock when no page
@@ -110,11 +151,21 @@ public:
                                    !manager->template IsRegionModified<Type::CPU>(offset, size)) {
                                    return;
                                }
-                               manager->lock.lock();
+                               BbStats::LockTimed(manager->lock, BbStats::t_gpu_region_wait);
+                               const auto locked_at = BbStats::enabled && !is_written
+                                                          ? std::chrono::steady_clock::now()
+                                                          : std::chrono::steady_clock::time_point{};
                                manager->template ForEachModifiedRange<Type::CPU, true>(
                                    manager->GetCpuAddr() + offset, size, func);
                                if (!is_written) {
                                    manager->lock.unlock();
+                                   if (BbStats::enabled) {
+                                       BbStats::t_upload_lock_held.fetch_add(
+                                           std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - locked_at)
+                                               .count(),
+                                           std::memory_order_relaxed);
+                                   }
                                }
                            });
         on_upload();
@@ -127,6 +178,13 @@ public:
                                     manager->GetCpuAddr() + offset, size);
                                 manager->lock.unlock();
                             });
+        if (time_held) {
+            BbStats::t_upload_lock_held.fetch_add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - held_since)
+                    .count(),
+                std::memory_order_relaxed);
+        }
     }
 
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified

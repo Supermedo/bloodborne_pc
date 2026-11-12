@@ -109,6 +109,49 @@ class CleanEbootTests(Folder):
         self.assertLess(source.index('restored = restore_eboot(game)'), source.index('prepatched = digest =='))
 
 
+class CleanEbootVersionTests(unittest.TestCase):
+    def test_a_game_of_the_year_dump_is_1_09(self):
+        # APP_VER 01.00 over the 1.09 code: patches.game_app_version decides, as for the patches.
+        with mock.patch('patches.game_app_version', return_value='01.09') as version:
+            self.assertEqual(C.app_version('CUSA03173'), '01.09')
+        version.assert_called_once_with('CUSA03173')
+
+
+class GameOfTheYearVersionTests(Folder):
+    """APP_VER 01.00 over the 1.09 code (CUSA03173, CUSA00900): the help and the setup say 01.09, as the patches do."""
+
+    def setUp(self):
+        super().setUp()
+        from test_patches import param_sfo
+        self.game = self.root / 'game'
+        (self.game / 'sce_sys').mkdir(parents=True)
+        (self.game / 'sce_sys' / 'param.sfo').write_bytes(param_sfo('01.00'))
+        (self.game / 'eboot.bin').write_bytes(b'x')
+
+    def help_checks(self, code_109):
+        scan = {'files': 28800, 'bytes': 30 * 1024 ** 3, 'empty': [], 'shaders': True}
+        with mock.patch('patches.eboot_is_109', return_value=code_109), \
+                mock.patch.object(help_, 'eboot_state', return_value=('clean', 93_825_704)), \
+                mock.patch.object(help_, 'scan_game', return_value=scan):
+            checks, _eboot = help_.run_checks(str(self.game), '', str(self.root / 'port'), '1920x1080')
+        return [check for check in checks if check[1] == 'version']
+
+    def test_the_help_has_no_version_warning(self):
+        self.assertEqual(self.help_checks(True), [])
+        self.assertEqual(self.help_checks(False),
+                         [('warn', 'version', 'Game version 01.00: it needs the 1.09 update.')])
+
+    def test_the_setup_says_1_09(self):
+        import bbport_launcher_win  # noqa: F401  (binds the setup module to the launcher)
+        import bbport_setup
+        with mock.patch('patches.eboot_is_109', return_value=True):
+            rows, _ok = bbport_setup.game_checks(self.game)
+        self.assertIn(('ok', 'Version 01.09: every community patch is available.'), rows)
+        with mock.patch('patches.eboot_is_109', return_value=False):
+            rows, _ok = bbport_setup.game_checks(self.game)
+        self.assertTrue(any(text.startswith('Version 01.00: the game runs at 30 FPS only') for _state, text in rows))
+
+
 class CleanImageTests(unittest.TestCase):
     """CLEAN_IMAGE is the clean 1.09 eboot's: checked where a game folder is at hand (BB_GAME_DIR)."""
 
@@ -164,6 +207,15 @@ class GameFilesTests(Folder):
         leftovers = [name for name in clean if name.lower().endswith(('.bak', '.orig', '.old', '.tmp'))]
         self.assertEqual(leftovers, [])
         self.assertEqual(clean['dvdroot_ps4/menu/common.tpf.dcx'][0], 9415151)
+
+    def test_the_full_result_is_written(self):
+        (self.game / 'dvdroot_ps4/chr/c0000.bnd').write_bytes(b'hu')
+        (self.game / 'sce_module/libc.prx').unlink()
+        out = self.root / 'user' / 'game_files_check.txt'
+        G.write_result(G.check(self.game, clean=self.clean), out)
+        self.assertEqual(out.read_text(encoding='utf-8').splitlines(),
+                         ['3 files: 1 differ, 1 missing', 'differ\tdvdroot_ps4/chr/c0000.bnd',
+                          'missing\tsce_module/libc.prx'])
 
 
 class GameFolderTests(Folder):

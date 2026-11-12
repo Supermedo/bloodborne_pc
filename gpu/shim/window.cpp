@@ -42,6 +42,9 @@ std::array<uint64_t, 4> g_wheel_expiry_ms{}; // index: WHEEL_UP=0, DOWN=1, LEFT=
 } // namespace
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
+    // bbport: the text dialog draws the IME's composition itself (SDL_EVENT_TEXT_EDITING), so
+    // a Hangul syllable being typed shows in it, also in fullscreen; the system draws candidates.
+    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
@@ -126,6 +129,7 @@ WindowSDL::~WindowSDL() {
 void WindowSDL::BeginTextInput(const std::string& initial, const std::string& prompt) {
     std::scoped_lock lock{text_mutex};
     text = initial;
+    text_editing.clear();
     text_prompt = prompt;
     text_state = 0;
     text_requested = true;
@@ -137,25 +141,66 @@ int WindowSDL::PollTextInput(std::string& out) {
     return text_state;
 }
 
+void WindowSDL::CancelTextInput() {
+    std::scoped_lock lock{text_mutex};
+    text_requested = false;
+    text_cancel_requested = true;
+}
+
 void WindowSDL::UpdateTextTitle() {
-    const std::string title = text_active ? base_title + " \u2014 " + text_prompt + ": " + text + "_  (Enter = OK, Esc = cancel)"
+    const std::string shown = text + text_editing;
+    const std::string title = text_active ? base_title + " \u2014 " + text_prompt + ": " + shown + "_  (Enter = OK, Esc = cancel)"
                                           : base_title;
     SDL_SetWindowTitle(window, title.c_str());
-    BbOverlay::SetTextEntry(text_active, text_prompt, text);
+    BbOverlay::SetTextEntry(text_active, text_prompt, shown);
+}
+
+void WindowSDL::UpdateTextInputArea() {
+    BbOverlay::TextArea area{};
+    int window_w = 0, window_h = 0;
+    if (!BbOverlay::TextEntryArea(area) || area.display_w <= 0.0f || area.display_h <= 0.0f ||
+        !SDL_GetWindowSize(window, &window_w, &window_h)) {
+        return;
+    }
+    // The overlay draws in the presented image's pixels; SDL takes window coordinates.
+    const float sx = float(window_w) / area.display_w, sy = float(window_h) / area.display_h;
+    const int rect[5] = {int(area.x * sx), int(area.y * sy), std::max(1, int(area.w * sx)),
+                         std::max(1, int(area.h * sy)), int(area.cursor * sx)};
+    if (std::equal(rect, rect + 5, text_area)) {
+        return;
+    }
+    std::copy(rect, rect + 5, text_area);
+    const SDL_Rect sdl_rect{rect[0], rect[1], rect[2], rect[3]};
+    SDL_SetTextInputArea(window, &sdl_rect, rect[4]);
 }
 
 bool WindowSDL::PollEvents() {
     {
         std::scoped_lock lock{text_mutex};
+        // bbport: the game closed the dialog (sceImeDialogAbort); the box stayed until Esc.
+        // Before a new request, which may follow at once. text_state is left alone: the runtime
+        // has finished the closed dialog already, and a new one's state is BeginTextInput's.
+        if (text_cancel_requested) {
+            text_cancel_requested = false;
+            if (text_active) {
+                text_active = false;
+                text_editing.clear();
+                SDL_StopTextInput(window);
+                UpdateTextTitle();
+            }
+        }
         if (text_requested) { // SDL text input must be toggled from the window thread
             text_requested = false;
             text_active = true;
+            std::fill(text_area, text_area + 5, 0); // a new box: hand its line to SDL again
             SDL_StartTextInput(window);
             UpdateTextTitle();
         }
     }
     if (!text_active) {
         BbOverlay::UpdateTextInput(window);
+    } else {
+        UpdateTextInputArea();
     }
     SDL_Event event;
     bool pad_used = false, mouse_used = false; // the cursor follows them too (UpdateCursor)
@@ -272,10 +317,18 @@ bool WindowSDL::PollEvents() {
                 else if (event.wheel.x < 0) g_wheel_expiry_ms[2] = expiry; // WHEEL_LEFT
             }
         }
-        if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
+        if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_TEXT_EDITING ||
+                            event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
                 text += event.text.text;
+                text_editing.clear();
+            } else if (event.type == SDL_EVENT_TEXT_EDITING) {
+                text_editing = event.edit.text ? event.edit.text : "";
+            } else if (!text_editing.empty() && (event.key.key == SDLK_BACKSPACE ||
+                                                 event.key.key == SDLK_RETURN ||
+                                                 event.key.key == SDLK_KP_ENTER)) {
+                // the IME takes these while composing (erases a jamo, commits the syllable)
             } else if (event.key.key == SDLK_BACKSPACE && !text.empty()) {
                 size_t cut = text.size() - 1; // drop one UTF-8 code point
                 while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) --cut;
@@ -283,6 +336,7 @@ bool WindowSDL::PollEvents() {
             } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER || event.key.key == SDLK_ESCAPE) {
                 text_state = event.key.key == SDLK_ESCAPE ? 2 : 1;
                 text_active = false;
+                text_editing.clear();
                 SDL_StopTextInput(window);
             }
             UpdateTextTitle();
@@ -294,6 +348,10 @@ bool WindowSDL::PollEvents() {
              event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)) {
             std::scoped_lock lock{text_mutex};
             text_state = event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH ? 1 : 2;
+            if (text_state == 1) {
+                text += text_editing; // a syllable still being composed is part of the answer
+            }
+            text_editing.clear();
             text_active = false;
             SDL_StopTextInput(window);
             UpdateTextTitle();

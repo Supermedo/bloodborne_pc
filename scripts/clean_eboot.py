@@ -42,12 +42,13 @@ def is_clean(path):
 
 
 def app_version(game_dir):
-    """APP_VER of the game folder's param.sfo ('01.09'), None when unreadable."""
+    """APP_VER of the game folder's param.sfo ('01.09'), None when unreadable. Game of the Year dumps say
+    APP_VER 01.00 over the 1.09 code: patches.game_app_version counts them as 01.09."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
-        from prepare import sfo, system_folder
-        return sfo((system_folder(Path(game_dir)) / 'param.sfo').read_bytes()).get('APP_VER')
-    except (OSError, ValueError, ImportError):
+        from patches import game_app_version
+        return game_app_version(game_dir)
+    except ImportError:
         return None
 
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Local prototype using AMD's original Windows Vulkan driver provider.
+// FSR 4.1.2 through the public AMD FSR SDK 2.4 Vulkan API.
 #include "video_core/renderer_vulkan/vk_fsr412_driver.h"
 #ifdef _WIN32
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -7,20 +7,21 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/host_shaders/fsr4vk_prepare_comp.h"
 #include "video_core/texture_cache/image.h"
-#include "driver_provider.h"
+#include "sdk24_upscaling.h"
+#include "vk/ffx_api_vk.h"
 #include "ffx_upscale.h"
 #include <deque>
 #include <cstdlib>
 #include <stdexcept>
 namespace Vulkan {
-namespace {
-struct Backend {ffxCreateContextDescHeader header;VkDevice device;VkPhysicalDevice physical;PFN_vkGetDeviceProcAddr gdpa;};
-struct Version {ffxCreateContextDescHeader header;uint32_t version;};
-void Message(uint32_t type,const wchar_t*message){std::printf("AMD Vulkan 4.1.2 message %u: %ls\n",type,message);}
-}
 struct Fsr412Driver::Impl {
     const Instance& instance; Scheduler& scheduler;
-    DriverFsr::External provider{}; ffxContext context{};
+    const FsrSdk24::Api* api{}; ffxContext context{};
+    FsrSdk24::Version selected{};
+    ffxCreateBackendVKDesc backend{};
+    ffxCreateContextDescUpscaleVersion version{};
+    ffxOverrideVersion override_version{};
+    ffxCreateContextDescUpscale create{};
     u32 out_width{},out_height{},context_rw{},context_rh{},input_width{},input_height{};
     bool context_hdr{};
     VideoCore::UniqueImage prepared_color,prepared_depth;
@@ -32,32 +33,31 @@ struct Fsr412Driver::Impl {
     std::deque<u64> ticks;
     std::string error;
     Impl(const Instance&i,Scheduler&s):instance(i),scheduler(s){}
-    ~Impl(){if(context){scheduler.Finish();provider.provider.destroyContext(&context,nullptr);}}
+    ~Impl(){if(context){scheduler.Finish();api->functions.DestroyContext(&context,nullptr);}}
     void Create(const Fsr4Upscaler::Frame& f){
-        if(!provider.provider.createContext){
-            provider=DriverFsr::Get(DriverFsr::Runtime(false),FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE);
-            if((uint32_t(provider.provider.versionId)&0x7fffffffu)!=((4u<<22)|(1u<<12)|2u))
-                throw std::runtime_error("Driver did not provide FSR 4.1.2");
-        }
-        Backend backend{};backend.header.type=0x01000003u;
-        backend.device=VkDevice(instance.GetDevice());backend.physical=VkPhysicalDevice(instance.GetPhysicalDevice());
-        auto vk=GetModuleHandleW(L"vulkan-1.dll");
-        backend.gdpa=reinterpret_cast<PFN_vkGetDeviceProcAddr>(GetProcAddress(vk,"vkGetDeviceProcAddr"));
-        if(!backend.gdpa || !DriverFsr::Supported(provider,&backend.device))
-            throw std::runtime_error("AMD Vulkan 4.1.2 is unsupported on the selected device");
-        Version version{};version.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
-        version.version=(4u<<22)|(1u<<12)|2u;backend.header.pNext=&version.header;
-        ffxCreateContextDescUpscale create{};create.header.type=FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-        create.header.pNext=&backend.header;
-        create.flags=FFX_UPSCALE_ENABLE_AUTO_EXPOSURE|FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
-        create.flags|=f.hdr?FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE:FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
-        create.maxRenderSize={f.render_width,f.render_height};create.maxUpscaleSize={f.output.width,f.output.height};
-        create.fpMessage=&Message;
-        auto rc=provider.provider.createContext(&context,&create.header,nullptr);
-        if(rc||!context)throw std::runtime_error("AMD Vulkan 4.1.2 context returned "+std::to_string(rc));
+        if (!instance.IsFsr412VulkanDeviceReady())
+            throw std::runtime_error("SDK 2.4 Vulkan device features unavailable; restart the game after restoring SDK files");
+        api = &FsrSdk24::Runtime(false);
+        backend = {}; backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK;
+        backend.deviceContext = {VkDevice(instance.GetDevice()), VkPhysicalDevice(instance.GetPhysicalDevice()), VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr};
+        selected = FsrSdk24::Select(*api, &backend.deviceContext);
+        version = {}; version.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
+        version.version = (4u << 22) | (1u << 12) | 2u;
+        override_version = {}; override_version.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
+        override_version.versionId = selected.id;
+        backend.header.pNext = &version.header;
+        version.header.pNext = &override_version.header;
+        create = {}; create.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+        create.header.pNext = &backend.header;
+        create.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
+        create.flags |= f.hdr ? FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE : FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE;
+        create.maxRenderSize = {f.render_width, f.render_height}; create.maxUpscaleSize = {f.output.width, f.output.height};
+        FsrSdk24::ConfigureDiagnostics(create);
+        selected = FsrSdk24::CreateVerified(*api, context, &create.header, selected);
+        FsrSdk24::LogMemory(*api, &context, "AMD Vulkan");
         out_width=f.output.width;out_height=f.output.height;context_rw=f.render_width;context_rh=f.render_height;context_hdr=f.hdr;
-        std::printf("FSR 4.1.2 Vulkan driver: ACTIVE %s, %ux%u -> %ux%u, %s; original AMD shaders\n",
-            provider.provider.versionName,f.render_width,f.render_height,out_width,out_height,f.hdr?"HDR":"sRGB");
+        std::printf("FSR 4.1.2 AMD Vulkan: ACTIVE %s, %ux%u -> %ux%u, %s; SDK 2.4 public API\n",
+            selected.name.c_str(),f.render_width,f.render_height,out_width,out_height,f.hdr?"HDR":"sRGB");
     }
     static FfxApiResource Resource(const Fsr4Upscaler::Image&image,u32 format,bool output=false){
         FfxApiResource r{};r.resource=reinterpret_cast<void*>(VkImage(image.image));
@@ -230,12 +230,12 @@ struct Fsr412Driver::Impl {
             const bool changed=context&&(out_width!=input.output.width||out_height!=input.output.height||
                 context_rw!=input.render_width||context_rh!=input.render_height||context_hdr!=input.hdr);
             if(changed){scheduler.Finish();input.cmdbuf=scheduler.CommandBuffer();
-                provider.provider.destroyContext(&context,nullptr);context=nullptr;ticks.clear();}
+                api->functions.DestroyContext(&context,nullptr);context=nullptr;ticks.clear();}
             if(!context)Create(input);
             while(ticks.size()>=3){scheduler.Wait(ticks.front());ticks.pop_front();}
             auto f=Prepare(input);
             if(f.motion.width!=f.render_width||f.motion.height!=f.render_height)
-                throw std::runtime_error("AMD Vulkan prototype requires render-sized motion vectors");
+                throw std::runtime_error("FSR 4.1.2 AMD Vulkan requires render-sized motion vectors");
             ffxDispatchDescUpscale d{};d.header.type=FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
             d.commandList=reinterpret_cast<void*>(VkCommandBuffer(f.cmdbuf));
             d.color=Resource(f.color,FFX_API_SURFACE_FORMAT_R16G16B16A16_FLOAT);
@@ -248,35 +248,32 @@ struct Fsr412Driver::Impl {
             d.cameraFar=f.far_plane;d.cameraFovAngleVertical=f.vertical_fov;d.viewSpaceToMetersFactor=1.f;
             d.flags=f.hdr?0u:FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB;
             Transition(f.cmdbuf,f,true);
-            auto rc=provider.provider.dispatch(&context,&d.header);
+            auto rc=api->functions.Dispatch(&context,&d.header);
             Transition(f.cmdbuf,f,false);
             if(rc)throw std::runtime_error("AMD Vulkan 4.1.2 dispatch returned "+std::to_string(rc));
             ticks.push_back(scheduler.CurrentTick());error.clear();return true;
-        }catch(const std::exception&e){error=e.what();std::printf("FSR 4.1.2 Vulkan driver: %s\n",error.c_str());return false;}
+        }catch(const std::exception&e){error=e.what();std::printf("FSR 4.1.2 AMD Vulkan SDK: %s\n",error.c_str());return false;}
     }
 };
 Fsr412Driver::Fsr412Driver(const Instance&i,Scheduler&s):impl(std::make_unique<Impl>(i,s)){}
 Fsr412Driver::~Fsr412Driver()=default;
 bool Fsr412Driver::Record(Fsr4Upscaler::Frame&f){return impl->Record(f);}
+std::filesystem::path Fsr412Driver::RuntimeDirectory(){return FsrSdk24::Directory();}
 const std::string&Fsr412Driver::Error()const{return impl->error;}
 bool Fsr412Driver::Available(const Instance& instance, int* status) {
     const auto result = [status](int code) { if (status) *status=code; return code==0; };
     if (instance.GetVendorID() != 0x1002) return result(1);
+    if (FsrSdk24::VulkanRuntimePresent() && !instance.IsFsr412VulkanDeviceReady())
+        return result(9); // Files repaired after logical-device creation: restart required.
     try {
-        const auto provider = DriverFsr::Get(DriverFsr::Runtime(false), FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE);
-        // The driver's support query consumes the Vulkan backend triplet starting
-        // at device, including physical device and gdpa (as in Create()).
-        Backend backend{};
-        backend.device = VkDevice(instance.GetDevice());
-        backend.physical = VkPhysicalDevice(instance.GetPhysicalDevice());
-        const auto vulkan = GetModuleHandleW(L"vulkan-1.dll");
-        backend.gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>(GetProcAddress(vulkan, "vkGetDeviceProcAddr"));
-        if ((uint32_t(provider.provider.versionId) & 0x7fffffffu) != ((4u << 22) | (1u << 12) | 2u)) return result(3);
-        if (!backend.gdpa) return result(5);
-        if (!provider.isSupported) return result(5);
-        return result(DriverFsr::Supported(provider, &backend.device) ? 0 : 1);
+        VkDeviceContext backend{VkDevice(instance.GetDevice()), VkPhysicalDevice(instance.GetPhysicalDevice()), VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr};
+        FsrSdk24::Select(FsrSdk24::Runtime(false), &backend);
+        return result(0);
+    } catch (const FsrSdk24::Error& error) {
+        const std::string_view reason = error.reason;
+        return result(reason == "files" ? 4 : reason == "provider" ? 2 : 5);
     } catch (const std::exception&) {
-        return result(3);
+        return result(5);
     }
 }
 }

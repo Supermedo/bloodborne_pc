@@ -67,6 +67,11 @@ vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat nu
 /// readers such as the draw-preparation workers.
 vk::Format TrySurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat num_format);
 
+/// bbport: a vertex attribute's host format and stride. A V# with the invalid data format (a
+/// zeroed or null V#) describes no data; see the .cpp.
+vk::Format VertexInputFormat(const AmdGpu::Buffer& buffer);
+u32 VertexInputStride(const AmdGpu::Buffer& buffer);
+
 struct DepthFormatInfo {
     AmdGpu::DepthBuffer::ZFormat z_format;
     AmdGpu::DepthBuffer::StencilFormat stencil_format;

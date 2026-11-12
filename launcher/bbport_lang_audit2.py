@@ -415,3 +415,22 @@ TEXTS = {
 for _language, _texts in TEXTS.items():
     assert len(_texts) == len(KEYS), (_language, len(_texts), len(KEYS))
     bbport_lang.EXTRA_TRANSLATIONS.setdefault(_language, {}).update(zip(KEYS, _texts))
+
+# The second sentence of the old eboot.bin step, a step of its own since the first one names the plain ELF size too.
+COPY_AGAIN = 'Copy it again even if yours has that size: the size alone does not show damage.'
+COPY_AGAIN_TEXTS = {
+    'ru': 'Скопируйте его заново, даже если ваш файл такого же размера: по одному размеру повреждение не видно.',
+    'ar': 'انسخه من جديد حتى لو كان لملفك هذا الحجم: الحجم وحده لا يكشف التلف.',
+    'es': 'Cópialo de nuevo aunque el tuyo tenga ese tamaño: el tamaño por sí solo no revela daños.',
+    'pt': 'Copie-o de novo mesmo que o seu tenha esse tamanho: o tamanho sozinho não mostra danos.',
+    'fr': 'Copiez-le à nouveau même si le vôtre a cette taille : la taille seule ne révèle pas un fichier endommagé.',
+    'de': 'Kopiere sie neu, auch wenn deine diese Größe hat: An der Größe allein sieht man keinen Schaden.',
+    'it': 'Copialo di nuovo anche se il tuo ha questa dimensione: la dimensione da sola non rivela i danni.',
+    'pl': 'Skopiuj go ponownie, nawet jeśli twój ma taki rozmiar: sam rozmiar nie pokazuje uszkodzenia.',
+    'tr': 'Sizinki bu boyutta olsa bile yeniden kopyalayın: boyut tek başına hasarı göstermez.',
+    'zh': '即使你的文件也是这个大小，也请重新复制：仅凭大小看不出损坏。',
+    'ja': '同じサイズでもコピーし直してください：サイズだけでは破損はわかりません。',
+    'ko': '크기가 같더라도 다시 복사하세요: 크기만으로는 손상을 알 수 없습니다.',
+}
+for _language, _text in COPY_AGAIN_TEXTS.items():
+    bbport_lang.EXTRA_TRANSLATIONS.setdefault(_language, {})[COPY_AGAIN] = _text

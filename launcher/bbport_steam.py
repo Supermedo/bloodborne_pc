@@ -76,9 +76,16 @@ def entry(name, exe, start_dir, icon, options=''):
     ]
 
 
+def seamless_options(options):
+    """Whether launch options start Seamless co-op (Play Bloodborne.exe --seamless): that entry starts the same exe
+    as the normal game's and stays beside it."""
+    return '--seamless' in str(options).split()
+
+
 def add_shortcut(vdf_path, name, exe, start_dir, icon, options=''):
-    """Adds the shortcut to one shortcuts.vdf, or updates the entry that starts the same exe.
-    Returns 'added' or 'updated'. A copy of the old file is kept as shortcuts.vdf.bak."""
+    """Adds the shortcut to one shortcuts.vdf, or updates the entry that starts the same exe the same way (the
+    normal game, or Seamless co-op: seamless_options). Returns 'added' or 'updated'. A copy of the old file is kept
+    as shortcuts.vdf.bak."""
     vdf_path = Path(vdf_path)
     data = vdf_path.read_bytes() if vdf_path.exists() else b''
     root = parse(data)[0] if data else []
@@ -90,7 +97,8 @@ def add_shortcut(vdf_path, name, exe, start_dir, icon, options=''):
     target = f'"{exe}"'.lower()
     for index, (kind, key, value) in enumerate(shortcuts):
         fields = {k.lower(): v for _t, k, v in value} if kind == MAP else {}
-        if str(fields.get('exe', '')).lower() == target:
+        if (str(fields.get('exe', '')).lower() == target
+                and seamless_options(fields.get('launchoptions', '')) == seamless_options(options)):
             # Keep what Steam or the player added (play time, tags).
             kept = {k.lower() for k in ('LastPlayTime', 'tags')}
             old = {k.lower(): (t, k, v) for t, k, v in value}
@@ -142,7 +150,11 @@ if __name__ == '__main__':  # self-test on a temporary file
         print(add_shortcut(vdf, 'Bloodborne', r'C:\Games\bb\Play Bloodborne.exe', r'C:\Games\bb', 'x.exe'))
         print(add_shortcut(vdf, 'Other', r'C:\Other\o.exe', r'C:\Other', ''))
         print(add_shortcut(vdf, 'Bloodborne', r'C:\Games\bb\Play Bloodborne.exe', r'C:\Games\bb', 'y.exe'))
+        print(add_shortcut(vdf, 'Bloodborne Seamless co-op', r'C:\Games\bb\Play Bloodborne.exe', r'C:\Games\bb',
+                           'y.exe', '--seamless'))
         root = parse(vdf.read_bytes())[0]
+        assert [f[2] for e in root[0][2] for f in e[2] if f[1] == 'AppName'] == \
+            ['Bloodborne', 'Other', 'Bloodborne Seamless co-op']
         print([[f for f in e[2] if f[1] in ('AppName', 'icon', 'appid')] for e in root[0][2]])
         assert dump(root) + bytes([END]) == vdf.read_bytes()
     print(os.path.basename(__file__), 'ok')

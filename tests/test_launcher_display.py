@@ -1,5 +1,6 @@
-"""The game's monitor and window (launcher/bbport_display.py), the output resolution's own sizes and
-the DLC status on Game & language (launcher/bbport_launcher_win.py)."""
+"""The game's monitor and window (launcher/bbport_display.py), the output resolution's own sizes, the
+DLC status on Game & language (launcher/bbport_launcher_win.py) and the editions the setup guide
+accepts (launcher/bbport_setup.py)."""
 from paths import ROOT
 import sys
 import tempfile
@@ -123,13 +124,62 @@ class DlcTests(unittest.TestCase):
         (self.tmp / 'empty').mkdir()
         self.assertEqual(self.status(self.tmp / 'empty')[0], 'warn')
 
-    def test_the_game_of_the_year_edition_has_it(self):
-        self.assertEqual(self.status('', edition='CUSA03173')[0], 'ok')
+    def test_the_game_of_the_year_editions_have_it(self):
+        for edition in ('CUSA03179', 'CUSA03173', 'CUSA03014', 'CUSA03023'):  # US, EU, JP, Asia
+            with self.subTest(edition=edition):
+                kind, text = self.status('', edition=edition)
+                self.assertEqual(kind, 'ok')
+                self.assertIn(edition, text)
         self.assertEqual(self.status('')[0], 'none')
+        self.assertEqual(self.status('', edition='CUSA00900')[0], 'none')  # the US base game
 
     def test_shadps4s_layout_in_the_saves_folder(self):
         (self.user / 'addcont' / 'CUSA00207' / 'SPEXPANSIONDLC03').mkdir(parents=True)
         self.assertEqual(self.status('')[0], 'ok')
+
+
+class EditionTests(unittest.TestCase):
+    """The setup guide's game folder: every retail release, the merged 1.09 folder first."""
+
+    def setUp(self):
+        import bbport_setup
+        self.setup = bbport_setup
+        self.tmp = Path(tempfile.mkdtemp())
+        self.values = {}
+        patcher = mock.patch.object(bbport_setup, 'game_values', lambda folder: self.values.get(folder.name, {}))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def dump(self, name, title, version, complete=True):
+        folder = self.tmp / name
+        folder.mkdir()
+        (folder / 'eboot.bin').write_bytes(b'')
+        for part in ('sce_module', 'sce_sys', 'dvdroot_ps4') if complete else ('sce_sys', 'dvdroot_ps4'):
+            (folder / part).mkdir()
+        self.values[name] = {'TITLE_ID': title, 'APP_VER': version}
+        return folder
+
+    def test_the_merged_folder_before_the_base_game_or_the_update_alone(self):
+        self.dump('CUSA00900-patch', 'CUSA00900', '01.09', complete=False)  # no sce_module
+        self.dump('CUSA00900-app', 'CUSA00900', '01.00')
+        with mock.patch.object(L, 'PORT_DIR', self.tmp / 'port'):
+            self.assertEqual(Path(self.setup.find_game()).name, 'CUSA00900-app')
+            self.dump('CUSA00900-merge', 'CUSA00900', '01.09')
+            self.assertEqual(Path(self.setup.find_game()).name, 'CUSA00900-merge')
+
+    def test_every_retail_release_passes_the_check(self):
+        for title, state, words in (('CUSA00900', 'ok', 'base game'), ('CUSA00207', 'ok', 'base game'),
+                                    ('CUSA03179', 'ok', 'Game of the Year'), ('CUSA03173', 'ok', 'Game of the Year'),
+                                    ('CUSA01322', 'warn', 'not a retail release')):
+            with self.subTest(title=title):
+                rows, playable = self.setup.game_checks(self.dump(title, title, '01.09'))
+                self.assertTrue(playable)
+                self.assertIn((state, title), [(kind, text.split(':')[0]) for kind, text in rows])
+                self.assertTrue(any(words in text for _kind, text in rows))
 
 
 if __name__ == '__main__':

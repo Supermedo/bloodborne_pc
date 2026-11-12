@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/fsr_support_cache.h"
 
 #define TRACY_VK_USE_SYMBOL_TABLE
 #include <tracy/TracyVulkan.hpp>
@@ -139,6 +140,16 @@ public:
 
     /// bbport: prints the driver's fault report after a device loss (VK_EXT_device_fault), once.
     void ReportDeviceLost(const char* where) const;
+
+    /// Returns true if VK_KHR_maintenance5 is supported
+    bool IsMaintenance5Supported() const {
+        return maintenance_5;
+    }
+
+    /// Returns true if VK_KHR_maintenance6 is supported
+    bool IsMaintenance6Supported() const {
+        return maintenance_6;
+    }
 
     /// Returns true if VK_KHR_maintenance8 is supported
     bool IsMaintenance8Supported() const {
@@ -311,6 +322,8 @@ public:
     int Fsr411NativeStatus() const { return native_fsr411_status; }
     int FsrDx12InteropStatus() const { return fsr_dx12_interop_status; }
     int Fsr4VkStatus() const { return fsr4vk_status; }
+    bool IsFsr412VulkanDeviceReady() const { return fsr412_vulkan_device_ready; }
+    FsrSupportCache& Fsr412SupportCache() const { return fsr412_support_cache; }
     bool IsFg401InteropSupported() const { return fg401_interop; }
     bool IsFsr4VkSupported() const { return fsr4vk; }
     bool IsRobustBufferAccessEnabled() const { return features.robustBufferAccess; }
@@ -546,7 +559,7 @@ public:
 private:
     Instance(const Frontend::WindowSystemInfo&, s32, bool, bool);
     /// Creates the logical device opportunistically enabling extensions
-    bool CreateDevice();
+    bool CreateDevice(bool presentation);
 
     /// Creates the VMA allocator handle
     void CreateAllocator();
@@ -612,6 +625,7 @@ private:
     bool shader_atomic_float2{};
     bool workgroup_memory_explicit_layout{};
     bool maintenance_5{};
+    bool maintenance_6{};
     bool device_fault{};
     bool maintenance_8{};
     bool attachment_feedback_loop{};
@@ -632,6 +646,8 @@ private:
     bool native_fsr411_async{};
     bool native_fsr411{}; // Windows: AMD's DX12 runtime through shared GPU memory
     int native_fsr411_status{5}, fsr_dx12_interop_status{5}, fsr4vk_status{5};
+    bool fsr412_vulkan_device_ready{};
+    mutable FsrSupportCache fsr412_support_cache;
     bool supports_memory_budget{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

@@ -42,7 +42,7 @@ PATCH_VERSION = '01.09'
 MAX_LOG_LINES = 6000
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '1.9.8.4'
+VERSION = '1.9.8.5'
 # A beta of VERSION (its number), or 0: shown as 'v1.9.5 beta 1', and the release of VERSION itself is
 # offered as its update.
 BETA = 0
@@ -274,6 +274,8 @@ import bbport_lang_195  # noqa: E402,F401 (the 1.9.5 texts: the shadNet server t
 import bbport_lang_pools  # noqa: E402,F401 (the co-op pools' texts)
 import bbport_lang_mistakes  # noqa: E402,F401 (the repairs of player mistakes, in the other eleven languages)
 import bbport_lang_vram  # noqa: E402,F401 (the video memory warning's switch)
+import bbport_lang_borderless  # noqa: E402,F401 (the borderless fullscreen switch)
+import bbport_lang_motion  # noqa: E402,F401 (shared object-motion reasons and troubleshooting)
 import bbport_lang_latency  # noqa: E402,F401 (the low latency options)
 import bbport_lang_yharnam  # noqa: E402,F401 (the Seamless co-op page, BBSC 1.0.0)
 import bbport_lang_gpu  # noqa: E402,F401 (a graphics card Windows has and Vulkan does not see)
@@ -286,8 +288,9 @@ import bbport_lang_audit5  # noqa: E402,F401 (Help's new order: asking for help 
 import bbport_lang_audit8  # noqa: E402,F401 (sharpening with FSR 4, achievements from another installation)
 import bbport_lang_news  # noqa: E402,F401 (the What's new window)
 import bbport_lang_readouts  # noqa: E402,F401 (the FPS counter's lines)
-# Last of the texts: it builds bbport_lang's tables (table()) to add its own, so a module registering
-# EXTRA_TRANSLATIONS after it would not be in them.
+import bbport_lang_ko  # noqa: E402,F401 (Korean over the other tables)
+# Last of the texts: this and bbport_lang_ko build bbport_lang's tables (table()) to add their own, so a module
+# registering EXTRA_TRANSLATIONS after them would not be in them.
 import bbport_fsr41_translations  # noqa: E402,F401
 import bbport_hardware as hardware  # noqa: E402
 import bbport_frame  # noqa: E402
@@ -419,11 +422,14 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 'dlc_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
                 'voice_language': 'auto',
-                'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False, 'hdr': False, 'present_mode': 'Mailbox',
+                'player_name': '', 'fullscreen': False, 'exclusive_fullscreen': False,
+                'borderless_fullscreen': False,  # a window without a frame over the monitor (bbport_display)
+                'hdr': False, 'present_mode': 'Mailbox',
                 'fps_mode': 'uncap', 'frame_cap': '', 'draw_pipe': '', 'readbacks': '', 'low_vram': '', 'vram_warning': True,
                 'frames_ahead': '', 'low_latency': 'auto', 'low_latency_auto': True, 'async_pipelines': '', 'vrr': '', 'early_submit': '', 'frame_stats': False, 'gpu_profile': False,
                 'vk_validation': False, 'extra_env': '', 'close_on_play': False,
                 'on_play': 'stay', 'reopen_after_game': False, 'minimize_to_tray': False, 'discord_status': True,
+                'discord_stats': True,
                 'menu_key': 'Insert', 'menu_pad': 'l3+r3',
                 'check_updates': True, 'save_backups': False, 'online': False, 'online_server': 'srv.shadps4.net:31313',
                 'online_webapi': '', 'online_npid': '', 'online_password': '', 'online_upnp': True, 'online_relay': False,
@@ -454,6 +460,7 @@ APP_DEFAULTS = {'ui_language': '', 'game_dir': str(PORT_DIR.parent / 'CUSA03173'
                 # A new key: the first test build saved 'translucent' on for everyone.
                 'translucent_window': False,
                 'windows_title_bar': False,  # Windows' caption instead of the launcher's own (bbport_frame)
+                'launcher_place': '',  # where the launcher window was at its last close (window_place, R30)
                 # The game's window (bbport_display): its monitor ('' = the main one), its size in a
                 # window ('output', 'last' or 'custom'), the player's own size and the last one it had.
                 'game_monitor': '', 'window_size': 'output', 'window_custom': '1600x900', 'window_last': '',
@@ -570,13 +577,15 @@ FRAMES_AHEAD = [('', ('1 (default)', '1 (по умолчанию)')), ('2', ('2'
 # auto: On + Boost on NVIDIA (the GPU keeps its clocks while the game waits on it), off on other GPUs.
 LOW_LATENCY = [('auto', ('Auto (NVIDIA: On + Boost)', 'Авто (NVIDIA: Вкл. + Boost)')), ('off', ('Off', 'Выкл.')),
                ('on', ('On', 'Вкл.')), ('boost', ('On + Boost', 'Вкл. + Boost'))]
-# vk_pipeline_cache.cpp BB_ASYNC_PIPELINES: new pipelines built on worker threads, their draws skipped meanwhile.
+# vk_pipeline_cache.cpp BB_ASYNC_PIPELINES: new pipelines built on worker threads, their draws skipped meanwhile;
+# the default since 1.9.8.5 ('' = unset), '0' waits for each. An old saved '1' (background) is not in the list: the
+# box shows the first entry, and the engine takes any value but '0' as on.
 # gpu/shim/core/emulator_settings.h BB_VRR: V-Sync (FIFO) and a frame cap just below the refresh rate.
 VRR_MODES = [('', ('Off', 'Выкл.')), ('1', ('On (G-Sync / FreeSync)', 'Вкл. (G-Sync / FreeSync)'))]
 # vk_rasterizer.cpp BB_EARLY_SUBMIT: the frame goes to the GPU in parts while it is prepared.
 EARLY_SUBMIT = [('', ('Off', 'Выкл.')), ('1', ('On (about 2 ms less lag)', 'Вкл. (примерно на 2 мс меньше задержка)'))]
-ASYNC_PIPELINES = [('', ('Wait for each (exact)', 'Ждать каждый (точно)')),
-                   ('1', ('In the background (no stutter)', 'В фоне (без фризов)'))]
+ASYNC_PIPELINES = [('', ('In the background (no stutter)', 'В фоне (без фризов)')),
+                   ('0', ('Wait for each (exact)', 'Ждать каждый (точно)'))]
 UI_LANGUAGES = bbport_lang.LANGUAGE_NAMES
 
 FSR4_COMMIT = 'ae8d628fae208813172446d1e49ed94150b04658'
@@ -643,6 +652,29 @@ def load_settings():
     except OSError:
         pass
     return settings
+
+
+def placed(text, width=400):
+    """(x, y, zoomed) of the launcher's place at its last close ('x,y' or 'x,y,zoomed', window_place), or None
+    when there is none or no part of its title bar (`width` wide) is on a connected monitor now (a monitor
+    unplugged: the window opened off screen). Its left end, middle or right end will do: with monitors of
+    different scaling the top left can lie in a gap between them in Tk's (system DPI aware) coordinates, the
+    window still on the second monitor. MonitorFromPoint uses the same coordinates on this thread."""
+    parts = str(text or '').split(',')
+    try:
+        x, y = int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return None
+    try:
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = ctypes.c_void_p
+        spots = (x + 80, x + width // 2, x + width - 80)  # along the title bar; MONITOR_DEFAULTTONULL
+        if not any(user32.MonitorFromPoint(wintypes.POINT(spot, y + 16), 0) for spot in spots):
+            return None
+    except (AttributeError, OSError, ValueError):
+        return None
+    return x, y, parts[2:] == ['zoomed']
 
 
 def write_settings(settings):
@@ -797,6 +829,19 @@ def game_info(folder):
         return 'Bloodborne', '?'
 
 
+def game_names(app):
+    """The game's own words (bbport_character.names) for the launcher's character cards: its Korean in a Korean
+    launcher, also when the game's text language is another one (a Korean mod over the English texts); else in that
+    text language."""
+    return character.names(app.var('game_dir', 'app').get(), '9' if LANG == 'ko' else app.var('language', 'app').get())
+
+
+def key_text(name):
+    """A key or a button by its name, as the player's language has it. Not Delete: as a text it is the command, here
+    it is what is written on the key."""
+    return name if name == 'Delete' else _(name)
+
+
 def monitor_options(chosen=''):
     """(value, (label,)) of the game monitor choice: '' (Windows' main monitor) first, then the
     others; a chosen monitor that is not connected stays listed."""
@@ -841,7 +886,9 @@ def add_ons(folder):
 
 def dlc_status(game_dir, dlc_dir, user_dir):
     """('ok' | 'warn' | 'none', text): does the game get The Old Hunters?"""
-    edition = title_id(game_dir) == 'CUSA03173'  # the Game of the Year Edition has it
+    from patches import OLD_HUNTERS_IDS
+    serial = title_id(game_dir)
+    edition = serial in OLD_HUNTERS_IDS  # the Game of the Year editions have it
     if dlc_dir:
         folder = Path(dlc_dir)
         if not folder.is_dir():
@@ -862,7 +909,7 @@ def dlc_status(game_dir, dlc_dir, user_dir):
     if addcont.is_dir() and any(OLD_HUNTERS in add_ons(title) for title in addcont.iterdir()):
         return 'ok', _('The Old Hunters found in the saves folder (addcont).')
     if edition:
-        return 'ok', _('Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.')
+        return 'ok', _('Your edition ({}) already includes The Old Hunters.').format(serial)
     return 'none', _('The Old Hunters: not found. Only needed if you own it; without it its areas stay closed.')
 
 
@@ -1038,6 +1085,7 @@ def server_check(server, webapi, community):
     return '\n'.join(lines)
 
 
+SIGN_IN_TOO_LONG = 'the sign-in took too long; start it again'  # Korean only, kept out of _('...') for the translation test
 SHADNET_ERRORS = {3: 'The name or the email address is not valid.', 4: 'Too soon: try again in a minute.',
                   11: 'This name is taken.', 12: 'This email provider is not allowed.',
                   13: 'An account with this email address exists already.', 23: 'Sign-up is closed.'}
@@ -1069,7 +1117,7 @@ def shadnet_register(address, npid, password, email, timeout=15):
                 raise OSError('the server closed the connection')
             data += chunk
         return data
-    host, _, port = address.rpartition(':')
+    host, _sep, port = address.rpartition(':')
     proto = text(1, npid) + text(2, password) + text(4, email)
     payload = struct.pack('<I', len(proto)) + proto
     with socket.create_connection((host, int(port)), timeout=timeout) as sock:
@@ -1078,7 +1126,7 @@ def shadnet_register(address, npid, password, email, timeout=15):
         sock.sendall(struct.pack('<BHIQ', 0, 2, 15 + len(payload), 1) + payload)
         reply = read(sock, 16)
     error = reply[15]
-    return None if error == 0 else SHADNET_ERRORS.get(error, f'The server said no (error {error}).')
+    return None if error == 0 else _(SHADNET_ERRORS.get(error, 'The server said no (error {}).')).format(error)
 
 
 def shadnet_check_login(address, npid, password, timeout=15):
@@ -1164,10 +1212,10 @@ def discord_sign_in(server, on_page, timeout=600):
         if reply.get('status') == 'done':
             return reply['npid'], reply['password']
         if reply.get('status') == 'failed':
-            raise ValueError(reply.get('message') or 'the sign-in failed')
+            raise ValueError(_(reply.get('message') or 'the sign-in failed'))
         if reply.get('status') == 'expired':
             break
-    raise ValueError('the sign-in took too long; start it again')
+    raise ValueError(_(SIGN_IN_TOO_LONG))
 
 
 def vulkan_verdict(env):
@@ -1229,9 +1277,10 @@ def object_motion_unavailable(gpu, gpu_line, extra_env=''):
     if 'BB_OBJECT_MOTION=1' in str(extra_env).split():
         return ''
     gpu = gpu or {}
-    if gpu.get('vendor_id') == 0x1002 and isinstance(gpu.get('device_id'), int) and gpu['device_id'] < 0x7440:
-        return _('Not available on RX 6000 and older Radeon cards: they lose the device with it.',
-                 'Недоступно на Radeon RX 6000 и более старых: с ним видеокарта теряет устройство.')
+    if gpu.get('vendor_id') == 0x1002 and isinstance(gpu.get('device_id'), int) and gpu['device_id'] < 0x7440 \
+            and gpu.get('object_motion_ssbo') is not True:
+        return _('Object motion unavailable for this GPU/driver.',
+                 'Векторы движения объектов недоступны для этой видеокарты/драйвера.')
     parts = [part.strip() for part in str(gpu_line or '').split(',')]
     vram = next((int(m.group(1)) for part in parts for m in [re.match(r'(\d+) MiB', part)] if m), 0)
     if 'discrete' in parts and 0 < vram < 6144 - 256:
@@ -1299,8 +1348,8 @@ def game_environment(s, graphics=None):
         if not (s.get('online') and s.get('online_pool') == 'shadnet' and theirs and theirs == ours):
             for key in BBSC_SCRIPT_VARIABLES:
                 env.pop(key, None)
-    import bbport_driver_runtime
-    bbport_driver_runtime.configure_environment(env, replace=True)
+    env.pop('BB_TEST_AMD_VK_RUNTIME', None)
+    env.pop('BB_TEST_AMD_DX_RUNTIME', None)
     graphics = graphics if graphics is not None else load_ini(s)[0]
     env['BB_UI_LANGUAGE'] = s.get('ui_language') or LANG
     env['BB_GAME_DIR'] = s['game_dir']
@@ -1317,6 +1366,7 @@ def game_environment(s, graphics=None):
     env['BB_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['BB_LANGUAGE'] = s['language']
     env['BB_DISCORD'] = '1' if DISCORD_APPLICATION_ID and s.get('discord_status', True) else '0'  # src/runtime_discord.c
+    env['BB_DISCORD_STATS'] = '1' if s.get('discord_stats', True) else '0'
     if DISCORD_APPLICATION_ID:
         env['BB_DISCORD_APP_ID'] = DISCORD_APPLICATION_ID
     env['BB_MENU_KEY'] = str(s.get('menu_key') or 'Insert')  # the in-game menu's key and combination
@@ -1452,6 +1502,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     def __init__(self, root, tk, ttk, filedialog, messagebox):
         self.tk, self.ttk, self.filedialog, self.messagebox = tk, ttk, filedialog, messagebox
         self.root = root
+        saves.LANGUAGE = LANG  # the dates it shows (bbport_saves.date_format)
         saved = load_settings()
         self.app = {**APP_DEFAULTS, **saved}
         if self.app.get('readbacks') == '0':  # Off left the launcher (READBACKS)
@@ -1526,6 +1577,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         free_w, free_h = root.winfo_screenwidth() - self.px(40), root.winfo_screenheight() - self.px(80)
         root.geometry(f'{min(self.px(1180), free_w)}x{min(self.px(760), free_h)}')
         root.minsize(min(self.px(1000), free_w), min(self.px(680), free_h))
+        # Where it was at its last close, on that monitor (it always opened on the main one: R30).
+        place = placed(self.app.get('launcher_place'), min(self.px(1180), free_w))
+        if place:
+            root.geometry(f'+{place[0]}+{place[1]}')
+            if place[2]:
+                root.state('zoomed')
         self.compact = min(self.px(760), free_h) < self.px(740)  # a short screen: smaller banner and emblem
         theme.load_fonts(root)
         self.theme = theme.Theme(root, self.dpi)
@@ -2787,7 +2844,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         x, y = px(40), int(h * 0.27)
         info = game_info(self.var('game_dir', 'app').get())
         if info:
-            first = (_('CUSA03173 · game version {}', 'CUSA03173 · версия игры {}').format(info[1]), GOLD, theme.GOLD, ())
+            edition = title_id(self.var('game_dir', 'app').get()) or info[0]  # the dump's CUSA id
+            first = (_('{} · game version {}', '{} · версия игры {}').format(edition, info[1]), GOLD, theme.GOLD, ())
         else:
             first = (renamed(_('Choose your game folder (Game & effects)', 'Выберите папку игры («Игра и эффекты»)')),
                      theme.TEXT_STRONG, theme.BLOOD_LIGHT, ('choose',))
@@ -2901,7 +2959,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if key not in TASTE_EFFECTS:
                 self.check(f, key, 'ini', _(*title))
         self.row(f, _('Model detail (LOD)', 'Детализация моделей'), self.choice(f, 'model_lod', 'ini', LODS),
-                 _('A game patch (game version 1.09).', 'Патч игры (версия 1.09).'))
+                 _('A game patch (game version 1.09). "Highest" can break armor and capes: parts go missing or '
+                   'look wrong.',
+                   'Патч игры (версия 1.09). «Максимальная» может ломать броню и плащи: части пропадают или '
+                   'выглядят неправильно.'))
         self.note(f, _('Effects are game patches for version 1.09, applied at start.'), top=6)
         self.section(f, _('Frame rate', 'Частота кадров'))
         self.row(f, _('Frame rate', 'Режим'), self.choice(f, 'fps_mode', 'app', FPS_MODES),
@@ -3060,13 +3121,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.section(f, _('Game', 'Игра'), top=4)
         self.folder(f, 'game_dir', _('Game folder', 'Папка игры'),
                     _('Choose the folder with eboot.bin', 'Выберите папку с eboot.bin'),
-                    _('Your own game files of CUSA03173 (eboot.bin, sce_module, sce_sys, dvdroot_ps4); '
-                      'version 1.09 for the community patches.',
-                      'Ваши собственные файлы игры CUSA03173 (eboot.bin, sce_module, sce_sys, dvdroot_ps4); '
-                      'версия 1.09 для патчей сообщества.'), on_change=self.game_changed)
+                    _('Your own Bloodborne game files, any edition (eboot.bin, sce_module, sce_sys, '
+                      'dvdroot_ps4); version 1.09 for the community patches.',
+                      'Ваши собственные файлы Bloodborne, любое издание (eboot.bin, sce_module, sce_sys, '
+                      'dvdroot_ps4); версия 1.09 для патчей сообщества.'), on_change=self.game_changed)
         self.folder(f, 'dlc_dir', _('DLC folder'), _('Choose the DLC folder'),
                     _('Your add-ons, one folder each named like SPEXPANSIONDLC03 (The Old Hunters). Only '
-                      'needed with the base game alone; the Game of the Year edition (CUSA03173) has it.'))
+                      'needed with the base game alone; the Game of the Year editions have it.'))
         dlc = self.wrap_within(self.tk.Label(f, text='', bg=PANEL, font=(theme.BODY, 9), justify='left', anchor='w'),
                                560)
         dlc.grid(row=self.next_row(f), column=1, sticky='we', pady=(4, 2))
@@ -3113,6 +3174,15 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.check(f, 'discord_status', 'app', _("Show what I'm playing on Discord"),
                        _('Your area, the boss you fight and your level on your Discord profile, while the Discord '
                          'app runs.'))
+            stats = self.check(f, 'discord_stats', 'app', _("Show my hunter's stats on Discord"),
+                               _('Your level, Blood Echoes and Insight; the area and boss still show.'))
+            status = self.var('discord_status', 'app')
+
+            def sync_stats(*_args):
+                stats.configure(state='normal' if status.get() else 'disabled')
+
+            status.trace_add('write', sync_stats)
+            sync_stats()
         self.check(f, 'minimize_to_tray', 'app', _('Minimize to the system tray'),
                    _('Minimized, the launcher leaves the task bar for an icon next to the clock: click it to '
                      'open the launcher again.'))
@@ -3209,7 +3279,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         ttk.Combobox(body, textvariable=chosen, values=labels, state='readonly', width=36).grid(
             row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
         # the attributes as the game names them in its text language (as on the Saves page)
-        words = character.names(self.var('game_dir', 'app').get(), self.var('language', 'app').get())
+        words = game_names(self)
         values = {a: tk.IntVar() for a in respec.ATTRIBUTES}
         for row, a in enumerate(respec.ATTRIBUTES, start=1):
             ttk.Label(body, text=words.attribute(a)).grid(row=row, column=0, sticky='w', padx=(0, 16), pady=2)
@@ -3876,6 +3946,26 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         self.note(f, _("Server: {}. Everyone in the team needs this launcher's Seamless co-op ({}).").format(
             bbport_yharnam.SERVER, bbport_yharnam.VERSION), top=6)
 
+        # Its own desktop shortcut and Steam entry (Play Bloodborne.exe --seamless), beside the normal game's.
+        self.section(f, _('Shortcuts'))
+        shortcuts = ttk.Frame(f)
+        button = ttk.Button(shortcuts, text=_('Desktop shortcut', 'Ярлык на рабочем столе'),
+                            command=self.seamless_shortcut)
+        button.pack(side='left')
+        # Named with the page in the search: the normal game's buttons keep their own titles first.
+        self.index_entry(button, _('Seamless co-op') + ': ' + _('Desktop shortcut', 'Ярлык на рабочем столе'),
+                         key='button:seamless_shortcut')
+        button = ttk.Button(shortcuts, text=_('Add to Steam'), command=lambda: self.add_to_steam(seamless=True))
+        button.pack(side='left', padx=(6, 0))
+        self.index_entry(button, _('Seamless co-op') + ': ' + _('Add to Steam'), key='button:seamless_steam')
+        if not bbport_yharnam.available(PORT_DIR):
+            for button in shortcuts.winfo_children():
+                button.state(['disabled'])
+        self.row(f, '', shortcuts,
+                 _('Both start Seamless co-op straight away with the settings saved in this launcher, as '
+                   '"Bloodborne Seamless co-op"; the normal game keeps its own shortcut and Steam entry.'),
+                 key='button:seamless_shortcut')
+
     def play_seamless(self):
         """Seamless co-op's Play: the game view, the co-op event files and the server's addresses are made in a
         helper thread (bbport_yharnam.prepare), then this port's own game starts with the seamless engine
@@ -3896,16 +3986,12 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.show('online')
             return
         if not game_info(self.app['game_dir']):
-            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
-                                                      'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin.',
+                                                      'Выберите папку игры с eboot.bin.'))
             self.show('game')
             return
         # The owner (2026-11-06): every start says Seamless co-op keeps its own saves; a new game is best.
-        if not self.messagebox.askokcancel('Bloodborne', _(
-                'Seamless coop uses its own save file folder. It is recommended to start a new game for a seamless '
-                'coop playthrough. Using your save files from the main game might cause some issues. If you want to '
-                'use it despite the risk - you have to manually put your saves into seamless folder.'),
-                parent=self.root):
+        if not self.seamless_saves_said():
             return
         if not self.save_settings():
             return
@@ -4639,7 +4725,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         conflicts = controller_conflicts(current)
         for output, (btn, warn) in self.controller_rows.items():
             name = current[output]
-            text = controller_display_name(name, LANG == 'ru') if name else '—'
+            text = _(controller_display_name(name, LANG == 'ru')) if name else '—'
             btn.configure(text=text + ('  ⚠' if output in conflicts else ''), style='Slot.TButton')
             others = conflicts.get(output, [])
             warn.configure(text='⚠ ' + _('also {}', 'также {}').format(
@@ -4780,7 +4866,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             marked = conflicts.get(o, {})
             for i, btn in enumerate(buttons):
                 key = values[i] if i < len(values) else None
-                text = ' + '.join(display_name(p, russian) for p in binding_parts(key)) if key else '—'
+                text = ' + '.join(key_text(display_name(p, russian)) for p in binding_parts(key)) if key else '—'
                 btn.configure(text=text + ('  ⚠' if i in marked else ''), style='Slot.TButton')
                 mark = self.remap_clear_marks.get((o, i))
                 if mark is not None:
@@ -4892,7 +4978,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             if name in MODIFIER_NAMES:
                 if name not in modifiers and len(modifiers) < MAX_COMBO - 1:
                     modifiers.append(name)
-                    key_label.configure(text=' + '.join(display_name(m, LANG == 'ru') for m in modifiers) + ' + …')
+                    key_label.configure(text=' + '.join(key_text(display_name(m, LANG == 'ru')) for m in modifiers) + ' + …')
                 return  # wait: another input makes a combination, a release binds it alone
             apply(name)
 
@@ -5290,7 +5376,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         info = game_info(self.var('game_dir', 'app').get())
         if info and info[1] != PATCH_VERSION:
             fps = ('30 FPS',)
-        upscaler = dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0]
+        upscaler = _(dict(UPSCALERS).get(self.var('upscaler', 'ini').get(), ('?',))[0].split(' (')[0])
         selected = self.var('upscaler', 'ini').get()
         if selected in ('fsr411', 'fsr412'):
             upscaler += ' · ' + ('DX12' if self.var('fsr411_backend', 'ini').get() == 'dx12'
@@ -5815,8 +5901,8 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                 self.refresh_status()
                 return
         if not game_info(self.app['game_dir']):
-            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin (CUSA03173).',
-                                                      'Выберите папку игры с eboot.bin (CUSA03173).'))
+            self.messagebox.showerror('Bloodborne', _('Choose the game folder with eboot.bin.',
+                                                      'Выберите папку игры с eboot.bin.'))
             self.show('game')
             return
         problem = start_problem(self.app)
@@ -6424,10 +6510,48 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         else:
             self.messagebox.showerror('Bloodborne', result.stderr.decode(errors='replace')[:400])
 
-    def add_to_steam(self):
+    def seamless_shortcut(self):
+        """Bloodborne Seamless co-op.lnk on the desktop: Seamless co-op straight away (Play Bloodborne.exe
+        --seamless: main, play_seamless_without_window), as its Steam entry; the normal Bloodborne.lnk opens this
+        launcher."""
+        if not self.seamless_saves_said():
+            return
+        self.collect()  # the start reads the saved settings
+        if FROZEN:
+            target, arguments, icon = PORT_DIR / 'Play Bloodborne.exe', '--seamless', f'{sys.executable},0'
+        else:  # a source tree: the launcher script with the windowless Python
+            pythonw = Path(sys.executable).with_name('pythonw.exe')
+            target = pythonw if pythonw.exists() else Path(sys.executable)
+            arguments = f'"{Path(__file__).resolve()}" --play --seamless'
+            icon = PORT_DIR / 'launcher' / 'bloodborne.ico'
+
+        def quoted(value):  # a PowerShell string as it is: an apostrophe in a folder name stays one
+            return "'" + str(value).replace("'", "''") + "'"
+        script = ('$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath("Desktop")'
+                  '+"\\Bloodborne Seamless co-op.lnk");'
+                  f'$s.TargetPath={quoted(target)};$s.Arguments={quoted(arguments)};'
+                  f'$s.WorkingDirectory={quoted(PORT_DIR)};$s.IconLocation={quoted(icon)};$s.Save()')
+        result = subprocess.run(['powershell', '-NoProfile', '-Command', script], capture_output=True,
+                                creationflags=NO_WINDOW)
+        if result.returncode == 0:
+            self.messagebox.showinfo('Bloodborne', _('Shortcut created on the desktop.', 'Ярлык создан на рабочем столе.'))
+        else:
+            self.messagebox.showerror('Bloodborne', result.stderr.decode(errors='replace')[:400])
+
+    def seamless_saves_said(self):
+        """The notice every Seamless co-op Play gives (its own saves), given when its shortcut or Steam entry is made:
+        those start without the launcher's window. False when the player cancels."""
+        return self.messagebox.askokcancel('Bloodborne', _(
+            'Seamless coop uses its own save file folder. It is recommended to start a new game for a seamless '
+            'coop playthrough. Using your save files from the main game might cause some issues. If you want to '
+            'use it despite the risk - you have to manually put your saves into seamless folder.'), parent=self.root)
+
+    def add_to_steam(self, seamless=False):
         """Bloodborne in the Steam library (a non-Steam game that starts Play Bloodborne.exe). Steam has to close
         for it: the wait for that (up to half a minute) and the writing run in a helper thread, as the window froze
-        while it waited on the Tk thread. The window closed meanwhile only hides until it is done (close)."""
+        while it waited on the Tk thread. The window closed meanwhile only hides until it is done (close).
+        `seamless`: "Bloodborne Seamless co-op", its own entry (Play Bloodborne.exe --seamless) beside the normal
+        game's (bbport_steam.seamless_options)."""
         if getattr(self, 'steam_adding', False):  # a second click while the first one waits for Steam
             self.messagebox.showinfo('Bloodborne', _('Bloodborne is still being added to Steam: Steam closes for it '
                                                      'first, which can take up to half a minute.'))
@@ -6438,11 +6562,16 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         if not configs:
             self.messagebox.showerror('Bloodborne', _('Steam was not found on this PC (or nobody has signed in to it yet).'))
             return
+        if seamless and not self.seamless_saves_said():
+            return
         if FROZEN:
             exe, options = PORT_DIR / 'Play Bloodborne.exe', ''
         else:
             pythonw = Path(sys.executable).with_name('pythonw.exe')
             exe, options = (pythonw if pythonw.exists() else Path(sys.executable)), f'"{Path(__file__).resolve()}" --play'
+        name = 'Bloodborne Seamless co-op' if seamless else 'Bloodborne'
+        if seamless:
+            options = (options + ' --seamless').strip()
         self.collect()  # Play Bloodborne.exe starts the game with the saved settings
         running = bbport_steam.steam_running()
         if running and not self.messagebox.askyesno('Bloodborne', _('Steam has to close while the game is added; it '
@@ -6459,7 +6588,10 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             else:
                 if running:
                     os.startfile('steam://open/games')
-                if not closing:  # closed, Steam's library with the game is the answer
+                if not closing and seamless:
+                    self.messagebox.showinfo('Bloodborne', _('Bloodborne Seamless co-op is in your Steam library. '
+                                                             'It starts with the settings saved in this launcher.'))
+                elif not closing:  # closed, Steam's library with the game is the answer
                     self.messagebox.showinfo('Bloodborne', _('Bloodborne is in your Steam library. It starts with '
                                                              'the settings saved in this launcher.'))
             if closing:
@@ -6479,13 +6611,24 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
                         return
                     time.sleep(1)  # Steam writes its files as it exits
                 for config in configs:
-                    bbport_steam.add_shortcut(config / 'shortcuts.vdf', 'Bloodborne', str(exe), str(PORT_DIR),
+                    bbport_steam.add_shortcut(config / 'shortcuts.vdf', name, str(exe), str(PORT_DIR),
                                               str(exe), options)
             except Exception as error:  # the button always answers
                 problem = _('Could not add the game to Steam: {}').format(error_text(error))
             finally:
                 self.ui_calls.put(done)
         threading.Thread(target=work, daemon=True).start()
+
+    def window_place(self):
+        """The window's place for the next start (placed): its top left, or a point of its monitor and 'zoomed' when
+        maximized; '' when it is on the task bar. Read once at close, nothing while it is dragged."""
+        state = self.root.state()
+        if state == 'zoomed':
+            return f'{self.root.winfo_rootx()},{self.root.winfo_rooty()},zoomed'
+        if state != 'normal':
+            return ''
+        match = re.search(r'\+(-?\d+)\+(-?\d+)$', self.root.geometry())  # WxH+X+Y, '+-8' left of the screen
+        return f'{int(match[1])},{int(match[2])}' if match else ''
 
     def close(self):
         if self.test_running():  # a game test: its game must not stay behind
@@ -6494,6 +6637,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
             self.bench.cancelled = True
             subprocess.run(['taskkill', '/IM', 'bb-probe.exe', '/F'], capture_output=True, creationflags=NO_WINDOW)
         try:
+            self.app['launcher_place'] = self.window_place() or self.app.get('launcher_place', '')
             self.collect()
         except Exception:  # never keep the window open over a settings problem
             pass
@@ -6641,7 +6785,7 @@ def connection_error(error, url):
                      'Time & language > Date & time, "Set time automatically".',
                      'Дата на вашем ПК неверна ({}), поэтому защищённые соединения не работают. Установите дату в '
                      'Windows: Параметры > Время и язык > Дата и время, «Установить время автоматически».').format(
-                time.strftime('%d.%m.%Y'))
+                time.strftime(saves.date_format(clock=False)))
     return error_text(error)
 
 
@@ -6839,6 +6983,72 @@ def play_without_window(settings):
     placer.stop()
     if placer.last and not settings.get('fullscreen'):
         remember_window(placer.last)
+    return code
+
+
+def seamless_signed_in(settings):
+    """Seamless co-op's sign-in: the SuperMedo account of the Online page (Launcher.play_seamless asks the same)."""
+    return bool(str(settings.get('supermedo_npid') or '').strip() and settings.get('supermedo_pass'))
+
+
+def play_seamless_without_window(settings):
+    """--play --seamless (Seamless co-op's desktop shortcut and Steam entry): Seamless co-op as its page's Play starts
+    it (Launcher.play_seamless, seamless_start), without the window: the game view, the co-op event files, the
+    server's addresses and the mods view, then this port's game with the seamless engine. The output goes to the
+    console when there is one and to seamless\\user\\log\\console.txt, as from the page. Returns the game's exit code,
+    or the text of what stopped the preparation."""
+    attach_stdio()
+    if game_underway():
+        front_game_window()
+        print('Play: a game is being prepared or runs already; its window was brought to the front')
+        return 0
+
+    def say(line):
+        try:
+            print(line)
+        except (OSError, ValueError):
+            pass
+    say(f'BBSC: Yharnam Together {bbport_yharnam.VERSION} · {bbport_yharnam.SERVER}')
+    graphics = load_ini(settings)[0]
+    try:
+        bbport_yharnam.learn_from_log(PORT_DIR)  # the last run's first-use key, before its log is rotated
+        game_dir = settings['game_dir']
+        if bbport_yharnam.needs_prepare(PORT_DIR, game_dir):
+            root, note = bbport_yharnam.prepare(PORT_DIR, game_dir, lambda folder: (game_info(folder) or (None, None))[1],
+                                                say=say)
+        else:
+            root, note = bbport_yharnam.view_root(PORT_DIR), ''
+            bbport_yharnam.copy_events(PORT_DIR, root)
+        ip = bbport_yharnam.server_ip(settings)  # the relay's with the Russia route on
+        bbport_yharnam.write_host_overrides(PORT_DIR, ip, bbport_yharnam.ports(settings)[2])
+        view, config, hud_note = bbport_yharnam.mods_view(
+            PORT_DIR, Path(root) / bbport_yharnam.TITLE, settings['mods_dir'] or str(DATA_DIR / 'mods'),
+            DATA_DIR / 'mods.json', settings['mods_enabled'])
+        bbport_yharnam.rotate_logs(PORT_DIR)
+    except (RuntimeError, OSError, ValueError) as error:
+        say(str(error))
+        return str(error) or _('Seamless co-op could not start.')
+    env = bbport_yharnam.environment(PORT_DIR, root, settings, ip, bbport_yharnam.link_key(PORT_DIR),
+                                     game_environment({**settings, 'online': False}, graphics), (view, config))
+    log = bbport_yharnam.user_dir(PORT_DIR) / 'log' / 'console.txt'
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, 'w', encoding='utf-8', errors='replace', buffering=1) as out:
+        for line in filter(None, (note, hud_note)):
+            out.write(line + '\n')
+        process = subprocess.Popen(run_command(), cwd=PORT_DIR, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        for raw in iter(process.stdout.readline, b''):
+            text = raw.decode('utf-8', errors='replace')
+            out.write(text.replace('\r\n', '\n'))
+            try:
+                sys.stdout.write(text)
+            except (OSError, ValueError):
+                pass
+        code = process.wait()
+    try:
+        bbport_yharnam.learn_from_log(PORT_DIR)
+    except Exception:  # only the first-use key of a new server: never the start's outcome
+        pass
     return code
 
 
@@ -7079,6 +7289,7 @@ class _ThisModule:
             raise AttributeError(name) from None
 
 
+character.TRANSLATE = _
 bbport_setup.bind(_ThisModule())
 bbport_news.bind(_ThisModule())
 bbport_seamless.bind(_ThisModule())
@@ -7150,7 +7361,26 @@ def main():
     restore_benchmark_backup(Path(settings.get('user_dir') or DATA_DIR / 'user'))
     # Without a usable game folder there is nothing to play yet: open the launcher instead.
     page, failed, problem = 'play', None, None
-    if '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() and CONFIG_FILE.exists():
+    if '--play' in args and '--seamless' in args:
+        # Seamless co-op's shortcut and Steam entry: what it needs and the start cannot ask for opens the launcher
+        # on the Seamless co-op page (its Play asks), what failed is said there.
+        system = bbport_help.system_problem(settings.get('game_dir'))
+        if system:
+            page, problem = 'game', (system, 'game')
+        elif not (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() or not CONFIG_FILE.exists():
+            page = 'game'
+        elif not bbport_yharnam.available(PORT_DIR) or not seamless_signed_in(settings):
+            page = 'seamless'
+        else:
+            result = play_seamless_without_window(settings)
+            if result == 0:
+                sys.exit(0)
+            # Ended with an error: the launcher opens on its page, as after its own Play (seamless_ended; the
+            # normal game's Help reads the normal game's log, not seamless\user\log\console.txt).
+            page = 'seamless'
+            if isinstance(result, str):
+                problem = (result, 'seamless')
+    elif '--play' in args and (Path(settings['game_dir'] or '.') / 'eboot.bin').is_file() and CONFIG_FILE.exists():
         # What cannot be repaired is said before the start, in the launcher's window (there is none otherwise).
         problem = start_problem(settings)
         if problem:
@@ -7196,4 +7426,5 @@ def main():
 
 
 if __name__ == '__main__':
+    saves.OUTSIDE = saves.outside_dir()  # every backup also outside the port folder (R86); not for tests' main()
     main()

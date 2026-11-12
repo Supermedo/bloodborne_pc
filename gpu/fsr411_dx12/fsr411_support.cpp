@@ -3,7 +3,7 @@
 #include "ffx_api.h"
 #include "ffx_api_loader.h"
 #include "ffx_upscale.h"
-#include "driver_provider.h"
+#include "sdk24_upscaling.h"
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -175,24 +175,17 @@ Fsr411Support ProbeFsr412Dx12(const uint8_t bytes[8], FsrSupportTrace* trace) {
     FsrCheck(trace, "device", "pass", "D3D12 feature level 12_0");
     try {
         stage = "runtime_load";
-        const auto module = DriverFsr::Runtime(true);
-        FsrCheck(trace, stage, "pass", "amdxcffx64.dll");
+        const auto& api = FsrSdk24::Runtime(true);
+        FsrCheck(trace, stage, "pass", "SDK 2.4 / " + api.path.filename().string());
         stage = "provider_query";
-        const auto provider = DriverFsr::Get(module, FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE);
-        char identity[64]{};
-        std::snprintf(identity, sizeof(identity), "0x%llx", (unsigned long long)provider.provider.versionId);
-        FsrCheck(trace, stage, "pass", std::string(identity) + " " +
-            (provider.provider.versionName ? provider.provider.versionName : ""));
-        stage = "provider_version";
-        if ((uint32_t(provider.provider.versionId) & 0x7fffffffu) != ((4u<<22)|(1u<<12)|2u))
-            return fail("driver", "FSR 4.1.2 provider unavailable");
-        FsrCheck(trace, stage, "pass", "4.1.2");
-        stage = "provider_support";
-        if (!DriverFsr::Supported(provider, r.device))
-            return fail("hardware", "FSR 4.1.2 unsupported by selected GPU");
-        FsrCheck(trace, stage, "pass", "isSupported=true");
+        const auto selected = FsrSdk24::Select(api, r.device);
+        FsrCheck(trace, stage, "pass", selected.name);
+        FsrCheck(trace, "provider_version", "pass", selected.name);
+        FsrCheck(trace, "provider_support", "pass", "SDK offers 4.1.2 for the selected D3D12 device");
         return {true, "ready", "4.1.2"};
+    } catch (const FsrSdk24::Error& error) {
+        return fail(error.reason, error.what());
     } catch (const std::exception& error) {
-        return fail(std::string_view(stage) == "provider_support" ? "check" : "driver", error.what());
+        return fail("check", error.what());
     }
 }

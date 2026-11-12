@@ -23,6 +23,136 @@ def notes(version):
 
 
 NOTES = {
+    '1.9.8.5': (
+        None,
+        [('Graphics', [
+            'Fixed: a broken or smeared picture for the whole session after a load (the game rewrote a command '
+            'buffer it had already submitted), and a smeared, frozen-looking picture from the first camera turn on '
+            '(a saved pipeline was lost after a start with an empty shader cache).',
+            'Fixed: rainbow tiles on hit enemies, a light line along the top in cutscenes.',
+            "Shaders follow the PS4 GPU's rules for NaN and infinity, and a NaN or infinity written to a float "
+            "render target becomes 0 or its largest number (black blotches after Vicar Amelia's cutscene with "
+            'screen-space reflections).',
+            'Vertex inputs without data, draws without a pixel shader and the reuse of vertex shaders are fixed (an '
+            'NVIDIA device loss, broken geometry).',
+            'Crash fixes: the copy shader, switching frame generation off, a damaged command buffer, nothing sent '
+            'to the GPU while the swapchain is made again, and a damaged shader cache record no longer stops the game.',
+            'FSR 4.1.2 uses AMD SDK 2.4 (Vulkan and DX12), FSR 4.1 sharpening works with SDR output, Radeon RX 6000 '
+            'cards get object motion vectors, and DLSS Frame Generation gets its jitter and motion vectors in the '
+            "units NVIDIA's SDK asks for.",
+            'The shader cache is built again at the first start: the first load takes longer.',
+        ]),
+         ('Performance', [
+            'Shaders are built in the background: a new effect no longer stops the game while it compiles ("New '
+            'shaders while playing": "Wait for each" is the old way).',
+            'Fewer frame drops when the game writes to memory the GPU uses, and with 6 or more CPU threads the GPU '
+            'thread runs small copies itself instead of waiting for them.',
+            'Frame rate: more of what the game ties to a 30 FPS frame follows the frame rate, and a frame cap holds '
+            'its number (120 held about 118.5).',
+         ]),
+         ('Game', [
+            'Game of the Year dumps with the 1.09 code get the 1.09 patches again.',
+            'Patches for the Laurence cutscene hang, a crash when talking to NPCs and the render command limit.',
+            'US and other retail editions start on older CPUs, and the launcher accepts them.',
+            'Offline Chalice Glyphs: glyph dungeons without a server.',
+         ]),
+         ('Launcher', [
+            'Borderless fullscreen option.',
+            '"Check the game files" no longer calls a clean game damaged.',
+            'Model detail "Highest" is never set automatically; every new installation gets its automatic settings.',
+            'Save backups are also kept outside the port folder, and the launcher opens where it was closed.',
+            'Signing in keeps asking after "already signed in" instead of staying offline.',
+            'Discord Rich Presence shows hunter stats. Korean: text input, PC Settings and launcher texts.',
+            'Closing the window ends the game at once; fault reports name the thread, and a hang writes thread '
+            'snapshots to the log.',
+         ]),
+         ('Seamless co-op', [
+            'Its own desktop shortcut and Steam entry ("Bloodborne Seamless co-op", on the Seamless co-op page): '
+            'both start Seamless co-op straight away. The normal game keeps its own.',
+            'A teammate whose character comes back hidden after a re-join is shown again, and a third player can '
+            'join a room that already has a guest.',
+            'The Seamless co-op engine has every fix above.',
+         ])]),
+    '1.9.8.5 beta 3': (
+        None,
+        [('Graphics', [
+            'Fixed: a broken or smeared picture for the whole session after a load. The game rewrote a command '
+            'buffer it had already submitted before the GPU thread read it; every submitted buffer is now copied '
+            'first (BB_COPY_GPU_BUFFERS=0: as before).',
+            'Fixed: a smeared, frozen-looking picture from the first camera turn on (the motion blur kept blurring '
+            'the last frame). After a start with an empty shader cache, one saved pipeline could be lost for the '
+            'whole next session.',
+            'The shader cache is built again at the first start: the first load takes longer.',
+        ]),
+         ('Performance', [
+            'Shaders are built in the background by default: a new effect no longer stops the game while it '
+            'compiles; for a moment it is not drawn instead ("New shaders while playing": "Wait for each", or '
+            'BB_ASYNC_PIPELINES=0: as before).',
+            'Fewer frame drops when the game writes to memory the GPU uses: one fault opens a larger window, and '
+            'a fault where no texture lives skips the texture lock (BB_FAULT_MERGE=0, BB_FAULT_TEX_SKIP=0: as before).',
+            'With 6 or more CPU threads the GPU thread runs small copies itself instead of waiting for them '
+            '(BB_COPY_HELP=0: as before).',
+         ]),
+         ('Seamless co-op', [
+            'Its own desktop shortcut and Steam entry ("Bloodborne Seamless co-op", on the Seamless co-op page): '
+            'both start Seamless co-op straight away with the saved settings. The normal game keeps its own.',
+            'The Seamless co-op engine has all of the above.',
+         ])]),
+    '1.9.8.5 beta 2': (
+        None,
+        [('Graphics', [
+            "To test: black blotches on characters and floors after Vicar Amelia's cutscene with screen-space "
+            "reflections on. Shaders follow the PS4 GPU's rules where Vulkan leaves NaN and infinity open "
+            "(min/max, clamping, legacy multiplies, compares; BB_GCN_FLOAT=0: as before), and a NaN or "
+            "infinity written to a float render target becomes 0 or its largest number (BB_NAN_GUARD=0: as before).",
+            "To test: DLSS Frame Generation gets its jitter and motion vectors in the units NVIDIA's SDK asks for.",
+            'A vertex input without data was an undefined format (an NVIDIA device loss followed); a draw '
+            'without a pixel shader takes its clip-plane discard from its own vertex shader, also from a '
+            'preloaded cache; a vertex shader is reused only with the same binding base.',
+            'Nothing is sent to the GPU while the swapchain is made again (resizing, HDR, frame generation).',
+            'Closing the window ends the game at once (a driver could keep it running in the background).',
+            'The shader cache is built again at the first start: the first load takes longer.',
+        ]),
+         ('Performance', [
+            'A sampler taken out of the cache is destroyed once the GPU is done with it, not at once.',
+         ])]),
+    '1.9.8.5 beta 1': (
+        None,
+        [('Game', [
+            'Game of the Year dumps with the 1.09 code get the 1.09 patches again (they started without them).',
+            'Patches for the Laurence cutscene hang, a crash when talking to NPCs and the render command limit.',
+            'US and other retail editions start on older CPUs, and the launcher accepts them.',
+            'Frame rate: more of what the game ties to a 30 FPS frame follows the frame rate, and a frame cap '
+            'holds its number (120 held about 118.5).',
+            'Offline Chalice Glyphs: glyph dungeons without a server.',
+        ]),
+         ('Graphics', [
+            'Fixed: rainbow tiles on hit enemies, a light line along the top in cutscenes.',
+            'Three crash fixes (copy shader, switching frame generation off, a damaged command buffer), and '
+            'fixes from other ports: stale descriptor tables and vertex inputs, constant engine waits, shared '
+            'memory barriers in compute shaders, every mip level in depth copies, draws without an index '
+            'buffer, and a damaged shader cache record no longer stops the game.',
+            'FSR 4.1.2 uses AMD SDK 2.4 (Vulkan and DX12), Radeon RX 6000 object motion fixes, FSR 4.1 '
+            'sharpening with SDR output.',
+            'The shader cache is built again at the first start: the first load takes longer.',
+         ]),
+         ('Launcher', [
+            'Borderless fullscreen option.',
+            '"Check the game files" no longer calls a clean game damaged.',
+            'Model detail "Highest" is never set automatically; every new installation gets its automatic settings.',
+            'Save backups are also kept outside the port folder.',
+            'The launcher opens where it was closed.',
+            'Signing in keeps asking after "already signed in" instead of staying offline.',
+            'Discord Rich Presence shows hunter stats.',
+            'Korean: text input, PC Settings and launcher texts.',
+            'Fault reports name the thread and driver frames, and a hang writes thread snapshots to the log.',
+         ]),
+         ('Seamless co-op', [
+            'To test: a third player joining a room that already has a guest (the lookup of that guest had no online '
+            'version).',
+            'To test: a teammate whose character comes back hidden after a re-join is shown again (the log says '
+            'when it happens).',
+         ])]),
     '1.9.8.4': (
         None,
         [('Seamless co-op', [
@@ -373,9 +503,9 @@ class NewsPanel:
                            spacing1=px(10), spacing3=px(4))
         text.tag_configure('item', lmargin1=px(4), lmargin2=px(20))
         for index, (section, items) in enumerate(sections):
-            text.insert('end', ('\n' if index else '') + section + '\n', 'section')
+            text.insert('end', ('\n' if index else '') + _(section) + '\n', 'section')
             for item in items:
-                text.insert('end', '•  ' + item + '\n', 'item')
+                text.insert('end', '•  ' + _(item) + '\n', 'item')
         text.configure(state='disabled')  # read only (still scrolls and selects)
 
         for key in ('<Escape>', '<Return>'):  # on the panel, which has the focus: the launcher's own stay

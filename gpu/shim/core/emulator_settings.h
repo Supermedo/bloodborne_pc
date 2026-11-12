@@ -76,7 +76,9 @@ public:
         }();
         return value;
     }
-    bool IsCopyGpuBuffers() { static const auto value = Flag("BB_COPY_GPU_BUFFERS", false); return value; }
+    // bbport: on by default since 1.9.8.5 (Liverpool::SubmitGfx: the game rewrote a submitted
+    // command buffer the GPU thread had not read yet); BB_COPY_GPU_BUFFERS=0 turns it off.
+    bool IsCopyGpuBuffers() { static const auto value = Flag("BB_COPY_GPU_BUFFERS", true); return value; }
     bool IsDirectMemoryAccessEnabled() { static const auto value = Flag("BB_DIRECT_MEMORY_ACCESS", false); return value; }
     bool IsDumpShaders() { static const auto value = Flag("BB_DUMP_SHADERS", false); return value; }
     bool IsFsrEnabled() { static const auto value = Flag("BB_FSR1", false); return value; }

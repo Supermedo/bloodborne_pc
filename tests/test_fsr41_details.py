@@ -87,7 +87,10 @@ class DetailsTests(unittest.TestCase):
     def test_driver_probe_preserves_trace_and_reports_timeout_or_process_failure(self):
         with tempfile.TemporaryDirectory() as folder:
             port = Path(folder)
-            paths = dict(vulkan=str(port / 'amdvkffx64.dll'))
+            paths = {}
+            runtime = port/'out/gpu/fsr24/amd_fidelityfx_upscaler_vk.dll'
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b'test fixture; native query is mocked')
             good = dict(supported=False, reason='hardware', detail='isSupported=false',
                 checks=[dict(id='provider_support', state='fail', detail='isSupported=false')], gpu=ready()['gpu'])
             response = subprocess.CompletedProcess([], 0, json.dumps(good), '')

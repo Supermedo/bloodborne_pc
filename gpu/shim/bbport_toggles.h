@@ -96,12 +96,41 @@ inline std::atomic<std::uint64_t> gpu_frames{0};
 /// Wall time spent in operations suspected of stalls (ns, all threads).
 inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}, t_refresh{0},
     t_staging{0}, t_host_wait{0}, t_copy{0}, copy_bytes{0}, t_read_faults{0}, read_faults{0},
-    t_write_faults{0}, t_copy_cpu{0}, copy_sys_us{0}, copy_minflt{0};
+    t_write_faults{0}, write_faults{0}, t_copy_cpu{0}, copy_sys_us{0}, copy_minflt{0};
+/// Guest write faults, by part (ns): the buffer side (tracker state and unprotect), waiting
+/// for the texture cache's lock, the texture side with it held; faults with no image on the
+/// page skip the texture side (count).
+inline std::atomic<std::uint64_t> t_fault_buffer{0}, t_fault_tex_wait{0}, t_fault_tex{0},
+    fault_tex_skips{0};
+/// PM4 packets of the draw engine and commands from guest threads the GPU thread processed.
+inline std::atomic<std::uint64_t> pm4_packets{0}, gpu_commands{0};
+/// Write faults (ns): waiting for a tracker region's lock, and the faulting threads' CPU time
+/// (the rest of t_write_faults is off the CPU: preempted or asleep). Time the GPU thread held
+/// tracker region locks to upload (re-protecting the pages), and waited for them.
+inline std::atomic<std::uint64_t> t_fault_region_wait{0}, t_write_faults_cpu{0},
+    t_upload_lock_held{0}, t_gpu_region_wait{0};
 /// Diagnostics are collected only with BB_FRAME_STATS=1.
 inline const bool enabled = [] {
     const char* env = std::getenv("BB_FRAME_STATS");
     return env && env[0] == '1';
 }();
+/// Takes `lock`, adding the time it waited for it to `total` (with BB_FRAME_STATS=1).
+template <typename Lock>
+inline void LockTimed(Lock& lock, std::atomic<std::uint64_t>& total) {
+    if (!enabled) {
+        lock.lock();
+        return;
+    }
+    if (lock.try_lock()) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    lock.lock();
+    total.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count(),
+                    std::memory_order_relaxed);
+}
 struct Timer {
     std::atomic<std::uint64_t>& total;
     std::chrono::steady_clock::time_point start =
@@ -124,6 +153,9 @@ inline std::atomic<std::uint64_t> reduced_draws{0}, scene_draws{0};
 /// for host copies before a submission or fence, and for GPU ticks.
 inline std::atomic<std::uint64_t> sync_recording_ns{0}, host_copies_wait_ns{0}, tick_wait_ns{0},
     copy_threads_wait_ns{0}, host_copy_waits{0};
+/// Small guest copies the waiting thread ran itself instead of waiting for the recording
+/// thread to reach them (Scheduler::WaitHostCopies).
+inline std::atomic<std::uint64_t> host_copies_helped{0};
 struct WaitTimer {
     std::atomic<std::uint64_t>& total;
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

@@ -21,7 +21,7 @@ class Scheduler;
 
 class Fsr4Upscaler {
 public:
-    Fsr4Upscaler(const Instance& instance, Scheduler& scheduler);
+    Fsr4Upscaler(const Instance& instance, Scheduler& scheduler, bool refresh_support = false);
     ~Fsr4Upscaler();
 
     /// An image in layout General, written/read by compute shaders.

@@ -120,6 +120,7 @@ add_host_shader(fsr.comp fsr_rcas_comp SAMPLE_RCAS=1)
 add_host_shader(post_process.frag post_process_frag)
 add_host_shader(camera_motion.comp camera_motion_comp)
 add_host_shader(upscale_merge.comp upscale_merge_comp)
+add_host_shader(upscale_motion_debug.comp upscale_motion_debug_comp)
 add_host_shader(upscale_reactive.comp upscale_reactive_comp)
 add_host_shader(fsr4vk_prepare.comp fsr4vk_prepare_comp)
 add_host_shader(test_fsr411_consume.comp test_fsr411_consume_comp)
@@ -127,6 +128,7 @@ add_host_shader(taa.comp taa_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_comp)
 add_host_shader(taa_sharpen.comp taa_sharpen_ldr_comp LDR_OUTPUT=1)
 add_host_shader(taa_sharpen.comp taa_sharpen_direct_comp DIRECT_HALF_INPUT=1)
+add_host_shader(taa_sharpen.comp taa_sharpen_fused_comp DIRECT_HALF_INPUT=1 LDR_OUTPUT=1 FUSED_LDR_OUTPUT=1)
 add_host_shader(buffer_multi_copy.comp buffer_multi_copy_comp)
 add_host_shader(depth_resample.frag depth_resample_frag)
 add_host_shader(depth_resample.frag depth_stencil_resample_frag HAS_STENCIL=1)
@@ -291,6 +293,15 @@ if (WIN32)
     # <windows.h> out of the way of std::min/max and the Vulkan/SDL headers.
     target_compile_definitions(bbgpu PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN VK_USE_PLATFORM_WIN32_KHR)
     target_sources(bbgpu PRIVATE fsr411_dx12/native_fsr411.cpp fsr411_dx12/fsr411_support.cpp)
+    # SDK 2.4 headers only for upscaling TUs: keep FG's existing SDK headers intact.
+    set(FSR24_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/fsr24/sdk/api/include;${CMAKE_CURRENT_SOURCE_DIR}/fsr24/sdk/upscalers/include")
+    set_source_files_properties(fsr411_dx12/native_fsr411.cpp fsr411_dx12/fsr411_support.cpp
+        shadps4/video_core/renderer_vulkan/vk_instance.cpp
+        shadps4/video_core/renderer_vulkan/vk_fsr412_driver.cpp ../tools/fsr411_capabilities.cpp
+        PROPERTIES INCLUDE_DIRECTORIES "${FSR24_INCLUDES}")
+    set_source_files_properties(shadps4/video_core/renderer_vulkan/vk_instance.cpp
+        shadps4/video_core/renderer_vulkan/vk_fsr412_driver.cpp
+        PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
     # AMD's runtime loader checks MSBuild's _WINDOWS macro, not MinGW's _WIN32.
     set_source_files_properties(fsr411_dx12/native_fsr411.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
     set_source_files_properties(fsr411_dx12/fsr411_support.cpp PROPERTIES COMPILE_DEFINITIONS _WINDOWS)
@@ -311,8 +322,10 @@ if (WIN32)
     add_library(atrac9 STATIC ${BB_ATRAC9})
     target_compile_options(atrac9 PRIVATE -w)
     set_target_properties(atrac9 PROPERTIES C_STANDARD 99 INTERPROCEDURAL_OPTIMIZATION OFF)
+    # Offline Chalice Glyphs (docs/LOCAL_CHALICE.md).
+    set(BB_LOCAL_CHALICE ../src/local_chalice.cpp ../src/lc_desc.cpp ../src/lc_platform.cpp ../src/offline_slot.cpp)
     add_executable(bb-probe ../src/probe.c ${BB_RUNTIME} ../src/compat_win.c ../src/vulkan_smoke.c
-        ../packaging/windows/bb-probe.rc)
+        ${BB_LOCAL_CHALICE} ../packaging/windows/bb-probe.rc)
     # The overlay's GPU usage comes from Windows' GPU Engine counters (pdh), the CPU name from the
     # registry (advapi32).
     target_link_libraries(bbgpu INTERFACE pdh advapi32)
@@ -350,9 +363,24 @@ if (WIN32)
     target_link_options(bb-probe PRIVATE -Wl,--disable-high-entropy-va "SHELL:-Xlinker --stack -Xlinker 16777216,16777216")
     add_executable(bb-gpu-capabilities ../tools/gpu_capabilities.c ../tools/fsr411_capabilities.cpp
         fsr411_dx12/fsr411_support.cpp ../packaging/windows/bb-gpu-capabilities.rc)
+    target_compile_definitions(bb-gpu-capabilities PRIVATE _WINDOWS)
     target_include_directories(bb-gpu-capabilities PRIVATE shim fsr411_dx12
         fsr411_dx12/sdk/api/include fsr411_dx12/sdk/upscalers/include)
     target_compile_definitions(bb-gpu-capabilities PRIVATE NOMINMAX)
+    add_executable(fsr24-api-test EXCLUDE_FROM_ALL ../tests/test_fsr24_api.cpp)
+    target_include_directories(fsr24-api-test PRIVATE fsr411_dx12 ${FSR24_INCLUDES})
+    target_compile_definitions(fsr24-api-test PRIVATE _WINDOWS NOMINMAX)
+    target_compile_options(fsr24-api-test PRIVATE -UNDEBUG)
+    add_executable(fsr24-vulkan-features-test EXCLUDE_FROM_ALL ../tests/test_fsr24_vulkan_features.cpp)
+    target_include_directories(fsr24-vulkan-features-test PRIVATE fsr411_dx12)
+    target_compile_options(fsr24-vulkan-features-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    add_executable(fsr-support-cache-test EXCLUDE_FROM_ALL ../tests/test_fsr_support_cache.cpp)
+    target_include_directories(fsr-support-cache-test PRIVATE shadps4)
+    target_compile_options(fsr-support-cache-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(fsr-support-cache-test PRIVATE -pthread)
+    add_executable(fsr4-preferences-test EXCLUDE_FROM_ALL ../tests/test_fsr4_preferences.cpp shim/bbport_settings.cpp)
+    target_include_directories(fsr4-preferences-test PRIVATE shim)
+    target_compile_options(fsr4-preferences-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_libraries(bb-gpu-capabilities PRIVATE Vulkan::Vulkan d3d12 dxgi)
     # "Play Bloodborne.exe": the game with the launcher's saved settings, no launcher window.
     add_executable(bb-play WIN32 ../packaging/windows/play.c ../packaging/windows/play.rc)
@@ -361,20 +389,63 @@ if (WIN32)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
+add_executable(hang-snapshot-test EXCLUDE_FROM_ALL ../tests/test_hang_snapshot.cpp)
+target_compile_options(hang-snapshot-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(hang-snapshot-test PRIVATE ..)
+
 add_executable(fsr411-requirements-test EXCLUDE_FROM_ALL ../tests/test_fsr411_requirements.cpp)
 target_include_directories(fsr411-requirements-test PRIVATE shim)
 target_link_libraries(fsr411-requirements-test PRIVATE Vulkan::Headers)
 target_compile_options(fsr411-requirements-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -Wno-missing-field-initializers)
 
+add_executable(copy-shader-test EXCLUDE_FROM_ALL ../tests/test_copy_shader.cpp)
+target_compile_options(copy-shader-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(copy-shader-test PRIVATE ..)
+
 add_executable(command-buffer-test EXCLUDE_FROM_ALL ../tests/test_command_buffers.cpp)
 target_compile_options(command-buffer-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(command-buffer-test PRIVATE ..)
+
+add_executable(frame-rate-test EXCLUDE_FROM_ALL ../tests/test_frame_rate.cpp)
+target_compile_options(frame-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(frame-rate-test PRIVATE ..)
 
 add_executable(fsr4vk-post-test EXCLUDE_FROM_ALL ../tests/test_fsr4vk_post.cpp
     shadps4/video_core/renderer_vulkan/fsr4vk_post.cpp)
 target_include_directories(fsr4vk-post-test PRIVATE shadps4)
 target_compile_options(fsr4vk-post-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_link_libraries(fsr4vk-post-test PRIVATE PkgConfig::XXHASH)
+
+add_executable(flip-tail-test EXCLUDE_FROM_ALL ../tests/test_flip_tail.cpp)
+target_compile_options(flip-tail-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+target_include_directories(flip-tail-test PRIVATE ..)
+
+# The GCN float rules of the shader translator (Profile::gcn_float_rules, BB_GCN_FLOAT). On
+# Windows with the runtime, as rt-guard-test.
+if (WIN32)
+    add_executable(gcn-float-test EXCLUDE_FROM_ALL ../tests/test_gcn_float_rules.cpp ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(gcn-float-test PRIVATE .. ../src shim shadps4 third_party/gcn/include
+        third_party/sirit/externals/SPIRV-Headers/include)
+    target_link_libraries(gcn-float-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+else()
+    add_executable(gcn-float-test EXCLUDE_FROM_ALL ../tests/test_gcn_float_rules.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(gcn-float-test PRIVATE shim shadps4 third_party/gcn/include
+        third_party/sirit/externals/SPIRV-Headers/include)
+    target_link_libraries(gcn-float-test PRIVATE bbgpu)
+endif()
+
+# The float render-target guard of the shader translator (export.cpp, BB_NAN_GUARD).
+if (WIN32)
+    add_executable(rt-guard-test EXCLUDE_FROM_ALL ../tests/test_rt_guard.cpp ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(rt-guard-test PRIVATE .. ../src shim shadps4 third_party/gcn/include
+        third_party/sirit/externals/SPIRV-Headers/include)
+    target_link_libraries(rt-guard-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+else()
+    add_executable(rt-guard-test EXCLUDE_FROM_ALL ../tests/test_rt_guard.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(rt-guard-test PRIVATE shim shadps4 third_party/gcn/include
+        third_party/sirit/externals/SPIRV-Headers/include)
+    target_link_libraries(rt-guard-test PRIVATE bbgpu)
+endif()
 
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
@@ -385,9 +456,17 @@ if (NOT WIN32)
     target_include_directories(object-motion-cache-test PRIVATE .. shim shadps4 third_party/gcn/include)
     target_link_libraries(object-motion-cache-test PRIVATE bbgpu)
 endif()
-add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
-target_link_libraries(motion-shader-test PRIVATE bbgpu)
+if (WIN32)
+    add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp
+        ../tests/test_motion_shader_gpu.cpp ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(motion-shader-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(motion-shader-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+else()
+    add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp
+        ../tests/test_motion_shader_gpu.cpp ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
+    target_link_libraries(motion-shader-test PRIVATE bbgpu)
+endif()
 add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
 target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(ui-composition-test PRIVATE ..)
@@ -445,6 +524,10 @@ add_executable(pad-use-test EXCLUDE_FROM_ALL ../tests/test_pad_use.cpp)
 target_include_directories(pad-use-test PRIVATE shim)
 target_compile_options(pad-use-test PRIVATE -UNDEBUG)
 
+add_executable(motion-storage-test EXCLUDE_FROM_ALL ../tests/test_motion_storage.cpp)
+target_include_directories(motion-storage-test PRIVATE shadps4)
+target_compile_options(motion-storage-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+
 # bbport: when the video memory banner comes up: ninja -C out/gpu vram-warning-test, then run it.
 # No GPU.
 add_executable(vram-warning-test EXCLUDE_FROM_ALL ../tests/test_vram_warning.cpp)
@@ -480,15 +563,10 @@ target_include_directories(shared-graphics-test PRIVATE shim)
 target_compile_options(shared-graphics-test PRIVATE -UNDEBUG)
 
 if (WIN32)
-    add_library(fsr-driver-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_fixture.cpp)
-    target_include_directories(fsr-driver-fixture PRIVATE fsr411_dx12 fsr411_dx12/sdk/api/include)
-    add_library(fsr-driver-invalid-fixture SHARED EXCLUDE_FROM_ALL ../tests/test_fsr_driver_invalid.c)
-    target_link_options(fsr-driver-invalid-fixture PRIVATE -nostdlib -Wl,--entry,DllMain)
-    add_executable(fsr-driver-test EXCLUDE_FROM_ALL ../tests/test_fsr_driver.cpp)
-    target_include_directories(fsr-driver-test PRIVATE shim fsr411_dx12 fsr411_dx12/sdk/api/include)
-    target_compile_options(fsr-driver-test PRIVATE -UNDEBUG)
-    target_link_libraries(fsr-driver-test PRIVATE bcrypt)
-    add_dependencies(fsr-driver-test fsr-driver-fixture fsr-driver-invalid-fixture)
+    add_executable(pc-menu-upscaler-test EXCLUDE_FROM_ALL ../tests/test_pc_menu_upscaler.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(pc-menu-upscaler-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(pc-menu-upscaler-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
     add_executable(shared-graphics-overlay-test EXCLUDE_FROM_ALL ../tests/test_shared_graphics_overlay.cpp
         ${BB_RUNTIME} ../src/compat_win.c)
     target_include_directories(shared-graphics-overlay-test PRIVATE .. ../src shim shadps4
@@ -506,6 +584,10 @@ target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan:
 
 if (WIN32)
     include(fg401_dx12/CMakeLists.txt)
+    add_executable(pc-menu-framegen-test EXCLUDE_FROM_ALL ../tests/test_pc_menu_framegen.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(pc-menu-framegen-test PRIVATE .. ../src shim shadps4 third_party/gcn/include)
+    target_link_libraries(pc-menu-framegen-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
 endif()
 
 # Compare the actual host RCAS shaders, including the legacy FP16 -> FP32 blit.
@@ -517,6 +599,12 @@ set_source_files_properties(../tests/test_fsr411_sharpen.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(fsr411-sharpen-test PRIVATE Vulkan::Vulkan)
 add_dependencies(fsr411-sharpen-test host_shaders)
+
+add_executable(fsr41-fused-output-test EXCLUDE_FROM_ALL ../tests/test_fsr41_fused_output.cpp)
+target_include_directories(fsr41-fused-output-test PRIVATE shim shadps4 ${SHADER_INCLUDE})
+target_compile_options(fsr41-fused-output-test PRIVATE -fPIC)
+target_link_libraries(fsr41-fused-output-test PRIVATE Vulkan::Vulkan)
+add_dependencies(fsr41-fused-output-test host_shaders)
 
 # Normalize dependency include paths for the Windows driver integration.
 foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)
@@ -530,3 +618,15 @@ foreach(dependency PkgConfig::FFMPEG PkgConfig::SDL3 PkgConfig::XXHASH)
     set_property(TARGET ${dependency} PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${normalized}")
   endif()
 endforeach()
+
+if (WIN32)
+    add_executable(scaled-motion-debug-test EXCLUDE_FROM_ALL ../tests/test_scaled_motion_debug.cpp
+        ${BB_RUNTIME} ../src/compat_win.c)
+    target_include_directories(scaled-motion-debug-test PRIVATE .. ../src shim shadps4 ${SHADER_INCLUDE})
+    target_link_libraries(scaled-motion-debug-test PRIVATE bbgpu atrac9 onecore bcrypt ws2_32 -pthread)
+else()
+    add_executable(scaled-motion-debug-test EXCLUDE_FROM_ALL ../tests/test_scaled_motion_debug.cpp
+        ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(scaled-motion-debug-test PRIVATE .. shim shadps4 ${SHADER_INCLUDE})
+    target_link_libraries(scaled-motion-debug-test PRIVATE bbgpu)
+endif()

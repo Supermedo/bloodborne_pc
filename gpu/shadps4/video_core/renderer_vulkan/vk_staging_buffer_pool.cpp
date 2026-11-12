@@ -4,6 +4,7 @@
 #include "bbport_toggles.h"
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -14,6 +15,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
+
+#include <vk_mem_alloc.h>
 
 namespace Vulkan {
 
@@ -209,6 +212,46 @@ void StagingBufferPool::TrimLarge(std::vector<LargeBuffer>& cache) {
 
 void StagingBufferPool::PublishStats() const {
     using namespace Core::Devtools::Widget;
+    // bbport: BB_FRAME_STATS=1 prints, every 300 frames, what the staging pool holds and each
+    // memory heap's use: host staging lives in system memory (GTT on a discrete card), next to
+    // the guest's own memory on PCs with 8 GB or less.
+    if (BbStats::enabled && frame % 300 == 0) {
+        u64 ring_bytes[NUM_TYPES]{}, large_bytes[NUM_TYPES]{};
+        for (size_t i = 0; i < NUM_TYPES; ++i) {
+            for (const Block& block : rings[i].blocks) {
+                ring_bytes[i] += block.buffer->SizeBytes();
+            }
+            for (const LargeBuffer& entry : large_caches[i]) {
+                large_bytes[i] += entry.buffer->SizeBytes();
+            }
+        }
+        const VkPhysicalDeviceMemoryProperties* props = nullptr;
+        vmaGetMemoryProperties(instance.GetAllocator(), &props);
+        VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+        vmaGetHeapBudgets(instance.GetAllocator(), budgets);
+        char heaps[512]{};
+        size_t used = 0;
+        for (u32 i = 0; i < props->memoryHeapCount && used < sizeof(heaps); ++i) {
+            const int n = std::snprintf(
+                heaps + used, sizeof(heaps) - used,
+                "; heap %u%s: used %llu MiB (%llu MiB in allocator blocks) of %llu MiB", i,
+                props->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? " (device-local)"
+                                                                               : "",
+                (unsigned long long)(budgets[i].usage >> 20),
+                (unsigned long long)(budgets[i].statistics.blockBytes >> 20),
+                (unsigned long long)(props->memoryHeaps[i].size >> 20));
+            used += n > 0 ? size_t(n) : 0;
+        }
+        const auto mib = [](u64 bytes) { return (unsigned long long)(bytes >> 20); };
+        std::printf("Staging: host ring %llu MiB, host large %llu MiB, cached %llu MiB, VRAM ring "
+                    "%llu MiB, VRAM large %llu MiB%s\n",
+                    mib(ring_bytes[u32(MemoryType::HostUncached)]),
+                    mib(large_bytes[u32(MemoryType::HostUncached)]),
+                    mib(ring_bytes[u32(MemoryType::HostCached)] +
+                        large_bytes[u32(MemoryType::HostCached)]),
+                    mib(ring_bytes[u32(MemoryType::DeviceLocal)]),
+                    mib(large_bytes[u32(MemoryType::DeviceLocal)]), heaps);
+    }
     if (!GpuMemoryViewer::IsEnabled()) {
         return;
     }

@@ -5,7 +5,10 @@ The port opens its window at 1920 x 1080 in the middle of the main monitor (gpu/
 and keeps nothing of where the player moved it or how big they made it. The launcher places the
 window instead, once it exists: on the chosen monitor, at the chosen size (the output resolution,
 the size the player left it at last time, or their own), and in fullscreen over the whole chosen
-monitor. The game's in-game restart opens a new window; it is placed the same way.
+monitor. The game's in-game restart opens a new window; it is placed the same way. Borderless
+fullscreen ('borderless_fullscreen', with Fullscreen off): the game opens in a window, and the
+launcher takes its frame off and keeps it over the whole monitor it is on, so Alt+Tab is instant and
+other windows can go on top of it.
 
 Every size here is in physical pixels: the code that measures monitors and moves the window runs
 per-monitor DPI aware, whatever the rest of the launcher is."""
@@ -17,8 +20,14 @@ import time
 from ctypes import wintypes
 
 MIN_SIZE, MAX_SIZE = (640, 360), (7680, 4320)
-SWP_NOZORDER, SWP_NOACTIVATE = 0x0004, 0x0010
+SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED, SWP_NOOWNERZORDER = 0x0004, 0x0010, 0x0020, 0x0200
 GWL_STYLE, GWL_EXSTYLE = -16, -20
+# Borderless: no caption, sizing border or maximize box (minimize and the system menu stay: the taskbar
+# and Win+D still minimize it), and no edges.
+WS_CAPTION, WS_THICKFRAME, WS_MAXIMIZEBOX = 0x00C00000, 0x00040000, 0x00010000
+FRAME = WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX
+EDGES = 0x00000001 | 0x00000100 | 0x00000200 | 0x00020000  # WS_EX_DLGMODALFRAME, WINDOWEDGE, CLIENTEDGE, STATICEDGE
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND = 33, 1
 PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 
 
@@ -206,6 +215,72 @@ def monitor_dpi(m):
         return 96
 
 
+def frameless(style, extended):
+    """The window styles without frame and edges (borderless fullscreen)."""
+    return style & ~FRAME, extended & ~EDGES
+
+
+def borderless(settings):
+    """Borderless fullscreen: on, and Fullscreen off (Fullscreen wins when an older file has both)."""
+    return bool(settings.get('borderless_fullscreen')) and not settings.get('fullscreen')
+
+
+def window_long(hwnd, index):
+    user32 = ctypes.windll.user32
+    get = getattr(user32, 'GetWindowLongPtrW', user32.GetWindowLongW)
+    get.restype, get.argtypes = ctypes.c_ssize_t, (wintypes.HWND, ctypes.c_int)
+    return get(hwnd, index)
+
+
+def set_window_long(hwnd, index, value):
+    user32 = ctypes.windll.user32
+    put = getattr(user32, 'SetWindowLongPtrW', user32.SetWindowLongW)
+    put.restype, put.argtypes = ctypes.c_ssize_t, (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+    put(hwnd, index, value)
+
+
+def monitor_of(hwnd):
+    """The rect of the monitor the window is on (most of it), or None."""
+    user32 = ctypes.windll.user32
+    user32.MonitorFromWindow.restype = wintypes.HMONITOR
+    user32.MonitorFromWindow.argtypes = (wintypes.HWND, wintypes.DWORD)
+    info = MONITORINFOEXW()
+    info.cbSize = ctypes.sizeof(info)
+    handle = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+    if not handle or not user32.GetMonitorInfoW(handle, ctypes.byref(info)):
+        return None
+    r = info.rcMonitor
+    return r.left, r.top, r.right, r.bottom
+
+
+def make_borderless(hwnd, rect):
+    """The window without its frame, over `rect` (a monitor, physical pixels); True when it changed. Only
+    what differs is set: SDL may put its frame back (a DPI change, a restore), and this runs every 0.25 s."""
+    user32 = ctypes.windll.user32
+    style, extended = window_long(hwnd, GWL_STYLE), window_long(hwnd, GWL_EXSTYLE)
+    new_style, new_extended = frameless(style, extended)
+    framed = (new_style, new_extended) != (style, extended)
+    if framed:
+        set_window_long(hwnd, GWL_STYLE, new_style)
+        set_window_long(hwnd, GWL_EXSTYLE, new_extended)
+    if not framed and window_rect(hwnd) == tuple(rect):
+        return False
+    # The normal Z order: after Alt+Tab other windows stay above the game.
+    user32.SetWindowPos(hwnd, None, rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1],
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER | (SWP_FRAMECHANGED if framed else 0))
+    return True
+
+
+def square_corners(hwnd):
+    """Windows 11 rounds the corners of framed windows; a window over the monitor keeps square ones."""
+    try:
+        corner = ctypes.c_int(DWMWCP_DONOTROUND)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE,
+                                                   ctypes.byref(corner), ctypes.sizeof(corner))
+    except (AttributeError, OSError):  # before Windows 11
+        pass
+
+
 def window_target(settings, output):
     """The game window's client size: the output resolution, the last size, the player's own, or
     None ('game': as the port opens it, the launcher leaves its size alone)."""
@@ -223,6 +298,7 @@ class Placer:
 
     def __init__(self, settings, output, find=game_windows):
         self.fullscreen = bool(settings.get('fullscreen'))
+        self.borderless = borderless(settings)
         self.device = settings.get('game_monitor') or ''
         self.size = window_target(settings, output)
         self.find = find
@@ -254,8 +330,22 @@ class Placer:
                     self.place(hwnd)
                     self.placed.add(hwnd)
                 self.seen[hwnd] = rect
+            elif self.borderless:
+                self.keep_borderless(hwnd)
             elif not self.fullscreen:
                 self.remember(hwnd)
+
+    def keep_borderless(self, hwnd):
+        """A placed borderless window stays frameless over the monitor it is on (Win+Shift+Arrow still moves
+        it); a minimized one is left alone until it comes back."""
+        user32 = ctypes.windll.user32
+        if user32.IsIconic(hwnd):
+            return
+        if user32.IsZoomed(hwnd):
+            user32.ShowWindow(hwnd, 9)
+        rect = monitor_of(hwnd)
+        if rect:
+            make_borderless(hwnd, rect)
 
     def remember(self, hwnd):
         user32 = ctypes.windll.user32
@@ -271,6 +361,12 @@ class Placer:
             return
         user32 = ctypes.windll.user32
         move = lambda x, y, w, h: user32.SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+        if self.borderless:
+            if user32.IsZoomed(hwnd):
+                user32.ShowWindow(hwnd, 9)  # SW_RESTORE: a maximized window would only cover the work area
+            make_borderless(hwnd, m.rect)
+            square_corners(hwnd)
+            return
         if self.fullscreen:
             if window_rect(hwnd) != m.rect:
                 move(m.rect[0], m.rect[1], *m.size)

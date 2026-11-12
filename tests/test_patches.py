@@ -138,7 +138,13 @@ class DebugPatchTests(unittest.TestCase):
 
     def test_fixes_raise_the_frame_heaps_without_touching_other_patches(self):
         writes = compile_patches(XML, FIXES, '01.09', SEGMENTS)
-        self.assertEqual(writes, [(0x2195c0a, b'\x00\x00\x10\x00'), (0x2195c47, b'\x00\x00\x10\x00')])
+        self.assertIn((0x2195c0a, b'\x00\x00\x10\x00'), writes)
+        self.assertIn((0x2195c47, b'\x00\x00\x10\x00'), writes)
+        self.assertIn((0x4736dc8, b'\x00\x00\x60\x11'), writes)  # GFX heap, 278 MiB
+        self.assertIn((0x1d96b26, b'\x60\x03\x00\x00'), writes)  # 864 render commands
+        offsets = {offset for offset, _ in writes}
+        for offset in (0x17bcb33, 0x17bcb59, 0x106800b, 0x1068040, 0x1068075, 0x1d96aff):  # NPC talk, Laurence, clear
+            self.assertIn(offset, offsets)
         others = [n for names in FPS_PRESETS.values() for n in names] + [RESOLUTION_TEMPLATE]
         for offset, data in compile_patches(XML, others, '01.09', SEGMENTS):
             for fix, value in writes:
@@ -199,7 +205,8 @@ class FairPlayTests(unittest.TestCase):
             self.assertIn('online play: Player Stealth (Read note), Restore Debug Camera, Player No Dead (Read note) '
                           'stay off', played.stdout)
             self.assertIn('the third-party patches extra.xml/On, extra.xml/Mask stay off', played.stdout)
-            self.assertIn("from ['Larger Frame Heaps', 'Skip Intro']", played.stdout)
+            self.assertIn("from ['Larger Frame Heaps', 'More Render Commands', 'NPC Talk Crash Fix', "
+                          "'Laurence Cutscene Hang Fix', 'Black Clear Colour', 'Skip Intro']", played.stdout)
             played = subprocess.run(command, capture_output=True, text=True, env=env)
             self.assertEqual(played.returncode, 0, played.stderr)
             self.assertNotIn('online play', played.stdout)
@@ -459,6 +466,21 @@ class GameVersionTests(unittest.TestCase):
     def test_unreadable_eboot_is_not_109(self):
         game = self.game('01.00')
         self.assertFalse(eboot_is_109(str(game / 'eboot.bin')))
+
+    def test_eboot_with_a_109_group_is_109(self):
+        # Not mocked: the check must work with PATCH_FINGERPRINTS' per-group hashes. The size argument (1, 2)
+        # keeps eboot_is_109's cache from answering the second check with the first one's result.
+        game = self.game('01.00')
+        eboot = bytearray(elf_image(b'\0' * 16))
+        eboot[:7] = b'\x7fELF\x02\x01\x01'  # parse_self: a little-endian ELF64 for x86-64
+        struct.pack_into('<H', eboot, 0x12, 62)
+        (game / 'eboot.bin').write_bytes(eboot)
+        with mock.patch.dict('patches.PATCH_FINGERPRINTS', {'01.09': {'fps': 'other', 'resolution': 'other'}}):
+            self.assertFalse(eboot_is_109(str(game / 'eboot.bin'), 1))
+        expected = {'fps': 'other', 'resolution': patch_fingerprint(
+            elf_image(b'\0' * 16), names=PATCH_GROUPS['resolution'])}
+        with mock.patch.dict('patches.PATCH_FINGERPRINTS', {'01.09': expected}):
+            self.assertTrue(eboot_is_109(str(game / 'eboot.bin'), 2))
 
 
 if __name__ == '__main__':

@@ -132,8 +132,8 @@ HELP = {'de': {
     'it is that folder, not another copy of the game.':
         'Kopiere die eboot.bin daraus in deinen Spielordner (Spiel & Sprache > Spielordner) und ersetze die alte. '
         'Achte darauf, dass es genau dieser Ordner ist und keine andere Kopie des Spiels.',
-    'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-        'Rechtsklick auf eboot.bin > Eigenschaften: Die saubere Datei hat genau 93.825.704 Bytes.',
+    'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+        'Rechtsklick auf eboot.bin > Eigenschaften: Die saubere Datei hat genau 93.825.704 Bytes (93.667.640, wenn dein Dump-Werkzeug sie als einfache ELF-Datei geschrieben hat).',
     'Mods must not bring their own eboot.bin: the check at the top of this page names any that do.':
         'Mods dürfen keine eigene eboot.bin mitbringen: Die Prüfung oben nennt solche Mods.',
     'eboot.bin is cut off': 'eboot.bin ist abgeschnitten',
@@ -141,17 +141,17 @@ HELP = {'de': {
         'Sie ist beim Entpacken kaputtgegangen (im Log steht „prepare failed: out of bounds“).',
     'Put the base game and the 1.09 update into two new, empty folders again.':
         'Lege das Grundspiel und das Update 1.09 erneut in zwei neue, leere Ordner.',
-    'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-        'Prüfe die Größe: Die eboot.bin des Updates hat genau 93.825.704 Bytes (89,4 MB).',
+    'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+        'Prüfe die Größe: Die eboot.bin des Updates hat genau 93.825.704 Bytes (89,4 MB), als einfache ELF-Datei 93.667.640 Bytes.',
     'Copy everything from the update folder into the base game folder and replace the files.':
         'Kopiere alles aus dem Update-Ordner in den Basisspiel-Ordner und ersetze die Dateien.',
     'eboot.bin cannot be read': 'eboot.bin kann nicht gelesen werden',
-    'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-    'Bloodborne.':
-        'Es ist nicht die Originaldatei (eine PS4-SELF-Datei): Ein anderes Werkzeug hat sie umgewandelt, '
-        'oder sie ist nicht von Bloodborne.',
-    'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-        'Nimm die eboot.bin eines unveränderten Updates 1.09 (genau 93.825.704 Bytes).',
+    'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+    'another tool has converted it, or it is not from Bloodborne.':
+        'Es ist weder die Originaldatei (eine PS4-SELF-Datei) noch eine einfache ELF-Datei: Sie ist noch '
+        'verschlüsselt, ein anderes Werkzeug hat sie umgewandelt, oder sie ist nicht von Bloodborne.',
+    'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+        'Nimm die eboot.bin eines unveränderten Updates 1.09 (genau 93.825.704 Bytes, als einfache ELF-Datei 93.667.640).',
     'The game is not version 1.09': 'Das Spiel ist nicht Version 1.09',
     'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
         'Die Community-Patches (60 FPS und mehr, die Effekt-Optionen) gibt es nur für 1.09; andere Versionen laufen '

@@ -48,6 +48,8 @@ KEYS = [
     "Custom: your own, each from 1 (the game's own) to 10.",
     'Revival: a fallen hunter goes down and teammates strike them back up',
     'Off: a fallen hunter dies for real, as in the normal game.',
+    'Bloodborne Seamless co-op is in your Steam library. It starts with the settings saved in this launcher.',
+    'Both start Seamless co-op straight away with the settings saved in this launcher, as "Bloodborne Seamless co-op"; the normal game keeps its own shortcut and Steam entry.',
 ]
 TEXTS = {
     'ru': [
@@ -96,6 +98,8 @@ TEXTS = {
         'Свой: ваши значения, каждое от 1 (как в игре) до 10.',
         'Воскрешение: павший охотник падает, и союзники поднимают его ударами',
         'Выкл.: павший охотник умирает по-настоящему, как в обычной игре.',
+        'Bloodborne Seamless co-op добавлен в библиотеку Steam. Игра запускается с настройками, сохранёнными в этом лаунчере.',
+        'Оба сразу запускают бесшовный кооператив с настройками, сохранёнными в этом лаунчере, под именем «Bloodborne Seamless co-op»; у обычной игры остаются свой ярлык и своя запись в Steam.',
     ],
     'ar': [
         'اللعب التعاوني السلس',
@@ -141,6 +145,8 @@ TEXTS = {
         'مخصص: قيمك أنت، كل منها من 1 (قيمة اللعبة) إلى 10.',
         'الإنعاش: الصياد الذي يسقط يبقى أرضًا ويعيده زملاؤه بالضربات',
         'إيقاف: الصياد الذي يسقط يموت فعلًا، كما في اللعبة العادية.',
+        'أُضيفت Bloodborne Seamless co-op إلى مكتبة Steam، وتعمل بالإعدادات المحفوظة في هذا المشغّل.',
+        'كلاهما يشغّل اللعب التعاوني السلس مباشرة بالإعدادات المحفوظة في هذا المشغّل، باسم "Bloodborne Seamless co-op"؛ وتحتفظ اللعبة العادية باختصارها وإدخالها الخاصين في Steam.',
     ],
     'es': [
         'Cooperativo continuo',
@@ -190,6 +196,8 @@ TEXTS = {
         'Personalizado: tus valores, cada uno de 1 (el del juego) a 10.',
         'Reanimación: un cazador caído queda en el suelo y sus compañeros lo levantan a golpes',
         'Desactivado: un cazador caído muere de verdad, como en el juego normal.',
+        'Bloodborne Seamless co-op está en tu biblioteca de Steam. Se inicia con los ajustes guardados en este lanzador.',
+        'Ambos inician el cooperativo continuo directamente con los ajustes guardados en este lanzador, como «Bloodborne Seamless co-op»; el juego normal conserva su propio acceso directo y su entrada de Steam.',
     ],
     'pt': [
         'Cooperativo contínuo',
@@ -238,6 +246,8 @@ TEXTS = {
         'Personalizado: os seus valores, cada um de 1 (o do jogo) a 10.',
         'Reanimação: um caçador caído fica no chão e os companheiros o levantam com golpes',
         'Desligado: um caçador caído morre de verdade, como no jogo normal.',
+        'Bloodborne Seamless co-op está na sua biblioteca da Steam. Ele abre com as configurações salvas neste launcher.',
+        'Ambos iniciam o cooperativo contínuo direto com as configurações salvas neste launcher, como "Bloodborne Seamless co-op"; o jogo normal mantém seu próprio atalho e sua entrada na Steam.',
     ],
     'fr': [
         'Coop continue',
@@ -288,6 +298,8 @@ TEXTS = {
         'Personnalisé : vos valeurs, chacune de 1 (celle du jeu) à 10.',
         'Réanimation : un chasseur tombé reste à terre et ses coéquipiers le relèvent en le frappant',
         'Désactivé : un chasseur tombé meurt vraiment, comme dans le jeu normal.',
+        'Bloodborne Seamless co-op est dans votre bibliothèque Steam. Il démarre avec les réglages enregistrés dans ce lanceur.',
+        'Les deux lancent directement la coop continue avec les réglages enregistrés dans ce lanceur, sous le nom « Bloodborne Seamless co-op » ; le jeu normal garde son propre raccourci et son entrée Steam.',
     ],
     'de': [
         'Seamless-Koop',
@@ -337,6 +349,8 @@ TEXTS = {
         'Eigene: deine Werte, jeder von 1 (der des Spiels) bis 10.',
         'Wiederbelebung: ein gefallener Jäger geht zu Boden und Mitspieler schlagen ihn wieder hoch',
         'Aus: ein gefallener Jäger stirbt wirklich, wie im normalen Spiel.',
+        'Bloodborne Seamless co-op ist in deiner Steam-Bibliothek. Es startet mit den in diesem Launcher gespeicherten Einstellungen.',
+        'Beide starten Seamless-Koop sofort mit den in diesem Launcher gespeicherten Einstellungen, als „Bloodborne Seamless co-op“; das normale Spiel behält seine eigene Verknüpfung und seinen eigenen Steam-Eintrag.',
     ],
     'it': [
         'Coop continua',
@@ -386,6 +400,8 @@ TEXTS = {
         'Personalizzato: i tuoi valori, ciascuno da 1 (quello del gioco) a 10.',
         'Rianimazione: un cacciatore caduto resta a terra e i compagni lo rialzano colpendolo',
         'Disattivato: un cacciatore caduto muore davvero, come nel gioco normale.',
+        'Bloodborne Seamless co-op è nella tua libreria di Steam. Si avvia con le impostazioni salvate in questo launcher.',
+        'Entrambi avviano subito la coop continua con le impostazioni salvate in questo launcher, come «Bloodborne Seamless co-op»; il gioco normale mantiene il proprio collegamento e la propria voce di Steam.',
     ],
     'pl': [
         'Płynna kooperacja',
@@ -433,6 +449,8 @@ TEXTS = {
         'Własny: twoje wartości, każda od 1 (gry) do 10.',
         'Wskrzeszanie: poległy łowca pada, a towarzysze podnoszą go ciosami',
         'Wył.: poległy łowca ginie naprawdę, jak w zwykłej grze.',
+        'Bloodborne Seamless co-op jest w twojej bibliotece Steam. Uruchamia się z ustawieniami zapisanymi w tym launcherze.',
+        'Oba od razu uruchamiają płynną kooperację z ustawieniami zapisanymi w tym launcherze, jako „Bloodborne Seamless co-op”; zwykła gra zachowuje własny skrót i własny wpis w Steam.',
     ],
     'tr': [
         'Kesintisiz ortak oyun',
@@ -482,6 +500,8 @@ TEXTS = {
         'Özel: kendi değerleriniz, her biri 1 (oyununki) ile 10 arası.',
         'Diriltme: düşen avcı yere yığılır ve takım arkadaşları onu vurarak kaldırır',
         'Kapalı: düşen avcı normal oyundaki gibi gerçekten ölür.',
+        'Bloodborne Seamless co-op Steam kitaplığında. Bu başlatıcıda kayıtlı ayarlarla açılır.',
+        'İkisi de kesintisiz ortak oyunu bu başlatıcıda kayıtlı ayarlarla "Bloodborne Seamless co-op" adıyla doğrudan başlatır; normal oyunun kendi kısayolu ve Steam kaydı olduğu gibi kalır.',
     ],
     'zh': [
         '无缝合作',
@@ -524,6 +544,8 @@ TEXTS = {
         '自定义：你自己的数值，每项 1（游戏原值）到 10。',
         '复活：倒下的猎人会倒地，队友击打即可将其扶起',
         '关闭：倒下的猎人会真正死亡，与普通游戏相同。',
+        'Bloodborne Seamless co-op 已加入你的 Steam 库，会使用此启动器中保存的设置启动。',
+        '两者都会以“Bloodborne Seamless co-op”的名称，使用此启动器中保存的设置直接启动无缝合作；普通游戏保留自己的快捷方式和 Steam 条目。',
     ],
     'ja': [
         'シームレス協力',
@@ -566,6 +588,8 @@ TEXTS = {
         'カスタム：自分で決めた値、各 1（ゲーム本来）から 10 まで。',
         '蘇生：倒れた狩人はダウンし、仲間が攻撃して起こせます',
         'オフ：倒れた狩人は通常のゲームと同じく本当に死にます。',
+        'Bloodborne Seamless co-op を Steam ライブラリに追加しました。このランチャーに保存された設定で起動します。',
+        'どちらも「Bloodborne Seamless co-op」として、このランチャーに保存された設定でシームレス協力を直接起動します。通常のゲームの専用ショートカットと Steam の項目はそのまま残ります。',
     ],
     'ko': [
         '끊김 없는 협동',
@@ -608,6 +632,8 @@ TEXTS = {
         '사용자 지정: 직접 정한 값, 각각 1(게임 기본)부터 10까지.',
         '부활: 쓰러진 사냥꾼은 다운되고 동료가 공격해 일으킬 수 있습니다',
         '끄면: 쓰러진 사냥꾼은 일반 게임처럼 실제로 죽습니다.',
+        'Bloodborne Seamless co-op이 Steam 라이브러리에 추가되었습니다. 이 런처에 저장된 설정으로 실행됩니다.',
+        '둘 다 "Bloodborne Seamless co-op"이라는 이름으로 이 런처에 저장된 설정을 사용해 끊김 없는 협동을 바로 시작합니다. 일반 게임의 바로 가기와 Steam 항목은 그대로 유지됩니다.',
     ],
 }
 

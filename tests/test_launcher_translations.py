@@ -47,8 +47,10 @@ class TranslationTests(unittest.TestCase):
                 if text and '{' in en:
                     with self.subTest(language=language, text=en):
                         values = sample(en)
-                        en.format(*values)
-                        text.format(*values)
+                        # Named fields ({expert}) as the texts that use them pass them.
+                        names = {name: 'x' for _l, name, _s, _c in FORMAT.parse(en) if name and not name.isdigit()}
+                        en.format(*values, **names)
+                        text.format(*values, **names)
 
     def test_status_symbols(self):
         for language in LANGUAGES:

@@ -747,7 +747,10 @@ static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, in
     }
     write_unlock();
     flush_hooks();
-    for (int i=0; i<done; ++i) entries[i].start=copy[i].start;
+    /* Only a map returns an address; an unmap or protect in this batch may have just taken the
+     * entries' own page away or made it read-only (from SpartanPort 21db7f29). */
+    for (int i=0; i<done; ++i)
+        if (copy[i].operation==0 || copy[i].operation==3) entries[i].start=copy[i].start;
     free(copy);
     if (processed) *processed=done;
     return result;

@@ -11,6 +11,8 @@
 #include <sys/resource.h>
 #endif
 #include "common/assert.h"
+#include "bbport_hang.h"
+#include "bbport_frame_rate.h"
 #include "bbport_settings.h"
 #include "bbport_toggles.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -292,6 +294,8 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
 }
 
 void VideoOutDriver::Flip(const Request& req) {
+    BbHang::OnFlip(); // bbport: thread snapshots while no frame is shown
+    BbFrameRate::OnFlip(); // bbport: per-frame values for the frame the game measured
     // Update HDR status before presenting, then present the frame (bbport: on the swap thread).
     RunPresenter([this, frame = req.frame, hdr = req.port->is_hdr] {
         presenter->SetHDR(hdr);
@@ -322,14 +326,40 @@ void VideoOutDriver::Flip(const Request& req) {
         static u64 last_copy_cpu, last_copy_sys, last_copy_flt;
         const u64 copy_cpu = BbStats::t_copy_cpu.load(), copy_sys = BbStats::copy_sys_us.load(),
                   copy_flt = BbStats::copy_minflt.load();
-        static u64 last_proc_flt, last_copy_ns, last_copy_bytes, last_rf, last_trf, last_twf;
+        static u64 last_proc_flt, last_copy_ns, last_copy_bytes, last_rf, last_trf, last_twf,
+            last_wf;
         const u64 rf = BbStats::read_faults.load(), trf = BbStats::t_read_faults.load(),
-                  twf = BbStats::t_write_faults.load();
+                  twf = BbStats::t_write_faults.load(), wf = BbStats::write_faults.load();
+        static u64 last_fb, last_ftw, last_ft, last_fs, last_frw, last_fcpu, last_held, last_gw;
+        const u64 fb = BbStats::t_fault_buffer.load(), ftw = BbStats::t_fault_tex_wait.load(),
+                  ft = BbStats::t_fault_tex.load(), fs = BbStats::fault_tex_skips.load(),
+                  frw = BbStats::t_fault_region_wait.load(),
+                  fcpu = BbStats::t_write_faults_cpu.load(),
+                  held = BbStats::t_upload_lock_held.load(),
+                  gw = BbStats::t_gpu_region_wait.load();
+        const u64 d_frw = frw - last_frw, d_fcpu = fcpu - last_fcpu, d_held = held - last_held,
+                  d_gw = gw - last_gw;
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
-            std::printf("       fault handlers: %llu read faults %.1f ms, write faults %.1f ms\n",
+            std::printf("       fault handlers: %llu read faults %.1f ms, %llu write faults %.1f ms "
+                        "(invalidations: buffer side %.1f ms, texture lock wait %.1f ms, texture "
+                        "side %.1f ms, %llu without images); region lock wait %.1f ms, faulting "
+                        "threads on CPU %.1f ms; GPU thread held region locks %.1f ms, waited "
+                        "%.1f ms\n",
                         static_cast<unsigned long long>(rf - last_rf), (trf - last_trf) / 1e6,
-                        (twf - last_twf) / 1e6);
+                        static_cast<unsigned long long>(wf - last_wf), (twf - last_twf) / 1e6,
+                        (fb - last_fb) / 1e6, (ftw - last_ftw) / 1e6, (ft - last_ft) / 1e6,
+                        static_cast<unsigned long long>(fs - last_fs), (frw - last_frw) / 1e6,
+                        (fcpu - last_fcpu) / 1e6, d_held / 1e6, d_gw / 1e6);
         }
+        last_frw = frw;
+        last_fcpu = fcpu;
+        last_held = held;
+        last_gw = gw;
+        last_fb = fb;
+        last_ftw = ftw;
+        last_ft = ft;
+        last_fs = fs;
+        last_wf = wf;
         last_rf = rf;
         last_trf = trf;
         last_twf = twf;
@@ -357,21 +387,54 @@ void VideoOutDriver::Flip(const Request& req) {
         const u64 images = BbStats::images_registered.load();
         const u64 image_bytes = BbStats::image_upload_bytes.load();
         const u64 buffer_bytes = BbStats::buffer_upload_bytes.load();
+        static u64 last_packets, last_commands, last_wf_normal, last_twf_normal;
+        static struct {
+            u64 frames, draws, packets, commands, on_cpu_ns, user_us, sys_us, protect_ns,
+                write_faults, t_write_faults, region_wait, fault_cpu, held, gpu_wait;
+        } normal{};
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
+            // The flip's steady-clock time (CLOCK_MONOTONIC on Linux) lines a stall up with a
+            // profile taken with perf record -k CLOCK_MONOTONIC.
             std::printf("Stall: %.1f ms frame; GPU thread on CPU %.1f ms; %llu images registered, "
-                        "%.1f MB image uploads, %.1f MB buffer uploads\n",
+                        "%.1f MB image uploads, %.1f MB buffer uploads; flip at %.6f s\n",
                         frame_ms, (gpu_ns - last_gpu_ns) / 1e6,
                         static_cast<unsigned long long>(images - last_images),
                         (image_bytes - last_image_bytes) / 1e6,
-                        (buffer_bytes - last_buffer_bytes) / 1e6);
-            std::printf("       %llu draws, %llu dispatches, %llu submissions; GPU thread user %.1f ms, "
-                        "kernel %.1f ms, %llu preempted, %llu waits\n",
+                        (buffer_bytes - last_buffer_bytes) / 1e6,
+                        std::chrono::duration<double>(now.time_since_epoch()).count());
+            std::printf("       %llu draws, %llu dispatches, %llu submissions, %llu packets, %llu "
+                        "commands; GPU thread user %.1f ms, kernel %.1f ms, %llu preempted, %llu "
+                        "waits\n",
                         static_cast<unsigned long long>(draws - last_draws),
                         static_cast<unsigned long long>(dispatches - last_dispatches),
-                        static_cast<unsigned long long>(subs - last_subs), (user_us - last_user) / 1e3,
+                        static_cast<unsigned long long>(subs - last_subs),
+                        static_cast<unsigned long long>(BbStats::pm4_packets.load() - last_packets),
+                        static_cast<unsigned long long>(BbStats::gpu_commands.load() - last_commands),
+                        (user_us - last_user) / 1e3,
                         (sys_us - last_sys) / 1e3, static_cast<unsigned long long>(invol - last_invol),
                         static_cast<unsigned long long>(vol - last_vol));
         }
+        // The same figures for frames under 20 ms, averaged per 5 s window ("Normal frames").
+        if (frame_ms < 20.0 && last_gpu_ns != 0) {
+            normal.frames += 1;
+            normal.draws += draws - last_draws;
+            normal.packets += BbStats::pm4_packets.load() - last_packets;
+            normal.commands += BbStats::gpu_commands.load() - last_commands;
+            normal.on_cpu_ns += gpu_ns - last_gpu_ns;
+            normal.user_us += user_us - last_user;
+            normal.sys_us += sys_us - last_sys;
+            normal.protect_ns += BbStats::t_protect.load() - last_t[1];
+            normal.write_faults += BbStats::write_faults.load() - last_wf_normal;
+            normal.t_write_faults += BbStats::t_write_faults.load() - last_twf_normal;
+            normal.region_wait += d_frw;
+            normal.fault_cpu += d_fcpu;
+            normal.held += d_held;
+            normal.gpu_wait += d_gw;
+        }
+        last_packets = BbStats::pm4_packets.load();
+        last_commands = BbStats::gpu_commands.load();
+        last_wf_normal = BbStats::write_faults.load();
+        last_twf_normal = BbStats::t_write_faults.load();
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
             std::printf("       ms in: resident %.1f, protect %.1f, image create %.1f, "
                         "image refresh %.1f, staging %.1f, waiting for host copies %.1f\n",
@@ -442,7 +505,8 @@ void VideoOutDriver::Flip(const Request& req) {
                         "%u shader/pipeline compiles, %.1f ms; %llu recorder syncs; "
                         "%.0f write faults/s, %lld hot pages; GPU thread %.2f us/draw, "
                         "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
-                        "%.1f%% (%.0f/frame), copy threads %.1f%%, GPU ticks %.1f%%; "
+                        "%.1f%% (%.0f/frame, %.0f copies/frame run while waiting), copy threads "
+                        "%.1f%%, GPU ticks %.1f%%; "
                         "reduced-size draws %.0f/frame of %.0f in the scene\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
@@ -452,6 +516,7 @@ void VideoOutDriver::Flip(const Request& req) {
                         BbStats::sync_recording_ns.exchange(0) / (window * 1e7),
                         BbStats::host_copies_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::host_copy_waits.exchange(0)) / frames : 0.0,
+                        frames ? double(BbStats::host_copies_helped.exchange(0)) / frames : 0.0,
                         BbStats::copy_threads_wait_ns.exchange(0) / (window * 1e7),
                         BbStats::tick_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(BbStats::reduced_draws.exchange(0)) / frames : 0.0,
@@ -475,6 +540,22 @@ void VideoOutDriver::Flip(const Request& req) {
                             sorted.front(), sorted[sorted.size() / 100],
                             sorted[std::min(sorted.size() - 1, sorted.size() * 99 / 100)], spikes);
             }
+            if (normal.frames != 0 && BbStats::gpu_thread_clock.load() != -1) {
+                const double n = double(normal.frames);
+                std::printf("Normal frames (%llu under 20 ms), per frame: %.0f draws, %.0f packets, "
+                            "%.1f commands; GPU thread on CPU %.1f ms, user %.1f ms, kernel %.1f "
+                            "ms, protect %.2f ms; %.1f write faults %.2f ms (region lock wait "
+                            "%.2f ms, on CPU %.2f ms); GPU thread held region locks %.2f ms, "
+                            "waited %.2f ms\n",
+                            static_cast<unsigned long long>(normal.frames), normal.draws / n,
+                            normal.packets / n, normal.commands / n, normal.on_cpu_ns / n / 1e6,
+                            normal.user_us / n / 1e3, normal.sys_us / n / 1e3,
+                            normal.protect_ns / n / 1e6, normal.write_faults / n,
+                            normal.t_write_faults / n / 1e6, normal.region_wait / n / 1e6,
+                            normal.fault_cpu / n / 1e6, normal.held / n / 1e6,
+                            normal.gpu_wait / n / 1e6);
+            }
+            normal = {};
             intervals.clear();
             window_start = now;
             frames = 0;
@@ -727,7 +808,14 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 FRAME_END;
             }
         }
-        std::this_thread::sleep_until(tick_deadline);
+        // bbport: a flip's slot soon after this tick: the wait for the tick is precise too. A plain
+        // sleep woke up to ~1 ms past the slot, more than the slack next_slot forgives, and that time
+        // was lost: 118.5 FPS at a cap of 120. Other ticks may sleep as they did.
+        if (next_flip > tick_deadline && next_flip - tick_deadline < vblank_period) {
+            Common::PreciseSleepUntil(tick_deadline);
+        } else {
+            std::this_thread::sleep_until(tick_deadline);
+        }
     }
 }
 

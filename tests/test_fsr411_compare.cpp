@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <numeric>
 #include <stdexcept>
@@ -22,11 +23,16 @@
 #include "bbport_settings.h"
 #include "video_core/texture_cache/image.h"
 #include <vk_mem_alloc.h>
+#include "fsr24_shader_capture.h"
 
 using namespace Vulkan;
 extern "C" void runtime_restart() { std::abort(); }
 static uint16_t Half(float f) { return std::bit_cast<uint16_t>(static_cast<_Float16>(f)); }
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0, _CALL_REPORTFAULT);
+#endif
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     try {
         const bool driver_vk=argc>1&&std::string_view(argv[1])=="driver-vk";
@@ -55,14 +61,42 @@ int main(int argc, char** argv) {
         const bool vary = std::getenv("BB_FSR411_VARY_INPUT") != nullptr;
         const bool vary_motion = std::getenv("BB_FSR411_VARY_MOTION") != nullptr;
         const bool switch_preset = std::getenv("BB_FSR411_SWITCH_PRESET") != nullptr;
-        Instance instance(0, false);
+        const bool validation = std::getenv("BB_TEST_VULKAN_VALIDATION") != nullptr;
+        Instance instance(0, validation);
         if (std::getenv("BB_TEST_NO_FG_INTEROP") &&
             (instance.IsFg401InteropSupported() || !instance.IsFsr411NativeSupported() || !instance.IsFsr411AsyncSupported()))
             throw std::runtime_error("expected DX12 upscaling interop without ML-FG interop");
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetInstance());
         VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.GetDevice());
+        if (const char* capture = std::getenv("BB_TEST_SDK_SHADER_CAPTURE")) {
+            Fsr24ShaderCapture::Enable(capture);
+        }
         const auto device = instance.GetDevice();
         Scheduler scheduler(instance);
+        if (std::getenv("BB_TEST_VALIDATION_SENTINEL")) {
+            if (!validation) throw std::runtime_error("sentinel requires Vulkan validation");
+            // Deliberately invalid test input: prove that validation messages are captured.
+            const auto [result, buffer] = device.createBuffer(
+                {.size = 0, .usage = vk::BufferUsageFlagBits::eTransferSrc});
+            if (result == vk::Result::eSuccess) device.destroyBuffer(buffer);
+            std::puts("PASS: intentional zero-size-buffer validation sentinel executed");
+            return 0;
+        }
+        if (const char* repair = std::getenv("BB_TEST_REPAIR_SDK_VULKAN")) {
+            int status{};
+            if (instance.IsFsr412VulkanDeviceReady() || Fsr412Driver::Available(instance, &status) || status != 4)
+                throw std::runtime_error("repair fixture must start without SDK files and device features");
+            const auto target = Fsr412Driver::RuntimeDirectory() / L"amd_fidelityfx_upscaler_vk.dll";
+            std::filesystem::copy_file(std::filesystem::path(repair), target);
+            if (Fsr412Driver::Available(instance, &status) || status != 9)
+                throw std::runtime_error("late SDK repair did not require restart");
+            Fsr412Driver provider(instance, scheduler);
+            Fsr4Upscaler::Frame frame{};
+            if (provider.Record(frame) || provider.Error().find("restart the game") == std::string::npos)
+                throw std::runtime_error("context creation did not refuse the unsuitable logical device");
+            std::puts("PASS: missing SDK status=4; late repair status=9; context creation requires restart");
+            return 0;
+        }
         std::array<VideoCore::UniqueImage, 4> images;
         std::array<vk::UniqueImageView, 4> views;
         const char *depth_setting = std::getenv("BB_SHARED_TEST_DEPTH");

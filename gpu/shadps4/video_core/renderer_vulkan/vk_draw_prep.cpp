@@ -138,10 +138,12 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
         // The V# may come from user data the guest is still writing: an unknown format leaves
         // the inputs to the GPU thread, which reads them once the draw is submitted (the
         // assertion in SurfaceFormat stopped the process here).
+        // bbport: the invalid data format gets a placeholder (LiverpoolToVK::VertexInputFormat).
         const vk::Format format =
-            LiverpoolToVK::TrySurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
-        if (format == vk::Format::eUndefined &&
-            buffer.GetDataFmt() != AmdGpu::DataFormat::FormatInvalid) {
+            buffer.GetDataFmt() == AmdGpu::DataFormat::FormatInvalid
+                ? LiverpoolToVK::VertexInputFormat(buffer)
+                : LiverpoolToVK::TrySurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
+        if (format == vk::Format::eUndefined) {
             out.valid = false;
             return;
         }
@@ -153,7 +155,7 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
         });
         bindings.push_back({
             .binding = attrib.semantic,
-            .stride = buffer.GetStride(),
+            .stride = LiverpoolToVK::VertexInputStride(buffer),
             .inputRate = step_rate == InstanceIdType::None ? vk::VertexInputRate::eVertex
                                                            : vk::VertexInputRate::eInstance,
             .divisor = step_rate == InstanceIdType::OverStepRate0 ? regs.vgt_instance_step_rate_0
@@ -378,7 +380,16 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
     }
 }
 
+namespace {
+thread_local bool on_worker_thread = false;
+} // namespace
+
+bool DrawPreparation::OnWorkerThread() noexcept {
+    return on_worker_thread;
+}
+
 void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
+    on_worker_thread = true;
     Common::SetCurrentThreadName(("bb:DrawPrep" + std::to_string(index)).c_str());
     BbThreads::MakeBackground();
     auto regs = std::make_unique<AmdGpu::Regs>();

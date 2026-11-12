@@ -9,6 +9,41 @@
 
 namespace Shader::Gcn {
 
+// bbport: float render-target guard (Profile::rt_nan_guard, BB_NAN_GUARD=0 turns it off).
+// A NaN or an infinity our translation lets through, where the PS4 would not have made one,
+// does not stay in its pixel once a float target stores it: bloom and blur passes spread it
+// over the screen (white or black), and history buffers (reflections, eye adaptation) keep it
+// until the area reloads. Exports to float targets therefore turn NaN into 0 and infinities
+// (and overflow) into the format's largest finite value; finite values in range are unchanged.
+// Normalized and integer targets are left alone: their conversion already maps every input.
+// The largest finite value of the target's float format, 0 for formats that are not guarded.
+static float GuardedFloatLimit(AmdGpu::DataFormat format) {
+    switch (format) {
+    case AmdGpu::DataFormat::Format16:
+    case AmdGpu::DataFormat::Format16_16:
+    case AmdGpu::DataFormat::Format16_16_16_16:
+        return 65504.0f; // half float
+    case AmdGpu::DataFormat::Format10_11_11:
+    case AmdGpu::DataFormat::Format11_11_10:
+        return 64512.0f; // the 10-bit channel's largest; the 11-bit ones reach 65024
+    case AmdGpu::DataFormat::Format5_9_9_9:
+        return 65408.0f; // shared exponent
+    case AmdGpu::DataFormat::Format32:
+    case AmdGpu::DataFormat::Format32_32:
+    case AmdGpu::DataFormat::Format32_32_32:
+    case AmdGpu::DataFormat::Format32_32_32_32:
+        return 3.40282347e38f; // FLT_MAX: only NaN and the infinities change
+    default:
+        return 0.0f;
+    }
+}
+
+static IR::F32 GuardFloatExport(IR::IREmitter& ir, const IR::F32& value, float limit) {
+    // The clamp alone leaves NaN undefined (FClamp), hence the select.
+    const IR::F32 clamped{ir.FPClamp(value, ir.Imm32(-limit), ir.Imm32(limit))};
+    return IR::F32{ir.Select(ir.FPIsNan(value), ir.Imm32(0.0f), clamped)};
+}
+
 static AmdGpu::NumberFormat NumberFormatCompressed(AmdGpu::ShaderExportFormat export_format) {
     switch (export_format) {
     case AmdGpu::ShaderExportFormat::ABGR_FP16:
@@ -102,6 +137,10 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
                                    (color_buffer.data_format == AmdGpu::DataFormat::Format8 ||
                                     color_buffer.data_format == AmdGpu::DataFormat::Format8_8 ||
                                     color_buffer.data_format == AmdGpu::DataFormat::Format8_8_8_8);
+    const float guard_limit = profile.rt_nan_guard &&
+                                      color_buffer.num_format == AmdGpu::NumberFormat::Float
+                                  ? GuardedFloatLimit(color_buffer.data_format)
+                                  : 0.0f;
 
     // Swizzle components and export
     for (u32 i = 0; i < 4; ++i) {
@@ -113,6 +152,9 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
         if (needs_unorm_fixup) {
             // FIXME: Fix-up for GPUs where float-to-unorm rounding is off from expected.
             converted = ir.FPSub(converted, ir.Imm32(1.f / 127500.f));
+        }
+        if (guard_limit > 0.0f) {
+            converted = GuardFloatExport(ir, converted, guard_limit);
         }
         ir.SetAttribute(mrt, converted, i);
     }
