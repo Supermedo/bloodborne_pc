@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import sys
@@ -31,6 +32,53 @@ def child(folder, name):
 EXTRA_SUFFIXES = {'', '.txt', '.md', '.ini', '.json', '.pdf', '.rtf', '.nfo', '.url', '.htm', '.html',
                   '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
 ARCHIVE_SUFFIXES = {'.zip', '.7z', '.rar'}
+NATIVE_MANIFEST = 'bbport-native-mod.json'
+NATIVE_ID = re.compile(r'^[a-z0-9][a-z0-9._-]{0,63}$')
+
+
+def native_manifest(folder):
+    """Validated native-mod manifest, or None when this is not a native mod.
+
+    This only recognizes the package. Launch-time compatibility, hashes and
+    environment paths are checked by native_mods.py before any DLL is loaded.
+    """
+    folder = Path(folder)
+    path = folder / NATIVE_MANIFEST
+    if not path.is_file():
+        return None
+    data = json.loads(path.read_text(encoding='utf-8-sig'))
+    if not isinstance(data, dict) or data.get('schema') != 1:
+        raise ValueError('native manifest schema must be 1')
+    if not isinstance(data.get('id'), str) or not NATIVE_ID.fullmatch(data['id']):
+        raise ValueError('native manifest has an invalid id')
+    if not isinstance(data.get('name'), str) or not data['name'].strip() or len(data['name']) > 128:
+        raise ValueError('native manifest has an invalid name')
+    if data.get('native_api') != 1:
+        raise ValueError('native mod needs an unsupported host API')
+    module = data.get('module')
+    if not isinstance(module, str) or not module.lower().endswith('.dll'):
+        raise ValueError('native manifest module must be a DLL path')
+    relative = Path(module)
+    if relative.is_absolute() or not relative.parts or any(part in ('', '.', '..') for part in relative.parts):
+        raise ValueError('native manifest module path escapes its mod folder')
+    root = folder.resolve()
+    target = (root / relative).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise ValueError('native manifest module path escapes its mod folder') from error
+    if not target.is_file() or target.is_symlink():
+        raise ValueError(f'native module is missing: {module}')
+    return data
+
+
+def recognized(folder):
+    if content_root(folder):
+        return True
+    try:
+        return native_manifest(folder) is not None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
 
 
 def content_root(folder, depth=0):
@@ -63,6 +111,12 @@ def content_root(folder, depth=0):
 def problem(folder):
     """Why `folder` is not a mod (content_root is None), for the launcher's list."""
     folder = Path(folder)
+    manifest = Path(folder) / NATIVE_MANIFEST
+    if manifest.exists():
+        try:
+            native_manifest(folder)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+            return f'invalid native mod: {error}'
     files = [e for e in folder.rglob('*') if e.is_file()][:2000]
     if not files:
         return 'empty'
@@ -81,7 +135,7 @@ def unrecognized(root):
     if not root.is_dir():
         return []
     return sorted(((p.name, problem(p)) for p in root.iterdir()
-                   if p.is_dir() and not p.name.startswith('.') and not content_root(p)),
+                   if p.is_dir() and not p.name.startswith('.') and not recognized(p)),
                   key=lambda item: (item[0].casefold(), item[0]))
 
 
@@ -90,7 +144,7 @@ def discover(root):
     root = Path(root)
     if not root.is_dir():
         return []
-    return sorted((p.name for p in root.iterdir() if p.is_dir() and content_root(p)),
+    return sorted((p.name for p in root.iterdir() if p.is_dir() and recognized(p)),
                   key=lambda name: (name.casefold(), name))
 
 
@@ -115,6 +169,8 @@ def mod_files(folder):
     """(game path, source) of every file a mod replaces or adds under dvdroot_ps4."""
     layout = content_root(folder)
     if not layout:
+        if native_manifest(folder):
+            return
         raise ValueError(f'{folder}: expected dvdroot_ps4 (or chr/, parts/, ...) inside the mod folder')
     root, prefix = layout
     root = root.resolve()
