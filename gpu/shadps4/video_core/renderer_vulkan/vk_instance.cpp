@@ -297,7 +297,7 @@ bool Instance::CreateDevice(bool presentation) {
         vk::PhysicalDeviceShaderFloat8FeaturesEXT,
 #endif
         vk::PhysicalDeviceFaultFeaturesEXT, vk::PhysicalDevicePresentIdFeaturesKHR,
-        vk::PhysicalDeviceAntiLagFeaturesAMD>();
+        vk::PhysicalDeviceAntiLagFeaturesAMD, vk::PhysicalDeviceFragmentShadingRateFeaturesKHR>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -487,6 +487,16 @@ bool Instance::CreateDevice(bool presentation) {
     if (compute_shader_derivatives) {
         compute_shader_derivatives_features =
             feature_chain.get<vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR>();
+    }
+    // bbport: pipeline shading rates, only when the reflection pass asks for one
+    // (vk_graphics_pipeline.cpp ReflectionShadingRate); otherwise the extension stays off.
+    if (ReflectionShadingRateWanted()) {
+        pipeline_shading_rate =
+            feature_chain.get<vk::PhysicalDeviceFragmentShadingRateFeaturesKHR>()
+                .pipelineFragmentShadingRate &&
+            add_extension(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+        LOG_INFO(Render_Vulkan, "Reflection shading rate: {}",
+                 pipeline_shading_rate ? "available" : "not supported by this GPU");
     }
     shader_clock = add_extension(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (shader_clock) {
@@ -823,6 +833,9 @@ bool Instance::CreateDevice(bool presentation) {
         vk::PhysicalDeviceAntiLagFeaturesAMD{
             .antiLag = true,
         },
+        vk::PhysicalDeviceFragmentShadingRateFeaturesKHR{
+            .pipelineFragmentShadingRate = true,
+        },
     };
 
 #ifdef _WIN32
@@ -899,6 +912,9 @@ bool Instance::CreateDevice(bool presentation) {
     }
     if (!amd_anti_lag) {
         device_chain.unlink<vk::PhysicalDeviceAntiLagFeaturesAMD>();
+    }
+    if (!pipeline_shading_rate) {
+        device_chain.unlink<vk::PhysicalDeviceFragmentShadingRateFeaturesKHR>();
     }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());

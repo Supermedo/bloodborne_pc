@@ -25,6 +25,14 @@ namespace Vulkan {
 /// be). Logged once per kind ("image", "buffer").
 void NoteOverBudget(const char* what);
 
+/// bbport: the shading rate of the game's screen-space reflection pass (vk_graphics_pipeline.cpp);
+/// {1, 1} = every pixel.
+vk::Extent2D ReflectionShadingRate();
+inline bool ReflectionShadingRateWanted() {
+    const vk::Extent2D rate = ReflectionShadingRate();
+    return rate.width > 1 || rate.height > 1;
+}
+
 class Instance {
 public:
     explicit Instance(bool validation = false, bool crash_diagnostic = false);
@@ -338,6 +346,13 @@ public:
         return present_id;
     }
 
+    /// bbport: a pipeline may shade blocks of pixels once (VK_KHR_fragment_shading_rate,
+    /// pipelineFragmentShadingRate); enabled only when the reflection pass asks for it
+    /// (vk_graphics_pipeline.cpp ReflectionShadingRate).
+    bool IsPipelineShadingRateEnabled() const {
+        return pipeline_shading_rate;
+    }
+
     /// bbport: NVIDIA Reflex (VK_NV_low_latency2) is enabled.
     bool IsNvLowLatencyEnabled() const {
         return nv_low_latency;
@@ -632,6 +647,7 @@ private:
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};
+    bool pipeline_shading_rate{};
     bool present_id{};
     bool nv_low_latency{};
     bool amd_anti_lag{};
