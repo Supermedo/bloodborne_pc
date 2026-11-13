@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 # The port's version servers see (shadNet's client version, User-Agent): bbport_launcher_win.VERSION.
-VERSION = '1.9.8.5'
+VERSION = '1.9.8.6'
 # SuperMedo Server: supermedo.com's shadNet server and its game server (messages, bloodstains, sign-in,
 # parties); the game's own server requests go there.
 COMMUNITY_SERVER = 'https://game.supermedo.com'

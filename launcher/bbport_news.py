@@ -454,6 +454,8 @@ NOTES = {
             'The low latency options in every launcher language.',
         ])]),
 }
+# 1.9.8.6 is 1.9.8.5 with a new Seamless co-op engine (button icons, party HUD): the same notes.
+NOTES['1.9.8.6'] = NOTES['1.9.8.5']
 
 
 class NewsPanel:
