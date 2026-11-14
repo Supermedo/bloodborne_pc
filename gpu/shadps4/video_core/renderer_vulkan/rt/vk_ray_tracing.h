@@ -82,6 +82,11 @@ public:
     [[nodiscard]] static bool Paused() noexcept {
         return Rt::effects_paused.load(std::memory_order_relaxed);
     }
+    /// Per-draw scene capture (geometry, bones, tags) runs only while the effects are on: with
+    /// F9 off it cost as much as tracing (62 FPS vs 120 with BB_RT=0, 2026-11-14).
+    [[nodiscard]] bool Capturing() const noexcept {
+        return enabled && !Paused();
+    }
     [[nodiscard]] bool WaterSheet(u64 ps) const {
         return enabled && water_on && !Paused() &&
                ps == (water_mark_layer ? Rt::WaterLayerShader : Rt::FxMistShader);

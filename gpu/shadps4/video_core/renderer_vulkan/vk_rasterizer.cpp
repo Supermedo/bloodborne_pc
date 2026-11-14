@@ -1553,8 +1553,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
-        bool gated = !(all_motion || ray_tracing->Enabled());
-        const bool rt_bones = ray_tracing->Enabled();
+        bool gated = !(all_motion || ray_tracing->Capturing());
+        const bool rt_bones = ray_tracing->Capturing();
         bool skinned = false;
         bool unreadable = false;
         u64 palette = 0;
@@ -1641,7 +1641,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 }
             }
             Rt::DrawTag rt_tag{};
-            if (ray_tracing->Enabled()) {
+            if (ray_tracing->Capturing()) {
                 rt_tag.vs = vs.pgm_hash;
                 rt_tag.mrt_mask = u32(pipeline->GetGraphicsKey().mrt_mask);
                 rt_tag.target_mask = regs.color_target_mask.raw;
@@ -1661,7 +1661,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                                   ? u32(regs.polygon_control.CullingMode())
                                   : 0u;
             }
-            if (ray_tracing->Enabled() && pipeline->HasStage(Shader::SwStage::Fragment)) {
+            if (ray_tracing->Capturing() && pipeline->HasStage(Shader::SwStage::Fragment)) {
                 const auto& ps = pipeline->GetStage(Shader::SwStage::Fragment);
                 alpha_test = ps.has_discard;
                 rt_tag.ps = ps.pgm_hash;
@@ -1776,7 +1776,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const bool sky_layer_draw =
                 fx_pipeline && pipeline->HasStage(Shader::SwStage::Fragment) &&
                 u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash) == Rt::SkyLayerPs;
-            if (push_data.motion_param && ray_tracing->Enabled() && range.count && !side_gbuffer_draw &&
+            if (push_data.motion_param && ray_tracing->Capturing() && range.count && !side_gbuffer_draw &&
                 (!fx_pipeline || (blended_fx && uv_select != 0) || water_sheet_draw ||
                  sky_layer_draw) &&
                 (regs.primitive_type == AmdGpu::PrimitiveType::TriangleList || fx_list)) {

@@ -10226,11 +10226,15 @@ void RayTracing::FinishFrame(const SceneInputs& inputs) {
     }
     const u32 slot = u32(frame % Slots);
     const u32 pass_slot = built_slot;
-    const bool passes_ran = tlas_address != 0;
+    // F9 off runs no pass: holding the slot anyway made BeginSlot wait for the GPU every third
+    // frame (14 ms waits, 73 FPS paused vs 120).
+    const bool passes_ran = tlas_address != 0 && !Paused();
     const bool camera = inputs.projection[0] != 0.0f && inputs.projection[1] != 0.0f;
-    if (!instances.empty() && camera) {
+    // F9 off: no build. A few draws still reach the list (sky layer, held fx) and the kept
+    // off-screen instances came with them: 618 instances rebuilt every frame, 88 FPS vs 120.
+    if (!instances.empty() && camera && !Paused()) {
         Build(inputs);
-    } else if (instances.empty()) {
+    } else if (instances.empty() || Paused()) {
         ++empty_frames;
     } else {
         ++skipped_frames;

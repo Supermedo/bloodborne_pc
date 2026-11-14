@@ -4787,3 +4787,21 @@ sky part between 0.006 and 0.157. Why the 0.9 history does not even that out is 
 
 Until it is fixed the live `rt.cfg` carries `BB_RT_FOG_STOCK=1` (the user's choice): the game's
 own fog in every map.
+
+## F9 off costs nothing again (2026-11-14, `vk_rasterizer.cpp`, `vk_ray_tracing.cpp`)
+
+With the effects paused (F9 or `BB_RT_PAUSE=1`) the engine still did most of the RT work:
+per-draw capture (geometry, bones, tags, alpha test), a TLAS rebuild of the 618 kept
+off-screen instances every frame, and a slot hold that made BeginSlot wait for the GPU every
+third frame. Now `RayTracing::Capturing()` (enabled and not paused) gates the capture, the
+build is skipped while paused, and a paused frame holds no slot.
+
+Nightmare Frontier start spot, FSR 3.1, in-game FPS overlay read by hand:
+
+| Mode | Before | After |
+|---|---|---|
+| `BB_RT=0` (stock path) | 120 | 120 |
+| RT on | ~60 | ~60 |
+| RT paused (F9) | 62 | 120 |
+
+Unpausing brings the lighting back on the next frame; hitch log 0 hitch frames, worst wait 0 ms.
