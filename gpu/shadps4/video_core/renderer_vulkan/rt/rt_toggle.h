@@ -140,7 +140,16 @@ inline bool CasterLog() {
     return wanted;
 }
 
+/// F9 only switches the traced effects; with path tracing off in the launcher (BB_RT=0) it
+/// does nothing.
 inline bool ToggleEffects() {
+    static const bool rt_on = [] {
+        const char* rt = std::getenv("BB_RT");
+        return rt && rt[0] == '1';
+    }();
+    if (!rt_on) {
+        return false;
+    }
     const bool paused = !effects_paused.load(std::memory_order_relaxed);
     effects_paused.store(paused, std::memory_order_relaxed);
     return !paused;

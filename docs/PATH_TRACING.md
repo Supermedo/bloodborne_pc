@@ -4805,3 +4805,6 @@ Nightmare Frontier start spot, FSR 3.1, in-game FPS overlay read by hand:
 | RT paused (F9) | 62 | 120 |
 
 Unpausing brings the lighting back on the next frame; hitch log 0 hitch frames, worst wait 0 ms.
+
+F9 does nothing when path tracing is off in the launcher (`BB_RT=0`): `Rt::ToggleEffects()`
+returns before touching the pause flag (`rt_toggle.h`).
