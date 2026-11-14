@@ -32,12 +32,15 @@ public:
     }
 
     using DrawInfo = Motion::Draw;
+    u32 PrepareDraw(const DrawInfo& draw, u32 uv_select = 0);
+    [[nodiscard]] u64 UvsAddress() const noexcept {
+        return uvs_address;
+    }
     /// Current-frame coverage at the requested render size, after PrepareRead.
     [[nodiscard]] vk::ImageView CurrentView(u32 width, u32 height) const noexcept {
         return enabled && Image(width, height) ? View() : vk::ImageView{};
     }
 
-    u32 PrepareDraw(const DrawInfo& draw);
     void BindParameters(vk::PipelineLayout layout);
     /// Small skeletons: whether the bone palette changed (Motion::History::Moving).
     bool Moving(const Motion::History::GateKey& key, u64 palette) {
@@ -48,6 +51,10 @@ public:
     Motion::IndexRangeCache::Result IndexRange(const Motion::IndexRangeCache::Key& key,
                                                Scan&& scan) {
         return index_ranges.Get(key, frame, scan);
+    }
+
+    [[nodiscard]] u32 StoreBase(u32 param_index) const noexcept {
+        return param_index && params_mapped ? params_mapped[param_index * 8] : 0;
     }
 
     /// Rendering of a motion pipeline: the motion attachment (render-target size).
@@ -82,7 +89,7 @@ private:
     static constexpr u32 FrameSlots = 4;
     static constexpr u32 ParamsPerFrame = 8192;
     // Positions (device local): two halves (current/previous frame) of vec4; element 0 is reserved.
-    static constexpr u32 PositionsPerFrame = 4u << 20;
+    static constexpr u32 PositionsPerFrame = 8u << 20;
     Motion::History history{PositionsPerFrame};
     Motion::IndexRangeCache index_ranges;
     std::array<u64, FrameSlots> params_ticks{};
@@ -94,6 +101,12 @@ private:
     u32* params_mapped{};
     vk::Buffer positions_buffer{};
     VmaAllocation positions_allocation{};
+    vk::Buffer uvs_buffer{};
+    VmaAllocation uvs_allocation{};
+    u64 uvs_address = 0;
+    vk::Buffer normals_buffer{};
+    VmaAllocation normals_allocation{};
+    u64 normals_address = 0;
 
     u64 frame = 0;
     u32 params_used = 0;

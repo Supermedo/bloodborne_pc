@@ -1,0 +1,3672 @@
+#version 460
+#if defined(RT_GI_RGEN) || defined(RT_GI_AHIT) || defined(RT_GI_CHIT) || defined(RT_GI_MISS)
+#define RT_GI_STAGE 1
+#extension GL_EXT_ray_tracing : require
+#endif
+#ifdef RT_GI_SER
+#extension GL_NV_shader_invocation_reorder : require
+#endif
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_samplerless_texture_functions : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TlasSpace {
+    vec4 tlas_rows[3];
+};
+
+TlasSpace TlasSpaceOf(uvec2 tlas) {
+    return TlasSpace(uvec2(tlas.x - 256u, tlas.y - (tlas.x < 256u ? 1u : 0u)));
+}
+
+vec3 TlasPoint(uvec2 tlas, vec3 p) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0], vec4(p, 1.0)), dot(s.tlas_rows[1], vec4(p, 1.0)),
+                dot(s.tlas_rows[2], vec4(p, 1.0)));
+}
+
+vec3 TlasDir(uvec2 tlas, vec3 d) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0].xyz, d), dot(s.tlas_rows[1].xyz, d), dot(s.tlas_rows[2].xyz, d));
+}
+
+mat3 TlasToView(uvec2 tlas, mat3 m) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return mat3(s.tlas_rows[0].xyz, s.tlas_rows[1].xyz, s.tlas_rows[2].xyz) * m;
+}
+
+#ifdef RT_GI_RGEN
+#define GI_INVOCATION gl_LaunchIDEXT
+#else
+#define GI_INVOCATION gl_GlobalInvocationID
+#endif
+
+#ifndef RT_GI_STAGE
+layout(local_size_x = 8, local_size_y = 8) in;
+#endif
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1) uniform texture2D scene_tex;
+layout(binding = 2) uniform texture2D normal_tex;
+layout(binding = 3) uniform texture2D history_tex;
+layout(binding = 4) uniform texture2D history_z_tex;
+layout(binding = 5, rgba16f) uniform writeonly image2D history_out;
+layout(binding = 6, r32f) uniform writeonly image2D history_z_out;
+layout(binding = 7, rgba16f) uniform writeonly image2D raw_out;
+
+layout(binding = 9, std430)
+#ifndef RT_SKY_LAYER
+readonly
+#endif
+buffer Material {
+    vec4 material[];
+};
+layout(binding = 10, std430) buffer Accum {
+    uvec4 accum[];
+};
+struct SurfaceRecord {
+    uint texture;
+    uint flags;
+    uint uv_base;
+    float alpha_ref;
+    uint flags2;
+};
+layout(binding = 11, std430) readonly buffer Surfaces {
+    SurfaceRecord surfaces[];
+};
+layout(binding = 12, std430) readonly buffer UvPool {
+    uint uv_pool[];
+};
+layout(binding = 13) uniform texture2D g3_tex;
+layout(binding = 14) uniform texture2D g1_tex;
+layout(binding = 15) uniform texture2D albedo_tex;
+struct DirectLight {
+    vec4 pos_inv_r2;
+    vec4 color_sp;
+    vec4 spec_kind;
+    vec4 wrap_r_flag;
+    mat4 cone;
+};
+// Flag 16 (glow lamp in its glass): no light on its own housing. The lit iron next to the light
+// outshone the glass the game draws over it, so the panes read black; stock frames stay dark.
+// Zero within 0.3 m of the light, full at 0.6 m (the neighbouring heads on the same post).
+float HousingFade(uint flags, float d2) {
+    return (flags & 16u) != 0u ? smoothstep(0.09, 0.36, d2) : 1.0;
+}
+
+const uint MaxGiLights = 1024u;
+layout(binding = 16, std430) readonly buffer Lights {
+    DirectLight lights[MaxGiLights];
+    uint light_grid[];
+};
+layout(binding = 17, std430) readonly buffer DirSets {
+    vec4 sets[];
+};
+layout(binding = 18, rgba16f) uniform writeonly image2D aux_albedo_out;
+layout(binding = 19, rgba16f) uniform writeonly image2D aux_spec_out;
+layout(binding = 20, rgba16f) uniform writeonly image2D aux_normal_out;
+layout(binding = 21, r16f) uniform writeonly image2D aux_hit_out;
+#ifdef RT_REFLECT
+layout(binding = 22, r11f_g11f_b10f) uniform image2D reflect_spec_out;
+layout(binding = 23) uniform texture2D reflect_irr_tex;
+layout(binding = 24) uniform texture2D reflect_irr_pre_tex;
+layout(binding = 25) uniform texture2D reflect_spec_pre_tex;
+layout(binding = 26, r16f) uniform writeonly image2D reflect_hit_out;
+const uint ReflectFlagPreAo = 1u;
+const uint ReflectFlagF0 = 2u;
+const float ReflectDielectricF0 = 0.04;
+const float ReflectMinAlpha = 1e-3;
+const float ReflectMaxWeight = 1.0;
+const float ReflectMaxOutput = 64512.0;
+// See-through glass (BB_RT_GLASS): binding 28 is the irradiance target (written only with
+// GlassIrr), binding 15 the G-buffer albedo (read only with GlassAlbedo).
+layout(binding = 28, r11f_g11f_b10f) uniform image2D reflect_irr_out;
+// Diffuse keep factor for the GI apply pass (written only with GlassKeep): 1, or the decal cover
+// on a glass pixel, so a clear pane gets no albedo * GI.
+layout(binding = 29, r16f) uniform writeonly image2D glass_keep_out;
+layout(push_constant) uniform GlassPush {
+    float gloss; // G-buffer1.x above this makes a glass candidate
+    float tint;  // strength of the pane colour on the transmitted light
+    uint flags;
+    float skip;  // the transmitted ray starts this far behind the pane (its own back face)
+    float water_rough;
+    float water_f0;
+    float base_cut;
+    float sheet_depth;
+    float murk;
+    float ripple;
+    float sheet_f0;
+    float mist;
+    float mist_height;
+    float mist_albedo;
+    float mist_steps;
+    float mist_patch;
+    float mist_glow;
+    float mist_glow_dark;
+    float mist_sheet;
+    float mist_fog;
+    float raise;
+    float body;
+    float sheen;
+    float sheen_far;
+    float puddle_edge;
+    float puddle_wet;
+} glass_push;
+layout(binding = 30, std430) readonly buffer FogSets {
+    vec4 fog_sets[];
+};
+// The game's sky dome panorama (rt_sky.comp), so mirrors show the sky image, not the 32x32 probe.
+layout(binding = 31) uniform sampler2D sky_dome_tex;
+const uint GlassOn = 1u;
+const uint GlassDebugMask = 2u;
+const uint GlassDebugCandidates = 4u;
+const uint GlassIrr = 8u;
+const uint GlassAlbedo = 16u;
+const uint GlassKeep = 32u;
+const uint WaterOn = 64u;
+const uint WaterDebugMask = 128u;
+const uint WaterAtFloor = 256u;
+const uint ReflectSkyDome = 512u;
+// Water draws in this frame's TLAS: sheets (MaskWater) and G-buffer puddle floors. Without them
+// WaterFind skips that probe ray.
+const uint WaterSheets = 1024u;
+const uint WaterPuddles = 2048u;
+// Puddle normals within ~45 degrees of up are flattened to up (puddles on slopes keep theirs).
+const float PuddleFlatMin = 0.7;
+// Share of the cobble bump kept under a puddle: 0 is a mirror, 1 smeared the sky to flat colour.
+const float PuddleBump = 0.25;
+const uint SurfaceGlass = 0x10000000u;
+const float GlassDepthWindow = 0.01;
+const float GlassDepthSlack = 0.03;
+// A pane with an opaque surface this close behind it is a mirror (glass on its backing: the
+// workshop mirror's backing is 4.1 cm behind), not a window; the wardrobe panes have only their
+// own glass back face 2 cm behind.
+const float GlassBackedGap = 0.05;
+// Such a backed pane is a silvered mirror: a sharp lobe with an old silver mirror's reflectance
+// (fresh silver behind glass ~0.9; the workshop mirror is aged and dirty).
+const float MirrorF0 = 0.7;
+const float GlassCoverLo = 0.06;
+const float GlassCoverHi = 0.25;
+const float WaterRealF0 = 0.02;
+const float WaterPuddleGloss = 0.6;
+const float PuddleRippleScale = 0.3; // puddles: 0.3 x BB_RT_WATER_RIPPLE (was a fixed 0.5)
+const float WaterCoverLo = 0.4;
+const float WaterCoverHi = 0.65;
+#endif
+#ifdef RT_RESTIR_INIT
+layout(binding = 22, rgba32f) uniform writeonly image2D res_pos_out;
+layout(binding = 23, rgba16f) uniform writeonly image2D res_rad_out;
+layout(binding = 24, rgba16f) uniform writeonly image2D res_norm_out;
+layout(binding = 25, rgba16f) uniform writeonly image2D res_recv_out;
+const float RestirMaxW = 65504.0;
+#endif
+#ifdef RT_RESTIR_RESOLVE
+layout(binding = 22) uniform texture2D res_pos_tex;
+layout(binding = 23) uniform texture2D res_rad_tex;
+layout(binding = 24) uniform texture2D res_norm_tex;
+layout(binding = 25) uniform texture2D res_recv_tex;
+#endif
+layout(binding = 27) uniform texture2D emissive_tex;
+const uint MaxSurfaceTextures = 1024u;
+layout(set = 1, binding = 0) uniform sampler2D surface_textures[MaxSurfaceTextures];
+
+const uint SurfaceAlphaTest = 1u;
+const uint SurfaceHasUv = 2u;
+const uint SurfaceHasTexture = 4u;
+const uint SurfaceHasNormal = 8u;
+const uint SurfaceBlended = 32u;
+const uint SurfaceUsable = SurfaceHasUv | SurfaceHasTexture;
+// Solid instances plus painted window panes (rt_geometry.h MaskSolid | MaskPortal).
+const uint MaskSolid = 0x09u;
+const uint MaskPortal = 0x08u;
+// Painted windows are drawn a few cm in front of a solid wall (0.63 m measured at the tall
+// arched windows, item 32h): past a pane, rays skip this much and then go on testing for
+// blockers outside (other buildings, trees), so the outside still casts shadows through it.
+const float PortalWall = 1.5;
+// Instances kept from earlier frames for shadows only (rt_geometry.h MaskKept); window panes
+// can land here, so the glass confirm ray must see them.
+const uint MaskKept = 0x04u;
+const uint MaskWater = 0x10u;
+const float FlameRadius = 0.07;
+const float FlameHeight = 2.2;
+const float FlameLift = 0.6;
+const float FlameGain = 3.0;
+const float FlameWarm = 0.6;
+const float FlameMerge = 1.5;
+const uint FlameFxBase = 36873u;
+const uint FlameFxMax = 32u;
+const float FlameFxRadius = 0.15;
+const float FlameFxSlack = 0.3;
+const vec3 FlameFxColor = vec3(1.0, 0.45, 0.12);
+// Loot wisps: the game's particle colour (ffe6be), pale warm white.
+const vec3 WispFxColor = vec3(1.0, 0.9, 0.75);
+const float WispFxRadius = 0.06;
+// Wider than tall: the wisp is a soft ball, not a flame tongue.
+const float WispFxWidth = 0.12;
+const float WispGain = 0.8;
+const uint SurfaceSkinned = 0x20000000u; // rt_surface.h SurfaceSkinned
+// Glass panes (SurfaceGlass, BB_RT_GLASS_PS draws; their instances are forced non-opaque) let
+// light through: bounce, sky and shadow rays go on past them, losing GlassTransmit.
+const float GlassTransmit = 0.85;
+bool trace_through_glass = false;
+float trace_cap = 1e6;
+const float SmokeGiOpacity = 0.6;
+const uint TriangleWords = 8u;
+const uint SurfaceNormalMapShift = 16u;
+const uint GiDebugHitNormal = 6u;
+const uint GiDebugAlbedo = 9u;
+const uint GiDebugAlphaTest = 10u;
+const float SurfaceAlbedoLod = 2.0;
+const uint BounceFlagG3 = 1u;
+const uint BounceFlagG1 = 2u;
+const uint BounceFlagAlbedo = 4u;
+const uint BounceFlagLights = 8u;
+const uint BounceFlagDirSets = 16u;
+const uint BounceFlagPortals = 64u; // rt_gi.h BounceFlagPortals
+const uint BounceFlagWater = 128u;
+const uint SurfacePortalPane = 0x40000000u; // rt_surface.h SurfacePortal
+const uint SurfaceWater = 0x80000000u;
+const float WaterGiF0 = 0.5;
+const float RouletteMin = 0.05;
+const float UnknownAlbedo = 0.3; // hits with no captured texture
+const float MissHitDistance = 1.0e4;
+
+struct Surface {
+    vec3 albedo;
+    float alpha;
+    vec3 normal;
+    bool valid;
+};
+
+layout(binding = 8, std140) uniform Params {
+    vec4 proj;
+    vec4 prev_proj;
+    vec4 reproject[3];
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    vec4 prev_jitter_sky_clamp;
+    uvec4 tlas_frame_flags;
+    uvec4 cfg;
+    vec4 strength_bias;
+    uvec4 bounce;
+    uvec4 bounce_cfg;
+    vec4 bounce_misc;
+    vec4 shadow_color;
+    uvec4 sharc;
+    vec4 far_fade;
+};
+
+const uint FlagReset = 1u;
+const uint FlagNormalDebug = 2u;
+const uint FlagNoScreen = 4u;
+// rt_sky.comp fills the sky probe from the dome texture; the screen at composite time holds the
+// grey pre-sky fill, so neither learn nor read the sky from it.
+const uint FlagSkyDome = 8u;
+const uint NormalFromDepth = 0u;
+const uint NormalUnorm = 1u;
+const uint NormalSigned = 2u;
+const uint NormalWorldSpace = 0x10u;
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+vec2 PrevJitter() { return prev_jitter_sky_clamp.xy; }
+float Sky() { return prev_jitter_sky_clamp.z; }
+float Clamp() { return prev_jitter_sky_clamp.w; }
+uint Spp() { return cfg.x; }
+uint GiDebug() { return cfg.w; }
+const uint GiDebugSource = 8u;
+const uint SourceSky = 0u;
+const uint SourceScreen = 1u;
+const uint SourceMaterial = 2u;
+const uint SourceMiss = 3u;
+const uint SourceTraced = 4u; // direct light evaluated at the hit (debug view 8: yellow)
+const uint SourceUnknown = 5u; // traced, untextured, assumed albedo (debug view 8: magenta)
+const uint SourceSharc = 6u;
+const uint MaterialScale = 256u;
+const float MaterialMaxRadiance = 16.0;
+const uint MaterialSampleMask = 31u;
+float MaxHistory() { return float(cfg.y); }
+uint NormalMode() { return cfg.z & 0xFu; }
+bool NormalWorld() { return (cfg.z & NormalWorldSpace) != 0u; }
+uint NormalSwizzle() { return cfg.z >> 8u; }
+uint NormalComponents() { return (cfg.z >> 16u) & 0xFu; }
+uint Flags() { return tlas_frame_flags.w; }
+uint Frame() { return tlas_frame_flags.z; }
+float Bias() { return strength_bias.y; }
+float FarWeight(vec3 p) {
+    return far_fade.w > 0.0 ? clamp((far_fade.y - length(p)) * far_fade.z, 0.0, 1.0) : 1.0;
+}
+uint Bounces() { return bounce.x; }
+uint BounceRays() { return bounce.y; }
+uint LightCount() { return bounce.z; }
+uint DirSetCount() { return bounce.w; }
+uint SkySlot() { return bounce_cfg.x; }
+uint BounceFlags() { return bounce_cfg.y; }
+// World set + 1 written by rt_world_set.comp, 0 = none (use the pixel's own set).
+uint WorldSet() { return sharc.w; }
+float EmissiveLuma() { return bounce_misc.x; }
+float BounceGap() { return bounce_misc.y; }
+uint TraceCfg() { return uint(max(bounce_misc.z, 0.0) + 0.5); }
+uint Sparse() { return max(TraceCfg() & 7u, 1u); }
+bool LastBounceCache() { return (TraceCfg() & 8u) != 0u; }
+float GiTMax() {
+    const uint m = (TraceCfg() >> 4u) & 0xFFFu;
+    return m == 0u ? 1e6 : float(m);
+}
+uint SparsePhase() { return uint(max(bounce_misc.w, 0.0) + 0.5); }
+
+Surface EmptySurface() {
+    Surface s;
+    s.albedo = vec3(0.0);
+    s.alpha = 1.0;
+    s.normal = vec3(0.0);
+    s.valid = false;
+    return s;
+}
+
+Surface HitSurface(uint instance, uint primitive, vec2 barycentrics, mat3 rotation) {
+    Surface s = EmptySurface();
+    if (instance >= surfaces.length()) {
+        return s;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if ((r.flags & SurfaceHasNormal) == 0u || base + 3u >= uv_pool.length()) {
+        return s;
+    }
+    const vec3 local_n = unpackSnorm4x8(uv_pool[base + 3u]).xyz;
+    vec3 geo_n = vec3(0.0);
+    if (dot(local_n, local_n) > 0.5) {
+        const vec3 n = rotation * local_n;
+        geo_n = dot(n, n) > 0.0 ? normalize(n) : vec3(0.0);
+        s.normal = geo_n;
+    }
+    if (dot(geo_n, geo_n) > 0.5 && base + 7u < uv_pool.length()) {
+        const vec3 n0 = unpackSnorm4x8(uv_pool[base + 4u]).xyz;
+        const vec3 n1 = unpackSnorm4x8(uv_pool[base + 5u]).xyz;
+        const vec3 n2 = unpackSnorm4x8(uv_pool[base + 6u]).xyz;
+        if (dot(n0, n0) > 0.5 && dot(n1, n1) > 0.5 && dot(n2, n2) > 0.5) {
+            const vec3 li = n0 * (1.0 - barycentrics.x - barycentrics.y) + n1 * barycentrics.x +
+                            n2 * barycentrics.y;
+            if (dot(li, li) > 1e-6) {
+                const vec3 vn = normalize(rotation * li);
+                if (dot(vn, geo_n) > 0.0) {
+                    s.normal = vn;
+                }
+            }
+        }
+    }
+    if ((r.flags & SurfaceUsable) != SurfaceUsable || r.texture == 0u ||
+        r.texture >= MaxSurfaceTextures) {
+        return s;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    if (any(isnan(uv)) || any(isinf(uv))) {
+        return s;
+    }
+    const uint normal_map = (r.flags >> SurfaceNormalMapShift) & 1023u;
+    if (normal_map != 0u && normal_map < MaxSurfaceTextures && dot(s.normal, s.normal) > 0.5 &&
+        base + 7u < uv_pool.length()) {
+        const vec4 tw = unpackSnorm4x8(uv_pool[base + 7u]);
+        if (dot(tw.xyz, tw.xyz) > 0.5) {
+            const vec4 m = textureLod(surface_textures[nonuniformEXT(normal_map)], uv, SurfaceAlbedoLod);
+            const float mx = m.r * 2.0 - 1.0;
+            const float my = m.g * 2.0 - 1.0;
+            const float mz = m.b > 0.0 ? m.b * 2.0 - 1.0 : sqrt(max(0.0, 1.0 - mx * mx - my * my));
+            const vec3 nn = s.normal;
+            vec3 t = rotation * tw.xyz;
+            t -= nn * dot(t, nn);
+            if (dot(t, t) > 1e-6 && !any(isnan(m))) {
+                t = normalize(t);
+                const vec3 bt = cross(nn, t) * (tw.w < 0.0 ? -1.0 : 1.0);
+                const vec3 pn = t * mx + bt * my + nn * mz;
+                if (dot(pn, pn) > 1e-6 && dot(pn, geo_n) > 0.0) {
+                    s.normal = normalize(pn);
+                }
+            }
+        }
+    }
+    const vec4 t = textureLod(surface_textures[nonuniformEXT(r.texture)], uv, SurfaceAlbedoLod);
+    if (any(isnan(t))) {
+        return s;
+    }
+    s.albedo = clamp(t.rgb, vec3(0.0), vec3(1.0));
+    s.alpha = clamp(t.a, 0.0, 1.0);
+    s.valid = true;
+    return s;
+}
+
+uint SurfaceAlphaTexture(SurfaceRecord r) {
+    const uint slot = (r.flags >> 6u) & 1023u;
+    return slot != 0u ? slot : r.texture;
+}
+
+uint SurfaceAlphaChannel(SurfaceRecord r) {
+    return ((r.flags >> 26u) & 3u) ^ 3u;
+}
+
+bool AlphaTestPasses(uint instance, uint primitive, vec2 barycentrics) {
+    if (instance >= surfaces.length()) {
+        return true;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    const uint alpha_tex = SurfaceAlphaTexture(r);
+    if ((r.flags & SurfaceAlphaTest) == 0u || (r.flags & SurfaceHasUv) == 0u ||
+        alpha_tex == 0u || alpha_tex >= MaxSurfaceTextures) {
+        return true;
+    }
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return true;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    const float alpha = textureLod(surface_textures[nonuniformEXT(alpha_tex)], uv, 0.0)[SurfaceAlphaChannel(r)];
+    return !(alpha < r.alpha_ref);
+}
+
+// Glass at a hit: SurfaceGlass records. A masked one (alpha_ref < 0, RayTracing::GlassMaskSlots)
+// is glass only where its hand-painted mask (texture slot -alpha_ref) is white: the bottle
+// shelves mix glass and metal in one mesh.
+bool GlassAt(uint instance, uint primitive, vec2 barycentrics) {
+    if (instance >= surfaces.length()) {
+        return false;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    if ((r.flags & 0x10000000u) == 0u) {
+        return false;
+    }
+    if (!(r.alpha_ref < 0.0)) {
+        return true;
+    }
+    const uint slot = uint(-r.alpha_ref + 0.5);
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (slot == 0u || slot >= MaxSurfaceTextures || (r.flags & 2u) == 0u ||
+        base + 2u >= uv_pool.length()) {
+        return false;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(slot)], uv, 0.0).r > 0.5;
+}
+
+float SmokeAlpha(uint instance, uint primitive, vec2 barycentrics) {
+    const SurfaceRecord r = surfaces[instance];
+    if ((r.flags & SurfaceUsable) != SurfaceUsable || r.texture == 0u ||
+        r.texture >= MaxSurfaceTextures) {
+        return 1.0;
+    }
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return 1.0;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(r.texture)], uv, 0.0).a;
+}
+
+#ifdef RT_GI_STAGE
+const uint GiPayloadThroughGlass = 1u;
+struct GiPayload {
+    mat3 rotation;
+    vec2 barycentrics;
+    float t;
+    uint instance;
+    uint primitive;
+    uint flags;
+    uint rejected;
+};
+#endif
+
+#if defined(RT_GI_AHIT)
+layout(location = 0) rayPayloadInEXT GiPayload payload;
+hitAttributeEXT vec2 attribs;
+void main() {
+    const uint instance = uint(gl_InstanceCustomIndexEXT);
+    if ((payload.flags & GiPayloadThroughGlass) != 0u && GlassAt(instance, uint(gl_PrimitiveID), attribs)) {
+        ignoreIntersectionEXT;
+    }
+    if (!AlphaTestPasses(instance, uint(gl_PrimitiveID), attribs)) {
+        ++payload.rejected;
+        ignoreIntersectionEXT;
+    }
+}
+#elif defined(RT_GI_CHIT)
+layout(location = 0) rayPayloadInEXT GiPayload payload;
+hitAttributeEXT vec2 attribs;
+void main() {
+    payload.instance = uint(gl_InstanceCustomIndexEXT);
+    payload.primitive = uint(gl_PrimitiveID);
+    payload.barycentrics = attribs;
+    payload.rotation = mat3(gl_ObjectToWorldEXT);
+    payload.t = gl_HitTEXT;
+}
+#elif defined(RT_GI_MISS)
+layout(location = 0) rayPayloadInEXT GiPayload payload;
+void main() {
+    payload.t = -1.0;
+}
+#else
+uint Hash(uint x) {
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
+}
+
+float Random(inout uint state) {
+    state = Hash(state);
+    return float(state & 0x00FFFFFFu) / 16777216.0;
+}
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+vec2 ViewToPixel(vec3 p, vec4 projection, vec2 jitter) {
+    const float z = max(p.z, 1e-4);
+    const vec2 ndc = vec2(p.x * projection.x, p.y * projection.y) / z;
+    return vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * Size() + jitter - 0.5;
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+vec3 ViewAt(ivec2 pixel) {
+    return PixelToView(vec2(pixel), DepthAt(pixel));
+}
+
+vec3 NormalFromDepthAt(ivec2 pixel, vec3 p) {
+    const vec3 px = ViewAt(pixel + ivec2(1, 0)), mx = ViewAt(pixel - ivec2(1, 0));
+    const vec3 py = ViewAt(pixel + ivec2(0, 1)), my = ViewAt(pixel - ivec2(0, 1));
+    const vec3 dx = abs(px.z - p.z) < abs(p.z - mx.z) ? px - p : p - mx;
+    const vec3 dy = abs(py.z - p.z) < abs(p.z - my.z) ? py - p : p - my;
+    const vec3 n = cross(dy, dx);
+    return dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, -1.0);
+}
+
+float Component(vec4 v, uint index) {
+    return index == 0u ? v.x : index == 1u ? v.y : index == 2u ? v.z : v.w;
+}
+
+vec3 SurfaceNormal(ivec2 pixel, vec3 p) {
+    vec3 n;
+    if (NormalMode() == NormalFromDepth) {
+        n = NormalFromDepthAt(pixel, p);
+    } else {
+        const vec4 t = texelFetch(normal_tex, pixel, 0);
+        const uint sw = NormalSwizzle();
+        n = vec3(Component(t, sw & 3u), Component(t, (sw >> 2u) & 3u),
+                 NormalComponents() == 3u ? Component(t, (sw >> 4u) & 3u) : 0.0);
+        if (NormalMode() == NormalUnorm) {
+            n = n * 2.0 - 1.0;
+        }
+        if (NormalComponents() == 2u) {
+            n.z = -sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        if (NormalWorld()) {
+            n = vec3(dot(view_rows[0].xyz, n), dot(view_rows[1].xyz, n), dot(view_rows[2].xyz, n));
+        }
+        if (any(isnan(n)) || dot(n, n) < 1e-6) {
+            n = NormalFromDepthAt(pixel, p);
+        } else {
+            n = normalize(n);
+        }
+    }
+    if (dot(n, p) > 0.0) {
+        n = -n;
+    }
+    return n;
+}
+
+#ifdef RT_GI_RGEN
+layout(location = 0) rayPayloadEXT GiPayload gi_payload;
+#ifdef RT_GI_SER
+layout(location = 0) hitObjectAttributeNV vec2 gi_hit_attribs;
+const uint GiReorderBits = 16u;
+#endif
+float TraceSpan(vec3 origin, vec3 dir, float t_min, float t_max, uint mask, out uint instance_id,
+                out uint primitive, out vec2 barycentrics, out mat3 rotation, inout uint rejected) {
+    instance_id = 0xFFFFFFFFu;
+    primitive = 0u;
+    barycentrics = vec2(0.0);
+    rotation = mat3(1.0);
+    gi_payload.flags = trace_through_glass ? GiPayloadThroughGlass : 0u;
+    gi_payload.rejected = 0u;
+    gi_payload.t = -1.0;
+#ifdef RT_GI_SER
+    hitObjectNV hit;
+    hitObjectTraceRayNV(hit, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT,
+                        mask, 0, 1, 0, TlasPoint(tlas_frame_flags.xy, origin), t_min,
+                        TlasDir(tlas_frame_flags.xy, dir), t_max, 0);
+    rejected += gi_payload.rejected;
+    const bool is_hit = hitObjectIsHitNV(hit);
+    const uint hint = is_hit ? (uint(hitObjectGetInstanceCustomIndexNV(hit)) & 0x7FFFu) | 0x8000u
+                             : 0u;
+    reorderThreadNV(hit, hint, GiReorderBits);
+    if (!is_hit) {
+        return -1.0;
+    }
+    hitObjectGetAttributesNV(hit, 0);
+    instance_id = uint(hitObjectGetInstanceCustomIndexNV(hit));
+    primitive = uint(hitObjectGetPrimitiveIndexNV(hit));
+    barycentrics = gi_hit_attribs;
+    rotation = TlasToView(tlas_frame_flags.xy, mat3(hitObjectGetObjectToWorldNV(hit)));
+    return hitObjectGetRayTMaxNV(hit);
+#else
+    traceRayEXT(accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT, mask, 0, 1, 0,
+                TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max, 0);
+    rejected += gi_payload.rejected;
+    if (gi_payload.t < 0.0) {
+        return -1.0;
+    }
+    instance_id = gi_payload.instance;
+    primitive = gi_payload.primitive;
+    barycentrics = gi_payload.barycentrics;
+    rotation = TlasToView(tlas_frame_flags.xy, gi_payload.rotation);
+    return gi_payload.t;
+#endif
+}
+#else
+// Closest alpha-tested solid hit with t in [t_min, t_max]; -1 on a miss.
+float TraceSpan(vec3 origin, vec3 dir, float t_min, float t_max, uint mask, out uint instance_id,
+                out uint primitive, out vec2 barycentrics, out mat3 rotation, inout uint rejected) {
+    instance_id = 0xFFFFFFFFu;
+    primitive = 0u;
+    barycentrics = vec2(0.0);
+    rotation = mat3(1.0);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT,
+                          mask, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            const uint cand_instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+            const uint cand_prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+            const vec2 cand_bary = rayQueryGetIntersectionBarycentricsEXT(q, false);
+            if (trace_through_glass && GlassAt(cand_instance, cand_prim, cand_bary)) {
+                continue;
+            }
+            if (AlphaTestPasses(cand_instance, cand_prim, cand_bary)) {
+                rayQueryConfirmIntersectionEXT(q);
+            } else {
+                ++rejected;
+            }
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        instance_id = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+        primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+        barycentrics = rayQueryGetIntersectionBarycentricsEXT(q, true);
+        rotation = TlasToView(tlas_frame_flags.xy, mat3(rayQueryGetIntersectionObjectToWorldEXT(q, true)));
+        return rayQueryGetIntersectionTEXT(q, true);
+    }
+    return -1.0;
+}
+#endif
+
+bool PortalPane(uint id) {
+    return (BounceFlags() & BounceFlagPortals) != 0u && id < surfaces.length() &&
+           (surfaces[id].flags & SurfacePortalPane) != 0u;
+}
+
+float Trace(vec3 origin, vec3 dir, out uint instance_id, out uint primitive, out vec2 barycentrics,
+            out mat3 rotation, inout uint rejected, float t_min) {
+    trace_through_glass = true;
+    const float t = TraceSpan(origin, dir, t_min, trace_cap, MaskSolid, instance_id, primitive,
+                              barycentrics, rotation, rejected);
+    trace_through_glass = false;
+    return t;
+}
+
+float Trace(vec3 origin, vec3 dir, out uint instance_id, out uint primitive, out vec2 barycentrics,
+            out mat3 rotation, inout uint rejected) {
+    return Trace(origin, dir, instance_id, primitive, barycentrics, rotation, rejected, 0.0);
+}
+
+vec3 WorldUp() {
+    return normalize(vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y));
+}
+
+float WaterSpan(vec3 origin, vec3 dir, float t_hit, uint hit_id) {
+    if ((BounceFlags() & BounceFlagWater) == 0u || dot(dir, WorldUp()) >= 0.0) {
+        return -1.0;
+    }
+    if (t_hit >= 0.0 && hit_id < surfaces.length() && (surfaces[hit_id].flags & SurfaceWater) != 0u) {
+        return t_hit;
+    }
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT,
+                          MaskWater, TlasPoint(tlas_frame_flags.xy, origin), 0.0,
+                          TlasDir(tlas_frame_flags.xy, dir), t_hit >= 0.0 ? t_hit : trace_cap);
+    while (rayQueryProceedEXT(q)) {
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return -1.0;
+    }
+    return rayQueryGetIntersectionTEXT(q, true);
+}
+
+// Transmittance over [t_min, t_max]; mask 0x03 leaves the portal panes out.
+float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x03u, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
+    float t = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (GlassAt(instance, primitive, b)) {
+            t *= GlassTransmit;
+        } else if (instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u) {
+            t *= 1.0 - clamp(SmokeAlpha(instance, primitive, b) * SmokeGiOpacity, 0.0, 1.0);
+            if (t < 0.02) {
+                rayQueryConfirmIntersectionEXT(q);
+            }
+        } else if (AlphaTestPasses(instance, primitive, b)) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT
+               ? 0.0
+               : t;
+}
+
+// Painted windows: see rt_direct.comp Transmittance.
+float Transmittance(vec3 origin, vec3 dir, float t_max) {
+    if ((BounceFlags() & BounceFlagPortals) != 0u) {
+        rayQueryEXT p;
+        rayQueryInitializeEXT(p, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsOpaqueEXT,
+                              MaskPortal, TlasPoint(tlas_frame_flags.xy, origin), 0.0, TlasDir(tlas_frame_flags.xy, dir), t_max);
+        while (rayQueryProceedEXT(p)) {
+        }
+        if (rayQueryGetIntersectionTypeEXT(p, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            const float t_pane = rayQueryGetIntersectionTEXT(p, true);
+            const float t = SegmentTransmittance(origin, dir, 0.0, t_pane);
+            return t > 0.0 && t_pane + PortalWall < t_max
+                       ? t * SegmentTransmittance(origin, dir, t_pane + PortalWall, t_max)
+                       : t;
+        }
+    }
+    return SegmentTransmittance(origin, dir, 0.0, t_max);
+}
+
+bool Finite(vec3 v) {
+    return !(any(isnan(v)) || any(isinf(v)));
+}
+
+vec3 Radiance(ivec2 pixel) {
+    vec3 c = texelFetch(scene_tex, pixel, 0).rgb;
+    if (!Finite(c)) {
+        return vec3(0.0);
+    }
+    return clamp(c, vec3(0.0), vec3(Clamp()));
+}
+
+uint MaterialEncode(float radiance) {
+    const float v = isnan(radiance) ? 0.0 : clamp(radiance, 0.0, MaterialMaxRadiance);
+    return uint(v * float(MaterialScale) + 0.5);
+}
+
+void MaterialAccumulate(uint id, vec3 radiance) {
+    atomicAdd(accum[id].x, MaterialEncode(radiance.x));
+    atomicAdd(accum[id].y, MaterialEncode(radiance.y));
+    atomicAdd(accum[id].z, MaterialEncode(radiance.z));
+    atomicAdd(accum[id].w, 1u);
+}
+
+float Luma(vec3 c) {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 CachedRadiance(uint id, Surface surface, out uint source) {
+    if (id < material.length()) {
+        const vec4 m = material[id];
+        if (m.w > 0.0 && Finite(m.rgb)) {
+            source = SourceMaterial;
+            const vec3 cached = clamp(m.rgb, vec3(0.0), vec3(Clamp()));
+            if (surface.valid) {
+                return clamp(surface.albedo * (Luma(cached) / max(Luma(surface.albedo), 0.05)),
+                             vec3(0.0), vec3(Clamp()));
+            }
+            return cached;
+        }
+    }
+    source = SourceSky;
+    if (surface.valid) {
+        return surface.albedo * Sky();
+    }
+    return vec3(Sky());
+}
+
+const uint BounceFlagEmissive = 32u;
+const uint SkyProbeSize = 32u;
+
+uint EmissiveBase() { return SkySlot() + 1u; }
+uint SkyProbeBase() { return 2u * SkySlot() + 1u; }
+
+bool LearnSample() {
+#ifdef RT_LIGHT_VIS
+    return false; // the light visibility pass only reads the material and emissive caches
+#else
+    const uvec2 p = GI_INVOCATION.xy;
+    return ((p.x * 7u + p.y * 13u + Frame()) & MaterialSampleMask) == 0u;
+#endif
+}
+
+vec3 WorldDir(vec3 v) {
+    return view_rows[0].xyz * v.x + view_rows[1].xyz * v.y + view_rows[2].xyz * v.z;
+}
+
+vec2 OctEncode(vec3 d) {
+    const float l1 = abs(d.x) + abs(d.y) + abs(d.z);
+    if (!(l1 > 0.0)) {
+        return vec2(0.5);
+    }
+    vec2 p = d.xy / l1;
+    if (d.z < 0.0) {
+        p = (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+uint SkyProbeCell(vec3 world_dir) {
+    const ivec2 c = clamp(ivec2(OctEncode(world_dir) * float(SkyProbeSize)), ivec2(0),
+                          ivec2(int(SkyProbeSize) - 1));
+    return uint(c.y) * SkyProbeSize + uint(c.x);
+}
+
+void SkyLearn(ivec2 pixel) {
+    const vec3 c = Radiance(pixel);
+    MaterialAccumulate(SkySlot(), c);
+    const vec2 uv = (vec2(pixel) + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const vec3 v = vec3(ndc.x / proj.x, ndc.y / proj.y, 1.0);
+    const vec3 w = WorldDir(v);
+    if (!Finite(w) || dot(w, w) <= 0.0) {
+        return;
+    }
+    const uint slot = SkyProbeBase() + SkyProbeCell(normalize(w));
+    if (slot < accum.length()) {
+        MaterialAccumulate(slot, c);
+    }
+}
+
+bool SkyProbe(vec3 dir, out vec3 radiance) {
+    radiance = vec3(0.0);
+    const vec3 w = WorldDir(dir);
+    if (!Finite(w) || dot(w, w) <= 0.0) {
+        return false;
+    }
+    const vec2 f = OctEncode(normalize(w)) * float(SkyProbeSize) - 0.5;
+    const ivec2 i0 = ivec2(floor(f));
+    const vec2 t = f - vec2(i0);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        const ivec2 o = ivec2(k & 1, k >> 1);
+        const ivec2 c = clamp(i0 + o, ivec2(0), ivec2(int(SkyProbeSize) - 1));
+        const uint slot = SkyProbeBase() + uint(c.y) * SkyProbeSize + uint(c.x);
+        if (slot >= material.length()) {
+            continue;
+        }
+        const vec4 m = material[slot];
+        if (m.w <= 0.0 || !Finite(m.rgb)) {
+            continue;
+        }
+        const float wt = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y);
+        sum += wt * clamp(m.rgb, vec3(0.0), vec3(Clamp()));
+        weight += wt;
+    }
+    if (weight <= 1e-3) {
+        return false;
+    }
+    radiance = sum / weight;
+    return true;
+}
+
+#ifdef RT_REFLECT
+// Dome texture v against elevation, as in rt_sky.comp (read from the dome mesh rings).
+const int DomeRows = 11;
+const float DomeRowElev[DomeRows] = float[](-2.9, 1.8, 6.8, 12.4, 19.2, 28.3, 41.4, 56.0, 80.8,
+                                            85.8, 90.0);
+const float DomeRowV[DomeRows] = float[](2044.0, 1780.0, 1501.0, 1211.0, 892.0, 572.0, 337.0,
+                                         176.0, 79.0, 14.0, 0.0);
+
+float DomeElevationToV(float elev) {
+    if (elev <= DomeRowElev[0]) {
+        return DomeRowV[0];
+    }
+    for (int i = 1; i < DomeRows; ++i) {
+        if (elev <= DomeRowElev[i]) {
+            const float t = (elev - DomeRowElev[i - 1]) / (DomeRowElev[i] - DomeRowElev[i - 1]);
+            return mix(DomeRowV[i - 1], DomeRowV[i], t);
+        }
+    }
+    return 0.0;
+}
+
+/// Mip level for mirror rays: ripples spread neighbouring pixels over many texels, and lod 0
+// aliased the dome into grain.
+const float DomeMirrorLod = 1.0;
+
+const uint SkyImageSize = 1024u; // rt_gi.h SkyImageSize
+
+// The sky image the sky pass learned from the screen (clouds included), bilinear over the
+// cells seen so far; false where the sky was never on screen.
+bool SkyImage(vec3 w, out vec3 radiance) {
+    radiance = vec3(0.0);
+    const uint base = SkyProbeBase() + SkyProbeSize * SkyProbeSize + 2u;
+    const vec2 f = OctEncode(w) * float(SkyImageSize) - 0.5;
+    const ivec2 i0 = ivec2(floor(f));
+    const vec2 t = f - vec2(i0);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        const ivec2 o = ivec2(k & 1, k >> 1);
+        const ivec2 c = clamp(i0 + o, ivec2(0), ivec2(int(SkyImageSize) - 1));
+        const uint slot = base + uint(c.y) * SkyImageSize + uint(c.x);
+        if (slot >= material.length()) {
+            continue;
+        }
+        const vec4 m = material[slot];
+        if (m.w <= 0.0 || !Finite(m.rgb)) {
+            continue;
+        }
+        const float wt = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y);
+        sum += wt * m.rgb;
+        weight += wt;
+    }
+    if (weight < 0.25) {
+        return false;
+    }
+    radiance = clamp(sum / weight, vec3(0.0), vec3(Clamp()));
+    return true;
+}
+
+// The learned sky image, else dome texture x the sky pass's fitted gain.
+bool DomeSky(vec3 dir, out vec3 radiance) {
+    radiance = vec3(0.0);
+    if ((glass_push.flags & ReflectSkyDome) == 0u) {
+        return false;
+    }
+    {
+        const vec3 wi = WorldDir(dir);
+        if (Finite(wi) && dot(wi, wi) > 0.0 && SkyImage(normalize(wi), radiance)) {
+            return true;
+        }
+    }
+    const uint gain_slot = SkyProbeBase() + SkyProbeSize * SkyProbeSize;
+    if (gain_slot + 1u >= material.length()) {
+        return false;
+    }
+    const vec4 g = material[gain_slot];
+    const vec4 map = material[gain_slot + 1u];
+    if (!(g.w > 0.0) || !(map.w > 0.0) || !Finite(g.rgb)) {
+        return false;
+    }
+    vec3 w = WorldDir(dir);
+    if (!Finite(w) || dot(w, w) <= 0.0) {
+        return false;
+    }
+    w = normalize(w);
+    const float elev = degrees(asin(clamp(w.y, -1.0, 1.0)));
+    const float phi = atan(w.z, w.x) * 0.15915494; // 1 / (2 pi)
+    vec2 uv = vec2((map.x + phi) * map.y, DomeElevationToV(elev) / map.z);
+    uv.y = clamp(uv.y, 0.5 / 512.0, 1.0 - 0.5 / 512.0);
+    const vec3 c = textureLod(sky_dome_tex, uv, DomeMirrorLod).rgb;
+    if (!Finite(c)) {
+        return false;
+    }
+    radiance = clamp(max(c, vec3(0.0)) * g.rgb, vec3(0.0), vec3(Clamp()));
+    return true;
+}
+#endif
+
+float FillSkyGain() { return strength_bias.w; }
+
+// The game's directional lights 3 and 4 (half-Lambert squared, unshadowed in the stock shader)
+// are its sky light: on the Cathedral Ward bridge they are as bright as the moon and light the
+// snow from behind the camera, while the painted night dome is nearly black. Path-traced light
+// only (37c9e7c) dropped them, so open ground under a full moon came out ~6x darker than stock.
+// Here they come back as sky radiance on GI misses (world set, rt_world_set.comp), so geometry
+// occludes them. 24/17 makes an unoccluded surface facing the light get the stock value:
+// the cosine-weighted mean of ((1 + mu) / 2)^2 over that hemisphere is 17/24.
+// BB_RT_GI_FILL_SKY scales it (0 = off); the reflection pass passes 0.
+// The primary pixel's own directional set (GBuffer3 alpha), for FillSky; ~0u = none.
+uint fill_set = 0xFFFFFFFFu;
+
+// rt_direct.comp MoonSet: the pixel's own set when its light 1 points where the world set's
+// does, so each material keeps the game's moon colour and it does not follow the camera; else
+// the world set. ~0u when neither is valid.
+uint MoonSet(uint own) {
+    const uint count = DirSetCount();
+    const uint world = WorldSet();
+    const uint w = world != 0u && world <= count ? world - 1u : 0xFFFFFFFFu;
+    if (own >= count) {
+        return w;
+    }
+    if (w == 0xFFFFFFFFu || w == own) {
+        return own;
+    }
+    const vec3 c = sets[own * 18u + 4u].xyz;
+    const vec3 d_own = sets[own * 18u].xyz;
+    const vec3 d_world = sets[w * 18u].xyz;
+    const bool aligned = dot(c, c) > 0.0 && dot(d_own, d_own) > 0.0 && dot(d_world, d_world) > 0.0 &&
+                         dot(normalize(d_own), normalize(d_world)) > 0.9999;
+    return aligned ? own : w;
+}
+
+vec3 FillSky(vec3 dir) {
+    const float gain = FillSkyGain();
+    if (!(gain > 0.0) || (BounceFlags() & BounceFlagDirSets) == 0u) {
+        return vec3(0.0);
+    }
+    const uint set = MoonSet(fill_set);
+    if (set >= DirSetCount()) {
+        return vec3(0.0);
+    }
+    const uint base = set * 18u;
+    const uvec2 extra = floatBitsToUint(sets[base + 16u].xy);
+    vec3 r = vec3(0.0);
+    for (uint k = 0u; k < 2u; ++k) {
+        if ((k == 0u ? extra.x : extra.y) == 0u) {
+            continue;
+        }
+        const vec3 d = sets[base + 2u + k].xyz;
+        if (!(dot(d, d) > 0.0)) {
+            continue;
+        }
+        const vec3 L = normalize(vec3(dot(view_rows[0].xyz, d), dot(view_rows[1].xyz, d),
+                                      dot(view_rows[2].xyz, d)));
+        const float h = 0.5 * dot(dir, L) + 0.5;
+        r += max(sets[base + 6u + k].xyz, vec3(0.0)) * (h * h);
+    }
+    r *= gain * (24.0 / 17.0);
+    return Finite(r) ? r : vec3(0.0);
+}
+
+vec3 SkyLookup(vec3 dir);
+
+vec3 SkyRadiance(vec3 dir) {
+    return SkyLookup(dir) + FillSky(dir);
+}
+
+vec3 SkyLookup(vec3 dir) {
+#ifdef RT_REFLECT
+    vec3 dome;
+    if (DomeSky(dir, dome)) {
+        return dome;
+    }
+#endif
+    const vec2 pixel = ViewToPixel(dir * 1e5, proj, Jitter());
+    const ivec2 ip = ivec2(floor(pixel + 0.5));
+    if ((Flags() & (FlagNoScreen | FlagSkyDome)) == 0u && dir.z > 1e-4 &&
+        all(greaterThanEqual(ip, ivec2(0))) &&
+        all(lessThan(ip, ivec2(Size()))) && DepthAt(ip) >= 1.0) {
+        return Radiance(ip);
+    }
+    vec3 probe;
+    if (SkyProbe(dir, probe)) {
+        return probe;
+    }
+    const uint slot = SkySlot();
+    if (slot < material.length()) {
+        const vec4 m = material[slot];
+        if (m.w > 0.0 && Finite(m.rgb)) {
+            return clamp(m.rgb, vec3(0.0), vec3(Clamp()));
+        }
+    }
+    return vec3(Sky());
+}
+
+vec3 Emission(uint id, Surface surface, vec3 hit) {
+    if ((BounceFlags() & BounceFlagEmissive) != 0u) {
+        if (id >= SkySlot()) {
+            return vec3(0.0);
+        }
+        const uint slot = EmissiveBase() + id;
+        const ivec2 ip = ivec2(floor(ViewToPixel(hit, proj, Jitter()) + 0.5));
+        if (hit.z > 1e-4 && all(greaterThanEqual(ip, ivec2(0))) && all(lessThan(ip, ivec2(Size()))) &&
+            abs(ViewZ(DepthAt(ip)) - hit.z) <= 0.03 * hit.z + 0.05) {
+            const vec3 e = texelFetch(emissive_tex, ip, 0).rgb;
+            const vec3 c = Finite(e) ? clamp(e, vec3(0.0), vec3(Clamp())) : vec3(0.0);
+            if (LearnSample() && slot < accum.length()) {
+                MaterialAccumulate(slot, c);
+            }
+            return c;
+        }
+        if (slot < material.length()) {
+            const vec4 m = material[slot];
+            if (m.w > 0.0 && Finite(m.rgb)) {
+                return clamp(m.rgb, vec3(0.0), vec3(Clamp()));
+            }
+        }
+        return vec3(0.0);
+    }
+    const float threshold = EmissiveLuma();
+    if (threshold <= 0.0 || id >= SkySlot() || id >= material.length()) {
+        return vec3(0.0);
+    }
+    const vec4 m = material[id];
+    if (m.w <= 0.0 || !Finite(m.rgb)) {
+        return vec3(0.0);
+    }
+    const vec3 cached = clamp(m.rgb, vec3(0.0), vec3(Clamp()));
+    const float luma = Luma(cached);
+    if (luma <= threshold) {
+        return vec3(0.0);
+    }
+    if (surface.valid) {
+        return clamp(surface.albedo * (luma / max(Luma(surface.albedo), 0.05)), vec3(0.0),
+                     vec3(Clamp()));
+    }
+    return cached;
+}
+
+// Emission at a traced hit. Untextured hits only take the emissive target: the cached-luma
+// fallback is the mesh's mean screen colour, which already holds lighting.
+vec3 HitEmission(uint id, Surface surface, vec3 hit) {
+    if (!surface.valid && (BounceFlags() & BounceFlagEmissive) == 0u) {
+        return vec3(0.0);
+    }
+    return Emission(id, surface, hit);
+}
+
+vec3 HitRadiance(vec3 hit, bool missed, vec3 dir, uint id, Surface surface, bool sample_material,
+                 out uint source) {
+    const vec2 size = Size();
+    source = SourceMiss;
+    if (missed) {
+        return SkyRadiance(dir);
+    }
+    const vec2 pixel = ViewToPixel(hit, proj, Jitter());
+    const ivec2 ip = ivec2(floor(pixel + 0.5));
+    if ((Flags() & FlagNoScreen) != 0u || hit.z <= 1e-4 || any(lessThan(ip, ivec2(0))) ||
+        any(greaterThanEqual(ip, ivec2(size)))) {
+        return CachedRadiance(id, surface, source);
+    }
+    const float screen_z = ViewZ(DepthAt(ip));
+    if (abs(screen_z - hit.z) <= 0.03 * hit.z + 0.05) {
+        source = SourceScreen;
+        const vec3 c = Radiance(ip);
+        if (sample_material && id < accum.length()) {
+            MaterialAccumulate(id, c);
+        }
+        return c;
+    }
+    return CachedRadiance(id, surface, source);
+}
+
+const float HitDefaultF0 = 0.04;
+const float HitDefaultRoughness = 0.6;
+const float HitMinAlpha = 0.02;
+const float HitSpecMax = 16.0;
+
+vec4 HitMaterial(vec3 p) {
+    vec4 m = vec4(vec3(HitDefaultF0), HitDefaultRoughness);
+    const vec2 pixel = ViewToPixel(p, proj, Jitter());
+    const ivec2 ip = ivec2(floor(pixel + 0.5));
+    if ((Flags() & FlagNoScreen) != 0u || p.z <= 1e-4 || any(lessThan(ip, ivec2(0))) ||
+        any(greaterThanEqual(ip, ivec2(Size())))) {
+        return m;
+    }
+    const float screen_z = ViewZ(DepthAt(ip));
+    if (abs(screen_z - p.z) > 0.03 * p.z + 0.05) {
+        return m;
+    }
+    if ((BounceFlags() & BounceFlagG3) != 0u) {
+        const vec3 g3 = texelFetch(g3_tex, ip, 0).rgb;
+        if (Finite(g3)) {
+            const vec3 c = clamp(g3, vec3(0.0), vec3(1.0));
+            m.rgb = c * c;
+        }
+    }
+    if ((BounceFlags() & BounceFlagG1) != 0u) {
+        const float g1x = texelFetch(g1_tex, ip, 0).x;
+        if (!isnan(g1x)) {
+            m.a = clamp(1.0 - g1x, 0.0, 1.0);
+        }
+    }
+    return m;
+}
+
+float HitSpecG1(float alpha, float c) {
+    const float a2 = alpha * alpha;
+    return 2.0 * c / (c + sqrt(a2 + (1.0 - a2) * c * c));
+}
+
+vec3 HitSpecular(vec4 material, vec3 n, vec3 v, vec3 l) {
+    const float nl = dot(n, l), nv = dot(n, v);
+    if (nl <= 0.0 || nv <= 0.0) {
+        return vec3(0.0);
+    }
+    const vec3 h = normalize(l + v);
+    const float nh = dot(n, h);
+    if (nh <= 0.0) {
+        return vec3(0.0);
+    }
+    const float r = clamp(material.a, 0.0, 1.0);
+    const float alpha = max(r * r, HitMinAlpha);
+    const float a2 = alpha * alpha;
+    const float dd = nh * nh * (a2 - 1.0) + 1.0;
+    const float d = a2 / (3.14159265 * dd * dd);
+    const float m = 1.0 - clamp(dot(v, h), 0.0, 1.0);
+    const float m2 = m * m;
+    const vec3 f = material.rgb + (1.0 - material.rgb) * (m2 * m2 * m);
+    const float g = HitSpecG1(alpha, nl) * HitSpecG1(alpha, nv);
+    return min(f * (3.14159265 * d * g / (4.0 * nl * nv)), vec3(HitSpecMax));
+}
+
+void LightCell(vec3 p, out uint first, out uint last, out uint entries, out bool grid) {
+    first = 0u;
+    last = min(LightCount(), MaxGiLights);
+    entries = 0u;
+    grid = light_grid[7] != 0u;
+    if (grid) {
+        const vec3 grid_origin = uintBitsToFloat(uvec3(light_grid[0], light_grid[1], light_grid[2]));
+        const float inv_cell = uintBitsToFloat(light_grid[3]);
+        const uvec3 dims = uvec3(light_grid[4], light_grid[5], light_grid[6]);
+        const vec3 f = clamp(floor((p - grid_origin) * inv_cell), vec3(0.0), vec3(dims - 1u));
+        const uvec3 c = uvec3(f);
+        const uint cells = dims.x * dims.y * dims.z;
+        const uint cell = min((c.z * dims.y + c.y) * dims.x + c.x, cells - 1u);
+        first = light_grid[8u + cell];
+        last = light_grid[9u + cell];
+        entries = 9u + cells;
+    }
+}
+
+vec3 DirectLit(vec3 p, vec3 n, uint set_id, vec3 v, vec3 albedo, vec4 material, uint rays) {
+    vec3 result = vec3(0.0);
+    uint traced = 0u;
+    const vec3 origin = p + n * (Bias() + abs(p.z) * 2e-4);
+    if ((BounceFlags() & BounceFlagLights) != 0u) {
+        const uint count = min(LightCount(), MaxGiLights);
+        uint first, last, entries;
+        bool grid;
+        LightCell(p, first, last, entries, grid);
+        for (uint k = first; k < last; ++k) {
+            const uint i = grid ? light_grid[entries + k] : k;
+            if (i >= count) {
+                continue;
+            }
+            const DirectLight l = lights[i];
+            const vec3 d = l.pos_inv_r2.xyz - p;
+            const float d2 = dot(d, d);
+            const float inv_r2 = l.pos_inv_r2.w;
+            if (d2 <= 1e-8 || d2 * inv_r2 >= 1.0) {
+                continue;
+            }
+            float cone = 1.0;
+            float atten = max(0.0, 1.0 / d2 - inv_r2);
+            if (l.spec_kind.w > 0.5) {
+                const vec4 hp = vec4(p, 1.0);
+                const vec4 q = vec4(dot(l.cone[0], hp), dot(l.cone[1], hp), dot(l.cone[2], hp),
+                                    dot(l.cone[3], hp));
+                if (q.z <= 0.0 || q.w == 0.0) {
+                    continue;
+                }
+                const vec2 xy = q.xy / q.w;
+                const float disc = clamp(1.0 - dot(xy, xy), 0.0, 1.0);
+                if (l.spec_kind.w < 1.5) {
+                    cone = disc;
+                } else {
+                    const float axial = clamp(1.0 - q.w / l.wrap_r_flag.z, 0.0, 1.0);
+                    cone = disc * disc * axial * axial;
+                    atten = 1.0;
+                }
+                if (cone <= 0.0) {
+                    continue;
+                }
+            }
+            const float dist = sqrt(d2);
+            const float nl = clamp(dot(n, d / dist), 0.0, 1.0);
+            if (nl <= 0.0) {
+                continue;
+            }
+            if ((uint(l.wrap_r_flag.w + 0.5) & 1u) != 0u) {
+                const float legacy_f = 1.0 - sqrt(clamp(d2 * inv_r2, 0.0, 1.0));
+                atten = legacy_f * legacy_f;
+            }
+            if ((uint(l.wrap_r_flag.w + 0.5) & 4u) != 0u) {
+                const float s2 = l.wrap_r_flag.z;
+                atten = max(0.0, s2 / (d2 + s2) - s2 / (1.0 / inv_r2 + s2)) *
+                        HousingFade(uint(l.wrap_r_flag.w + 0.5), d2);
+            }
+            const vec3 c = l.color_sp.rgb * (nl * atten * cone) *
+                           (albedo + HitSpecular(material, n, v, d / dist));
+            if (dot(c, vec3(1.0)) <= 0.0) {
+                continue;
+            }
+            float vis = 1.0;
+            if (traced < rays) {
+                ++traced;
+                const vec3 ray = l.pos_inv_r2.xyz - origin;
+                const float ray_len = length(ray);
+                if (ray_len > 1e-3) {
+                    vis = Transmittance(origin, ray / ray_len, max(ray_len - BounceGap(), 1e-3));
+                }
+            }
+            result += c * vis;
+        }
+    }
+    if ((BounceFlags() & BounceFlagDirSets) != 0u && set_id < DirSetCount()) {
+        // The same set the direct pass shades this pixel with (MoonSet), so bounce light has the
+        // same moon.
+        const uint base = MoonSet(set_id) * 18u;
+        const vec4 d1 = sets[base];
+        const vec3 c1 = sets[base + 4u].xyz;
+        const vec3 L1 = normalize(vec3(dot(view_rows[0].xyz, d1.xyz), dot(view_rows[1].xyz, d1.xyz),
+                                       dot(view_rows[2].xyz, d1.xyz)));
+        const float nl1 = clamp(dot(n, L1), 0.0, 1.0);
+        float sun_vis = 1.0;
+        if (nl1 > 0.0 && dot(c1, c1) > 0.0) {
+            sun_vis = Transmittance(origin, L1, 1.0e4);
+        }
+        result += c1 * nl1 * sun_vis * (albedo + HitSpecular(material, n, v, L1));
+    }
+    return Finite(result) ? result : vec3(0.0);
+}
+
+vec3 DirectAtHit(vec3 p, vec3 n, uint set_id, vec3 v, vec3 albedo) {
+    return DirectLit(p, n, set_id, v, albedo, HitMaterial(p), BounceRays());
+}
+
+vec3 SourceColor(uint source) {
+    return source == SourceScreen ? vec3(0.0, 1.0, 0.0)
+         : source == SourceTraced ? vec3(1.0, 1.0, 0.0)
+         : source == SourceUnknown ? vec3(1.0, 0.0, 1.0)
+         : source == SourceSharc ? vec3(0.0, 1.0, 1.0)
+         : source == SourceMaterial ? vec3(0.0, 0.3, 1.0)
+         : source == SourceSky ? vec3(1.0, 0.0, 0.0) : vec3(0.25);
+}
+
+vec3 CosineDirection(vec3 n, inout uint state) {
+    const vec3 helper = abs(n.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 tangent = normalize(cross(helper, n));
+    const vec3 bitangent = cross(n, tangent);
+    const float u1 = Random(state);
+    const float u2 = Random(state);
+    const float r = sqrt(u1);
+    const float phi = 6.28318530718 * u2;
+    const vec3 local = vec3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - u1)));
+    return tangent * local.x + bitangent * local.y + n * local.z;
+}
+
+void WriteAux(ivec2 pixel, vec3 albedo, vec3 spec, vec3 n, float roughness, float hit_distance) {
+    imageStore(aux_albedo_out, pixel, vec4(albedo, 1.0));
+    imageStore(aux_spec_out, pixel, vec4(spec, 1.0));
+    imageStore(aux_normal_out, pixel, vec4(n, roughness));
+    imageStore(aux_hit_out, pixel, vec4(hit_distance, 0.0, 0.0, 0.0));
+}
+
+#if defined(RT_LIGHT_VIS)
+// Fill-light visibility (BB_RT_FILL_VIS): one workgroup per light, fixed Fibonacci-sphere rays
+// from the light position, so the result is deterministic and noise-free. A ray that reaches no
+// solid surface counts as sky, weighted by the same blended (glass, smoke) attenuation as the
+// moon's shadow rays; shadow-only kept casters block it like they block the moon.
+// Emitter evidence, all reported to the host which decides:
+// - emission (Emission()) at a solid or blended hit within emit_dist;
+// - enclosure: the fraction of rays that meet solid or blended geometry within emit_dist. A light
+//   inside a fixture (lantern housing, glass panes, candle) is mostly enclosed; a fill light near
+//   a wall is not (a wall 0.4 m away covers ~17% of the sphere within 0.6 m);
+// - screen: whether the light position is on screen and not hidden (then this frame's TLAS holds
+//   the geometry drawn there), and the emissive G-buffer target around it.
+const uint MaxLightVis = 64u; // Rt::FillVisBatch
+const uint VisOutputs = 3u;   // Rt::FillVisOutputs
+layout(binding = 28, std430) buffer LightVis {
+    vec4 vis_in[MaxLightVis]; // xyz: light position in view space
+    // [0] sky fraction, emissive ray fraction, max emission luma, nearest solid hit
+    // [1] enclosed ray fraction, blended-within-reach ray fraction, nearest blended hit,
+    //     max screen emissive luma near the light
+    // [2] on screen and not hidden (0/1), scene depth minus light depth at its pixel,
+//     enclosed fraction of the upward rays (world y > 0.5): a lamp's cap vs a fire's open top
+    vec4 vis_out[MaxLightVis * VisOutputs];
+};
+layout(push_constant) uniform VisPush {
+    uint vis_count;
+    uint vis_rays;
+    float vis_offset;
+    float vis_emit_dist;
+    float vis_emit_luma;
+    float vis_smoke;
+};
+const uint VisThreads = 64u; // local_size 8x8
+const uint VisScreenTaps = 25u; // 5x5 window
+const uint VisScreenCentre = 12u;
+const float VisScreenRadius = 0.3; // metres around the light
+shared vec4 vis_a[VisThreads];
+shared vec4 vis_b[VisThreads];
+shared vec2 vis_screen;
+shared vec2 vis_up[VisThreads];
+
+vec3 FibonacciDir(uint i, uint n) {
+    const float z = 1.0 - (2.0 * float(i) + 1.0) / float(n);
+    const float r = sqrt(max(0.0, 1.0 - z * z));
+    const float phi = float(i) * 2.39996322973;
+    return vec3(r * cos(phi), r * sin(phi), z);
+}
+
+// Transmittance of a ray that reached no solid surface: blended surfaces attenuate it like the
+// moon's shadow rays (rt_direct.comp Transmittance, alpha x BB_RT_FX_SMOKE_OPACITY), kept
+// shadow-only casters block it.
+float VisSkyTransmittance(vec3 origin, vec3 dir) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu & ~MaskSolid, TlasPoint(tlas_frame_flags.xy, origin), 0.0, TlasDir(tlas_frame_flags.xy, dir),
+                          1e6);
+    float t = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u) {
+            t *= 1.0 - clamp(SmokeAlpha(instance, primitive, b) * vis_smoke, 0.0, 1.0);
+            if (t < 0.02) {
+                rayQueryConfirmIntersectionEXT(q);
+            }
+        } else if (AlphaTestPasses(instance, primitive, b)) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT
+               ? 0.0
+               : t;
+}
+
+// Closest blended surface (glass, sprites in the TLAS) up to t_max, whatever its alpha: thin
+// lantern panes count as part of the fixture.
+float VisBlendedHit(vec3 origin, vec3 dir, float t_max, out uint instance_id, out uint primitive,
+                    out vec2 barycentrics, out mat3 rotation) {
+    instance_id = 0xFFFFFFFFu;
+    primitive = 0u;
+    barycentrics = vec2(0.0);
+    rotation = mat3(1.0);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT,
+                          0x02u, TlasPoint(tlas_frame_flags.xy, origin), 0.0, TlasDir(tlas_frame_flags.xy, dir), t_max);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        instance_id = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+        primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+        barycentrics = rayQueryGetIntersectionBarycentricsEXT(q, true);
+        rotation = TlasToView(tlas_frame_flags.xy, mat3(rayQueryGetIntersectionObjectToWorldEXT(q, true)));
+        return rayQueryGetIntersectionTEXT(q, true);
+    }
+    return -1.0;
+}
+
+// Emission at a hit, only from the game's emissive target (on screen) or the per-mesh cache
+// learned from it. Without that target Emission() falls back to the mesh's mean lit screen
+// colour, which holds the light's own light, so it is not evidence and counts as zero.
+float VisEmission(uint id, vec3 hit) {
+    if ((BounceFlags() & BounceFlagEmissive) == 0u) {
+        return 0.0;
+    }
+    const float e = Luma(Emission(id, EmptySurface(), hit));
+    return isnan(e) || isinf(e) ? 0.0 : max(e, 0.0);
+}
+
+// One tap of the 5x5 screen window (0.3 m across at the light's depth) around the light: the
+// emissive target where the scene depth is within reach of the light. The centre tap also
+// reports whether the light position is on screen and not hidden behind nearer geometry.
+float VisScreenTap(vec3 center, uint tap) {
+    if (center.z <= 0.05) {
+        return 0.0;
+    }
+    const float reach = vis_emit_dist + 0.02 * center.z;
+    const float px_per_m = proj.x * Size().x * 0.5 / center.z;
+    const float step = clamp(VisScreenRadius * px_per_m, 1.0, 16.0) * 0.5;
+    const vec2 pixel = ViewToPixel(center, proj, Jitter()) +
+                       vec2(float(int(tap % 5u) - 2), float(int(tap / 5u) - 2)) * step;
+    const ivec2 ip = ivec2(floor(pixel + 0.5));
+    if (any(lessThan(ip, ivec2(0))) || any(greaterThanEqual(ip, ivec2(Size())))) {
+        return 0.0;
+    }
+    const float scene_z = ViewZ(DepthAt(ip));
+    if (tap == VisScreenCentre) {
+        vis_screen = vec2(scene_z >= center.z - reach ? 1.0 : 0.0, scene_z - center.z);
+    }
+    if ((BounceFlags() & BounceFlagEmissive) == 0u || abs(scene_z - center.z) > reach) {
+        return 0.0;
+    }
+    const vec3 e = texelFetch(emissive_tex, ip, 0).rgb;
+    return Finite(e) ? Luma(clamp(e, vec3(0.0), vec3(Clamp()))) : 0.0;
+}
+
+void main() {
+    const uint light = gl_WorkGroupID.x;
+    const uint lane = gl_LocalInvocationIndex;
+    const bool valid_light = light < min(vis_count, MaxLightVis);
+    const uint n = max(vis_rays, 1u);
+    float sky = 0.0, emit = 0.0, luma = 0.0, near_solid = MissHitDistance;
+    float enclosed = 0.0, blended = 0.0, near_blended = MissHitDistance, screen_luma = 0.0;
+    vec2 up = vec2(0.0);
+    if (lane == VisScreenCentre) {
+        vis_screen = vec2(0.0);
+    }
+    barrier();
+    if (valid_light) {
+        const vec3 center = vis_in[light].xyz;
+        if (lane < VisScreenTaps) {
+            screen_luma = VisScreenTap(center, lane);
+        }
+        const float reach = max(vis_emit_dist - vis_offset, 0.0);
+        for (uint i = lane; i < n; i += VisThreads) {
+            const vec3 w = FibonacciDir(i, n);
+            const vec3 v = vec3(dot(view_rows[0].xyz, w), dot(view_rows[1].xyz, w),
+                                dot(view_rows[2].xyz, w));
+            if (!Finite(v) || dot(v, v) < 1e-6) {
+                continue;
+            }
+            const vec3 dir = normalize(v);
+            const vec3 origin = center + dir * vis_offset;
+            uint id, primitive;
+            vec2 barycentrics;
+            mat3 rotation;
+            uint rejected = 0u;
+            float t = TraceSpan(origin, dir, 0.0, 1e6, MaskSolid | MaskKept, id, primitive,
+                                barycentrics, rotation, rejected);
+            // A character (skinned surface) next to the light is not its fixture: look past it.
+            if (t >= 0.0 && id < surfaces.length() && (surfaces[id].flags & SurfaceSkinned) != 0u) {
+                const float t2 = TraceSpan(origin, dir, t + 0.01, 1e6, MaskSolid | MaskKept, id,
+                                           primitive, barycentrics, rotation, rejected);
+                t = t2;
+            }
+            bool near_hit = false;
+            float ray_emit = 0.0;
+            if (t >= 0.0) {
+                near_solid = min(near_solid, t + vis_offset);
+                if (t <= reach) {
+                    near_hit = true;
+                    ray_emit = VisEmission(id, origin + dir * t);
+                }
+            }
+            const float b_max = t >= 0.0 ? min(t, reach) : reach;
+            if (b_max > 0.0) {
+                uint bid, bprim;
+                vec2 bbary;
+                mat3 brot;
+                const float bt = VisBlendedHit(origin, dir, b_max, bid, bprim, bbary, brot);
+                if (bt >= 0.0) {
+                    near_hit = true;
+                    blended += 1.0;
+                    near_blended = min(near_blended, bt + vis_offset);
+                    ray_emit = max(ray_emit, VisEmission(bid, origin + dir * bt));
+                }
+            }
+            enclosed += near_hit ? 1.0 : 0.0;
+            if (w.y > 0.5) {
+                up += vec2(near_hit ? 1.0 : 0.0, 1.0);
+            }
+            luma = max(luma, ray_emit);
+            emit += ray_emit > vis_emit_luma ? 1.0 : 0.0;
+            if (t < 0.0) {
+                sky += VisSkyTransmittance(origin, dir);
+            }
+        }
+    }
+    vis_a[lane] = vec4(sky, emit, luma, near_solid);
+    vis_b[lane] = vec4(enclosed, blended, near_blended, screen_luma);
+    vis_up[lane] = up;
+    barrier();
+    if (valid_light && lane == 0u) {
+        vec4 a = vec4(0.0, 0.0, 0.0, MissHitDistance);
+        vec4 b = vec4(0.0, 0.0, MissHitDistance, 0.0);
+        vec2 u = vec2(0.0);
+        for (uint k = 0u; k < VisThreads; ++k) {
+            u += vis_up[k];
+            const vec4 ka = vis_a[k], kb = vis_b[k];
+            a = vec4(a.x + ka.x, a.y + ka.y, max(a.z, ka.z), min(a.w, ka.w));
+            b = vec4(b.x + kb.x, b.y + kb.y, min(b.z, kb.z), max(b.w, kb.w));
+        }
+        const float inv = 1.0 / float(n);
+        const uint o = light * VisOutputs;
+        vis_out[o] = vec4(a.x * inv, a.y * inv, a.z, a.w);
+        vis_out[o + 1u] = vec4(b.x * inv, b.y * inv, b.z, b.w);
+        vis_out[o + 2u] = vec4(vis_screen, u.y > 0.0 ? u.x / u.y : 0.0, 0.0);
+    }
+}
+#elif defined(RT_SKY_LAYER)
+// The game's moon and cloud layer (BB_RT_MOON_FROM_SKY): a blended band mesh around the camera
+// (pixel shader rt_gi.h SkyLayerPs) that the TLAS holds under its own mask bit. Phase 0 traces
+// it from the camera over a world azimuth x elevation grid and stores premultiplied rgb and
+// coverage; phase 1 (one workgroup) finds the moon disc there and stores its world direction
+// in the moon slot for rt_moon_dir.comp. No look at the sky is needed and nothing on screen
+// (fire, cloud gaps, exposure) can pass for the moon. Hits whose texture is unknown come out
+// magenta in the grid (debug view BB_RT_SKY_DEBUG=4).
+layout(push_constant) uniform SkyLayerPush {
+    uint layer_base; // material slot of grid cell 0 (rt_gi.h SkyLayerSlot)
+    uint moon_slot;  // rt_gi.h MoonDirSlot
+    uint layer_phase;
+    float moon_min;  // weakest-channel score a disc needs
+    // Direction from the camera to the cached moon of this sky model (rt_moon_cache.h; w 1 when
+    // known): the game draws the disc only while it is in view, so a load facing away starts
+    // from the cache.
+    vec4 moon_seed;
+    uint moon_reset; // 1 on the first search after a load: drop the last map's moon
+};
+const uint MaskSky = 0x80u;     // rt_geometry.h MaskSky
+const uint LayerW = 512u;       // rt_gi.h SkyLayerWidth
+const uint LayerH = 128u;       // rt_gi.h SkyLayerHeight
+const float LayerElMin = -20.0; // rt_gi.h SkyLayerElMin, degrees
+const float LayerElMax = 90.0;  // rt_gi.h SkyLayerElMax
+// Searches (rt_gi.h SkyLayerEvery frames apart) the moon is kept once the layer is gone (a load,
+// an interior). While the layer draws, a known moon is kept with no limit: the game draws the
+// disc only while it is in view, so looking at the ground drops it from the layer. w is MoonHold
+// only on the search that found the disc (the CPU caches those, rt_moon_cache.h); a kept or
+// seeded moon has MoonHold - 1.
+const float MoonHold = 150.0;
+const int MoonWindow = 12;      // cells around the peak for the weighted centre (a big moon is ~6 cells in radius)
+// A disc, not a pale cloud: the peak must be MoonContrast x the mean score on a ring about 5
+// degrees out (7 azimuth cells, 6 elevation cells). Clouds are wide, so their ring is as pale.
+const float MoonContrast = 4.0;
+const uint MoonRingTaps = 16u;
+const vec4 LayerUnknown = vec4(1.0, 0.0, 1.0, 0.5);
+
+vec3 LayerDir(vec2 cell) {
+    const float az = radians((cell.x / float(LayerW)) * 360.0 - 180.0);
+    const float el = radians(mix(LayerElMin, LayerElMax, cell.y / float(LayerH)));
+    return vec3(cos(el) * sin(az), sin(el), cos(el) * cos(az));
+}
+
+vec4 LayerTexel(uint instance, uint primitive, vec2 b) {
+    if (instance >= surfaces.length()) {
+        return LayerUnknown;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if ((r.flags & SurfaceUsable) != SurfaceUsable || r.texture == 0u ||
+        r.texture >= MaxSurfaceTextures || base + 2u >= uv_pool.length()) {
+        return LayerUnknown;
+    }
+    const vec2 u0 = unpackHalf2x16(uv_pool[base]);
+    const vec2 u1 = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 u2 = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = u0 * (1.0 - b.x - b.y) + u1 * b.x + u2 * b.y;
+    const vec4 t = textureLod(surface_textures[nonuniformEXT(r.texture)], uv, 0.0);
+    if (any(isnan(t)) || any(isinf(t))) {
+        return vec4(0.0);
+    }
+    return vec4(max(t.rgb, vec3(0.0)), clamp(t.a, 0.0, 1.0));
+}
+
+// Every layer surface along the ray, composited without order (premultiplied sum, coverage).
+vec4 LayerTrace(vec3 w) {
+    const vec3 v = vec3(dot(view_rows[0].xyz, w), dot(view_rows[1].xyz, w), dot(view_rows[2].xyz, w));
+    if (!Finite(v) || dot(v, v) < 1e-6) {
+        return vec4(0.0);
+    }
+    const vec3 dir = normalize(v);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoOpaqueEXT,
+                          MaskSky, TlasPoint(tlas_frame_flags.xy, vec3(0.0)), 0.0,
+                          TlasDir(tlas_frame_flags.xy, dir), 1e6);
+    vec3 rgb = vec3(0.0);
+    float clear = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            const vec4 c = LayerTexel(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                                      uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                                      rayQueryGetIntersectionBarycentricsEXT(q, false));
+            rgb += c.rgb * c.a;
+            clear *= 1.0 - c.a;
+        }
+    }
+    return vec4(rgb, 1.0 - clear);
+}
+
+// Distance from the camera to the first mostly opaque layer texel along world direction w.
+float LayerHitT(vec3 w) {
+    const vec3 v = vec3(dot(view_rows[0].xyz, w), dot(view_rows[1].xyz, w), dot(view_rows[2].xyz, w));
+    if (!Finite(v) || dot(v, v) < 1e-6) {
+        return 0.0;
+    }
+    const vec3 dir = normalize(v);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoOpaqueEXT,
+                          MaskSky, TlasPoint(tlas_frame_flags.xy, vec3(0.0)), 0.0,
+                          TlasDir(tlas_frame_flags.xy, dir), 1e6);
+    float best = 0.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            const vec4 c = LayerTexel(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                                      uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                                      rayQueryGetIntersectionBarycentricsEXT(q, false));
+            const float t = rayQueryGetIntersectionTEXT(q, false);
+            if (c.a > 0.5 && min(c.r, min(c.g, c.b)) > moon_min && (best == 0.0 || t < best)) {
+                best = t;
+            }
+        }
+    }
+    return best;
+}
+
+// The moon is near white; the layer's clouds are red or grey. The weakest channel scores it.
+float LayerWhite(uint i) {
+    const uint slot = layer_base + i;
+    if (slot >= material.length()) {
+        return 0.0;
+    }
+    const vec4 m = material[slot];
+    return Finite(m.rgb) ? max(min(m.r, min(m.g, m.b)), 0.0) : 0.0;
+}
+
+shared float l_peak[64];
+shared uint l_at[64];
+shared vec3 l_sum[64];
+shared uint l_cover;
+
+void FindLayerMoon() {
+    const uint t = gl_LocalInvocationIndex;
+    if (t == 0u) {
+        l_cover = 0u;
+    }
+    barrier();
+    float peak = 0.0;
+    uint cover = 0u;
+    uint at = 0u;
+    // Rows above the horizon (y > 0.02, about 1.2 degrees).
+    const uint first = uint(ceil((degrees(asin(0.02)) - LayerElMin) / (LayerElMax - LayerElMin) *
+                                 float(LayerH) - 0.5));
+    for (uint i = t + first * LayerW; i < LayerW * LayerH; i += 64u) {
+        const float s = LayerWhite(i);
+        if (s > peak) {
+            peak = s;
+            at = i;
+        }
+        const uint slot = layer_base + i;
+        cover += slot < material.length() && material[slot].a > 0.01 ? 1u : 0u;
+    }
+    atomicAdd(l_cover, cover);
+    l_peak[t] = peak;
+    l_at[t] = at;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (t < stride && l_peak[t + stride] > l_peak[t]) {
+            l_peak[t] = l_peak[t + stride];
+            l_at[t] = l_at[t + stride];
+        }
+        barrier();
+    }
+    const float top = l_peak[0];
+    const ivec2 c0 = ivec2(l_at[0] % LayerW, l_at[0] / LayerW);
+    // Three rings (about 5, 10 and 17 degrees out); the darkest one counts. Later in the game the
+    // moon grows to ~8 degrees across: the 5 degree ring then lay on the disc and its glow, so the
+    // moon was never found and the light kept a stale cached direction while the player faced it.
+    vec3 ring = vec3(0.0);
+    if (t < MoonRingTaps) {
+        const float a = float(t) * (6.28318530718 / float(MoonRingTaps));
+        const vec2 cs = vec2(cos(a), sin(a));
+        for (int r = 0; r < 3; ++r) {
+            const vec2 radius = r == 0 ? vec2(7.0, 6.0) : r == 1 ? vec2(14.0, 12.0) : vec2(24.0, 20.0);
+            const ivec2 c = c0 + ivec2(round(radius * cs));
+            const int y = clamp(c.y, 0, int(LayerH) - 1);
+            ring[r] = LayerWhite(uint(y) * LayerW + uint((c.x + int(LayerW)) % int(LayerW)));
+        }
+    }
+    l_sum[t] = ring;
+    barrier();
+    vec3 ring_sum = vec3(0.0);
+    for (uint k = 0u; k < MoonRingTaps; ++k) {
+        ring_sum += l_sum[k];
+    }
+    barrier();
+    const float ring_mean = min(ring_sum.x, min(ring_sum.y, ring_sum.z)) / float(MoonRingTaps);
+    const bool found = top > moon_min && top > MoonContrast * ring_mean;
+    vec3 sum = vec3(0.0);
+    if (found) {
+        const int span = 2 * MoonWindow + 1;
+        for (int k = int(t); k < span * span; k += 64) {
+            const ivec2 o = ivec2(k % span, k / span) - MoonWindow;
+            const int y = c0.y + o.y;
+            if (y < 0 || y >= int(LayerH)) {
+                continue;
+            }
+            const int x = (c0.x + o.x + int(LayerW)) % int(LayerW);
+            const float s = LayerWhite(uint(y) * LayerW + uint(x));
+            if (s > 0.5 * top) {
+                sum += LayerDir(vec2(x, y) + 0.5) * (s - 0.5 * top);
+            }
+        }
+    }
+    l_sum[t] = sum;
+    barrier();
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (t < stride) {
+            l_sum[t] += l_sum[t + stride];
+        }
+        barrier();
+    }
+    if (t != 0u || moon_slot >= material.length()) {
+        return;
+    }
+    const vec3 view_t = vec3(view_rows[0].w, view_rows[1].w, view_rows[2].w);
+    const vec3 cam = -(view_rows[0].xyz * view_t.x + view_rows[1].xyz * view_t.y +
+                       view_rows[2].xyz * view_t.z);
+    // Cells this code wrote carry w = MoonCellTag (grid coverage is at most 1): the old grid
+    // values there passed as a sighting and a position and swung the light 29 degrees.
+    const float MoonCellTag = 4.0;
+    // A camera jump between two searches (a warp, a load) is another map with another moon:
+    // start over (row 0 cell 4: the camera of the last search). The CPU's reset (the layer's
+    // draws came back after a second away: a load, but also a look at the ground or a walk
+    // under a roof) only counts while this run has no moon placed in the world: it dropped the
+    // found moon and the light went back to the cached direction of the cloud draws, which other
+    // maps share (Cathedral Ward: 30 degrees off), until the player looked at the disc again.
+    const float MoonJump = 100.0;
+    const uint own_last = layer_base + 4u;
+    const vec4 last = material[own_last];
+    const bool jumped = last.w == MoonCellTag && Finite(last.xyz) && Finite(cam) &&
+                        distance(last.xyz, cam) > MoonJump;
+    const bool placed = material[layer_base].w == MoonCellTag;
+    // No tagged camera yet: the first search of a session (or of this layout of the cells).
+    const bool reset = jumped || last.w != MoonCellTag || ((moon_reset & 1u) != 0u && !placed);
+    material[own_last] = vec4(cam, MoonCellTag);
+    vec4 m = material[moon_slot];
+    if (!Finite(m.xyz) || !(m.w > 0.0) || reset) {
+        m = vec4(0.0);
+    }
+    const uint stats = layer_base + LayerW * LayerH;
+    // The moon on screen (rt_sky.comp FindScreenMoon, written every frame): the disc the player
+    // sees. It wins over the layer mesh's white spot, which only counts with BB_RT_MOON_LAYER_FIND=1.
+    const vec4 screen = stats + 2u < material.length() ? material[stats + 2u] : vec4(0.0);
+    // The disc's range in metres (rt_sky.comp FindScreenMoon, its stats slot).
+    const float screen_range = stats + 3u < material.length() ? material[stats + 3u].w : 0.0;
+    // Its glow (luminance over the sky's just past it): the moon is the disc with the most.
+    const float screen_glow = stats + 3u < material.length() ? material[stats + 3u].x : 0.0;
+    bool on_screen = screen.w > 0.0 && Finite(screen.xyz) && dot(screen.xyz, screen.xyz) > 0.5;
+    // w -1: the search ran and found no disc.
+    const bool search_ran = on_screen || screen.w < 0.0;
+    if (search_ran) {
+        material[stats + 2u].w = 0.0; // used once
+    }
+    // Finds carry rt_sky.comp ScreenMoonTag: they passed the disc test (a round mesh in front of
+    // the sky, any colour). Untagged finds never count: lit clouds out of view replaced the moon
+    // and the light swung as the player walked. The first disc of a run replaces the kept moon
+    // (the game's or the cache's direction) once it was found MoonFirst times at one spot (row 0
+    // cell 3: the spot, w 10 + the count, then 2 = a disc was seen; reset on load). At once, one
+    // stray find in the Nightmare Frontier, whose sky has no moon, placed a moon behind the
+    // rocks and the whole map sat in its shadow until the next warp.
+    const float MoonFirst = 3.0;
+    const float MoonFirstDir = 0.99863; // cos(3 degrees)
+    const uint own_disc = layer_base + 3u;
+    const bool screen_disc = on_screen && fract(screen.w) > 0.25;
+    const bool disc_seen = !reset && material[own_disc].w == 2.0;
+    bool confirm = false; // this search is the one that makes the first disc count
+    if (screen_disc && !disc_seen) {
+        const vec4 spot = reset ? vec4(0.0) : material[own_disc];
+        const bool same = Finite(spot.xyz) && dot(spot.xyz, spot.xyz) > 0.5 && spot.w >= 10.0 &&
+                          dot(normalize(screen.xyz), spot.xyz) > MoonFirstDir;
+        const float count = same ? spot.w - 10.0 + 1.0 : 1.0;
+        confirm = count >= MoonFirst;
+        material[own_disc] = vec4(normalize(screen.xyz), confirm ? 2.0 : 10.0 + count);
+        if (!confirm) {
+            on_screen = false; // not yet
+        }
+    } else if (reset) {
+        material[own_disc] = vec4(0.0);
+    }
+    if (!screen_disc) {
+        on_screen = false;
+    }
+    const bool layer_find = (moon_reset & 2u) != 0u;
+    const vec3 d = on_screen ? screen.xyz : (layer_find && found ? l_sum[0] : vec3(0.0));
+    const bool seeded = moon_seed.w > 0.0 && Finite(moon_seed.xyz) && dot(moon_seed.xyz, moon_seed.xyz) > 0.5;
+    vec3 found_dir = vec3(0.0);
+    // The disc the game draws is a mesh a few hundred metres out (two sightings 150 m apart at the
+    // cathedral met within 4 m, 250-390 m away), so a kept direction drifted 13 degrees as the
+    // player walked. Each run triangulates the disc from its own sightings, kept in grid row 0
+    // (below the horizon, never searched; phase 0 leaves these cells): cell 0 the position (w 1),
+    // cell 1 the camera of the last sighting (w 1), cell 2 its direction. Out of view the light
+    // points from the camera at that position. A find always wins over the cached seed: cloud
+    // segments are shared between areas, so the seed can be another area's moon (the cathedral
+    // got Hunter's Dream's, 15 degrees off). w = MoonOwn marks a moon found this run.
+    const float MoonOwn = MoonHold - 0.5;
+    const float MoonBaseline = 10.0;      // metres walked between sightings for a triangulation
+    const float MoonMinParallax = 3.0e-4; // sin^2 of 1 degree between the two sightings
+    const uint own_pos = layer_base, own_cam = layer_base + 1u, own_dir = layer_base + 2u;
+    vec4 pos = material[own_pos];
+    vec4 s_cam = material[own_cam];
+    vec4 s_dir = material[own_dir];
+    if (reset || !Finite(pos.xyz) || !Finite(s_cam.xyz) || !Finite(s_dir.xyz) ||
+        !Finite(cam)) {
+        pos = vec4(0.0);
+        s_cam = vec4(0.0);
+        s_dir = vec4(0.0);
+    }
+    pos.w = pos.w == MoonCellTag ? 1.0 : 0.0;
+    s_cam.w = s_cam.w == MoonCellTag ? 1.0 : 0.0;
+    // The first disc of the run, once confirmed, replaces whatever was kept.
+    if (confirm) {
+        pos = vec4(0.0);
+        s_cam = vec4(0.0);
+        s_dir = vec4(0.0);
+        m = vec4(0.0);
+    }
+    const bool own = m.w >= MoonOwn && dot(m.xyz, m.xyz) > 0.5;
+    // Row 0 cell 5: the glow of the kept moon (x) and of the stray spot being counted (y).
+    const uint own_glow = layer_base + 5u;
+    vec2 glow = material[own_glow].w == MoonCellTag && !reset && !confirm
+                    ? material[own_glow].xy : vec2(0.0);
+    if (any(isnan(glow)) || any(isinf(glow))) {
+        glow = vec2(0.0);
+    }
+    bool take = dot(d, d) > 0.0 && Finite(normalize(d)) && normalize(d).y > 0.02;
+    // The moon is static in the world: once this run has one (triangulated, or else the first
+    // find), a find off it is a stray and is dropped. A small bright patch at the horizon in
+    // Hemwick passed as the disc now and then and flicked the light between it and the moon.
+    // Off by MoonAgree from the position (3 degrees), or MoonAgreeDir from a direction-only moon
+    // (10: walking turns the disc until it is triangulated). A spot seen elsewhere steadily
+    // replaces the kept moon, so one wrong first find does not stick for the whole run: s_dir.w
+    // counts sightings of one stray spot (cell 3 xyz, within MoonAgreeDir), less MoonEmptyCost
+    // per search with no disc, and MoonUnlock replaces. A sighting elsewhere restarts it, one of
+    // the kept moon clears it. A plain count let a spot that passed about 1 search in 4 with the
+    // camera still replace the moon after 300 frames; the moon in view passes every search, so
+    // a wrong first find still unlocks in under a second (12 searches, 4 frames apart).
+    const float MoonAgree = 0.99863;    // cos(3 degrees)
+    const float MoonAgreeDir = 0.98481; // cos(10 degrees)
+    const float MoonUnlock = 12.0;
+    const float MoonEmptyCost = 2.0;
+    const float MoonFindBlend = 0.1;
+    if (isnan(s_dir.w) || isinf(s_dir.w)) {
+        s_dir.w = 0.0;
+    }
+    vec3 kept = vec3(0.0);
+    if (pos.w > 0.0 && dot(pos.xyz - cam, pos.xyz - cam) > 1.0) {
+        kept = normalize(pos.xyz - cam);
+    } else if (own) {
+        kept = normalize(m.xyz);
+    }
+    // The kept moon in the middle of the view and not found there: its glow fades, so a kept
+    // disc that is one no longer (the Nightmare Frontier's rock, once the search stopped passing
+    // it) gives way to the next one seen.
+    const float MoonGlowFade = 0.97;
+    const float MoonCentred = 0.96593; // cos(15 degrees) from the view's axis
+    const bool found_kept = take && dot(kept, kept) > 0.5 &&
+                            dot(normalize(d), kept) >= (pos.w > 0.0 ? MoonAgree : MoonAgreeDir);
+    if (search_ran && dot(kept, kept) > 0.5 && !found_kept &&
+        dot(normalize(view_rows[2].xyz), kept) > MoonCentred) {
+        glow.x *= MoonGlowFade;
+    }
+    if (take && dot(kept, kept) > 0.5 &&
+        dot(normalize(d), kept) < (pos.w > 0.0 ? MoonAgree : MoonAgreeDir)) {
+        const vec3 stray = material[own_disc].xyz;
+        const bool same = Finite(stray) && dot(stray, stray) > 0.5 && dot(normalize(d), stray) > MoonAgreeDir;
+        s_dir.w = same ? max(s_dir.w, 0.0) + 1.0 : 1.0;
+        material[own_disc].xyz = normalize(d);
+        // A disc with less glow never replaces the kept one: a moonlit round cloud in the
+        // Hunter's Dream (glow 1.4, the moon 1.6-2.6) took the light for as long as the camera
+        // rested on it. Found first, it still gives way to the moon.
+        glow.y = same && on_screen ? mix(glow.y, screen_glow, 0.25) : screen_glow;
+        if (s_dir.w < MoonUnlock || (on_screen && glow.x > 0.0 && glow.y <= glow.x)) {
+            take = false;
+        } else {
+            glow.x = 0.0;
+            pos = vec4(0.0);
+            s_cam = vec4(0.0);
+            s_dir = vec4(0.0);
+        }
+    } else if (search_ran && !screen_disc) {
+        s_dir.w = max(s_dir.w - MoonEmptyCost, 0.0);
+    }
+    if (take) {
+        found_dir = normalize(d);
+        // Finds on one moon scatter (about 1 degree when the disc is half off screen), so one
+        // that agrees with this run's moon moves it a tenth of the way.
+        if (own && dot(found_dir, normalize(m.xyz)) >= MoonAgreeDir) {
+            found_dir = normalize(mix(normalize(m.xyz), found_dir, MoonFindBlend));
+        }
+        m = vec4(found_dir, MoonHold);
+        s_dir.w = 0.0;
+        if (on_screen) {
+            glow.x = glow.x > 0.0 ? mix(glow.x, screen_glow, 0.1) : screen_glow;
+        }
+        // The disc on screen comes with its range (depth): the moon's place in the world at
+        // once, from one look. Two sightings a walk apart (below) only serve a layer find.
+        const bool ranged = on_screen && screen_range > 50.0 && screen_range < 5.0e4;
+        if (ranged) {
+            // The first find places it; later ones move it a twentieth of the way (finds 4
+            // frames apart: about a second to settle). Finds of one disc scatter 0.4-0.7 degrees
+            // (the blood moon's rims next to a cloud sheet, Upper Cathedral Ward's half disc); at
+            // a quarter of the way the light crept with them.
+            const vec3 x = cam + normalize(d) * screen_range;
+            pos = vec4(pos.w > 0.0 ? mix(pos.xyz, x, 0.05) : x, 1.0);
+            s_cam = vec4(cam, 1.0);
+            s_dir = vec4(found_dir, 0.0);
+        }
+        const vec3 walked = cam - s_cam.xyz;
+        if (!ranged && s_cam.w > 0.0 && dot(walked, walked) > MoonBaseline * MoonBaseline) {
+            // Closest points of the rays s_cam + t0 * d0 and cam + t1 * found_dir.
+            const vec3 d0 = s_dir.xyz;
+            const float k = dot(d0, found_dir);
+            const float den = 1.0 - k * k;
+            if (den > MoonMinParallax) {
+                const vec3 w0 = s_cam.xyz - cam;
+                const float e = dot(d0, w0), f = dot(found_dir, w0);
+                const float t0 = (k * f - e) / den;
+                const float t1 = (f - k * e) / den;
+                const vec3 x0 = s_cam.xyz + d0 * t0, x1 = cam + found_dir * t1;
+                if (t0 > 50.0 && t1 > 50.0 && distance(x0, x1) < 0.05 * t1) {
+                    const vec3 x = 0.5 * (x0 + x1);
+                    pos = vec4(pos.w > 0.0 ? mix(pos.xyz, x, 0.25) : x, 1.0);
+                }
+                s_cam = vec4(cam, 1.0);
+                s_dir = vec4(found_dir, 0.0);
+            } else if (dot(walked, walked) > 16.0 * MoonBaseline * MoonBaseline) {
+                // Under a degree over 40 m: the disc is kilometres out, a direction is enough.
+                pos = vec4(0.0);
+                s_cam = vec4(cam, 1.0);
+                s_dir = vec4(found_dir, 0.0);
+            }
+        } else if (!(s_cam.w > 0.0)) {
+            s_cam = vec4(cam, 1.0);
+            s_dir = vec4(found_dir, 0.0);
+        }
+    } else if (l_cover > 0u) {
+        // The layer still draws (clouds) without the disc: the moon is out of view. Keep this
+        // run's moon, else point at the cached moon of this sky from this camera, or keep the
+        // last find.
+        if (own) {
+            m.w = MoonOwn;
+        } else if (seeded) {
+            m = vec4(normalize(moon_seed.xyz), MoonHold - 1.0);
+        } else if (m.w > 0.0) {
+            m.w = MoonHold - 1.0;
+        }
+    } else if (seeded) {
+        // No layer draw (the view points at the ground): the CPU still seeds this sky's moon
+        // for a while (vk_ray_tracing.cpp MoonSeedHold), so shadows keep their direction.
+        m = own ? vec4(m.xyz, MoonOwn) : vec4(normalize(moon_seed.xyz), MoonHold - 1.0);
+    } else if (own && pos.w > 0.0) {
+        // Placed in the world this run: kept until a load or a jump. Skies with no layer draws
+        // (Cathedral Ward under the blood moon) lost it 150 searches after the disc left the
+        // screen and fell back to the game's direction until the player looked up again.
+        m.w = MoonOwn;
+    } else {
+        m.w = max(m.w - 1.0, 0.0);
+        if (m.w == 0.0) {
+            m = vec4(0.0);
+        }
+    }
+    // With a position the light always points at it, on a find too: the moon stays put.
+    if (m.w > 0.0 && (own || m.w == MoonHold) && pos.w > 0.0) {
+        const vec3 to = pos.xyz - cam;
+        if (dot(to, to) > 1.0 && Finite(normalize(to)) && normalize(to).y > 0.02) {
+            m.xyz = normalize(to);
+        }
+    }
+    material[moon_slot] = m;
+    material[own_pos] = vec4(pos.xyz, pos.w > 0.0 ? MoonCellTag : 0.0);
+    material[own_cam] = vec4(s_cam.xyz, s_cam.w > 0.0 ? MoonCellTag : 0.0);
+    material[own_dir] = s_dir;
+    material[own_glow] = vec4(glow, 0.0, MoonCellTag);
+    if (stats < material.length()) {
+        material[stats] = vec4(top, ring_mean, float(c0.x), float(c0.y));
+    }
+    if (stats + 1u < material.length()) {
+        // The distance the CPU caches the find at: the layer hit, or for the disc on screen the
+        // triangulated distance (ScreenMoonDistance until there is one; no mesh to hit).
+        const float ScreenMoonDistance = 2000.0;
+        const float screen_t = pos.w > 0.0 ? distance(pos.xyz, cam) : ScreenMoonDistance;
+        material[stats + 1u] = vec4(
+            m.w == MoonHold ? (on_screen ? screen_t : LayerHitT(found_dir)) : 0.0, found_dir);
+    }
+}
+
+void main() {
+    if (layer_phase == 1u) {
+        FindLayerMoon();
+        return;
+    }
+    const uvec2 c = gl_GlobalInvocationID.xy;
+    if (c.x >= LayerW || c.y >= LayerH) {
+        return;
+    }
+    if (c.y == 0u && c.x < 6u) {
+        return; // FindLayerMoon's own-moon cells
+    }
+    const uint slot = layer_base + c.y * LayerW + c.x;
+    if (slot < material.length()) {
+        material[slot] = LayerTrace(LayerDir(vec2(c) + 0.5));
+    }
+}
+#elif defined(RT_REFLECT)
+float ReflectStrength() { return strength_bias.x; }
+float ReflectMaxRough() { return strength_bias.z; }
+uint ReflectFlags() { return bounce_cfg.z; }
+uint ReflectDebug() { return bounce_cfg.w; }
+
+vec3 GgxHalfVector(vec3 n, float alpha, inout uint state) {
+    const float u1 = Random(state);
+    const float u2 = Random(state);
+    const float a2 = alpha * alpha;
+    const float cos_theta = sqrt(max(0.0, (1.0 - u1) / (1.0 + (a2 - 1.0) * u1)));
+    const float sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    const float phi = 6.28318530718 * u2;
+    const vec3 helper = abs(n.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 tangent = normalize(cross(helper, n));
+    const vec3 bitangent = cross(n, tangent);
+    return normalize(tangent * (sin_theta * cos(phi)) + bitangent * (sin_theta * sin(phi)) +
+                     n * cos_theta);
+}
+
+float GgxG1(float alpha, float n_dot_x) {
+    const float a2 = alpha * alpha;
+    const float c = max(n_dot_x, 1e-4);
+    return 2.0 * c / (c + sqrt(a2 + (1.0 - a2) * c * c));
+}
+
+vec3 ReflectTarget(ivec2 pixel) {
+    const vec3 current = imageLoad(reflect_spec_out, pixel).rgb;
+    return Finite(current) ? max(current, vec3(0.0)) : vec3(0.0);
+}
+
+void ReflectStore(ivec2 pixel, vec3 spec, float hit_distance) {
+    if (!Finite(spec)) {
+        spec = vec3(0.0);
+    }
+    imageStore(reflect_spec_out, pixel, vec4(clamp(spec, vec3(0.0), vec3(ReflectMaxOutput)), 1.0));
+    imageStore(reflect_hit_out, pixel, vec4(hit_distance, 0.0, 0.0, 0.0));
+}
+
+void ReflectKeep(ivec2 pixel) {
+    imageStore(reflect_hit_out, pixel, vec4(0.0));
+    if (glass_push.base_cut > 0.0) {
+        imageStore(reflect_spec_out, pixel,
+                   vec4(ReflectTarget(pixel) * (1.0 - clamp(glass_push.base_cut, 0.0, 1.0)), 1.0));
+    }
+}
+
+// A glossy pixel is glass when the camera ray through it first hits, at the pixel's depth, an
+// instance drawn by a BB_RT_GLASS_PS shader (SurfaceGlass in its surface record). The pane's own
+// texture (no decals) comes back in pane.
+bool GlassFind(vec3 p, out float t_pane, out Surface pane, out bool mirror) {
+    t_pane = 0.0;
+    mirror = false;
+    pane = EmptySurface();
+    const float dist = length(p);
+    if (dist <= 1e-4) {
+        return false;
+    }
+    const vec3 dir = p / dist;
+    const float window = GlassDepthWindow * dist + GlassDepthSlack;
+    trace_through_glass = false;
+    uint id, primitive;
+    vec2 barycentrics;
+    mat3 rotation;
+    uint rejected = 0u;
+    const float t = TraceSpan(vec3(0.0), dir, max(dist - window, 0.0), dist + window,
+                              MaskSolid | MaskKept, id, primitive,
+                              barycentrics, rotation, rejected);
+    if (t < 0.0 || !GlassAt(id, primitive, barycentrics)) {
+        return false;
+    }
+    pane = HitSurface(id, primitive, barycentrics, rotation);
+    // The gap is measured along the pane normal, so a mirror seen at a slant is still caught.
+    const float cos_view = pane.valid ? abs(dot(pane.normal, dir)) : 1.0;
+    const float t_end = t + GlassBackedGap / max(cos_view, 0.25);
+    float t_back = t + 0.002;
+    for (int k = 0; k < 4; ++k) {
+        uint back_id, back_prim;
+        vec2 back_bary;
+        mat3 back_rot;
+        uint back_rejected = 0u;
+        const float tb = TraceSpan(vec3(0.0), dir, t_back, t_end, MaskSolid | MaskKept,
+                                   back_id, back_prim, back_bary, back_rot, back_rejected);
+        if (tb < 0.0) {
+            break;
+        }
+        // Another draw, opaque, right behind: a backing board. The bottles' own liquid (same
+        // instance, outside the glass mask) does not count.
+        if (back_id != id && !GlassAt(back_id, back_prim, back_bary)) {
+            pane = EmptySurface();
+            mirror = true;
+            return false;
+        }
+        t_back = tb + 0.002;
+    }
+    t_pane = t;
+    return true;
+}
+
+bool FlameLight(DirectLight light) {
+    return light.spec_kind.w < 0.5 && light.color_sp.b < FlameWarm * light.color_sp.r &&
+           (uint(light.wrap_r_flag.w + 0.5) & 8u) == 0u;
+}
+
+float SpriteCore(vec3 c, vec3 o, vec3 l, float t_hit, vec3 up, float width, float height,
+                 float slack) {
+    const float s = dot(c - o, l);
+    if (s <= 0.0 || (t_hit >= 0.0 && s > t_hit + slack)) {
+        return 0.0;
+    }
+    const vec3 d = c - (o + l * s);
+    const float dv = dot(d, up) / height;
+    const vec3 dh = (d - up * dot(d, up)) / width;
+    const float r2 = dot(dh, dh) + dv * dv;
+    return r2 < 4.0 ? exp(-3.0 * r2) : 0.0;
+}
+
+float FlameCore(vec3 c, vec3 o, vec3 l, float t_hit, vec3 up, float radius, float slack) {
+    return SpriteCore(c, o, l, t_hit, up, radius, FlameHeight * radius, slack);
+}
+
+uint FlameFxCount() {
+    return min(light_grid[FlameFxBase], FlameFxMax);
+}
+
+vec3 FlameFxPoint(uint k) {
+    const uint w = FlameFxBase + 4u + 4u * k;
+    return uintBitsToFloat(uvec3(light_grid[w], light_grid[w + 1u], light_grid[w + 2u]));
+}
+
+bool WispFx(uint k) {
+    return light_grid[FlameFxBase + 7u + 4u * k] == 1u;
+}
+
+bool NearFlameFx(vec3 p) {
+    const uint n = FlameFxCount();
+    for (uint k = 0u; k < n; ++k) {
+        if (WispFx(k)) {
+            continue;
+        }
+        const vec3 gap = FlameFxPoint(k) - p;
+        if (dot(gap, gap) < FlameMerge * FlameMerge) {
+            return true;
+        }
+    }
+    return false;
+}
+
+vec3 FlameImage(vec3 o, vec3 l, float t_hit) {
+    vec3 result = vec3(0.0);
+    const vec3 up = normalize(vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y));
+    const uint fx = FlameFxCount();
+    for (uint k = 0u; k < fx; ++k) {
+        const bool wisp = WispFx(k);
+        const float core =
+            wisp ? SpriteCore(FlameFxPoint(k), o, l, t_hit, up, WispFxWidth,
+                              FlameHeight * WispFxRadius, FlameFxSlack)
+                 : FlameCore(FlameFxPoint(k), o, l, t_hit, up, FlameFxRadius, FlameFxSlack);
+        const vec3 tint = wisp ? WispFxColor : FlameFxColor;
+        result += mix(tint, vec3(tint.r), 0.3 * core) * ((wisp ? WispGain : FlameGain) * core);
+    }
+    const uint count = min(LightCount(), MaxGiLights);
+    uint first, last, entries;
+    bool grid;
+    LightCell(o, first, last, entries, grid);
+    for (uint k = first; k < last; ++k) {
+        const uint i = grid ? light_grid[entries + k] : k;
+        if (i >= count) {
+            continue;
+        }
+        const DirectLight light = lights[i];
+        if (!FlameLight(light)) {
+            continue;
+        }
+        const float core = FlameCore(light.pos_inv_r2.xyz + up * (FlameLift * FlameRadius), o, l,
+                                     t_hit, up, FlameRadius, 0.0);
+        if (core <= 0.0 || NearFlameFx(light.pos_inv_r2.xyz)) {
+            continue;
+        }
+        const float power = dot(light.color_sp.rgb, vec3(1.0));
+        bool beaten = false;
+        for (uint m = first; m < last && !beaten; ++m) {
+            const uint j = grid ? light_grid[entries + m] : m;
+            if (j == i || j >= count) {
+                continue;
+            }
+            const DirectLight other = lights[j];
+            if (!FlameLight(other)) {
+                continue;
+            }
+            const vec3 gap = other.pos_inv_r2.xyz - light.pos_inv_r2.xyz;
+            const float other_power = dot(other.color_sp.rgb, vec3(1.0));
+            beaten = dot(gap, gap) < FlameMerge * FlameMerge && (other_power > power || (other_power == power && j < i));
+        }
+        if (beaten) {
+            continue;
+        }
+        const vec3 hot = vec3(max(light.color_sp.r, max(light.color_sp.g, light.color_sp.b)));
+        result += mix(light.color_sp.rgb, hot, 0.3 * core) * (FlameGain * core);
+    }
+    return result;
+}
+
+vec3 MistLamp(vec3 q) {
+    if ((BounceFlags() & BounceFlagLights) == 0u) {
+        return vec3(0.0);
+    }
+    const uint count = min(LightCount(), MaxGiLights);
+    uint first, last, entries;
+    bool grid;
+    LightCell(q, first, last, entries, grid);
+    vec3 total = vec3(0.0);
+    float chosen_w = 0.0;
+    vec3 chosen_d = vec3(0.0);
+    for (uint k = first; k < last; ++k) {
+        const uint i = grid ? light_grid[entries + k] : k;
+        if (i >= count) {
+            continue;
+        }
+        const DirectLight l = lights[i];
+        const vec3 d = l.pos_inv_r2.xyz - q;
+        const float d2 = dot(d, d);
+        const float inv_r2 = l.pos_inv_r2.w;
+        if (d2 <= 1e-8 || d2 * inv_r2 >= 1.0) {
+            continue;
+        }
+        float cone = 1.0;
+        float atten = max(0.0, 1.0 / d2 - inv_r2);
+        if (l.spec_kind.w > 0.5) {
+            const vec4 hp = vec4(q, 1.0);
+            const vec4 s = vec4(dot(l.cone[0], hp), dot(l.cone[1], hp), dot(l.cone[2], hp), dot(l.cone[3], hp));
+            if (s.z <= 0.0 || s.w == 0.0) {
+                continue;
+            }
+            const vec2 xy = s.xy / s.w;
+            const float disc = clamp(1.0 - dot(xy, xy), 0.0, 1.0);
+            if (l.spec_kind.w < 1.5) {
+                cone = disc;
+            } else {
+                const float axial = clamp(1.0 - s.w / l.wrap_r_flag.z, 0.0, 1.0);
+                cone = disc * disc * axial * axial;
+                atten = 1.0;
+            }
+            if (cone <= 0.0) {
+                continue;
+            }
+        }
+        if ((uint(l.wrap_r_flag.w + 0.5) & 1u) != 0u) {
+            const float legacy_f = 1.0 - sqrt(clamp(d2 * inv_r2, 0.0, 1.0));
+            atten = legacy_f * legacy_f;
+        }
+        if ((uint(l.wrap_r_flag.w + 0.5) & 4u) != 0u) {
+            const float s2 = l.wrap_r_flag.z;
+            atten = max(0.0, s2 / (d2 + s2) - s2 / (1.0 / inv_r2 + s2)) *
+                    HousingFade(uint(l.wrap_r_flag.w + 0.5), d2);
+        }
+        const vec3 e = max(l.color_sp.rgb, vec3(0.0)) * (atten * cone);
+        const float w = dot(e, vec3(1.0));
+        if (!(w > 0.0) || !Finite(e)) {
+            continue;
+        }
+        total += e;
+        if (w > chosen_w) {
+            chosen_w = w;
+            chosen_d = d;
+        }
+    }
+    const float dist = length(chosen_d);
+    if (!(chosen_w > 0.0) || dist <= 1e-3) {
+        return vec3(0.0);
+    }
+    return total * Transmittance(q, chosen_d / dist, max(dist - BounceGap(), 1e-3));
+}
+
+const float MistTop = 4.0;
+const float MistScale = 0.45;
+const vec3 MistWind = vec3(0.12, 0.02, 0.07);
+
+float MistValue(vec3 p) {
+    const vec3 i = floor(p);
+    const vec3 f = p - i;
+    const vec3 u = f * f * (3.0 - 2.0 * f);
+    const uvec3 c = uvec3(ivec3(i) + ivec3(1 << 20));
+    float v[8];
+    for (uint k = 0u; k < 8u; ++k) {
+        const uvec3 o = uvec3(k & 1u, (k >> 1u) & 1u, k >> 2u);
+        const uvec3 cc = c + o;
+        v[k] = float(Hash(cc.x * 73856093u ^ cc.y * 19349663u ^ cc.z * 83492791u) & 0xFFFFu) / 65535.0;
+    }
+    return mix(mix(mix(v[0], v[1], u.x), mix(v[2], v[3], u.x), u.y),
+               mix(mix(v[4], v[5], u.x), mix(v[6], v[7], u.x), u.y), u.z);
+}
+
+float MistNoise(vec3 w, float time) {
+    const vec3 p = w * MistScale - MistWind * time;
+    const vec3 warp = vec3(MistValue(p * 0.6 + vec3(time * 0.11, 0.0, 0.0)),
+                           MistValue(p * 0.6 + vec3(5.2, time * 0.13, 1.3)),
+                           MistValue(p * 0.6 + vec3(2.1, 7.7, time * 0.09))) - 0.5;
+    const vec3 r = p + warp * 1.6;
+    const float n = 0.6 * MistValue(r) + 0.4 * MistValue(r * 2.3 + vec3(17.1, 3.7 + time * 0.2, 9.2));
+    const float lo = clamp(glass_push.mist_patch, 0.0, 0.9);
+    return smoothstep(lo, min(lo + 0.3, 1.0), n) * 2.0;
+}
+
+const float MistReach = 30.0;
+const float MistFar = 300.0;
+const vec3 MistGlowTint = vec3(0.80, 0.95, 0.92);
+const float MistFall = 0.35;
+const float MistLift = 12.0;
+const vec2 MistGlowNear = vec2(1.5, 8.0);
+const float MistSwellScale = 0.15;
+const uint FogFxBase = FlameFxBase + 4u + 4u * FlameFxMax;
+const uint FogFxMax = 1024u;
+
+// Lamp halos seen along a mirror ray (o, l up to t_hit): the halo block after the fog block
+// (count, strength, radius, core, then 8 floats per halo, Rt::BuildHalos), the same Gaussian line
+// integral and flame tint as HaloGlow in rt_gi_apply.comp.
+const vec3 HaloTint = vec3(1.0, 0.5, 0.22);
+const uint HaloFxMax = 16u;
+vec3 MirrorHalos(vec3 o, vec3 l, float t_hit) {
+    const uint base = FogFxBase + 4u + 4u * FogFxMax;
+    const uint n = min(light_grid[base], HaloFxMax);
+    const float len = t_hit < 0.0 ? 1.0e4 : t_hit;
+    vec3 sum = vec3(0.0);
+    for (uint k = 0u; k < n; ++k) {
+        const uint w = base + 4u + 8u * k;
+        const vec3 p = uintBitsToFloat(uvec3(light_grid[w], light_grid[w + 1u], light_grid[w + 2u])) - o;
+        const float radius = uintBitsToFloat(light_grid[w + 3u]);
+        const vec3 ic = uintBitsToFloat(uvec3(light_grid[w + 4u], light_grid[w + 5u], light_grid[w + 6u]));
+        const float core = uintBitsToFloat(light_grid[w + 7u]);
+        const float b = dot(p, l);
+        const float h2 = max(dot(p, p) - b * b, 0.0);
+        const float r2 = radius * radius;
+        if (b <= 0.0 || !(r2 > 0.0) || h2 >= 9.0 * r2) {
+            continue;
+        }
+        const float hh = sqrt(h2 + core * core);
+        const float glow = (atan((len - b) / hh) + atan(b / hh)) / hh * exp(-h2 / r2);
+        const float peak = max(max(ic.r, ic.g), ic.b);
+        sum += HaloTint * (max(peak, 0.0) * glow);
+    }
+    return Finite(sum) ? sum : vec3(0.0);
+}
+const uint MistSheetMax = 8u;
+const float MistSheetNoise = 0.5;
+
+float MistBlob(vec3 q, vec4 c) {
+    const vec3 d = q - c.xyz;
+    const float x = clamp(1.0 - dot(d, d) / (c.w * c.w), 0.0, 1.0);
+    return x * x;
+}
+
+bool MistLevel(vec3 origin, vec3 down, vec3 ay, vec3 cam, out float level) {
+    level = 0.0;
+    uint id, primitive;
+    vec2 barycentrics;
+    mat3 rotation;
+    uint rejected = 0u;
+    const float t = TraceSpan(origin, down, 0.0, MistReach, MaskWater, id, primitive, barycentrics,
+                              rotation, rejected);
+    if (t < 0.0 || id >= surfaces.length()) {
+        return false;
+    }
+    level = dot(ay, origin + down * t - cam);
+    return true;
+}
+
+void MistVolume(vec3 p, bool sheet, vec3 sheet_p, ivec2 pixel, uint set_id, out float mist_t, out vec3 mist_in) {
+    mist_t = 1.0;
+    mist_in = vec3(0.0);
+    const float len = length(p);
+    if (len <= 1e-3) {
+        return;
+    }
+    const vec3 dir = p / len;
+    const float dist = min(len, MistFar);
+    const vec3 ax = vec3(view_rows[0].x, view_rows[1].x, view_rows[2].x);
+    const vec3 ay = vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y);
+    const vec3 az = vec3(view_rows[0].z, view_rows[1].z, view_rows[2].z);
+    const vec3 cam = vec3(view_rows[0].w, view_rows[1].w, view_rows[2].w);
+    const vec3 down = -normalize(ay);
+    const bool fog = glass_push.mist_sheet > 0.0;
+    vec4 fog_c[MistSheetMax];
+    float fog_a[MistSheetMax];
+    float fog_p[MistSheetMax];
+    vec3 fog_rgb[MistSheetMax];
+    uint fog_n = 0u;
+    float level = 0.0;
+    float lift = 0.0;
+    float band = 1.0;
+    float h0 = 0.0;
+    float dh = 0.0;
+    float t_e = 0.0;
+    float t_s = dist;
+    if (fog) {
+        const uint fog_count = min(light_grid[FogFxBase], FogFxMax);
+        for (uint k = 0u; k < fog_count; ++k) {
+            const uint wd = FogFxBase + 4u + 4u * k;
+            const uvec3 cw = uvec3(light_grid[wd], light_grid[wd + 1u], light_grid[wd + 2u]);
+            const vec3 c = uintBitsToFloat(cw & ~0xFFu);
+            const uint packed = light_grid[wd + 3u];
+            const float r = uintBitsToFloat(packed & ~0xFFu);
+            const float a = float(packed & 0xFFu) / 255.0;
+            if (!(r > 0.0) || a <= 0.0) {
+                continue;
+            }
+            const float tc = dot(c, dir);
+            const float d2 = dot(c, c) - tc * tc;
+            if (d2 >= r * r || tc + r <= 0.0 || tc - r >= dist) {
+                continue;
+            }
+            const float x = 1.0 - d2 / (r * r);
+            const float peak = a * x * x;
+            uint slot = fog_n;
+            if (fog_n < MistSheetMax) {
+                ++fog_n;
+            } else {
+                slot = 0u;
+                for (uint m = 1u; m < MistSheetMax; ++m) {
+                    slot = fog_p[m] < fog_p[slot] ? m : slot;
+                }
+                if (peak <= fog_p[slot]) {
+                    continue;
+                }
+            }
+            fog_c[slot] = vec4(c, r);
+            fog_a[slot] = a;
+            fog_p[slot] = peak;
+            fog_rgb[slot] = vec3(cw & 0xFFu) / 255.0;
+        }
+        if (fog_n == 0u) {
+            return;
+        }
+        float lo = 1e30;
+        float hi = 0.0;
+        for (uint k = 0u; k < fog_n; ++k) {
+            const float tc = dot(fog_c[k].xyz, dir);
+            const float half_w = sqrt(max(fog_c[k].w * fog_c[k].w - (dot(fog_c[k].xyz, fog_c[k].xyz) - tc * tc), 0.0));
+            lo = min(lo, tc - half_w);
+            hi = max(hi, tc + half_w);
+        }
+        t_e = max(lo, 0.0);
+        t_s = min(hi, dist);
+    } else {
+        level = sheet ? dot(ay, sheet_p - cam) : 0.0;
+        bool found = sheet;
+        if (!found) {
+            found = MistLevel(dir * max(dist - 0.1, 0.0) - down * 0.2, down, ay, cam, level);
+        }
+        if (!found) {
+            found = MistLevel(dir * (dist * 0.5), down, ay, cam, level);
+        }
+        if (!found) {
+            found = MistLevel(vec3(0.0), down, ay, cam, level);
+        }
+        if (!found) {
+            return;
+        }
+        float cam_level = level;
+        lift = MistLevel(vec3(0.0), down, ay, cam, cam_level) ? clamp(cam_level - level, 0.0, MistLift) : 0.0;
+        band = glass_push.mist_height * MistTop;
+        const float top = lift + band;
+        h0 = dot(ay, -cam) - level;
+        dh = dot(ay, dir);
+        if (abs(dh) < 1e-5) {
+            if (h0 < 0.0 || h0 > top) {
+                return;
+            }
+        } else {
+            const float ta = -h0 / dh;
+            const float tb = (top - h0) / dh;
+            t_e = max(t_e, min(ta, tb));
+            t_s = min(t_s, max(ta, tb));
+        }
+    }
+    if (t_s <= t_e) {
+        return;
+    }
+    const uint steps = max(uint(glass_push.mist_steps + 0.5), 1u);
+    const float dt = (t_s - t_e) / float(steps);
+    const vec2 ign = vec2(pixel) + 5.588238 * float(Frame() & 63u);
+    const float jitter = fract(52.9829189 * fract(dot(ign, vec2(0.06711056, 0.00583715))));
+    const float time = float(Frame()) / 60.0;
+    const uint half_steps = (steps + 1u) / 2u;
+    vec2 wsum = vec2(0.0);
+    vec3 near_q = vec3(0.0);
+    vec3 far_q = vec3(0.0);
+    vec3 glow_c = vec3(0.0);
+    for (uint i = 0u; i < steps; ++i) {
+        const float t = t_e + (float(i) + jitter) * dt;
+        const vec3 q = dir * t;
+        const vec3 w = vec3(dot(ax, q - cam), dot(ay, q - cam), dot(az, q - cam));
+        float density;
+        vec3 tint = vec3(1.0);
+        if (fog) {
+            float s = 0.0;
+            vec3 sc = vec3(0.0);
+            for (uint k = 0u; k < fog_n; ++k) {
+                const float b = fog_a[k] * MistBlob(q, fog_c[k]);
+                s += b;
+                sc += b * fog_rgb[k];
+            }
+            tint = s > 1e-6 ? sc / s : vec3(1.0);
+            density = glass_push.mist * s * mix(1.0, MistNoise(w, time), MistSheetNoise);
+        } else {
+            const float h = max(h0 + dh * t, 0.0);
+            const float swell = MistValue(vec3(w.x, 0.0, w.z) * MistSwellScale + vec3(0.0, time * 0.05, 0.0));
+            const float scale_h = max(glass_push.mist_height * (0.3 + 1.4 * swell), 1e-3);
+            const float fade = 1.0 - clamp(max(h - lift, 0.0) / band, 0.0, 1.0);
+            density = glass_push.mist * exp(-max(h - lift - scale_h, 0.0) / (MistFall * scale_h)) * fade * fade * MistNoise(w, time);
+        }
+        const float step_t = exp(-density * dt);
+        const float wi = mist_t * (1.0 - step_t);
+        if (i < half_steps) {
+            wsum.x += wi;
+            near_q += wi * q;
+        } else {
+            wsum.y += wi;
+            far_q += wi * q;
+        }
+        glow_c += wi * smoothstep(MistGlowNear.x, MistGlowNear.y, t) * tint;
+        mist_t *= step_t;
+    }
+    if (wsum.x > 1e-4) {
+        mist_in += wsum.x * MistLamp(near_q / wsum.x);
+    }
+    if (wsum.y > 1e-4) {
+        mist_in += wsum.y * MistLamp(far_q / wsum.y);
+    }
+    mist_in *= glass_push.mist_albedo / (4.0 * 3.14159265);
+    const float wall = wsum.x + wsum.y;
+    const uint fog_base = set_id * 6u + 1u;
+    if (glass_push.mist_fog > 0.0 && fog_base + 3u < fog_sets.length()) {
+        const vec3 fog_col = fog_sets[fog_base + 3u].rgb;
+        if (Finite(fog_col)) {
+            mist_in += glow_c * glass_push.mist_fog * max(fog_col, vec3(0.0));
+        }
+    } else if (glass_push.mist_glow > 0.0 && wall > 1e-4) {
+        const float lit = clamp(Luma(mist_in / wall) / glass_push.mist_glow, 0.0, 1.0);
+        mist_in += glow_c * glass_push.mist_glow * mix(glass_push.mist_glow_dark, 1.0, lit) * MistGlowTint;
+    }
+    mist_in = Finite(mist_in) ? clamp(mist_in, vec3(0.0), vec3(Clamp())) : vec3(0.0);
+}
+
+const float WaterRippleFade = 40.0;
+const float WaterRippleFps = 60.0;
+
+vec3 WaterRipple(vec3 p, vec3 n, float slope) {
+    const vec3 ax = vec3(view_rows[0].x, view_rows[1].x, view_rows[2].x);
+    const vec3 ay = vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y);
+    const vec3 az = vec3(view_rows[0].z, view_rows[1].z, view_rows[2].z);
+    const vec3 t = vec3(view_rows[0].w, view_rows[1].w, view_rows[2].w);
+    const vec2 w = vec2(dot(ax, p - t), dot(az, p - t));
+    const float fade = clamp(1.0 - length(p) / WaterRippleFade, 0.0, 1.0);
+    if (fade <= 0.0 || abs(dot(n, ay)) < 0.7) {
+        return n;
+    }
+    const float time = float(Frame()) / WaterRippleFps;
+    const vec4 waves[6] = vec4[6](vec4(0.83, 0.56, 5.1, 1.3), vec4(-0.42, 0.91, 7.3, 1.7),
+                                  vec4(0.21, -0.98, 11.9, 2.3), vec4(-0.95, -0.31, 17.3, 2.9),
+                                  vec4(0.64, -0.77, 23.7, 3.7), vec4(-0.12, 0.99, 31.1, 4.3));
+    vec2 grad = vec2(0.0);
+    for (int i = 0; i < 6; ++i) {
+        const float k = waves[i].z;
+        const float phase = dot(waves[i].xy, w) * k + time * waves[i].w;
+        grad += waves[i].xy * (cos(phase) / sqrt(k));
+    }
+    grad *= slope * fade;
+    vec3 rn = normalize(ay - ax * grad.x - az * grad.y);
+    return dot(n, ay) < 0.0 ? -rn : rn;
+}
+
+// Blood under sheet water: the splats are only in the G-buffer albedo (decals), and they are
+// red where stone is near grey (brown cobbles ~0.2, blood ~0.75-0.9 on this scale). Comparing
+// with the floor's own texture failed on layered materials (one texture of several traced).
+float WaterDecalCover(ivec2 pixel) {
+    if ((glass_push.flags & GlassAlbedo) == 0u) {
+        return 0.0;
+    }
+    const vec3 a = texelFetch(albedo_tex, pixel, 0).rgb;
+    if (!Finite(a)) {
+        return 0.0;
+    }
+    const vec3 g = clamp(a, vec3(0.0), vec3(1.0));
+    const float red = (g.r - max(g.g, g.b)) / max(g.r, 0.02);
+    return smoothstep(WaterCoverLo, WaterCoverHi, red);
+}
+
+// Coplanar copies of a floor sit within this fraction of the distance of each other.
+const float WaterCopySlack = 0.002;
+
+// puddle_ok: the pixel is glossy enough to be a puddle (WaterPuddleGloss), else only sheets count.
+uint WaterFind(vec3 p, bool puddle_ok, out vec3 water_p, out vec3 water_n, out float water_depth) {
+    water_p = p;
+    water_n = vec3(0.0);
+    water_depth = 0.0;
+    const float dist = length(p);
+    if (dist <= 1e-4) {
+        return 0u;
+    }
+    const vec3 dir = p / dist;
+    const float window = GlassDepthWindow * dist + GlassDepthSlack;
+    uint sheet_id, sheet_primitive;
+    vec2 sheet_barycentrics;
+    mat3 sheet_rotation;
+    uint sheet_rejected = 0u;
+    const float sheet_max = glass_push.sheet_depth < 0.0 ? dist + window : dist - glass_push.sheet_depth;
+    const vec3 up = normalize(vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y));
+    const float down = abs(dot(dir, up));
+    const float lift = glass_push.raise > 0.0 && down > 0.02 ? glass_push.raise / down : 0.0;
+    const float t_sheet = sheet_max <= 0.0 || (glass_push.flags & WaterSheets) == 0u ? -1.0 :
+                          TraceSpan(vec3(0.0), dir, 0.0, sheet_max + lift, MaskWater, sheet_id,
+                                    sheet_primitive, sheet_barycentrics, sheet_rotation,
+                                    sheet_rejected);
+    if (t_sheet >= 0.0 && sheet_id < surfaces.length()) {
+        water_n = dot(up, dir) > 0.0 ? -up : up;
+        const float t_top = max(t_sheet - lift, 0.0);
+        water_depth = max(dist - t_top, 0.0);
+        if ((glass_push.flags & WaterAtFloor) == 0u) {
+            water_p = dir * t_top;
+        }
+        return 3u;
+    }
+    if (!puddle_ok || (glass_push.flags & WaterPuddles) == 0u) {
+        return 0u;
+    }
+    // Every surface in the window, not only the closest: a puddle floor often has a coplanar copy
+    // (kept from an earlier frame, or a second draw), and which copy wins the closest hit changes
+    // with the view angle, so the puddles blinked between mirror and dry stone while moving.
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoOpaqueEXT,
+                          MaskSolid | MaskKept, TlasPoint(tlas_frame_flags.xy, vec3(0.0)),
+                          max(dist - window, 0.0), TlasDir(tlas_frame_flags.xy, dir), dist + window);
+    float t_any = 1e30;
+    float t_water = 1e30;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const float t = rayQueryGetIntersectionTEXT(q, false);
+        const uint id = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        t_any = min(t_any, t);
+        if (id < surfaces.length() && (surfaces[id].flags & SurfaceWater) != 0u) {
+            t_water = min(t_water, t);
+        }
+    }
+    if (t_any > 1e29) {
+        return 0u;
+    }
+    return t_water <= t_any + WaterCopySlack * dist + 0.01 ? 2u : 1u;
+}
+
+// Radiance arriving through a thin pane along the camera ray: the ray goes on straight (no
+// refraction offset) from t_start, past the pane's back face, and its hit is shaded like a
+// reflection hit.
+vec3 GlassBehind(vec3 dir, float t_start, uint set_id) {
+    uint id, primitive;
+    vec2 barycentrics;
+    mat3 rotation;
+    uint rejected = 0u;
+    trace_through_glass = true;
+    // MaskKept too: the room behind a pane is often not drawn this frame (the game culls it
+    // behind the door), only kept from earlier frames; without it the ray reached the sky.
+    const float t = TraceSpan(vec3(0.0), dir, t_start, 1e6, MaskSolid | MaskKept, id, primitive,
+                              barycentrics, rotation, rejected);
+    trace_through_glass = false;
+    vec3 radiance;
+    if (t < 0.0) {
+        radiance = SkyRadiance(dir);
+    } else {
+        const vec3 hit = dir * t;
+        const Surface surface = HitSurface(id, primitive, barycentrics, rotation);
+        const vec3 albedo = surface.valid ? surface.albedo : vec3(UnknownAlbedo);
+        vec3 hn = surface.normal;
+        if (dot(hn, hn) < 0.5) {
+            hn = -dir;
+        } else if (dot(hn, dir) > 0.0) {
+            hn = -hn;
+        }
+        radiance = DirectAtHit(hit, hn, set_id, -dir, albedo) + HitEmission(id, surface, hit);
+    }
+    return Finite(radiance) ? clamp(radiance, vec3(0.0), vec3(Clamp())) : vec3(0.0);
+}
+
+void GlassPaint(ivec2 pixel, vec3 color) {
+    imageStore(reflect_spec_out, pixel, vec4(color, 1.0));
+    if ((glass_push.flags & GlassKeep) != 0u) {
+        imageStore(glass_keep_out, pixel, vec4(0.0));
+    }
+    if ((glass_push.flags & GlassIrr) != 0u) {
+        imageStore(reflect_irr_out, pixel, vec4(0.0));
+    }
+    imageStore(reflect_hit_out, pixel, vec4(0.0));
+}
+
+void MistKeep(ivec2 pixel, float keep) {
+    if ((glass_push.flags & GlassIrr) != 0u) {
+        const vec3 irr = imageLoad(reflect_irr_out, pixel).rgb;
+        imageStore(reflect_irr_out, pixel, vec4(Finite(irr) ? max(irr, vec3(0.0)) * keep : vec3(0.0), 1.0));
+    }
+    if ((glass_push.flags & GlassKeep) != 0u) {
+        imageStore(glass_keep_out, pixel, vec4(-max(keep, 1e-4)));
+    }
+}
+
+void MistBase(ivec2 pixel, bool fogged, float mist_t, vec3 mist_in) {
+    if (!fogged) {
+        ReflectKeep(pixel);
+        return;
+    }
+    imageStore(reflect_hit_out, pixel, vec4(0.0));
+    const vec3 base = ReflectTarget(pixel) * (1.0 - clamp(glass_push.base_cut, 0.0, 1.0));
+    imageStore(reflect_spec_out, pixel, vec4(clamp(base * mist_t + mist_in, vec3(0.0), vec3(ReflectMaxOutput)), 1.0));
+    MistKeep(pixel, mist_t);
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const vec2 size = Size();
+    if (pixel.x >= int(size.x) || pixel.y >= int(size.y)) {
+        return;
+    }
+    if ((glass_push.flags & GlassKeep) != 0u) {
+        imageStore(glass_keep_out, pixel, vec4(1.0));
+    }
+    const float depth = DepthAt(pixel);
+    if (depth >= 1.0 || depth < 0.0 || isnan(depth)) {
+        ReflectKeep(pixel);
+        return;
+    }
+    float roughness = 1.0;
+    if ((BounceFlags() & BounceFlagG1) != 0u) {
+        const float g1x = texelFetch(g1_tex, pixel, 0).x;
+        roughness = isnan(g1x) ? 1.0 : clamp(1.0 - g1x, 0.0, 1.0);
+    }
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const bool glass_candidate =
+        (glass_push.flags & GlassOn) != 0u && 1.0 - roughness > glass_push.gloss;
+    float t_pane = 0.0;
+    Surface pane = EmptySurface();
+    bool mirror = false;
+    const bool glass = glass_candidate && GlassFind(p, t_pane, pane, mirror);
+    if (mirror) {
+        roughness = 0.0;
+    }
+    if (glass && (glass_push.flags & GlassDebugMask) != 0u) {
+        GlassPaint(pixel, vec3(4.0, 0.0, 4.0));
+        return;
+    }
+    if (glass_candidate && !glass && (glass_push.flags & GlassDebugCandidates) != 0u) {
+        GlassPaint(pixel, vec3(0.0, 2.0, 0.0));
+        return;
+    }
+    vec3 water_p = p;
+    vec3 water_n = vec3(0.0);
+    float water_depth = 0.0;
+    uint water_hit =
+        !glass && (glass_push.flags & WaterOn) != 0u
+            ? WaterFind(p, (BounceFlags() & BounceFlagG1) == 0u || 1.0 - roughness >= WaterPuddleGloss,
+                        water_p, water_n, water_depth)
+            : 0u;
+    // G-buffer water (a floor shader on the water list) is only wet where the game made it
+    // glossy: its puddles. The rest of that floor (gloss ~0.3..0.5) is dry stone.
+    if (water_hit == 2u && (BounceFlags() & BounceFlagG1) != 0u && 1.0 - roughness < WaterPuddleGloss) {
+        water_hit = 1u;
+    }
+    const bool water = water_hit >= 2u;
+    // The game's gloss ramps from dry to wet over the puddle's rim: a hard cut at
+    // WaterPuddleGloss drew jagged islands of full mirror (the Hunter's Dream path).
+    const float puddle_edge = glass_push.puddle_edge;
+    const float puddle_w = water_hit == 2u && (BounceFlags() & BounceFlagG1) != 0u && puddle_edge > 0.0
+                               ? smoothstep(WaterPuddleGloss, WaterPuddleGloss + puddle_edge, 1.0 - roughness)
+                               : 1.0;
+    // Sheet water is a volume: the floor shows through 1 - path / murk of the way, the rest is
+    // the murky body (scattered light), and the surface mirrors only its Fresnel share. Linear
+    // like the game's water layer (water colour = clamp(depth x 0.2)): shallow water is clear.
+    const float clear = water_hit == 3u && glass_push.murk > 0.0 ? 1.0 - clamp(water_depth / glass_push.murk, 0.0, 1.0) : 0.0;
+    // Decals on the floor (blood): no mirror or body over them, so they keep their colour
+    // instead of turning to grey reflection.
+    const float decal = water_hit == 3u ? WaterDecalCover(pixel) : 0.0;
+    if ((glass_push.flags & WaterDebugMask) != 0u) {
+        GlassPaint(pixel, water_hit == 3u ? vec3(0.5 * decal, 0.0, 0.5 * (1.0 - decal))
+                          : water_hit == 2u ? vec3(0.0, 0.5, 0.5)
+                                            : vec3(0.0));
+        return;
+    }
+    float mist_t = 1.0;
+    vec3 mist_in = vec3(0.0);
+    if (!glass && (glass_push.flags & WaterOn) != 0u && glass_push.mist > 0.0 && glass_push.mist_height > 0.0) {
+        const float set_a = (BounceFlags() & BounceFlagG3) != 0u ? texelFetch(g3_tex, pixel, 0).a : 0.0;
+        MistVolume(p, water_hit == 3u, water_p, pixel, isnan(set_a) ? 0xFFFFFFFFu : uint(clamp(set_a, 0.0, 1.0) * 255.0),
+                   mist_t, mist_in);
+    }
+    const bool fogged = mist_t < 0.9999 || dot(mist_in, vec3(1.0)) > 0.0;
+    if (water) {
+        roughness = glass_push.water_rough;
+    }
+    const bool reflect_pixel = roughness <= ReflectMaxRough() || water;
+    if (!reflect_pixel && !glass) {
+        MistBase(pixel, fogged, mist_t, mist_in);
+        return;
+    }
+    vec3 n = water_hit == 3u && dot(water_n, water_n) > 0.5 ? water_n : SurfaceNormal(pixel, p);
+    // A puddle's surface is mostly flat water over the cobbles: their full bump normals scattered
+    // each mirror ray over a wide patch of sky, so the clouds and moon smeared into flat colour.
+    if (water_hit == 2u) {
+        const vec3 up = normalize(vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y));
+        if (dot(n, up) > PuddleFlatMin) {
+            n = normalize(mix(up, n, PuddleBump));
+        }
+    }
+    if (water) {
+        n = WaterRipple(p, n, water_hit == 3u ? glass_push.ripple : glass_push.ripple * PuddleRippleScale);
+    }
+    // A pane seen from its back face (the far side of a glass door) is still glass: turn its
+    // normal to the camera instead of dropping the pixel below.
+    if (glass && dot(n, -p) < 0.0) {
+        n = -n;
+    }
+    vec4 g3 = vec4(0.0);
+    if ((BounceFlags() & BounceFlagG3) != 0u) {
+        g3 = texelFetch(g3_tex, pixel, 0);
+        g3 = Finite(g3.rgb) && !isnan(g3.a) ? clamp(g3, vec4(0.0), vec4(1.0)) : vec4(0.0);
+    }
+    const vec3 f0 = water ? vec3(water_hit == 3u ? glass_push.sheet_f0 : glass_push.water_f0)
+                    : mirror ? vec3(MirrorF0)
+                    : (ReflectFlags() & ReflectFlagF0) != 0u ? g3.rgb * g3.rgb
+                                                              : vec3(ReflectDielectricF0);
+    const uint set_id = uint(g3.a * 255.0);
+    fill_set = set_id;
+    const vec3 v = -normalize(p);
+    const float n_dot_v = dot(n, v);
+    if (n_dot_v <= 1e-4) {
+        MistBase(pixel, fogged, mist_t, mist_in);
+        return;
+    }
+    vec3 reflection = vec3(0.0);
+    vec3 radiance = vec3(0.0);
+    float weight = 0.0;
+    float t = -1.0;
+    float hit_distance = 0.0;
+    bool body_lobe = false;
+    float p_body = 0.0;
+    float body_weight = 0.0;
+    if (reflect_pixel) {
+        const float alpha = max(roughness * roughness, ReflectMinAlpha);
+        uint state = Hash(uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + Frame() * 26699u + 7919u);
+        vec3 h = GgxHalfVector(n, alpha, state);
+        vec3 l = reflect(-v, h);
+        if (dot(n, l) <= 1e-4) {
+            h = n;
+            l = reflect(-v, n);
+        }
+        // Deep sheet water has a body: with probability p_body the ray scatters into the
+        // hemisphere above (murky water lit by what surrounds it) instead of mirroring. The
+        // body takes the (1 - F) the mirror leaves, so it shows from above, the mirror at grazing.
+        if (water_hit == 3u && glass_push.body > 0.0) {
+            const float cv = 1.0 - clamp(n_dot_v, 0.0, 1.0);
+            const float cv2 = cv * cv;
+            const float fv = f0.x + (1.0 - f0.x) * (cv2 * cv2 * cv);
+            p_body = clamp(1.0 - fv, 0.1, 0.9);
+            if (Random(state) < p_body) {
+                body_lobe = true;
+                body_weight = (1.0 - fv) * glass_push.body / p_body;
+                l = CosineDirection(n, state);
+                h = normalize(l + v);
+            }
+        }
+        const float n_dot_l = max(dot(n, l), 1e-4);
+        const float n_dot_h = max(dot(n, h), 1e-4);
+        const float v_dot_h = max(dot(v, h), 1e-4);
+        const float m = 1.0 - clamp(v_dot_h, 0.0, 1.0);
+        const float m2 = m * m;
+        const vec3 fresnel = f0 + (1.0 - f0) * (m2 * m2 * m);
+        const float g = GgxG1(alpha, n_dot_l) * GgxG1(alpha, n_dot_v);
+        weight = min(g * v_dot_h / (n_dot_v * n_dot_h), ReflectMaxWeight);
+        const vec3 origin = water_p + n * (Bias() + abs(water_p.z) * 2e-4);
+        uint id, primitive;
+        vec2 barycentrics;
+        mat3 rotation;
+        uint rejected = 0u;
+        t = Trace(origin, l, id, primitive, barycentrics, rotation, rejected);
+        hit_distance = MissHitDistance;
+        if (t < 0.0) {
+            radiance = SkyRadiance(l);
+        } else {
+            hit_distance = t;
+            const vec3 hit = origin + l * t;
+            const Surface surface = HitSurface(id, primitive, barycentrics, rotation);
+            // Untextured hits: traced direct light with an assumed albedo, like the GI bounce.
+            const vec3 albedo = surface.valid ? surface.albedo : vec3(UnknownAlbedo);
+            vec3 hn = surface.normal;
+            if (dot(hn, hn) < 0.5) {
+                hn = -l;
+            } else if (dot(hn, l) > 0.0) {
+                hn = -hn;
+            }
+            radiance = DirectLit(hit, hn, set_id, -l, albedo, HitMaterial(hit), BounceRays()) + HitEmission(id, surface, hit);
+        }
+        if (water) {
+            radiance += FlameImage(origin, l, t) + MirrorHalos(origin, l, t);
+        }
+        if (water && glass_push.sheen > 0.0 && glass_push.sheen_far > 0.0) {
+            const uint fb = set_id * 6u + 1u;
+            if (fb + 1u < fog_sets.length()) {
+                const vec3 fc = fog_sets[fb].rgb;
+                const vec4 fd = fog_sets[fb + 1u];
+                if (Finite(fc) && Finite(fd.xyz) && fd.z > 0.0) {
+                    const float s0 = length(water_p);
+                    const float s1 = s0 + hit_distance;
+                    const float leg = max(s1 - fd.y, 0.0) - max(s0 - fd.y, 0.0);
+                    const float keep = exp2(-leg * fd.z * glass_push.sheen_far);
+                    radiance = mix(glass_push.sheen * max(fc, vec3(0.0)), radiance, keep);
+                }
+            }
+        }
+        radiance = Finite(radiance) ? clamp(radiance, vec3(0.0), vec3(Clamp())) : vec3(0.0);
+        reflection = body_lobe ? vec3(body_weight * (1.0 - clear)) * radiance
+                               : fresnel * (weight * ReflectStrength() * (water_hit == 3u ? 1.0 : 1.0 - clear) / (1.0 - p_body)) * radiance;
+        // A decal (blood) shows through: no mirror or body over it.
+        reflection *= (1.0 - decal) * puddle_w;
+    }
+    vec3 base = ReflectTarget(pixel);
+    float ao = 1.0;
+    if ((ReflectFlags() & ReflectFlagPreAo) != 0u) {
+        const vec3 irr_after = texelFetch(reflect_irr_tex, pixel, 0).rgb;
+        const vec3 irr_before = texelFetch(reflect_irr_pre_tex, pixel, 0).rgb;
+        const vec3 spec_before = texelFetch(reflect_spec_pre_tex, pixel, 0).rgb;
+        const float before = Finite(irr_before) ? Luma(irr_before) : 0.0;
+        const float after = Finite(irr_after) ? Luma(irr_after) : 0.0;
+        ao = before <= 1e-4 ? 1.0 : clamp(after / before, 0.0, 1.0);
+        base = Finite(spec_before) ? max(spec_before, vec3(0.0)) : vec3(0.0);
+    }
+    base *= 1.0 - clamp(glass_push.base_cut, 0.0, 1.0);
+    // The silvering takes the light the mirror reflects: only the rest shows the stock smudges.
+    if (mirror) {
+        base *= 1.0 - MirrorF0;
+    }
+    vec3 water_irr = vec3(0.0);
+    if (water && ReflectDebug() == 0u) {
+        const float c = 1.0 - clamp(n_dot_v, 0.0, 1.0);
+        const float c2 = c * c;
+        // Sheet water lets the floor through with real water's F0 (0.02), not the sheet's
+        // brighter mirror F0: at 0.5 the floor went half dark, and dry stones and blood glowed.
+        const float t0 = water_hit == 3u ? min(f0.x, WaterRealF0) : f0.x;
+        // Wet ground under a puddle is darker than dry (PHOTOREAL 13: 0.5-0.8 x albedo). Kept at
+        // dry brightness, the faint sky reflection lay on it like a milky film.
+        const float wet = water_hit == 2u ? mix(1.0, clamp(glass_push.puddle_wet, 0.0, 1.0), puddle_w) : 1.0;
+        const float under_f = (1.0 - puddle_w * (t0 + (1.0 - t0) * (c2 * c2 * c))) * wet;
+        const float under = (water_hit == 3u && glass_push.murk > 0.0 ? clear * under_f : under_f) * mist_t;
+        if ((glass_push.flags & GlassIrr) != 0u) {
+            const vec3 irr = imageLoad(reflect_irr_out, pixel).rgb;
+            water_irr = Finite(irr) ? max(irr, vec3(0.0)) : vec3(0.0);
+            imageStore(reflect_irr_out, pixel, vec4(water_irr * under, 1.0));
+        }
+        if ((glass_push.flags & GlassKeep) != 0u) {
+            // -under; -(2 + under) on decals: dimmed like the water's floor but without the
+            // direct pass's water scatter (x the game's light buffer, which is very bright on
+            // blood decals: white streaks; at under 1 the splats glowed against the water).
+            imageStore(glass_keep_out, pixel, vec4(decal > 0.5 ? -(2.0 + under) : -max(under, 1e-4)));
+        }
+    }
+    vec3 result = water ? reflection : ao * (base + reflection);
+    if (fogged && ReflectDebug() == 0u) {
+        result = result * mist_t + mist_in;
+        if (!water) {
+            MistKeep(pixel, mist_t);
+        }
+    }
+    if (glass && ReflectDebug() == 0u) {
+        // result = transmitted * tint * (1 - F) * (1 - cover) + the pane's specular (the light
+        // specular plus our F-weighted reflection); the pane's diffuse stays only under decals
+        // (cracks, dirt): cover is where the G-buffer albedo departs from the pane's own texture.
+        const float c = 1.0 - clamp(n_dot_v, 0.0, 1.0);
+        const float c2 = c * c;
+        const vec3 f = f0 + (1.0 - f0) * (c2 * c2 * c);
+        vec3 gbuffer_albedo = vec3(0.0);
+        bool have_albedo = false;
+        if ((glass_push.flags & GlassAlbedo) != 0u) {
+            const vec3 a = texelFetch(albedo_tex, pixel, 0).rgb;
+            if (Finite(a)) {
+                gbuffer_albedo = clamp(a, vec3(0.0), vec3(1.0));
+                have_albedo = true;
+            }
+        }
+        float cover = 0.0;
+        if (pane.valid && have_albedo) {
+            const vec3 d = abs(gbuffer_albedo - pane.albedo);
+            cover = smoothstep(GlassCoverLo, GlassCoverHi, max(d.r, max(d.g, d.b)));
+        }
+        const vec3 pane_albedo = pane.valid ? pane.albedo : gbuffer_albedo;
+        // Normalised by the max channel so tint <= 1: the pane only filters, never adds light.
+        const float pane_max = max(pane_albedo.r, max(pane_albedo.g, pane_albedo.b));
+        vec3 tint = vec3(1.0);
+        if ((pane.valid || have_albedo) && pane_max > 1e-3) {
+            tint = mix(vec3(1.0), clamp(pane_albedo / pane_max, vec3(0.0), vec3(1.0)),
+                       clamp(glass_push.tint * 0.5, 0.0, 1.0));
+        }
+        // The back face is skip / cos(view angle) behind the front one along the ray.
+        const vec3 behind =
+            GlassBehind(-v, t_pane + glass_push.skip / max(n_dot_v, 0.1), set_id);
+        result += behind * tint * (vec3(1.0) - f) * (1.0 - cover);
+        if ((glass_push.flags & GlassIrr) != 0u) {
+            const vec3 irr = imageLoad(reflect_irr_out, pixel).rgb;
+            imageStore(reflect_irr_out, pixel,
+                       vec4(Finite(irr) ? max(irr, vec3(0.0)) * cover : vec3(0.0), 1.0));
+        }
+        if ((glass_push.flags & GlassKeep) != 0u) {
+            imageStore(glass_keep_out, pixel, vec4(cover));
+        }
+    }
+    if (ReflectDebug() == 1u) {
+        result = reflection;
+    } else if (ReflectDebug() == 2u) {
+        result = vec3(weight, roughness, t < 0.0 ? 1.0 : 0.0);
+    } else if (ReflectDebug() == 3u) {
+        result = radiance;
+    }
+    ReflectStore(pixel, result, hit_distance);
+}
+#else
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer SharcGrid {
+    uint words[];
+};
+const uint SharcNone = 0xFFFFFFFFu;
+const uint SharcSlotMask = (1u << 20u) - 1u;
+const uint SharcEntryWords = 8u;
+const uint SharcProbes = 8u;
+const float SharcBaseCell = 0.25;
+const float SharcCellPerMeter = 0.02;
+const uint SharcMaxLevel = 15u;
+const uint SharcScale = 4096u;
+const float SharcMaxRadiance = 16.0;
+const uint SharcFrameCap = 256u;
+const float SharcMinWeight = 4.0;
+const uint SharcUpdateMask = 7u;
+const float SharcMinRayCells = 1.5;
+
+bool SharcOn() { return sharc.z != 0u; }
+
+uint SharcLevel(float distance) {
+    const float want = distance * SharcCellPerMeter / SharcBaseCell;
+    if (!(want > 1.0)) {
+        return 0u;
+    }
+    const float level = ceil(log2(want));
+    return level >= float(SharcMaxLevel) ? SharcMaxLevel : uint(level);
+}
+
+bool SharcMakeKey(vec3 hit, vec3 normal, out uvec2 key, out float size) {
+    key = uvec2(0u);
+    const uint level = SharcLevel(length(hit));
+    size = SharcBaseCell * exp2(float(level));
+    const vec3 w = WorldDir(hit - vec3(view_rows[0].w, view_rows[1].w, view_rows[2].w)) / size;
+    const vec3 wn = WorldDir(normal);
+    if (!Finite(w) || !Finite(wn) || any(greaterThan(abs(w), vec3(1.0e9)))) {
+        return false;
+    }
+    const uvec3 c = uvec3(ivec3(floor(w))) & 0x1FFFFu;
+    const uint octant = (wn.x < 0.0 ? 1u : 0u) | (wn.y < 0.0 ? 2u : 0u) | (wn.z < 0.0 ? 4u : 0u);
+    key = uvec2(c.x | (c.y << 17u), (c.y >> 15u) | (c.z << 2u) | (level << 19u) | (octant << 23u));
+    return true;
+}
+
+uint SharcHashSlot(uvec2 key) {
+    return Hash(key.x ^ Hash(key.y)) & SharcSlotMask;
+}
+
+uint SharcChecksum(uvec2 key) {
+    const uint c = Hash(key.y ^ Hash(key.x + 0x9E3779B9u));
+    return c == 0u ? 1u : c;
+}
+
+uint SharcFind(uvec2 key) {
+    SharcGrid g = SharcGrid(sharc.xy);
+    const uint h = SharcHashSlot(key), cs = SharcChecksum(key);
+    for (uint i = 0u; i < SharcProbes; ++i) {
+        const uint s = (h + i) & SharcSlotMask;
+        if (g.words[s * SharcEntryWords] == cs) {
+            return s;
+        }
+    }
+    return SharcNone;
+}
+
+uint SharcInsert(uvec2 key) {
+    SharcGrid g = SharcGrid(sharc.xy);
+    const uint h = SharcHashSlot(key), cs = SharcChecksum(key);
+    for (uint i = 0u; i < SharcProbes; ++i) {
+        const uint s = (h + i) & SharcSlotMask;
+        const uint prev = atomicCompSwap(g.words[s * SharcEntryWords], 0u, cs);
+        if (prev == 0u || prev == cs) {
+            return s;
+        }
+    }
+    return SharcNone;
+}
+
+bool SharcRead(uint s, out vec3 radiance) {
+    radiance = vec3(0.0);
+    SharcGrid g = SharcGrid(sharc.xy);
+    const uint base = s * SharcEntryWords;
+    const vec2 rg = unpackHalf2x16(g.words[base + 6u]);
+    const vec2 bw = unpackHalf2x16(g.words[base + 7u]);
+    const vec3 c = vec3(rg, bw.x);
+    if (!(bw.y >= SharcMinWeight) || !Finite(c)) {
+        return false;
+    }
+    if (g.words[base + 1u] != Frame()) {
+        g.words[base + 1u] = Frame();
+    }
+    radiance = clamp(c, vec3(0.0), vec3(Clamp()));
+    return true;
+}
+
+uint SharcEncode(float v) {
+    return uint((isnan(v) ? 0.0 : clamp(v, 0.0, SharcMaxRadiance)) * float(SharcScale) + 0.5);
+}
+
+void SharcAdd(uint s, vec3 radiance) {
+    SharcGrid g = SharcGrid(sharc.xy);
+    const uint base = s * SharcEntryWords;
+    g.words[base + 1u] = Frame();
+    if (atomicAdd(g.words[base + 5u], 1u) >= SharcFrameCap) {
+        return;
+    }
+    atomicAdd(g.words[base + 2u], SharcEncode(radiance.x));
+    atomicAdd(g.words[base + 3u], SharcEncode(radiance.y));
+    atomicAdd(g.words[base + 4u], SharcEncode(radiance.z));
+}
+
+bool SharcUpdatePath(ivec2 pixel) {
+    return (Hash(uint(pixel.x) * 1973u ^ uint(pixel.y) * 9277u ^ (Frame() * 26699u + 0x5bd1e995u)) &
+            SharcUpdateMask) == 0u;
+}
+
+bool HistoryHit(vec3 p) {
+    const vec3 prev = vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
+                           dot(reproject[2], vec4(p, 1.0)));
+    if (prev.z <= 1e-4) {
+        return false;
+    }
+    const ivec2 tap = ivec2(floor(ViewToPixel(prev, prev_proj, PrevJitter()) + 0.5));
+    if (any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, ivec2(Size())))) {
+        return false;
+    }
+    const float stored_z = texelFetch(history_z_tex, tap, 0).r;
+    return stored_z > 0.0 && abs(prev.z - stored_z) <= 0.05 * prev.z + 0.02;
+}
+
+void Shade(ivec2 pixel, bool trace) {
+    const vec2 size = Size();
+    if (pixel.x >= int(size.x) || pixel.y >= int(size.y)) {
+        return;
+    }
+#ifdef RT_RESTIR_RESOLVE
+    const bool sample_material = false;
+#else
+    const bool sample_material =
+        trace && ((uint(pixel.x) * 7u + uint(pixel.y) * 13u + Frame()) & MaterialSampleMask) == 0u;
+#endif
+    const float depth = DepthAt(pixel);
+    if (depth >= 1.0 || depth < 0.0 || isnan(depth)) {
+        imageStore(raw_out, pixel, vec4(0.0));
+        imageStore(history_out, pixel, vec4(0.0));
+        imageStore(history_z_out, pixel, vec4(0.0));
+#ifdef RT_RESTIR_INIT
+        imageStore(res_pos_out, pixel, vec4(0.0));
+        imageStore(res_rad_out, pixel, vec4(0.0));
+        imageStore(res_norm_out, pixel, vec4(0.0));
+        imageStore(res_recv_out, pixel, vec4(0.0));
+#endif
+#ifndef RT_RESTIR_RESOLVE
+        WriteAux(pixel, vec3(0.0), vec3(0.0), vec3(0.0), 1.0, 0.0);
+#endif
+        if (depth >= 1.0 && sample_material && (Flags() & FlagSkyDome) == 0u &&
+            SkySlot() < accum.length()) {
+            SkyLearn(pixel);
+        }
+        return;
+    }
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const vec3 n = SurfaceNormal(pixel, p);
+    if ((Flags() & FlagNormalDebug) != 0u) {
+        imageStore(raw_out, pixel, vec4(n * 0.5 + 0.5, 1.0));
+        imageStore(history_out, pixel, vec4(n * 0.5 + 0.5, 1.0));
+        imageStore(history_z_out, pixel, vec4(p.z, 0.0, 0.0, 0.0));
+        WriteAux(pixel, vec3(0.0), vec3(0.0), n, 1.0, 0.0);
+        return;
+    }
+    vec4 g3 = vec4(0.0);
+    if ((BounceFlags() & BounceFlagG3) != 0u) {
+        g3 = texelFetch(g3_tex, pixel, 0);
+        g3 = Finite(g3.rgb) && !isnan(g3.a) ? clamp(g3, vec4(0.0), vec4(1.0)) : vec4(0.0);
+    }
+    float roughness = 1.0;
+    if ((BounceFlags() & BounceFlagG1) != 0u) {
+        const float g1x = texelFetch(g1_tex, pixel, 0).x;
+        roughness = isnan(g1x) ? 1.0 : clamp(1.0 - g1x, 0.0, 1.0);
+    }
+    vec3 primary_albedo = vec3(1.0);
+    if ((BounceFlags() & BounceFlagAlbedo) != 0u) {
+        const vec3 a = texelFetch(albedo_tex, pixel, 0).rgb;
+        primary_albedo = Finite(a) ? clamp(a, vec3(0.0), vec3(1.0)) : vec3(1.0);
+    }
+    const uint set_id = uint(g3.a * 255.0);
+    fill_set = set_id;
+    const vec3 origin = p + n * (Bias() + p.z * 2e-4);
+    uint state = Hash(uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + Frame() * 26699u);
+    vec3 sum = vec3(0.0);
+    vec3 source_sum = vec3(0.0);
+    vec3 albedo_debug = vec3(1.0, 0.0, 1.0);
+    vec3 normal_debug = vec3(0.0);
+    uint rejected = 0u;
+    float hit_distance = MissHitDistance;
+    const uint spp = max(Spp(), 1u);
+    const uint bounces = Bounces();
+    const uint segments = bounces == 0u ? 1u : bounces;
+    const float far_w = FarWeight(p);
+#ifdef RT_RESTIR_RESOLVE
+    vec3 raw = vec3(0.0);
+    {
+        const vec4 rp = texelFetch(res_pos_tex, pixel, 0);
+        const vec4 rr = texelFetch(res_rad_tex, pixel, 0);
+        if (rp.w > 0.0 && rr.w > 0.0 && Finite(rp.xyz) && Finite(rr.rgb)) {
+            const vec3 d = rp.xyz - p;
+            const float len = length(d);
+            const float cos_r = len > 1e-6 ? max(dot(d, n) / len, 0.0) : 0.0;
+            raw = clamp(rr.rgb * (cos_r / 3.14159265 * rr.w), vec3(0.0), vec3(Clamp()));
+            hit_distance = min(len, MissHitDistance);
+        }
+        if (Sparse() > 1u) {
+            imageStore(aux_hit_out, pixel, vec4(hit_distance, 0.0, 0.0, 0.0));
+        }
+    }
+#else
+#ifdef RT_RESTIR_INIT
+    vec3 sample_pos = vec3(0.0);
+    vec3 sample_normal = vec3(0.0);
+    float sample_cos = 0.0;
+    vec3 sample_radiance = vec3(0.0);
+#endif
+#ifdef RT_RESTIR_INIT
+    const bool traced = (trace || !HistoryHit(p)) && far_w > 0.0;
+#else
+    const bool traced = trace && far_w > 0.0;
+#endif
+    trace_cap = GiTMax();
+    const bool sharc_on = SharcOn() && bounces > 0u;
+    const bool sharc_update = sharc_on && SharcUpdatePath(pixel);
+    for (uint i = 0u; traced && i < spp; ++i) {
+        vec3 ray_origin = origin;
+        vec3 dir = CosineDirection(n, state);
+        vec3 throughput = vec3(1.0);
+        const vec3 sum_before = sum;
+        uint sharc_slot = SharcNone;
+#ifdef RT_RESTIR_INIT
+        if (i == 0u) {
+            sample_cos = max(dot(n, dir), 0.0);
+        }
+#endif
+        for (uint seg = 0u; seg < segments; ++seg) {
+            uint id, primitive;
+            vec2 barycentrics;
+            mat3 rotation;
+            float t = Trace(ray_origin, dir, id, primitive, barycentrics, rotation, rejected);
+            // A GI ray that reaches a painted window (portal pane) goes on past the wall behind
+            // it (PortalWall) to the outside: the sky, or whatever stands outside.
+            if (t >= 0.0 && PortalPane(id)) {
+                t = Trace(ray_origin, dir, id, primitive, barycentrics, rotation, rejected,
+                          t + PortalWall);
+            }
+            float mirror_t = -1.0;
+            vec3 mirror_p = vec3(0.0);
+            if (seg == 0u) {
+                const float tw = WaterSpan(ray_origin, dir, t, id);
+                if (tw >= 0.0) {
+                    const vec3 up = WorldUp();
+                    const float c = 1.0 - clamp(-dot(dir, up), 0.0, 1.0);
+                    const float c2 = c * c;
+                    if (Random(state) < WaterGiF0 + (1.0 - WaterGiF0) * (c2 * c2 * c)) {
+                        mirror_t = tw;
+                        mirror_p = ray_origin + dir * tw;
+                        ray_origin = mirror_p + up * (Bias() + abs(mirror_p.z) * 2e-4);
+                        dir = reflect(dir, up);
+                        t = Trace(ray_origin, dir, id, primitive, barycentrics, rotation, rejected);
+                        if (t >= 0.0 && PortalPane(id)) {
+                            t = Trace(ray_origin, dir, id, primitive, barycentrics, rotation,
+                                      rejected, t + PortalWall);
+                        }
+                    }
+                }
+            }
+            if (i == 0u && seg == 0u && t >= 0.0) {
+                hit_distance = t + max(mirror_t, 0.0);
+            }
+            if (t < 0.0) {
+                sum += throughput * SkyRadiance(dir);
+                source_sum += SourceColor(SourceMiss);
+#ifdef RT_RESTIR_INIT
+                if (i == 0u && seg == 0u) {
+                    const vec3 seen = mirror_t >= 0.0 ? reflect(dir, WorldUp()) : dir;
+                    sample_pos = origin + seen * MissHitDistance;
+                    sample_normal = -seen;
+                }
+#endif
+                break;
+            }
+            const vec3 hit = ray_origin + dir * t;
+            Surface surface = HitSurface(id, primitive, barycentrics, rotation);
+            if (i == 0u && seg == 0u && surface.valid) {
+                albedo_debug = surface.albedo;
+            }
+            if (i == 0u && seg == 0u) {
+                normal_debug = surface.normal * 0.5 + 0.5;
+            }
+#ifdef RT_RESTIR_INIT
+            if (i == 0u && seg == 0u) {
+                sample_pos = hit;
+                vec3 sn = surface.normal;
+                if (dot(sn, sn) < 0.5) {
+                    sn = -dir;
+                } else if (dot(sn, dir) > 0.0) {
+                    sn = -sn;
+                }
+                sample_normal = sn;
+                if (mirror_t >= 0.0) {
+                    const vec3 up = WorldUp();
+                    sample_pos = hit - up * (2.0 * dot(hit - mirror_p, up));
+                    sample_normal = reflect(sn, up);
+                }
+            }
+#endif
+            uint source;
+            if (bounces == 0u) {
+                sum += HitRadiance(hit, false, dir, id, surface, sample_material && i == 0u, source);
+                source_sum += SourceColor(source);
+                break;
+            }
+            if (seg == 0u && i == 0u && sample_material) {
+                HitRadiance(hit, false, dir, id, surface, true, source);
+            }
+            if (seg >= 1u && LastBounceCache()) {
+                sum += throughput * HitRadiance(hit, false, dir, id, surface, false, source);
+                source_sum += SourceColor(source);
+                break;
+            }
+            const bool known = surface.valid;
+            if (!known) {
+                // No captured texture: the material is unknown, the light is not. Trace direct
+                // light at the hit with an assumed albedo instead of reusing the screen colour
+                // (full path tracing plan item 9).
+                surface.albedo = vec3(UnknownAlbedo);
+            }
+            vec3 hn = surface.normal;
+            if (dot(hn, hn) < 0.5) {
+                hn = -dir;
+            } else if (dot(hn, dir) > 0.0) {
+                hn = -hn;
+            }
+            uvec2 sharc_key;
+            float sharc_size;
+            if (sharc_on && seg == 0u && SharcMakeKey(hit, hn, sharc_key, sharc_size)) {
+                const uint found = SharcFind(sharc_key);
+                vec3 cached;
+                if (!sharc_update && found != SharcNone && t > sharc_size * SharcMinRayCells &&
+                    SharcRead(found, cached)) {
+                    sum += cached;
+                    source_sum += SourceColor(SourceSharc);
+                    break;
+                }
+                sharc_slot = found != SharcNone ? found : SharcInsert(sharc_key);
+            }
+            const vec3 direct = DirectAtHit(hit, hn, set_id, -dir, surface.albedo);
+            sum += throughput * (direct + HitEmission(id, surface, hit));
+            source_sum += SourceColor(known ? SourceTraced : SourceUnknown);
+            throughput *= surface.albedo;
+            if (seg + 1u >= segments) {
+                break;
+            }
+            if (seg >= 1u) {
+                const float p_continue = clamp(max(throughput.x, max(throughput.y, throughput.z)),
+                                               RouletteMin, 1.0);
+                if (Random(state) >= p_continue) {
+                    break;
+                }
+                throughput /= p_continue;
+            }
+            ray_origin = hit + hn * (Bias() + abs(hit.z) * 2e-4);
+            dir = CosineDirection(hn, state);
+        }
+        if (sharc_slot != SharcNone) {
+            const vec3 value = sum - sum_before;
+            if (Finite(value)) {
+                SharcAdd(sharc_slot, clamp(value, vec3(0.0), vec3(Clamp())));
+            }
+        }
+#ifdef RT_RESTIR_INIT
+        if (i == 0u) {
+            sample_radiance = sum;
+        }
+#endif
+    }
+    vec3 raw = sum / float(spp);
+    if (GiDebug() == GiDebugSource) {
+        raw = source_sum / float(spp);
+    } else if (GiDebug() == GiDebugAlbedo) {
+        raw = albedo_debug;
+    } else if (GiDebug() == GiDebugHitNormal) {
+        raw = normal_debug;
+    } else if (GiDebug() == GiDebugAlphaTest) {
+        raw = vec3(min(float(rejected) / float(spp), 1.0), 0.0, 0.0);
+    }
+#endif
+    if (!Finite(raw)) {
+        raw = vec3(0.0);
+    }
+    if (GiDebug() == 0u) {
+        raw *= far_w;
+    }
+#ifdef RT_RESTIR_INIT
+    {
+        const bool ok = sample_cos > 1e-6 && Finite(sample_pos) && Finite(sample_radiance) &&
+                        Finite(sample_normal);
+        const vec3 rad = clamp(sample_radiance, vec3(0.0), vec3(Clamp()));
+        const float w = ok ? min(3.14159265 / sample_cos, RestirMaxW) : 0.0;
+        imageStore(res_pos_out, pixel, vec4(ok ? sample_pos : vec3(0.0), ok ? 1.0 : 0.0));
+        imageStore(res_rad_out, pixel, vec4(ok ? rad : vec3(0.0), w));
+        imageStore(res_norm_out, pixel, vec4(ok ? sample_normal : vec3(0.0), 0.0));
+        imageStore(res_recv_out, pixel, vec4(far_w > 0.0 ? n : vec3(0.0), p.z));
+    }
+    imageStore(raw_out, pixel, vec4(raw, 1.0));
+    WriteAux(pixel, primary_albedo, g3.rgb * g3.rgb, n, roughness, hit_distance);
+    return;
+#endif
+    imageStore(raw_out, pixel, vec4(raw, 1.0));
+#ifndef RT_RESTIR_RESOLVE
+    WriteAux(pixel, primary_albedo, g3.rgb * g3.rgb, n, roughness, hit_distance);
+#endif
+
+    vec3 accumulated = raw;
+    float count = 1.0;
+    if ((Flags() & FlagReset) == 0u) {
+        const vec3 prev =
+            vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
+                 dot(reproject[2], vec4(p, 1.0)));
+        if (prev.z > 1e-4) {
+            const vec2 prev_pixel = ViewToPixel(prev, prev_proj, PrevJitter());
+            const ivec2 base = ivec2(floor(prev_pixel));
+            const vec2 f = prev_pixel - vec2(base);
+            vec3 hist = vec3(0.0);
+            float hist_count = 0.0;
+            float weight_sum = 0.0;
+            for (int j = 0; j < 4; ++j) {
+                const ivec2 tap = base + ivec2(j & 1, j >> 1);
+                if (any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, ivec2(size)))) {
+                    continue;
+                }
+                const float w = (j & 1) == 0 ? 1.0 - f.x : f.x;
+                const float wy = (j >> 1) == 0 ? 1.0 - f.y : f.y;
+                const float weight = w * wy;
+                const float stored_z = texelFetch(history_z_tex, tap, 0).r;
+                if (stored_z <= 0.0 || abs(prev.z - stored_z) > 0.05 * prev.z + 0.02) {
+                    continue;
+                }
+                const vec4 h = texelFetch(history_tex, tap, 0);
+                if (!Finite(h.rgb) || isnan(h.a)) {
+                    continue;
+                }
+                hist += h.rgb * weight;
+                hist_count += h.a * weight;
+                weight_sum += weight;
+            }
+            if (weight_sum > 1e-3) {
+                hist /= weight_sum;
+                hist_count /= weight_sum;
+                const float n_samples = min(hist_count, MaxHistory()) + 1.0;
+                accumulated = mix(hist, raw, 1.0 / n_samples);
+                count = n_samples;
+            }
+        }
+    }
+    if (!Finite(accumulated)) {
+        accumulated = raw;
+        count = 1.0;
+    }
+    imageStore(history_out, pixel, vec4(accumulated, count));
+    imageStore(history_z_out, pixel, vec4(p.z, 0.0, 0.0, 0.0));
+}
+
+void main() {
+#ifdef RT_RESTIR_INIT
+    const uint sparse = Sparse();
+    const uvec2 block_size = sparse >= 4u ? uvec2(2u, 2u) : sparse == 2u ? uvec2(2u, 1u) : uvec2(1u);
+    const uint count = block_size.x * block_size.y;
+    const uvec2 block = GI_INVOCATION.xy;
+    const bool full = count == 1u || (Flags() & FlagReset) != 0u;
+    const uint first = (SparsePhase() + Hash(block.x * 7919u + block.y * 104729u)) % count;
+    for (uint k = 0u; k < count; ++k) {
+        const uint index = (first + k) % count;
+        const uvec2 offset = uvec2(index % block_size.x, index / block_size.x);
+        Shade(ivec2(block * block_size + offset), full || k == 0u);
+    }
+#else
+    Shade(ivec2(GI_INVOCATION.xy), true);
+#endif
+}
+#endif
+#endif

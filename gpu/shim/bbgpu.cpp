@@ -7,6 +7,7 @@
 #include <sys/resource.h>
 #endif
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -97,7 +98,7 @@ extern "C" void bbgpu_input_note_read(void) {
     if (now - window_start >= 5'000'000'000LL && reads) {
         const u32 pumps = g_pumps.exchange(0);
         const s64 pump_sum = g_pump_sum_ns.exchange(0), pump_max = g_pump_max_ns.exchange(0);
-        std::printf("Input: %u pad reads/s, input %.2f ms old when read (worst %.2f); events "
+        BbOut::Print("Input: %u pad reads/s, input %.2f ms old when read (worst %.2f); events "
                     "taken every %.2f ms (worst %.2f)\n",
                     u32(reads * 1e9 / double(now - window_start)), age_sum / 1e6 / reads,
                     age_max / 1e6, pumps ? pump_sum / 1e6 / pumps : 0.0, pump_max / 1e6);

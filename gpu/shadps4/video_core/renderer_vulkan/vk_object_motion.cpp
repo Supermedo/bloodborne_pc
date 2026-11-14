@@ -10,8 +10,10 @@
 #include "bbport_settings.h"
 #include "bbport_motion_ui.h"
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include "shader_recompiler/motion_storage.h"
 #include "shader_recompiler/runtime_info.h"
+#include "video_core/renderer_vulkan/rt/vk_ray_tracing.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_motion_parameters.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -177,13 +179,29 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
     Shader::MotionVectors::storage_buffers = ssbo;
     Shader::MotionVectors::params_address = params_address;
     Shader::MotionVectors::positions_address = positions_address;
+    if (RayTracing::Wanted()) {
+        if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 4, false,
+                         uvs_buffer, uvs_allocation, nullptr, uvs_address)) {
+            Shader::MotionVectors::uvs_address = uvs_address;
+            if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 8, false,
+                             normals_buffer, normals_allocation, nullptr, normals_address)) {
+                Shader::MotionVectors::normals_address = normals_address;
+            } else {
+                normals_address = 0;
+                BbOut::Print("Object motion: normal capture buffer creation failed, hit normals flat\n");
+            }
+        } else {
+            uvs_address = 0;
+            BbOut::Print("Object motion: UV capture buffer creation failed, hit surfaces off\n");
+        }
+    }
     enabled = true;
     std::printf("Object motion: storage path %s (automatic GPU selection)\n",
                 ssbo ? "SSBO" : "BDA");
     const char* cache_setting = std::getenv("BB_OBJECT_MOTION_CACHE");
     cache_enabled = cache_setting && std::strcmp(cache_setting, "1") == 0;
-    std::printf("Object motion: on (%u vertices per frame)\n", PositionsPerFrame);
-    std::printf("Object motion: target cache %s (BB_OBJECT_MOTION_CACHE=0|1)\n",
+    BbOut::Print("Object motion: on (%u vertices per frame)\n", PositionsPerFrame);
+    BbOut::Print("Object motion: target cache %s (BB_OBJECT_MOTION_CACHE=0|1)\n",
                 cache_enabled ? "on" : "off");
 }
 
@@ -197,6 +215,12 @@ ObjectMotion::~ObjectMotion() {
     if (positions_buffer) {
         vmaDestroyBuffer(allocator, positions_buffer, positions_allocation);
     }
+    if (uvs_buffer) {
+        vmaDestroyBuffer(allocator, uvs_buffer, uvs_allocation);
+    }
+    if (normals_buffer) {
+        vmaDestroyBuffer(allocator, normals_buffer, normals_allocation);
+    }
 }
 
 void ObjectMotion::OnFrameStart() {
@@ -206,7 +230,7 @@ void ObjectMotion::OnFrameStart() {
     CollectRetiredImages();
     if (BbStats::enabled && (frame % 600) == 0 && history.stats.draws) {
         const auto& s = history.stats;
-        std::printf("Object motion: %llu draws, %llu stored, %llu with history, %llu unmatched, "
+        BbOut::Print("Object motion: %llu draws, %llu stored, %llu with history, %llu unmatched, "
                     "%llu capacity skips, %llu invalid, %llu still (600 frames); last frame %u/%u vertices; "
                     "index ranges %llu reused, %llu scanned (%llu found changed), %zu cached\n",
                     (unsigned long long)s.draws, (unsigned long long)s.stored,
@@ -257,7 +281,7 @@ void ObjectMotion::BindParameters(vk::PipelineLayout layout) {
     });
 }
 
-u32 ObjectMotion::PrepareDraw(const DrawInfo& draw) {
+u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, u32 uv_select) {
     if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
         return 0;
     }
@@ -282,7 +306,7 @@ u32 ObjectMotion::PrepareDraw(const DrawInfo& draw) {
     param[4] = allocation.first_vertex;
     param[5] = allocation.first_instance;
     param[6] = allocation.instances;
-    param[7] = 0;
+    param[7] = uvs_address ? uv_select : 0;
     params_ticks[slot] = scheduler.CurrentTick();
     return index;
 }
@@ -376,7 +400,15 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
     }
     const auto device = instance.GetDevice();
     if (image) {
-        scheduler.Finish();
+        auto* old = new CachedImage;
+        std::swap(image.device, old->image.device);
+        std::swap(image.allocator, old->image.allocator);
+        std::swap(image.allocation, old->image.allocation);
+        std::swap(image.image, old->image.image);
+        std::swap(image.image_ci, old->image.image_ci);
+        std::swap(image.size_bytes, old->image.size_bytes);
+        view.swap(old->view);
+        scheduler.DeferOperation([old] { delete old; });
     }
     view.reset();
     image_layout = vk::ImageLayout::eUndefined;

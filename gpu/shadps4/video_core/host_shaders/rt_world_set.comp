@@ -1,0 +1,58 @@
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+// One moon for every pass. The direct pass (rt_direct.comp VoteWorldSet) lights every pixel with
+// the directional set most pixels use (the "world set"): the game gives grass, foliage and
+// characters their own sets whose first light is not the moon (no colour, or a white light at
+// 45 degrees). GI and reflection hits took the pixel's own set, so their moon came from another
+// direction or was missing. This pass runs the same vote (16x16 screen grid, the set id in
+// GBuffer3 alpha, sets with a moon colour only) over the same depth, GBuffer3 and sets, and
+// writes world set + 1 (0 = no vote) into one word of the pass's params (GiParams.sharc.w).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1) uniform texture2D g3_tex;
+layout(binding = 2, std430) readonly buffer DirSets {
+    vec4 sets[];
+};
+layout(binding = 3, std430) buffer Params {
+    uint params[];
+};
+
+layout(push_constant) uniform Push {
+    vec2 size;
+    uint set_count;
+    uint word;
+};
+
+const uint MaxVoteSets = 256u;
+shared uint set_votes[MaxVoteSets];
+
+void main() {
+    set_votes[gl_LocalInvocationIndex] = 0u;
+    barrier();
+    const ivec2 sp = ivec2((vec2(gl_LocalInvocationID.xy) + 0.5) / 16.0 * size);
+    const float d = texelFetch(depth_tex, clamp(sp, ivec2(0), ivec2(size) - 1), 0).r;
+    if (d < 1.0 && d >= 0.0 && !isnan(d)) {
+        const float a = texelFetch(g3_tex, sp, 0).a;
+        const uint id = isnan(a) || isinf(a) ? MaxVoteSets : uint(clamp(a, 0.0, 1.0) * 255.0);
+        if (id < set_count && id < MaxVoteSets) {
+            const vec3 c = sets[id * 18u + 4u].xyz;
+            if (dot(c, c) > 0.0) {
+                atomicAdd(set_votes[id], 1u);
+            }
+        }
+    }
+    barrier();
+    if (gl_LocalInvocationIndex == 0u) {
+        uint best = 0u, n = 0u;
+        for (uint i = 0u; i < MaxVoteSets; ++i) {
+            if (set_votes[i] > n) {
+                n = set_votes[i];
+                best = i + 1u;
+            }
+        }
+        params[word] = best;
+    }
+}

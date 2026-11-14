@@ -1,0 +1,923 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_samplerless_texture_functions : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TlasSpace {
+    vec4 tlas_rows[3];
+};
+
+TlasSpace TlasSpaceOf(uvec2 tlas) {
+    return TlasSpace(uvec2(tlas.x - 256u, tlas.y - (tlas.x < 256u ? 1u : 0u)));
+}
+
+vec3 TlasPoint(uvec2 tlas, vec3 p) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0], vec4(p, 1.0)), dot(s.tlas_rows[1], vec4(p, 1.0)),
+                dot(s.tlas_rows[2], vec4(p, 1.0)));
+}
+
+vec3 TlasDir(uvec2 tlas, vec3 d) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0].xyz, d), dot(s.tlas_rows[1].xyz, d), dot(s.tlas_rows[2].xyz, d));
+}
+
+mat3 TlasToView(uvec2 tlas, mat3 m) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return mat3(s.tlas_rows[0].xyz, s.tlas_rows[1].xyz, s.tlas_rows[2].xyz) * m;
+}
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1, rgba16f) uniform image2D scene_img;
+layout(binding = 2, rgba16f) uniform image2D fog_out;
+layout(binding = 3) uniform texture2D fog_prev;
+
+layout(binding = 4, std140) uniform Params {
+    vec4 proj;
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    uvec4 tlas_count_flags;
+    uvec4 cfg;
+    vec4 fog;
+    vec4 prev_proj;
+    vec4 reproject[3];
+    vec4 prev_jitter;
+    vec4 moon;
+    uvec4 light_cfg;
+    vec4 pick; // xy pick pixel, z > 0.5 when the pick is on, w sun share (BB_RT_FX_FOG_SUN_SHARE)
+};
+
+layout(binding = 5, std430) readonly buffer DirSets {
+    vec4 sets[];
+};
+
+const uint FlagSets = 1u;
+const uint FlagHistory = 2u;
+const uint FlagTable = 4u;
+const uint Scale = 4u;
+
+layout(binding = 9) uniform texture2D g3_tex;
+layout(binding = 10, std430) readonly buffer FogSets {
+    vec4 fog_sets[];
+};
+
+#ifndef RT_FOG_APPLY
+// Pick readout (BB_RT_PICK): the fog numbers at the picked pixel, words 96.. of the pick slot
+// the direct pass fills (rt_direct.comp uses words 0..95).
+layout(binding = 13, std430) buffer FogPick {
+    uint fog_pick[];
+};
+const uint FogPickBase = 96u;
+struct DirectLight {
+    vec4 pos_inv_r2;
+    vec4 color_sp;
+    vec4 spec_kind;
+    vec4 wrap_r_flag;
+    mat4 cone;
+};
+const uint MaxFogLights = 1024u;
+layout(binding = 11, std430) readonly buffer Lights {
+    DirectLight lights[MaxFogLights];
+    uint light_grid[];
+};
+layout(binding = 12, std430) readonly buffer Material {
+    vec4 material[];
+};
+#endif
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+uint Frame() { return cfg.x; }
+uint Steps() { return max(cfg.y, 1u); }
+uint Debug() { return cfg.z; }
+float AlphaDistance() { return max(uintBitsToFloat(cfg.w), 0.06); }
+uint Flags() { return tlas_count_flags.w; }
+// Window shaft medium (BB_RT_FX_FOG_SHAFT): extinction per metre of a thin indoor haze that is
+// lit only by moonlight coming in through painted windows (portal panes).
+float ShaftDensity() { return fog.x; }
+float HeightFalloff() { return fog.y; }
+float Strength() { return fog.z; }
+float MaxDistance() { return fog.w; }
+uint TableVec4s() { return uint(prev_jitter.w + 0.5); }
+uint LampCount() { return light_cfg.x; }
+uint SkySlotId() { return light_cfg.y; }
+uint LightFlags() { return light_cfg.z; }
+float SkyClamp() { return max(uintBitsToFloat(light_cfg.w), 0.0); }
+float SkyScale() { return moon.y; }
+float LampScale() { return moon.z; }
+float SunShare() { return pick.w; }
+const uint LightLamps = 1u;
+const uint LightSky = 2u;
+// The sky pass saw the game's dome this frame (rt_sky.comp): dome pixels get no traced fog.
+const uint LightDome = 4u;
+// Calibrate the fog albedo against all the light the fog receives (sky and sun), not the sky alone.
+const uint LightSunCal = 8u;
+// Portal panes (painted windows, rt_surface.h SurfacePortal) are in the TLAS this frame.
+const uint LightPortals = 16u;
+const uint MaskPortal = 0x08u; // rt_geometry.h MaskPortal
+const float PortalWall = 1.5; // rt_direct.comp PortalWall
+const float Pi = 3.14159265;
+
+bool FogSetAt(uint id, out vec4 dist, out vec4 col, out vec4 height, out vec4 hcol) {
+    dist = vec4(0.0);
+    col = vec4(0.0);
+    height = vec4(0.0);
+    hcol = vec4(0.0);
+    if ((Flags() & FlagTable) == 0u) {
+        return false;
+    }
+    const uint base = id * 6u;
+    if (base + 5u >= TableVec4s()) {
+        return false;
+    }
+    col = fog_sets[base + 1u];
+    dist = fog_sets[base + 2u];
+    height = fog_sets[base + 3u];
+    hcol = fog_sets[base + 4u];
+    return true;
+}
+
+float Transmittance(float s, vec4 dist) {
+    return exp2(-max(s - dist.y, 0.0) * max(dist.z, 0.0));
+}
+
+vec3 WorldDir(vec3 v) {
+    return view_rows[0].xyz * v.x + view_rows[1].xyz * v.y + view_rows[2].xyz * v.z;
+}
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+vec2 ViewToPixel(vec3 p, vec4 projection, vec2 jitter) {
+    const vec2 ndc = vec2(p.x * projection.x, p.y * projection.y) / p.z;
+    return vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * Size() + jitter - 0.5;
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+uint Hash(uint x) {
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
+}
+
+float Rand(uvec2 pixel, uint salt) {
+    return float(Hash(pixel.x * 1973u + pixel.y * 9277u + salt * 26699u + Frame() * 7919u) & 0xFFFFFFu) /
+           16777216.0;
+}
+
+// Per-pixel start offset that walks the golden-ratio sequence over frames: successive frames
+// cover the step interval evenly, so the 0.9 history averages a stratified march instead of
+// white-noise offsets (far fog boiled in blotches with 4 steps).
+float StepOffset(uvec2 pixel, uint salt) {
+    const float base = float(Hash(pixel.x * 1973u + pixel.y * 9277u + salt * 26699u) & 0xFFFFFFu) /
+                       16777216.0;
+    return fract(base + float(Frame() & 4095u) * 0.6180339887);
+}
+
+#if !defined(RT_FOG_APPLY) && !defined(RT_FOG_OPAQUE)
+
+struct SurfaceRecord {
+    uint texture;
+    uint flags;
+    uint uv_base;
+    float alpha_ref;
+    uint flags2;
+};
+
+layout(binding = 7, std430) readonly buffer Surfaces {
+    SurfaceRecord surfaces[];
+};
+
+layout(binding = 8, std430) readonly buffer UvPool {
+    uint uv_pool[];
+};
+
+const uint MaxSurfaceTextures = 1024u;
+layout(set = 1, binding = 0) uniform sampler2D surface_textures[MaxSurfaceTextures];
+
+const uint SurfaceAlphaTest = 1u;
+const uint SurfaceHasUv = 2u;
+const uint SurfaceHasTexture = 4u;
+const uint SurfaceBlended = 32u;
+const uint SurfaceUsable = SurfaceHasUv | SurfaceHasTexture;
+const uint TriangleWords = 8u;
+
+uint SurfaceAlphaTexture(SurfaceRecord r) {
+    const uint slot = (r.flags >> 6u) & 1023u;
+    return slot != 0u ? slot : r.texture;
+}
+
+uint SurfaceAlphaChannel(SurfaceRecord r) {
+    return ((r.flags >> 26u) & 3u) ^ 3u;
+}
+
+bool SurfaceTests(SurfaceRecord r) {
+    const uint alpha_tex = SurfaceAlphaTexture(r);
+    return (r.flags & SurfaceAlphaTest) != 0u && (r.flags & SurfaceHasUv) != 0u &&
+           alpha_tex != 0u && alpha_tex < MaxSurfaceTextures;
+}
+
+float SurfaceAlpha(SurfaceRecord r, uint primitive, vec2 barycentrics) {
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return 1.0;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(SurfaceAlphaTexture(r))], uv, 0.0)[SurfaceAlphaChannel(r)];
+}
+
+float Visibility(vec3 origin, vec3 dir, float far_t) {
+    if (far_t <= 0.05) {
+        return 1.0;
+    }
+    const float alpha_t = min(AlphaDistance(), far_t);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu, TlasPoint(tlas_count_flags.xy, origin), 0.05, TlasDir(tlas_count_flags.xy, dir), alpha_t);
+    float t = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        if (instance >= surfaces.length()) {
+            rayQueryConfirmIntersectionEXT(q);
+            continue;
+        }
+        const SurfaceRecord r = surfaces[instance];
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if ((r.flags & SurfaceBlended) != 0u) {
+            const float alpha = SurfaceTests(r) ? SurfaceAlpha(r, primitive, b) : 1.0;
+            t *= 1.0 - clamp(alpha * prev_jitter.z, 0.0, 1.0);
+            if (t < 0.02) {
+                rayQueryConfirmIntersectionEXT(q);
+            }
+        } else if (!SurfaceTests(r) || !(SurfaceAlpha(r, primitive, b) < r.alpha_ref)) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return 0.0;
+    }
+    if (far_t <= alpha_t) {
+        return t;
+    }
+    rayQueryEXT far;
+    rayQueryInitializeEXT(far, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x01u, TlasPoint(tlas_count_flags.xy, origin),
+                          alpha_t, TlasDir(tlas_count_flags.xy, dir), far_t);
+    while (rayQueryProceedEXT(far)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(far, true) == gl_RayQueryCommittedIntersectionTriangleEXT
+               ? 0.0
+               : t;
+}
+
+// 1 when the closest hit toward the light is a portal pane: the light reaches this point
+// through a painted window. Open sky (no hit) gives 0, the table fog already lights that.
+// The panes have their own mask bit (rt_geometry.h MaskPortal): the nearest pane first, then
+// any solid hit in front of it, then past the wall behind it (PortalWall) out to the light.
+float PortalVisibility(vec3 origin, vec3 dir) {
+    rayQueryEXT p;
+    rayQueryInitializeEXT(p, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsOpaqueEXT,
+                          MaskPortal, TlasPoint(tlas_count_flags.xy, origin), 0.05, TlasDir(tlas_count_flags.xy, dir), 1.0e4);
+    while (rayQueryProceedEXT(p)) {
+    }
+    if (rayQueryGetIntersectionTypeEXT(p, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return 0.0;
+    }
+    const float t_pane = rayQueryGetIntersectionTEXT(p, true);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x05u, TlasPoint(tlas_count_flags.xy, origin),
+                          0.05, TlasDir(tlas_count_flags.xy, dir), t_pane);
+    while (rayQueryProceedEXT(q)) {
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return 0.0;
+    }
+    rayQueryEXT far;
+    rayQueryInitializeEXT(far, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x05u, TlasPoint(tlas_count_flags.xy, origin),
+                          t_pane + PortalWall, TlasDir(tlas_count_flags.xy, dir), 1.0e4);
+    while (rayQueryProceedEXT(far)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(far, true) == gl_RayQueryCommittedIntersectionTriangleEXT ? 0.0 : 1.0;
+}
+
+#elif defined(RT_FOG_OPAQUE)
+
+float Visibility(vec3 origin, vec3 dir, float far_t) {
+    if (far_t <= 0.05) {
+        return 1.0;
+    }
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x01u, TlasPoint(tlas_count_flags.xy, origin),
+                          0.05, TlasDir(tlas_count_flags.xy, dir), far_t);
+    while (rayQueryProceedEXT(q)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT ? 0.0 : 1.0;
+}
+
+#endif
+
+#ifndef RT_FOG_APPLY
+float Visibility(vec3 origin, vec3 dir) {
+    return Visibility(origin, dir, 1.0e4);
+}
+#endif
+uint SetIdAt(ivec2 pixel) {
+    if ((Flags() & FlagTable) == 0u) {
+        return 0u;
+    }
+    ivec2 at = pixel;
+    const int limit = int(Size().y) - 1;
+    for (int i = 0; i < 256 && DepthAt(at) >= 1.0 && at.y < limit; ++i) {
+        at.y = min(at.y + 8, limit);
+    }
+    if (DepthAt(at) >= 1.0) {
+        at = ivec2(int(Size().x) / 2, limit);
+    }
+    const float a = texelFetch(g3_tex, at, 0).a;
+    return isnan(a) ? 0u : uint(clamp(a, 0.0, 1.0) * 255.0);
+}
+
+bool MoonSet(uint id) {
+    return (Flags() & FlagSets) != 0u && id < tlas_count_flags.z;
+}
+
+vec3 MoonDir(uint id) {
+    if (!MoonSet(id)) {
+        return vec3(0.0);
+    }
+    const vec3 d = sets[id * 18u].xyz;
+    const vec3 L = vec3(dot(view_rows[0].xyz, d), dot(view_rows[1].xyz, d), dot(view_rows[2].xyz, d));
+    return dot(L, L) > 1e-6 ? normalize(L) : vec3(0.0);
+}
+
+vec3 MoonColor(uint id) {
+    if (!MoonSet(id)) {
+        return vec3(0.0);
+    }
+    return max(sets[id * 18u + 4u].xyz, vec3(0.0)) * moon.x;
+}
+
+float Phase(float cos_theta) {
+    const float g = moon.w;
+    const float d = 1.0 + g * g - 2.0 * g * cos_theta;
+    return (1.0 - g * g) / (4.0 * 3.14159265 * d * sqrt(d));
+}
+
+#ifndef RT_FOG_APPLY
+
+const uint SkyProbeSize = 32u;
+
+float PhaseFor(float cos_theta) {
+    return 4.0 * Pi * Phase(cos_theta);
+}
+
+bool FiniteVec(vec3 v) {
+    return !any(isnan(v)) && !any(isinf(v));
+}
+
+vec2 OctEncode(vec3 d) {
+    const float l1 = abs(d.x) + abs(d.y) + abs(d.z);
+    if (!(l1 > 0.0)) {
+        return vec2(0.5);
+    }
+    vec2 p = d.xy / l1;
+    if (d.z < 0.0) {
+        p = (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+vec3 SkyRadiance(vec3 w) {
+    const uint base = 2u * SkySlotId() + 1u;
+    const vec2 f = OctEncode(normalize(w)) * float(SkyProbeSize) - 0.5;
+    const ivec2 i0 = ivec2(floor(f));
+    const vec2 t = f - vec2(i0);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        const ivec2 o = ivec2(k & 1, k >> 1);
+        const ivec2 c = clamp(i0 + o, ivec2(0), ivec2(int(SkyProbeSize) - 1));
+        const uint slot = base + uint(c.y) * SkyProbeSize + uint(c.x);
+        if (slot >= material.length()) {
+            continue;
+        }
+        const vec4 m = material[slot];
+        if (m.w <= 0.0 || !FiniteVec(m.rgb)) {
+            continue;
+        }
+        const float wt = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y);
+        sum += wt * clamp(m.rgb, vec3(0.0), vec3(SkyClamp()));
+        weight += wt;
+    }
+    if (weight > 1e-3) {
+        return sum / weight;
+    }
+    const uint mean = SkySlotId();
+    if (mean < material.length()) {
+        const vec4 m = material[mean];
+        if (m.w > 0.0 && FiniteVec(m.rgb)) {
+            return clamp(m.rgb, vec3(0.0), vec3(SkyClamp()));
+        }
+    }
+    return vec3(0.0);
+}
+
+vec3 PhaseSample(vec3 dir, float u1, float u2) {
+    const float g = moon.w;
+    float cos_t = 1.0 - 2.0 * u1;
+    if (abs(g) > 1e-3) {
+        const float sq = (1.0 - g * g) / (1.0 - g + 2.0 * g * u1);
+        cos_t = (1.0 + g * g - sq * sq) / (2.0 * g);
+    }
+    cos_t = clamp(cos_t, -1.0, 1.0);
+    const float sin_t = sqrt(max(1.0 - cos_t * cos_t, 0.0));
+    const float phi = 2.0 * Pi * u2;
+    const vec3 a = abs(dir.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 t1 = normalize(cross(a, dir));
+    const vec3 t2 = cross(dir, t1);
+    return normalize(dir * cos_t + (t1 * cos(phi) + t2 * sin(phi)) * sin_t);
+}
+
+vec3 SkyScatter(vec3 x, vec3 dir, uvec2 q, uint salt) {
+    const vec3 v = PhaseSample(dir, Rand(q, salt), Rand(q, salt + 1u));
+    const vec3 w = WorldDir(v);
+    if (!(w.y > 0.0)) {
+        return vec3(0.0);
+    }
+    const vec3 radiance = SkyRadiance(w);
+    if (!(dot(radiance, radiance) > 0.0)) {
+        return vec3(0.0);
+    }
+    const float vis = Visibility(x, v, 1.0e4);
+    if (!(vis > 0.0)) {
+        return vec3(0.0);
+    }
+    return radiance * vis;
+}
+
+float SkyReference(out vec3 mean_sky) {
+    mean_sky = vec3(0.0);
+    const uint mean = SkySlotId();
+    if ((LightFlags() & LightSky) != 0u && mean < material.length()) {
+        const vec4 m = material[mean];
+        if (m.w > 0.0 && FiniteVec(m.rgb)) {
+            mean_sky = max(m.rgb, vec3(0.0));
+            return max(dot(mean_sky, vec3(0.29891, 0.58661, 0.11448)), 1e-3);
+        }
+    }
+    return 1.0;
+}
+
+vec3 LampScatter(vec3 x, vec3 dir, uvec2 q, uint salt) {
+    const uint count = min(LampCount(), MaxFogLights);
+    uint first = 0u, last = count;
+    const bool grid = light_grid[7] != 0u;
+    uint entries = 0u;
+    if (grid) {
+        const vec3 grid_origin = uintBitsToFloat(uvec3(light_grid[0], light_grid[1], light_grid[2]));
+        const float inv_cell = uintBitsToFloat(light_grid[3]);
+        const uvec3 dims = uvec3(light_grid[4], light_grid[5], light_grid[6]);
+        const vec3 f = clamp(floor((x - grid_origin) * inv_cell), vec3(0.0), vec3(dims - 1u));
+        const uvec3 c = uvec3(f);
+        const uint cells = dims.x * dims.y * dims.z;
+        const uint cell = min((c.z * dims.y + c.y) * dims.x + c.x, cells - 1u);
+        first = light_grid[8u + cell];
+        last = light_grid[9u + cell];
+        entries = 9u + cells;
+    }
+    float wsum = 0.0;
+    float chosen_w = 0.0;
+    float chosen_d = 0.0;
+    vec3 chosen_e = vec3(0.0);
+    vec3 chosen_l = vec3(0.0);
+    for (uint k = first; k < last; ++k) {
+        const uint i = grid ? light_grid[entries + k] : k;
+        if (i >= count) {
+            continue;
+        }
+        const DirectLight l = lights[i];
+        const vec3 d = l.pos_inv_r2.xyz - x;
+        const float d2 = dot(d, d);
+        const float inv_r2 = l.pos_inv_r2.w;
+        if (d2 <= 1e-8 || d2 * inv_r2 >= 1.0) {
+            continue;
+        }
+        float cone = 1.0;
+        float atten = max(0.0, 1.0 / d2 - inv_r2);
+        if (l.spec_kind.w > 0.5) {
+            const vec4 hp = vec4(x, 1.0);
+            const vec4 cq = vec4(dot(l.cone[0], hp), dot(l.cone[1], hp), dot(l.cone[2], hp),
+                                 dot(l.cone[3], hp));
+            if (cq.z <= 0.0 || cq.w == 0.0) {
+                continue;
+            }
+            const vec2 xy = cq.xy / cq.w;
+            const float disc = clamp(1.0 - dot(xy, xy), 0.0, 1.0);
+            if (l.spec_kind.w < 1.5) {
+                cone = disc;
+            } else {
+                const float axial = clamp(1.0 - cq.w / l.wrap_r_flag.z, 0.0, 1.0);
+                cone = disc * disc * axial * axial;
+                atten = 1.0;
+            }
+            if (cone <= 0.0) {
+                continue;
+            }
+        }
+        if ((uint(l.wrap_r_flag.w + 0.5) & 1u) != 0u) {
+            const float legacy_f = 1.0 - sqrt(clamp(d2 * inv_r2, 0.0, 1.0));
+            atten = legacy_f * legacy_f;
+        }
+        if ((uint(l.wrap_r_flag.w + 0.5) & 4u) != 0u) {
+            const float s2 = l.wrap_r_flag.z;
+            atten = max(0.0, s2 / (d2 + s2) - s2 / (1.0 / inv_r2 + s2));
+        }
+        const vec3 e = max(l.color_sp.rgb, vec3(0.0)) * (atten * cone);
+        const float w = dot(e, vec3(1.0));
+        if (!(w > 0.0) || !FiniteVec(e)) {
+            continue;
+        }
+        wsum += w;
+        if (Rand(q, salt + 13u * (k + 1u)) * wsum < w) {
+            chosen_w = w;
+            chosen_d = sqrt(d2);
+            chosen_e = e;
+            chosen_l = d;
+        }
+    }
+    if (!(chosen_w > 0.0) || !(chosen_d > 1e-3)) {
+        return vec3(0.0);
+    }
+    const vec3 ldir = chosen_l / chosen_d;
+    const float vis = Visibility(x, ldir, max(chosen_d - 0.05, 0.01));
+    if (!(vis > 0.0)) {
+        return vec3(0.0);
+    }
+    return chosen_e * (wsum / chosen_w) * vis * PhaseFor(dot(dir, ldir));
+}
+
+// Brightest moon luma over this frame's directional sets: the lamp reference for every pixel.
+// A pixel whose set has no moon fell back to the sky reference (~12x smaller in the Forbidden
+// Woods), so fire-lit fog flared in bright blobs shaped like the grass using that set.
+shared uint s_moon_luma;
+
+void main() {
+    if (gl_LocalInvocationIndex == 0u) {
+        s_moon_luma = 0u;
+    }
+    barrier();
+    const uint set_count = (Flags() & FlagSets) != 0u ? min(tlas_count_flags.z, 1024u) : 0u;
+    for (uint i = gl_LocalInvocationIndex; i < set_count; i += 64u) {
+        const vec3 Li = MoonDir(i);
+        const float li = dot(Li, Li) > 0.0 ? dot(MoonColor(i), vec3(0.29891, 0.58661, 0.11448)) : 0.0;
+        if (li > 0.0 && li < 1.0e30) {
+            atomicMax(s_moon_luma, floatBitsToUint(li));
+        }
+    }
+    barrier();
+    const float frame_moon_luma = uintBitsToFloat(s_moon_luma);
+    const ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 qsize = (ivec2(Size()) + int(Scale) - 1) / int(Scale);
+    if (any(greaterThanEqual(q, qsize))) {
+        return;
+    }
+    const uint phase = Frame() & 15u;
+    const ivec2 sub = ivec2(phase & 3u, phase >> 2u);
+    const ivec2 pixel = min(q * int(Scale) + sub, ivec2(Size()) - 1);
+    const float depth = DepthAt(pixel);
+    vec3 end = PixelToView(vec2(pixel), depth);
+    if (depth >= 1.0 || !(length(end) < 6.0e4)) {
+        end = normalize(end) * 6.0e4;
+    }
+    const float surface_dist = length(end);
+    const vec3 dir = end / max(surface_dist, 1e-4);
+    const float march_dist = min(surface_dist, MaxDistance());
+    const uint set_id = SetIdAt(pixel);
+    const vec3 L = MoonDir(set_id);
+    const vec3 c = dot(L, L) > 0.0 ? MoonColor(set_id) : vec3(0.0);
+    vec4 dist, col, height, hcol;
+    vec3 scatter = vec3(0.0);
+    if (FogSetAt(set_id, dist, col, height, hcol) && dist.x > 0.0 && dist.z > 0.0) {
+        const uint steps = Steps();
+        const float ds = march_dist / float(steps);
+        const float offset = StepOffset(uvec2(q), 1u);
+        const float phase_v = PhaseFor(dot(dir, L));
+        const bool lamps = (LightFlags() & LightLamps) != 0u && LampScale() > 0.0;
+        const bool sky = (LightFlags() & LightSky) != 0u && SkyScale() > 0.0;
+        vec3 lamp_sum = vec3(0.0);
+        vec3 sky_sum = vec3(0.0);
+        float w_sum = 0.0;
+        float t = Transmittance(0.0, dist);
+        for (uint i = 0u; i < steps; ++i) {
+            const float s0 = float(i) * ds;
+            const float t1 = Transmittance(s0 + ds, dist);
+            const float weight = t - t1;
+            t = t1;
+            if (weight <= 0.0) {
+                continue;
+            }
+            w_sum += weight;
+            const vec3 x = dir * (s0 + offset * ds);
+            float vis = 1.0;
+            if (dot(c, c) > 0.0) {
+                vis = Visibility(x, L);
+            }
+            scatter += weight * vis * col.rgb;
+            if (lamps) {
+                lamp_sum += weight * LampScatter(x, dir, uvec2(q), 2u + i * 8u);
+            }
+            if (sky) {
+                sky_sum += weight * SkyScatter(x, dir, uvec2(q), 5u + i * 8u);
+            }
+        }
+        // Beyond the march distance (up to the surface or the 60 km sky distance): two points
+        // drawn by transmittance, with traced moon visibility and sky in-scatter like the march,
+        // instead of adding the remainder unshadowed (full path tracing plan item 5).
+        const float t_end = Transmittance(surface_dist, dist);
+        const float remainder = max(t - t_end, 0.0);
+        if (remainder > 1e-4) {
+            const uint far_steps = 2u;
+            const float far_offset = StepOffset(uvec2(q), 3u);
+            for (uint i = 0u; i < far_steps; ++i) {
+                const float u = (float(i) + far_offset) / float(far_steps);
+                const float target = max(t - u * remainder, 1e-30);
+                const float s_far = clamp(dist.y - log2(target) / dist.z, march_dist, surface_dist);
+                const vec3 x = dir * s_far;
+                const float w = remainder / float(far_steps);
+                w_sum += w;
+                float vis = 1.0;
+                if (dot(c, c) > 0.0) {
+                    vis = Visibility(x, L);
+                }
+                scatter += w * vis * col.rgb;
+                if (sky) {
+                    sky_sum += w * SkyScatter(x, dir, uvec2(q), 3001u + i * 8u);
+                }
+            }
+        }
+        // Window shafts: the table fog indoors starts hundreds of metres away, so a beam through
+        // a painted window would not show. A thin haze of ShaftDensity() per metre, lit only by
+        // moonlight whose closest hit toward the moon is a portal pane, adds the beam on top
+        // (single scattering, same phase as the fog; its extinction is left out, it is thin).
+        // Divided by the set's fog amount, which the apply pass multiplies back in. Left out
+        // where the height fog covers this sample or one near it: the apply pass divides that
+        // light by the table fog's opacity and blends several quarter-res samples per pixel, so
+        // a shaft sample next to the height-fog line would flare there (opus review). The margin
+        // (2% of the distance, about 1 degree) covers the apply pass's sample footprint.
+        vec3 shaft_part = vec3(0.0);
+#ifndef RT_FOG_OPAQUE
+        const float sigma = ShaftDensity();
+        const vec3 o = WorldDir(end);
+        const float margin = 0.02 * length(end);
+        const float a2_lo = clamp(height.z * (o.y - margin + height.w - height.y), 0.0, 1.0);
+        const float a2_hi = clamp(height.z * (o.y + margin + height.w - height.y), 0.0, 1.0);
+        const bool height_near = height.x > 0.0 && max(a2_lo, a2_hi) > 0.0;
+        if (sigma > 0.0 && !height_near && (LightFlags() & LightPortals) != 0u && dot(c, c) > 0.0) {
+            const float sd = march_dist / float(steps);
+            float lit = 0.0;
+            for (uint i = 0u; i < steps; ++i) {
+                const float s = (float(i) + offset) * sd;
+                lit += PortalVisibility(dir * s, L);
+            }
+            shaft_part = sigma * lit * sd * c * phase_v / (4.0 * Pi) / clamp(dist.x, 1e-3, 1.0);
+        }
+#endif
+        vec3 mean_sky;
+        const float sky_ref = SkyReference(mean_sky);
+        // The game's fog colour is its total in-scatter, sun included (measured: fog colour / sky
+        // mean 5.7 on the Cathedral Ward rooftops, an albedo no medium lit by the sky alone can
+        // have). So the albedo is the fog colour over the sky mean plus the sun averaged over view
+        // directions (the phase averages 1 / 4pi), else the traced sun is counted twice: once
+        // inside the fog colour, once on top. Averaged over view directions with the sun in
+        // view, the traced fog then matches the stock fog; it is brighter toward the sun and
+        // darker away from it and in shadow.
+        const float ref = sky_ref + ((LightFlags() & LightSunCal) != 0u
+                                         ? dot(c, vec3(0.29891, 0.58661, 0.11448)) / (4.0 * Pi)
+                                         : 0.0);
+        // BB_RT_FX_FOG_SUN_SHARE > 0: the sky mean follows the sky on screen (0.015 with no sky
+        // in view, 0.33 facing the sun), so dividing by it made the fog fade in and out as the
+        // camera turned. Instead a fully lit point shows the game's fog colour: a fixed share
+        // of it lit by the traced sun, the rest by the traced sky as a ratio to the same frame's
+        // sky mean (the swing cancels), lamps on top against the sun's reference.
+        const vec3 lw = vec3(0.29891, 0.58661, 0.11448);
+        const float share = SunShare();
+        const float c_luma = dot(c, lw);
+        vec3 moon_part, lamp_part, sky_part;
+        float used_ref = ref;
+        const float lamp_ref = share > 0.0 && frame_moon_luma > 0.0
+                                   ? frame_moon_luma / (4.0 * Pi * share)
+                                   : ref;
+        if (share > 0.0 && c_luma > 0.0) {
+            used_ref = c_luma / (4.0 * Pi * share);
+            moon_part = share * scatter * phase_v;
+            lamp_part = col.rgb * LampScale() * lamp_sum / (4.0 * Pi * lamp_ref);
+            const float sky_vis = sky && sky_ref > 1e-3 && dot(mean_sky, mean_sky) > 0.0
+                                      ? SkyScale() * dot(sky_sum, lw) / sky_ref
+                                      : w_sum;
+            sky_part = (1.0 - share) * col.rgb * sky_vis;
+        } else {
+            moon_part = scatter * phase_v * c / (4.0 * Pi * ref);
+            lamp_part = col.rgb * LampScale() * lamp_sum / (4.0 * Pi * lamp_ref);
+            sky_part = col.rgb * SkyScale() * sky_sum / ref;
+        }
+        const uint debug = Debug();
+        if (pick.z > 0.5 && all(equal(q, ivec2(pick.xy) / int(Scale)))) {
+            fog_pick[FogPickBase + 1u] = floatBitsToUint(sky_ref);
+            fog_pick[FogPickBase + 16u] = floatBitsToUint(used_ref);
+            fog_pick[FogPickBase + 2u] = floatBitsToUint(dot(col.rgb, lw));
+            fog_pick[FogPickBase + 3u] = floatBitsToUint(dot(c, lw));
+            fog_pick[FogPickBase + 4u] = floatBitsToUint(dot(dir, L));
+            fog_pick[FogPickBase + 5u] = floatBitsToUint(phase_v);
+            fog_pick[FogPickBase + 6u] = floatBitsToUint(t_end);
+            fog_pick[FogPickBase + 7u] = floatBitsToUint(dot(scatter, lw));
+            fog_pick[FogPickBase + 8u] = floatBitsToUint(dot(moon_part, lw));
+            fog_pick[FogPickBase + 9u] = floatBitsToUint(dot(sky_part, lw));
+            fog_pick[FogPickBase + 10u] = floatBitsToUint(dot(lamp_part, lw));
+            fog_pick[FogPickBase + 11u] = floatBitsToUint(dot(sky_sum, lw));
+            fog_pick[FogPickBase + 12u] = floatBitsToUint(surface_dist);
+            fog_pick[FogPickBase + 13u] = floatBitsToUint(dist.z);
+            fog_pick[FogPickBase + 14u] = floatBitsToUint(dist.y);
+            fog_pick[FogPickBase + 15u] = set_id;
+            fog_pick[FogPickBase] = 1u;
+        }
+        scatter = debug == 2u ? lamp_part
+                : debug == 3u ? sky_part
+                : debug == 4u ? moon_part
+                : debug == 6u ? shaft_part
+                : moon_part + lamp_part + sky_part + shaft_part;
+    }
+    vec4 result = vec4(scatter, max(end.z, -6.0e4));
+    float history_used = 0.0;
+    if ((Flags() & FlagHistory) != 0u) {
+        history_used = 0.25;
+        const vec3 prev = vec3(dot(reproject[0], vec4(end, 1.0)), dot(reproject[1], vec4(end, 1.0)),
+                               dot(reproject[2], vec4(end, 1.0)));
+        if (prev.z > 1e-3) { // view z is positive in front of the camera
+            history_used = 0.5;
+            const ivec2 pq = ivec2(floor((ViewToPixel(prev, prev_proj, prev_jitter.xy) + 0.5) / float(Scale)));
+            if (all(greaterThanEqual(pq, ivec2(0))) && all(lessThan(pq, qsize))) {
+                history_used = 0.75;
+                vec4 h = texelFetch(fog_prev, pq, 0);
+                float dz = abs(h.w - prev.z) / max(abs(prev.z), 1e-3);
+                // The 4x4 sub-pixel phase moves this sample across depth edges (far branches)
+                // every frame: when the centre texel is the other side of the edge, take the
+                // best-matching neighbour instead of restarting from one noisy frame.
+                if (!(dz < 0.1) || any(isnan(h.xyz))) {
+                    float best = 1.0e9;
+                    for (int j = -1; j <= 1; ++j) {
+                        for (int i = -1; i <= 1; ++i) {
+                            const ivec2 t = pq + ivec2(i, j);
+                            if ((i == 0 && j == 0) || any(lessThan(t, ivec2(0))) ||
+                                any(greaterThanEqual(t, qsize))) {
+                                continue;
+                            }
+                            const vec4 n = texelFetch(fog_prev, t, 0);
+                            const float nz = abs(n.w - prev.z) / max(abs(prev.z), 1e-3);
+                            if (nz < best && all(not(isnan(n.xyz)))) {
+                                best = nz;
+                                h = n;
+                            }
+                        }
+                    }
+                    dz = best;
+                }
+                if (dz < 0.1 && all(not(isnan(h.xyz)))) {
+                    history_used = 1.0;
+                    result.xyz = mix(h.xyz, result.xyz, 0.1);
+                }
+            }
+        }
+    }
+    if (Debug() == 5u) {
+        result.xyz = vec3(history_used, float(set_id) / 16.0, dot(c, c) > 0.0 ? 1.0 : 0.0);
+    }
+    imageStore(fog_out, q, result);
+}
+
+#else
+
+layout(binding = 6) uniform texture2D fog_tex;
+
+// The game's sky dome writes depth (a squashed hemisphere around the camera, see rt_sky.comp),
+// and its texture already holds the sky's own atmosphere: no traced fog is laid over it.
+const float DomeRadius = 1480.0;
+const float DomeHeight = 539.0;
+const float DomeFraction = 0.3;
+
+bool IsDome(vec3 view_pos) {
+    const vec3 w = normalize(WorldDir(view_pos));
+    const float c = length(w.xz), s = max(w.y, 0.0);
+    const float dome = inversesqrt(c * c / (DomeRadius * DomeRadius) + s * s / (DomeHeight * DomeHeight));
+    return length(view_pos) >= DomeFraction * dome;
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(Size())))) {
+        return;
+    }
+    const ivec2 qsize = (ivec2(Size()) + int(Scale) - 1) / int(Scale);
+    const float z = max(ViewZ(DepthAt(pixel)), -6.0e4);
+    const vec2 qf = (vec2(pixel) + 0.5) / float(Scale) - 0.5;
+    const ivec2 q0 = ivec2(floor(qf));
+    const vec2 f = qf - vec2(q0);
+    vec4 dist, col, height, hcol;
+    const bool have_set = FogSetAt(SetIdAt(pixel), dist, col, height, hcol);
+    // View z to distance along this pixel's ray, for the opacity at each sample's own depth.
+    const vec3 ray = PixelToView(vec2(pixel), 0.5);
+    const float z_to_dist = length(ray) / max(ray.z, 1e-6);
+    if ((LightFlags() & LightDome) != 0u &&
+        (DepthAt(pixel) >= 1.0 || IsDome(ray * (z * z_to_dist / length(ray))))) {
+        return;
+    }
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    float osum = 0.0;
+    vec3 nearest = vec3(0.0);
+    float nearest_dz = 1e9;
+    float nearest_o = 0.0;
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            const ivec2 qc = clamp(q0 + ivec2(i, j), ivec2(0), qsize - 1);
+            const vec4 s = texelFetch(fog_tex, qc, 0);
+            const float dz = abs(s.w - z) / max(abs(z), 1e-3);
+            const float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+            const float w = wb * exp(-dz * 40.0);
+            const float o_s = have_set ? 1.0 - Transmittance(min(s.w * z_to_dist, 6.0e4), dist) : 0.0;
+            sum += s.xyz * w;
+            wsum += w;
+            osum += o_s * w;
+            if (dz < nearest_dz) {
+                nearest_dz = dz;
+                nearest = s.xyz;
+                nearest_o = o_s;
+            }
+        }
+    }
+    const vec3 scatter = (wsum > 1e-4 ? sum / wsum : nearest) * Strength();
+    const float sample_opacity = wsum > 1e-4 ? osum / wsum : nearest_o;
+    if (any(isnan(scatter))) {
+        return;
+    }
+    if (Debug() != 0u) {
+        imageStore(scene_img, pixel, vec4(scatter, 1.0));
+        return;
+    }
+    if (!have_set) {
+        return;
+    }
+    const vec4 scene = imageLoad(scene_img, pixel);
+    const vec3 p = PixelToView(vec2(pixel), DepthAt(pixel));
+    const float t = Transmittance(length(p), dist);
+    const float amount = clamp(dist.x, 0.0, 1.0);
+    vec3 result = scene.xyz * (1.0 - amount * (1.0 - t)) + amount * scatter;
+    const vec3 o = WorldDir(p);
+    const float a2 = clamp(height.x * clamp(height.z * (o.y + height.w - height.y), 0.0, 1.0), 0.0, 1.0);
+    // Height fog: extinction plus in-scatter of the traced light (full path tracing plan item 4).
+    // The march gives in-scattered radiance per unit of distance-fog opacity; both come from the
+    // same quarter-res samples (each at its own depth), so silhouettes do not divide a far sample
+    // by a near opacity. Re-tinted from the distance colour to the height colour. With no traced
+    // estimate (no distance fog in this set, or none in front of the surface) the height fog is
+    // left out rather than drawn as a black veil or as the flat table colour.
+    // Known limit: the estimate is the ray average, so a shadowed near layer can get light that
+    // was traced further along the ray.
+    if (a2 > 0.0 && sample_opacity > 1e-3 && amount > 0.0) {
+        const vec3 tint = clamp(hcol.rgb / max(col.rgb, vec3(1e-3)), vec3(0.0), vec3(8.0));
+        const vec3 h_light = scatter / sample_opacity * tint;
+        result = result * (1.0 - a2) + a2 * h_light;
+    }
+    if (any(isnan(result)) || any(isinf(result))) {
+        return;
+    }
+    imageStore(scene_img, pixel, vec4(result, scene.w));
+}
+
+#endif

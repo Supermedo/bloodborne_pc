@@ -18,7 +18,13 @@ void WriteMotionShaders(const std::filesystem::path& dir, uint64_t params_addres
     MotionVectors::params_address = params_address;
     MotionVectors::positions_address = positions_address;
     for (bool vertex : {true, false}) {
-        for (bool motion : {false, true}) {
+        for (int mode : {0, 1, 2}) {
+            const bool motion = mode != 0;
+            const bool uv = mode == 2;
+            if (uv && !vertex) {
+                continue;
+            }
+            MotionVectors::uvs_address = uv ? 0x30000 : 0;
             Info info{};
             info.hw_stage = vertex ? HwStage::Vertex : HwStage::Fragment;
             info.sw_stage = vertex ? SwStage::Vertex : SwStage::Fragment;
@@ -53,6 +59,18 @@ void WriteMotionShaders(const std::filesystem::path& dir, uint64_t params_addres
                     ir.SetAttribute(output, ir.Imm32(component == 3 ? 1.0f : 0.0f), component);
                 }
             }
+            if (uv) {
+                for (u32 component = 0; component < 2; ++component) {
+                    info.stores.Set(IR::Attribute::Param0, component);
+                    ir.SetAttribute(IR::Attribute::Param0, ir.Imm32(0.25f), component);
+                }
+                for (u32 component = 0; component < 4; ++component) {
+                    info.stores.Set(IR::Attribute::Param1, component);
+                    ir.SetAttribute(IR::Attribute::Param1, ir.Imm32(0.5f), component);
+                }
+                info.stores.Set(IR::Attribute::Param2, 0);
+                ir.SetAttribute(IR::Attribute::Param2, ir.Imm32(0.75f), 0);
+            }
             ir.Epilogue();
             IR::Program program(info);
             program.blocks.push_back(&block);
@@ -65,7 +83,7 @@ void WriteMotionShaders(const std::filesystem::path& dir, uint64_t params_addres
             Backend::Bindings bindings{};
             const auto code = Backend::SPIRV::EmitSPIRV(profile, runtime, program, bindings);
             const auto path = dir / (std::string(vertex ? "vertex" : "fragment") +
-                                      (motion ? "-motion.spv" : "-plain.spv"));
+                                      (uv ? "-motion-uv.spv" : motion ? "-motion.spv" : "-plain.spv"));
             std::ofstream out(path, std::ios::binary);
             out.write(reinterpret_cast<const char*>(code.data()), code.size() * sizeof(u32));
             if (!out) {

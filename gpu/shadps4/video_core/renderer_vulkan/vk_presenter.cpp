@@ -14,6 +14,7 @@
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
+#include "bbport_stdout.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_low_latency.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -898,7 +899,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         present_ms += std::chrono::duration<double, std::milli>(end - presented_generated).count();
         const double elapsed = std::chrono::duration<double>(end - window).count();
         if (elapsed >= 5.0) {
-            std::printf("Frame generation pacing: %.1f game frames/s, %u generated, %u shown, "
+            BbOut::Print("Frame generation pacing: %.1f game frames/s, %u generated, %u shown, "
                         "Present %.2f ms/frame (last image %.2f ms), interval %.2f ms\n",
                         frames / elapsed, made, shown_total, busy_ms / frames, present_ms / frames,
                         game_frame_ms.load());

@@ -15,6 +15,7 @@
 #include "bbport_process_memory.h"
 #include "bbport_prompts.h"
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include "bbport_vram_warning.h"
 #include "common/assert.h"
 #include "common/debug.h"
@@ -28,6 +29,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/rt/rt_surface.h"
 #include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/texture_cache/tile_manager.h"
@@ -148,7 +150,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     }
     trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
     // bbport: the marks in the log, so a player's log tells where eviction starts on that card.
-    std::printf("Texture cache: VRAM budget %lld MiB; marks: collect %llu, pressure %llu, critical %llu MiB\n",
+    BbOut::Print("Texture cache: VRAM budget %lld MiB; marks: collect %llu, pressure %llu, critical %llu MiB\n",
                 static_cast<long long>(device_local_memory >> 20),
                 static_cast<unsigned long long>(trigger_gc_memory >> 20),
                 static_cast<unsigned long long>(pressure_gc_memory >> 20),
@@ -636,7 +638,7 @@ static void ClampViewRange(TextureCache::ImageDesc& desc, const Image& image) {
     }
     static std::atomic<u32> reported{0};
     if (reported.fetch_add(1, std::memory_order_relaxed) < 8) {
-        std::printf("Texture cache: view mips %u+%u layers %u+%u clamped to image %#llx "
+        BbOut::Print("Texture cache: view mips %u+%u layers %u+%u clamped to image %#llx "
                     "(%u mips, %u layers, %s; requested %s)\n",
                     range.base.level, range.extent.levels, range.base.layer, range.extent.layers,
                     (unsigned long long)image.info.guest_address, levels, layers,
@@ -1247,6 +1249,11 @@ void TextureCache::ReportMemory() {
     // Unused for a minute: the tick at the start of the second a minute ago.
     const u64 minute_tick = gc_tick_at_second[(gc_second - 60) % gc_tick_at_second.size()];
     u64 idle = 0, idle_bytes = 0, kept = 0, kept_bytes = 0;
+    const auto ms_since = [](std::chrono::steady_clock::time_point t) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t)
+            .count();
+    };
+    const auto t0 = std::chrono::steady_clock::now();
     {
         std::scoped_lock lock{mutex};
         lru_cache.ForEachItemBelow(minute_tick, [&](ImageId image_id) {
@@ -1259,22 +1266,40 @@ void TextureCache::ReportMemory() {
             }
         });
     }
+    const double ms_lru = ms_since(t0);
+    const auto t1 = std::chrono::steady_clock::now();
     const u64 vram = instance.CanReportMemoryUsage() ? instance.GetDeviceMemoryUsage() : 0;
+    const double ms_vram = ms_since(t1);
+    const auto t2 = std::chrono::steady_clock::now();
     const auto process = BbProcessMemory::Get();
-    std::printf("Memory: VRAM %llu MiB; textures %llu (%llu MiB), game memory backing %llu MiB "
-                "(reserve %llu of %llu MiB used), unused for a minute %llu (%llu MiB), of them "
-                "GPU-written tiled %llu (%llu MiB); process %llu MiB committed, %llu MiB in RAM\n",
-                (unsigned long long)(vram >> 20), (unsigned long long)image_count,
-                (unsigned long long)(image_bytes >> 20),
-                (unsigned long long)(buffer_cache.ArenaBackedBytes() >> 20),
-                (unsigned long long)(buffer_cache.ArenaReserveUsedBytes() >> 20),
-                (unsigned long long)(buffer_cache.ArenaReserveBytes() >> 20),
-                (unsigned long long)idle,
-                (unsigned long long)(idle_bytes >> 20), (unsigned long long)kept,
-                (unsigned long long)(kept_bytes >> 20),
-                (unsigned long long)(process.private_bytes >> 20),
-                (unsigned long long)(process.working_set >> 20));
-    std::fflush(stdout);
+    const double ms_process = ms_since(t2);
+    const auto t3 = std::chrono::steady_clock::now();
+    const u64 arena_backed = buffer_cache.ArenaBackedBytes();
+    const u64 arena_used = buffer_cache.ArenaReserveUsedBytes();
+    const u64 arena_reserve = buffer_cache.ArenaReserveBytes();
+    const double ms_arena = ms_since(t3);
+    const auto t4 = std::chrono::steady_clock::now();
+    // One write: stdout is unbuffered (probe.c), and printf to it writes piece by piece.
+    char line[512];
+    const int length = std::snprintf(
+        line, sizeof(line),
+        "Memory: VRAM %llu MiB; textures %llu (%llu MiB), game memory backing %llu MiB "
+        "(reserve %llu of %llu MiB used), unused for a minute %llu (%llu MiB), of them "
+        "GPU-written tiled %llu (%llu MiB); process %llu MiB committed, %llu MiB in RAM\n",
+        (unsigned long long)(vram >> 20), (unsigned long long)image_count,
+        (unsigned long long)(image_bytes >> 20), (unsigned long long)(arena_backed >> 20),
+        (unsigned long long)(arena_used >> 20), (unsigned long long)(arena_reserve >> 20),
+        (unsigned long long)idle, (unsigned long long)(idle_bytes >> 20),
+        (unsigned long long)kept, (unsigned long long)(kept_bytes >> 20),
+        (unsigned long long)(process.private_bytes >> 20),
+        (unsigned long long)(process.working_set >> 20));
+    if (length > 0) {
+        BbOut::CurrentSink()(line, std::min<size_t>(size_t(length), sizeof(line) - 1));
+    }
+    const double ms_print = ms_since(t4);
+    // Timing of this report (the 60 s stall hunt).
+    BbOut::Print("Memory report ms: lru %.2f, vram %.2f, process %.2f, arena %.2f, print %.2f\n",
+                 ms_lru, ms_vram, ms_process, ms_arena, ms_print);
     // bbport: BB_VMA_DUMP=<file> (the benchmark's vram.json): the allocator's detailed statistics
     // (every allocation, its type, size and usage) written there with each memory line.
     static const char* vma_dump = std::getenv("BB_VMA_DUMP");
@@ -1509,7 +1534,7 @@ void TextureCache::GarbageCollectImages() {
     if (pressured || gc_downloads != 0) {
         const auto now = std::chrono::steady_clock::now();
         if (now - gc_report_time >= std::chrono::seconds(5)) {
-            std::printf("Texture cache: memory pressure, %llu of %llu MiB (critical %llu): "
+            BbOut::Print("Texture cache: memory pressure, %llu of %llu MiB (critical %llu): "
                         "%llu images evicted, %llu written back since the last report; "
                         "%llu old GPU-written tiled images kept (%llu MiB), %llu dropped\n",
                         (unsigned long long)(total_used_memory >> 20),
@@ -1525,7 +1550,7 @@ void TextureCache::GarbageCollectImages() {
         // bbport: evictions by the idle rule too (at most every 5 s), so two runs compare.
         const auto now = std::chrono::steady_clock::now();
         if (now - gc_report_time >= std::chrono::seconds(5)) {
-            std::printf("Texture cache: %llu of %llu MiB: %llu idle images evicted since the last report "
+            BbOut::Print("Texture cache: %llu of %llu MiB: %llu idle images evicted since the last report "
                         "(textures %llu MiB)\n",
                         (unsigned long long)(total_used_memory >> 20),
                         (unsigned long long)(pressure_gc_memory >> 20),
@@ -1589,8 +1614,27 @@ void TextureCache::RunGarbageCollector() {
         ++gc_tick;
     };
 
+    EraseHeldImages();
     GarbageCollectImages();
     GarbageCollectSamplers();
+}
+
+bool TextureCache::HoldReleased(const Image& image) {
+    return Vulkan::Rt::HoldReleased(image.rt_hold_tick,
+                                    [&](u64 tick) { return scheduler.IsFree(tick); });
+}
+
+void TextureCache::EraseHeldImages() {
+    std::erase_if(held_erases, [&](const HeldErase& h) {
+        if (!slot_images.is_allocated(h.image_id) || slot_images[h.image_id].image_uid != h.uid) {
+            return true;
+        }
+        if (!scheduler.IsFree(h.tick) || !HoldReleased(slot_images[h.image_id])) {
+            return false;
+        }
+        EraseImage(h.image_id);
+        return true;
+    });
 }
 
 void TextureCache::TouchImage(const Image& image) {
@@ -1655,7 +1699,8 @@ u64 TextureCache::ReclaimMemoryFor(VAddr addr, size_t size, u64 bytes) {
         if (!image.backing || image.lru_touched_tick >= unused_tick ||
             True(image.flags & ImageFlagBits::GpuModified) ||
             image.scene_proxy || image.usage.vo_surface || image.binding.is_bound ||
-            image.binding.is_target || image.allocation_failed || image.Overlaps(addr, size)) {
+            image.binding.is_target || image.allocation_failed || image.Overlaps(addr, size) ||
+            !HoldReleased(image)) {
             return false;
         }
         victims.push_back(image_id);
@@ -1702,6 +1747,10 @@ void TextureCache::DeleteImage(ImageId image_id, bool now) {
     // Reclaim image and any image views it references.
     if (now) {
         EraseImage(image_id);
+        return;
+    }
+    if (image.rt_hold_tick) {
+        held_erases.push_back({image_id, image.image_uid, scheduler.CurrentTick()});
         return;
     }
     scheduler.DeferOperation([this, image_id] { EraseImage(image_id); });

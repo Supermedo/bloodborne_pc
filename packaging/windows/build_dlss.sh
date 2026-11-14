@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds bbport_dlss.dll (gpu/dlss_bridge, the only code that uses the NVIDIA DLSS SDK) with
-# MSVC and puts it with NVIDIA's nvngx_dlss.dll (Super Resolution) and nvngx_dlssg.dll (Frame
-# Generation) next to out/bb-probe.exe; package.sh ships them.
+# MSVC and puts it with NVIDIA's nvngx_dlss.dll (Super Resolution), nvngx_dlssg.dll (Frame
+# Generation) and nvngx_dlssd.dll (Ray Reconstruction) next to out/bb-probe.exe; package.sh
+# ships them. Also builds out/bb-dlss-capabilities.exe (tools/dlss_capabilities.c), which
+# reports what NGX offers on this GPU through the bridge without the game.
 # Needs Visual Studio 2022 (Build Tools) and a checkout of https://github.com/NVIDIA/DLSS:
 #   DLSS_SDK_ROOT=F:/sdk/DLSS bash packaging/windows/build_dlss.sh
 set -euo pipefail
@@ -15,6 +17,8 @@ cp -r /c/msys64/clang64/include/vulkan /c/msys64/clang64/include/vk_video out/vk
     -DDLSS_SDK_ROOT="$(cygpath -m "$sdk")" -DVULKAN_INCLUDE="$(cygpath -m "$PWD/out/vkinclude")"
 "$cmake" --build out/dlss-bridge --config Release
 cp out/dlss-bridge/Release/bbport_dlss.dll "$sdk/lib/Windows_x86_64/rel/nvngx_dlss.dll" \
-    "$sdk/lib/Windows_x86_64/rel/nvngx_dlssg.dll" out/
+    "$sdk/lib/Windows_x86_64/rel/nvngx_dlssg.dll" "$sdk/lib/Windows_x86_64/rel/nvngx_dlssd.dll" out/
 cp "$sdk/LICENSE.txt" out/NVIDIA-DLSS-LICENSE.txt
-echo "DLSS bridge ready: out/bbport_dlss.dll, out/nvngx_dlss.dll, out/nvngx_dlssg.dll"
+"${CC:-clang}" -std=c11 -O2 -Wall -Wextra -Werror -Igpu/dlss_bridge tools/dlss_capabilities.c \
+    -lvulkan-1 -o out/bb-dlss-capabilities.exe
+echo "DLSS bridge ready: out/bbport_dlss.dll, out/nvngx_dlss.dll, out/nvngx_dlssg.dll, out/nvngx_dlssd.dll"

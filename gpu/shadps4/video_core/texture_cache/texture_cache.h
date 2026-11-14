@@ -14,6 +14,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 #include <queue>
 #include <tsl/robin_map.h>
@@ -216,6 +217,18 @@ public:
         auto& image = slot_images[id];
         return !uid || image.image_uid == uid ? &image : nullptr;
     }
+    void HoldImage(ImageId id, u64 uid, u64 tick) {
+        Image* image = TryGetImage(id, uid);
+        if (!image) {
+            return;
+        }
+        image->rt_hold_tick = tick;
+        if (tick == ~0ull) {
+            TouchImage(*image);
+        }
+    }
+    bool HoldReleased(const Image& image);
+    void EraseHeldImages();
     [[nodiscard]] Image& GetImage(ImageId id) {
         auto& image = slot_images[id];
         TouchImage(image);
@@ -439,6 +452,12 @@ private:
     u64 pressure_gc_samplers = 0;
     u64 critical_gc_samplers = 0;
     u64 gc_tick = 0;
+    struct HeldErase {
+        ImageId image_id;
+        u64 uid;
+        u64 tick;
+    };
+    std::vector<HeldErase> held_erases;
     Common::LeastRecentlyUsedCache<ImageId, u64> lru_cache;
     Common::LeastRecentlyUsedCache<u64, u64> sampler_lru_cache;
     const bool readback_linear_images;

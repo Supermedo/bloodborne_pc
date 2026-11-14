@@ -1,0 +1,1147 @@
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+// Sky dome as a light (full path tracing plan item 3). The game draws its sky dome (ps dda49e89,
+// a 2048x512 panorama on a squashed hemisphere) after the lighting composite, so the GI pass only
+// ever saw the grey pre-sky fill. This pass runs at the post trigger, after the sky draw. It fits
+// one gain per channel between the dome texture and the sky pixels on screen (the game multiplies
+// the texture by its own sky colour and adds fog), then writes dome x gain into every cell of the
+// 32x32 octahedral sky probe and into the sky mean. GI misses and fog in-scatter read the probe,
+// so all sky light comes from the game's own sky image.
+//
+// Phase 0 (cfg.z == 0): one workgroup fits the gain and fills the probe.
+// Phase 1 (cfg.z == 1): one thread per pixel, debug views over the sky pixels (BB_RT_SKY_DEBUG).
+
+layout(local_size_x = 256) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1, rgba16f) uniform image2D scene_img;
+layout(binding = 2) uniform sampler2D dome_tex;
+layout(binding = 3, std430) buffer Material {
+    vec4 material[];
+};
+
+layout(push_constant) uniform Push {
+    vec4 view_rows[3];
+    vec4 proj;
+    vec4 size_jitter;
+    uvec4 cfg;
+    vec4 dome;
+};
+
+const uint SkyProbeSize = 32u;
+const uint Cells = SkyProbeSize * SkyProbeSize;
+const float Pi = 3.14159265;
+const float Blend = 0.125;
+const float MaxFrames = 64.0;
+const uint GridX = 64u;
+const uint GridY = 36u;
+const uint MinSamples = 24u;
+
+uint SkySlot() { return cfg.x; }
+uint Debug() { return cfg.y; }
+uint Phase() { return cfg.z; }
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+float UOffset() { return dome.x; }
+float URepeat() { return dome.y; }
+float VDivisor() { return dome.z; }
+float SkyClamp() { return dome.w; }
+uint ProbeBase() { return 2u * SkySlot() + 1u; }
+uint GainSlot() { return ProbeBase() + Cells; }
+const uint SkyImageSize = 1024u; // rt_gi.h SkyImageSize
+uint ImageBase() { return GainSlot() + 2u; }
+
+bool Finite(vec3 v) {
+    return !any(isnan(v)) && !any(isinf(v));
+}
+
+vec3 WorldDir(vec3 v) {
+    return view_rows[0].xyz * v.x + view_rows[1].xyz * v.y + view_rows[2].xyz * v.z;
+}
+
+vec3 PixelWorldDir(vec2 pixel) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    return normalize(WorldDir(vec3(ndc.x / proj.x, ndc.y / proj.y, 1.0)));
+}
+
+vec2 OctEncode(vec3 d) {
+    const float l1 = abs(d.x) + abs(d.y) + abs(d.z);
+    if (!(l1 > 0.0)) {
+        return vec2(0.5);
+    }
+    vec2 p = d.xy / l1;
+    if (d.z < 0.0) {
+        p = (1.0 - abs(p.yx)) * vec2(p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+vec3 OctDecode(vec2 e) {
+    const vec2 p = e * 2.0 - 1.0;
+    vec3 d = vec3(p, 1.0 - abs(p.x) - abs(p.y));
+    if (d.z < 0.0) {
+        d.xy = (1.0 - abs(d.yx)) * vec2(d.x >= 0.0 ? 1.0 : -1.0, d.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(d);
+}
+
+// Dome texture v (in the vertex format's 16-bit units) against elevation from the dome centre,
+// read from the dome mesh (ps dda49e89 draw 1, 33-vertex rings).
+const int Rows = 11;
+const float RowElev[Rows] = float[](-2.9, 1.8, 6.8, 12.4, 19.2, 28.3, 41.4, 56.0, 80.8, 85.8, 90.0);
+const float RowV[Rows] = float[](2044.0, 1780.0, 1501.0, 1211.0, 892.0, 572.0, 337.0, 176.0, 79.0,
+                                 14.0, 0.0);
+
+float ElevationToV(float elev) {
+    if (elev <= RowElev[0]) {
+        return RowV[0];
+    }
+    for (int i = 1; i < Rows; ++i) {
+        if (elev <= RowElev[i]) {
+            const float t = (elev - RowElev[i - 1]) / (RowElev[i] - RowElev[i - 1]);
+            return mix(RowV[i - 1], RowV[i], t);
+        }
+    }
+    return 0.0;
+}
+
+vec2 DomeUv(vec3 w) {
+    const float elev = degrees(asin(clamp(w.y, -1.0, 1.0)));
+    const float phi = atan(w.z, w.x) / (2.0 * Pi);
+    return vec2((UOffset() + phi) * URepeat(), ElevationToV(elev) / VDivisor());
+}
+
+vec3 Dome(vec3 w, float lod) {
+    vec2 uv = DomeUv(w);
+    uv.y = clamp(uv.y, 0.5 / 512.0, 1.0 - 0.5 / 512.0);
+    const vec3 c = textureLod(dome_tex, uv, lod).rgb;
+    return Finite(c) ? max(c, vec3(0.0)) : vec3(0.0);
+}
+
+// The dome mesh is a squashed hemisphere around the camera (horizon radius about 1480, top 539)
+// and it writes depth, so after the sky draw the sky is not at depth 1. A pixel shows the sky if
+// it is at depth 1 or beyond DomeFraction of the dome model's distance in its direction.
+const float DomeRadius = 1480.0;
+const float DomeHeight = 539.0;
+// Measured in game: sky pixels sit at 0.4-0.8 of this model's range, scene geometry below 0.2.
+const float DomeFraction = 0.3;
+
+float DomeRange(vec3 w) {
+    const float c = length(w.xz), s = max(w.y, 0.0);
+    return inversesqrt(c * c / (DomeRadius * DomeRadius) + s * s / (DomeHeight * DomeHeight));
+}
+
+// Distance of what a pixel shows (metres); SkyFar at depth 1 (nothing drawn there).
+const float SkyFar = 1.0e5;
+float PixelRange(ivec2 pixel) {
+    const float depth = texelFetch(depth_tex, pixel, 0).r;
+    if (depth >= 1.0) {
+        return SkyFar;
+    }
+    const vec2 uv = (vec2(pixel) + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = proj.w / min(depth - proj.z, -1e-8);
+    return min(z * length(vec3(ndc.x / proj.x, ndc.y / proj.y, 1.0)), SkyFar);
+}
+
+bool IsSky(ivec2 pixel, vec3 w) {
+    return PixelRange(pixel) >= DomeFraction * DomeRange(w);
+}
+
+shared vec3 s_sd[256];
+shared vec3 s_dd[256];
+shared vec3 s_ss[256];
+shared uint s_n[256];
+// Screen sky per probe cell, fixed point (CellScale per unit), so the visible sky is learned
+// exactly, clouds included; cells off screen take dome x gain.
+const float CellScale = 1024.0;
+shared uint s_cell[Cells * 4u];
+shared vec3 s_gain;
+shared bool s_gain_ok;
+
+// Mean of the sky image (learned from the screen, or loaded from the sky cache) over a probe
+// cell, from 16 directions; false when under half of them were ever seen.
+bool ImageMean(vec2 base, out vec3 mean) {
+    vec3 sum = vec3(0.0);
+    uint n = 0u;
+    for (uint k = 0u; k < 16u; ++k) {
+        const vec2 sub = (vec2(float(k & 3u), float(k >> 2u)) + 0.5) * 0.25;
+        const vec3 w = OctDecode((base + sub) / float(SkyProbeSize));
+        const ivec2 c = clamp(ivec2(OctEncode(w) * float(SkyImageSize)), ivec2(0),
+                              ivec2(int(SkyImageSize) - 1));
+        const uint slot = ImageBase() + uint(c.y) * SkyImageSize + uint(c.x);
+        if (slot >= material.length()) {
+            continue;
+        }
+        const vec4 m = material[slot];
+        if (m.w > 0.0 && Finite(m.rgb)) {
+            sum += m.rgb;
+            ++n;
+        }
+    }
+    mean = n > 0u ? sum / float(n) : vec3(0.0);
+    return n >= 8u;
+}
+
+void FitAndFill() {
+    const uint t = gl_LocalInvocationIndex;
+    for (uint i = t; i < Cells * 4u; i += 256u) {
+        s_cell[i] = 0u;
+    }
+    barrier();
+    vec3 sd = vec3(0.0), dd = vec3(0.0), ss = vec3(0.0);
+    uint n = 0u;
+    for (uint i = t; i < GridX * GridY; i += 256u) {
+        const vec2 cell = vec2(float(i % GridX) + 0.5, float(i / GridX) + 0.5);
+        const ivec2 pixel = ivec2(cell / vec2(GridX, GridY) * Size());
+        const vec3 w = PixelWorldDir(vec2(pixel));
+        if (!Finite(w) || w.y < -0.05 || !IsSky(pixel, w)) {
+            continue;
+        }
+        const vec3 s = imageLoad(scene_img, pixel).rgb;
+        if (!Finite(s)) {
+            continue;
+        }
+        const ivec2 oc = clamp(ivec2(OctEncode(w) * float(SkyProbeSize)), ivec2(0),
+                               ivec2(int(SkyProbeSize) - 1));
+        const uint cell_id = (uint(oc.y) * SkyProbeSize + uint(oc.x)) * 4u;
+        const uvec3 q = uvec3(clamp(s, vec3(0.0), vec3(SkyClamp())) * CellScale + 0.5);
+        atomicAdd(s_cell[cell_id + 0u], q.x);
+        atomicAdd(s_cell[cell_id + 1u], q.y);
+        atomicAdd(s_cell[cell_id + 2u], q.z);
+        atomicAdd(s_cell[cell_id + 3u], 1u);
+        const vec3 d = Dome(w, 0.0);
+        sd += s * d;
+        dd += d * d;
+        ss += s * s;
+        ++n;
+    }
+    s_sd[t] = sd;
+    s_dd[t] = dd;
+    s_ss[t] = ss;
+    s_n[t] = n;
+    barrier();
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (t < stride) {
+            s_sd[t] += s_sd[t + stride];
+            s_dd[t] += s_dd[t + stride];
+            s_ss[t] += s_ss[t + stride];
+            s_n[t] += s_n[t + stride];
+        }
+        barrier();
+    }
+    if (t == 0u) {
+        const vec4 stored = GainSlot() < material.length() ? material[GainSlot()] : vec4(0.0);
+        const bool have = stored.w > 0.0 && Finite(stored.rgb);
+        vec3 gain = have ? stored.rgb : vec3(0.0);
+        bool ok = have;
+        if (s_n[0] >= MinSamples && all(greaterThan(s_dd[0], vec3(1e-8)))) {
+            const vec3 fit = clamp(s_sd[0] / s_dd[0], vec3(0.0), vec3(1e3));
+            if (Finite(fit)) {
+                gain = have ? mix(stored.rgb, fit, Blend) : fit;
+                ok = true;
+                if (GainSlot() < material.length()) {
+                    // w: whole part counts frames of history, fraction is the fit residual
+                    // (0 = exact, near 1 = no correlation), for the debug readout.
+                    const vec3 r2 = max(vec3(1.0) - s_sd[0] * s_sd[0] /
+                                                        max(s_dd[0] * s_ss[0], vec3(1e-12)),
+                                        vec3(0.0));
+                    const float residual = clamp(sqrt(dot(r2, vec3(1.0 / 3.0))), 0.0, 0.999);
+                    material[GainSlot()] =
+                        vec4(gain, min(floor(stored.w) + 1.0, MaxFrames) + residual);
+                }
+            }
+        }
+        s_gain = gain;
+        s_gain_ok = ok;
+        if (GainSlot() + 1u < material.length()) {
+            material[GainSlot() + 1u] = vec4(UOffset(), URepeat(), VDivisor(), 1.0);
+        }
+    }
+    barrier();
+    // Without a gain yet (too little sky on screen since the last material clear) only the cells
+    // seen on screen are written; the rest stay as they are. Cells below the horizon take the
+    // texture's bottom row, which is what the game draws on the dome's skirt there.
+    const bool gain_ok = s_gain_ok;
+    const vec3 gain = s_gain;
+    vec3 up_sum = vec3(0.0);
+    uint up_n = 0u;
+    for (uint c = t; c < Cells; c += 256u) {
+        const vec2 base = vec2(float(c % SkyProbeSize), float(c / SkyProbeSize));
+        const uint seen = s_cell[c * 4u + 3u];
+        // Off screen: the sky image there (clouds included), else dome x gain.
+        vec3 image;
+        const bool imaged = seen == 0u && ImageMean(base, image);
+        if (seen == 0u && !imaged && !gain_ok) {
+            continue;
+        }
+        vec3 value;
+        if (seen > 0u) {
+            value = vec3(s_cell[c * 4u], s_cell[c * 4u + 1u], s_cell[c * 4u + 2u]) /
+                    (CellScale * float(seen));
+        } else if (imaged) {
+            value = clamp(image, vec3(0.0), vec3(SkyClamp()));
+        } else {
+            vec3 sum = vec3(0.0);
+            for (int k = 0; k < 4; ++k) {
+                const vec2 sub = vec2(float(k & 1), float(k >> 1)) * 0.5 + 0.25;
+                sum += Dome(OctDecode((base + sub) / float(SkyProbeSize)), 4.0);
+            }
+            value = clamp(sum * 0.25 * gain, vec3(0.0), vec3(SkyClamp()));
+        }
+        if (OctDecode((base + 0.5) / float(SkyProbeSize)).y > 0.0) {
+            up_sum += value;
+            ++up_n;
+        }
+        const uint slot = ProbeBase() + c;
+        if (slot < material.length()) {
+            const vec4 stored = material[slot];
+            const bool have = stored.w > 0.0 && Finite(stored.rgb);
+            material[slot] = vec4(have ? mix(stored.rgb, value, Blend) : value,
+                                  min(stored.w + 1.0, MaxFrames));
+        }
+    }
+    barrier();
+    s_ss[t] = up_sum;
+    s_n[t] = up_n;
+    barrier();
+    for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+        if (t < stride) {
+            s_ss[t] += s_ss[t + stride];
+            s_n[t] += s_n[t + stride];
+        }
+        barrier();
+    }
+    if (t == 0u && s_n[0] > 0u && SkySlot() < material.length()) {
+        const vec3 mean = s_ss[0] / float(s_n[0]);
+        const vec4 stored = material[SkySlot()];
+        const bool have = stored.w > 0.0 && Finite(stored.rgb);
+        material[SkySlot()] = vec4(have ? mix(stored.rgb, mean, Blend) : mean,
+                                   min(stored.w + 1.0, MaxFrames));
+    }
+}
+
+// The moon slot and the moon and cloud layer grid that rt_gi.comp (RT_SKY_LAYER) traces from the
+// game's layer mesh (rt_gi.h MoonDirSlot, SkyLayerSlot).
+uint MoonSlot() { return ImageBase() + SkyImageSize * SkyImageSize; }
+uint LayerBase() { return MoonSlot() + 1u; }
+const uint LayerW = 512u;       // rt_gi.h SkyLayerWidth
+const uint LayerH = 128u;       // rt_gi.h SkyLayerHeight
+const float LayerElMin = -20.0; // rt_gi.h SkyLayerElMin, degrees
+const float LayerElMax = 90.0;  // rt_gi.h SkyLayerElMax
+const uint LayerStripRows = 256u;
+
+vec4 LayerCell(uvec2 c) {
+    const uint slot = LayerBase() + min(c.y, LayerH - 1u) * LayerW + min(c.x, LayerW - 1u);
+    return slot < material.length() ? material[slot] : vec4(0.0);
+}
+
+vec4 LayerAt(vec3 w) {
+    const float az = degrees(atan(w.x, w.z)) + 180.0;
+    const float el = degrees(asin(clamp(w.y, -1.0, 1.0)));
+    const float v = (el - LayerElMin) / (LayerElMax - LayerElMin);
+    if (v < 0.0 || v >= 1.0) {
+        return vec4(0.0);
+    }
+    return LayerCell(uvec2(uint(az / 360.0 * float(LayerW)) % LayerW, uint(v * float(LayerH))));
+}
+
+// Debug 1: sky pixels (IsSky) show dome x gain (compare with the game's sky). Debug 2: 4x the absolute
+// difference between the screen and dome x gain. Debug 3: the probe cell the GI reads.
+// Debug 4: the moon and cloud layer over dome x gain, and the whole layer grid as a strip along
+// the top (azimuth -180..180 left to right, elevation top down; magenta = a layer hit with no
+// known texture, green = the moon search's peak cell). Every view also draws a magenta ring
+// around the moon direction the layer pass found.
+void DebugView() {
+    const uint width = uint(Size().x);
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.x % width, gl_GlobalInvocationID.x / width);
+    if (pixel.y >= int(Size().y)) {
+        return;
+    }
+    if (Debug() == 4u && pixel.y < int(LayerStripRows)) {
+        const uvec2 c = uvec2(uint(float(pixel.x) / Size().x * float(LayerW)),
+                              LayerH - 1u - uint(pixel.y) * LayerH / LayerStripRows);
+        vec3 out_c = LayerCell(c).rgb;
+        const uint stats = LayerBase() + LayerW * LayerH;
+        // Top rows: moon slot held (red) or empty (blue); peak score (green) and 4x the ring mean
+        // (yellow) as bars, full width = 2.0.
+        if (pixel.y < 24 && stats < material.length()) {
+            const vec4 st = material[stats];
+            const float f = float(pixel.x) / Size().x * 2.0;
+            out_c = pixel.y < 8   ? (material[MoonSlot()].w > 0.0 ? vec3(0.4, 0.0, 0.0) : vec3(0.0, 0.0, 0.4))
+                    : pixel.y < 16 ? (f < st.x ? vec3(0.0, 0.4, 0.0) : vec3(0.0))
+                                   : (f < 4.0 * st.y ? vec3(0.4, 0.4, 0.0) : vec3(0.0));
+        }
+        if (stats < material.length() && uvec2(material[stats].zw) == c) {
+            out_c = vec3(0.0, 8.0, 0.0);
+        }
+        imageStore(scene_img, pixel, vec4(out_c, 1.0));
+        return;
+    }
+    const vec3 w = PixelWorldDir(vec2(pixel));
+    if (!IsSky(pixel, w)) {
+        return;
+    }
+    const vec4 g = GainSlot() < material.length() ? material[GainSlot()] : vec4(0.0);
+    if (!(g.w > 0.0)) {
+        return;
+    }
+    const vec3 s = imageLoad(scene_img, pixel).rgb;
+    vec3 out_c = Dome(w, 0.0) * g.rgb;
+    if (Debug() == 2u) {
+        out_c = abs(s - out_c) * 4.0;
+    } else if (Debug() == 3u) {
+        const ivec2 c = clamp(ivec2(OctEncode(w) * float(SkyProbeSize)), ivec2(0),
+                              ivec2(int(SkyProbeSize) - 1));
+        const uint slot = ProbeBase() + uint(c.y) * SkyProbeSize + uint(c.x);
+        out_c = slot < material.length() ? material[slot].rgb : vec3(0.0);
+    } else if (Debug() == 4u) {
+        const vec4 l = LayerAt(w);
+        out_c = out_c * (1.0 - l.a) + l.rgb;
+    }
+    // Every view: a magenta ring 3-3.5 degrees around the moon direction.
+    if (MoonSlot() < material.length() && material[MoonSlot()].w > 0.0) {
+        const float c = dot(w, normalize(material[MoonSlot()].xyz));
+        if (c < 0.99863 && c > 0.99813) {
+            out_c = vec3(8.0, 0.0, 8.0);
+        }
+    }
+    imageStore(scene_img, pixel, vec4(out_c, 1.0));
+}
+
+// Phase 2: every second pixel in x and y stores the screen's sky into the sky image cell of
+// its direction (the mirrors read it). Runs before the debug views overwrite the sky.
+void CaptureSky() {
+    const uint half_w = (uint(Size().x) + 1u) / 2u;
+    const ivec2 pixel = 2 * ivec2(gl_GlobalInvocationID.x % half_w, gl_GlobalInvocationID.x / half_w);
+    if (pixel.y >= int(Size().y) || pixel.x >= int(Size().x)) {
+        return;
+    }
+    const vec3 w = PixelWorldDir(vec2(pixel));
+    if (!Finite(w) || w.y < -0.05 || !IsSky(pixel, w)) {
+        return;
+    }
+    const vec3 s = imageLoad(scene_img, pixel).rgb;
+    if (!Finite(s)) {
+        return;
+    }
+    const ivec2 c = clamp(ivec2(OctEncode(w) * float(SkyImageSize)), ivec2(0),
+                          ivec2(int(SkyImageSize) - 1));
+    const uint slot = ImageBase() + uint(c.y) * SkyImageSize + uint(c.x);
+    if (slot < material.length()) {
+        material[slot] = vec4(clamp(s, vec3(0.0), vec3(SkyClamp())), 1.0);
+    }
+}
+
+// Phase 3 (one workgroup): the moon as the game draws it. The traced layer mesh can disagree
+// with the drawn disc (the late-game moon sat 30 degrees from the layer's white spot), so the
+// disc is found on screen: its direction goes to the slot after the search stats
+// (LayerBase() + grid + 2, w = disc samples, -1 when none), which the layer search takes as its
+// find (rt_gi.comp FindLayerMoon). The next slot keeps the numbers for the log, its w the disc's
+// range in metres (FindScreenMoon).
+//
+// One rule for every world: the moon is a round mesh in front of the sky, and it writes depth.
+// Colour is not looked at; brightness only says the disc is a light (ScreenMoonGlow). Hunter's
+// Dream: a flat disc at 748-750 m, the dome behind it at 1737 m. Cathedral Ward's blood moon: a
+// bulged mesh at 556-570 m, the sky behind it 565-684 m and uneven (a cloud sheet meets the rim
+// at the lower left, no step there). Upper Cathedral Ward: a mesh 21 degrees wide at 450 m, low
+// on the horizon behind the ruins, nothing behind it (depth 1), cloud sheets with straight
+// edges above; the game draws no dome there.
+// Rules on the picture failed one world each time: the brightest patch took lit clouds and
+// fire; a red and a pale search with a colour lock let the Dream's red clouds pass as the red
+// disc; a level fall at the edge failed the blood moon (shaded side, bright top) at one
+// threshold and the Dream moon (soft limb under thin cloud, edge contrast 1.8-2.5 against
+// 1.1-2.4 for cloud patches) at the other.
+const uint ScreenMoonGrid = 512u;     // samples across the screen (~6 per degree)
+const uint ScreenMoonMinSky = 300u;   // sky samples on screen
+const float ScreenMoonMinSamples = 40.0; // samples on the disc
+// A rim sample: the sky one grid step to both sides along x or y is farther by this share of
+// the range in sum (a step seen from its near side; a smooth dome gives under 0.0002).
+const float ScreenMoonEdge = 0.004;
+// Each rim sample votes for the cells its centre may be in: inward along the step, every ring
+// of radius from ScreenMoonMinRim to ScreenMoonMaxRim. The ScreenMoonCands best cells are then
+// voted on again, per radius: a rim sample counts for a cell at its own distance when its step
+// faces away from the cell. A disc's centre has rim samples at one radius from most of the 8
+// ways (m_cw, a bit each): the candidates with the most ways at one radius, then the most
+// samples there, go to the disc test (ScreenMoonTries in all, with the front cell's below). By
+// the first vote alone the Hunter's Dream's far pillars won (rows of straight edges: two ways
+// only, at any radius, their votes piling up along lines).
+const uint ScreenMoonVoteX = 64u, ScreenMoonVoteY = 32u;
+const uint ScreenMoonCands = 8u;
+const uint ScreenMoonTries = 3u;
+const int ScreenMoonMinWays = 4;
+shared uint m_vote[64u * 32u];
+shared uint m_block[64u * 32u]; // votes of the 3 x 3 cells around each cell
+shared vec3 m_cand[8];          // candidate centres (pixels), z 1 when set
+shared uint m_cr[8u * 16u];     // per candidate and radius (rings from ScreenMoonMinRim): samples
+shared uint m_cw[8u * 16u];     // the ways they face
+shared uint m_cn[8u * 16u];     // their ranges (m), summed
+shared uint m_cl[8u * 16u];     // their log luminance (SkyLogLum), summed
+shared float m_try_near[3];     // per candidate to test: its rim samples' mean range (0: none)
+shared uint m_sky;
+shared uint m_skylum; // log luminance sum of the sky samples (SkyLogLum)
+shared vec3 m_try[3]; // the candidates to test (zero: none)
+// One more candidate, where the disc stands far in front of the sky: a sample is in front when
+// the sky at its own height, ScreenMoonProbeArc (degrees, over the largest disc radius) to
+// either side, is ScreenMoonFront times farther (a dome round about the camera has the same
+// range there). The screen cell with the most such samples; their mean is the candidate. The
+// Hunter's Dream moon (748 m, the dome 1737 m) is found by it in every search, by the votes in
+// 1 of 3 to 1 of 8 (its far pillars and cloud edges); the blood moon (sky 1.0-1.2x farther) by
+// the votes only.
+const float ScreenMoonProbeArc = 14.0;
+const float ScreenMoonFront = 1.25;
+const uint ScreenMoonCellsX = 16u, ScreenMoonCellsY = 8u;
+const uint ScreenMoonMinFront = 12u;
+shared uint m_cell[3u * 16u * 8u]; // per cell: front samples, sums of their x and y
+shared uint m_done;   // 1 once a candidate passed
+shared uint m_near[2]; // range sum (1/8 m) and samples within a ring of a centre
+// The disc: sky within ScreenMoonBand of the range at the centre (the blood moon's bulge and
+// tilt span -0.4% to +1.9%); sky nearer than that hides it, as a branch does. In each of
+// ScreenMoonSectors directions the rim is where the share of samples on the disc falls under
+// half. A circle through the rims (DiscProfile) must hold ScreenMoonMinDirs of them: trees,
+// roofs, the screen edge or sky at the disc's own range may spoil the rest.
+const float ScreenMoonBand = 1.03;
+const float ScreenMoonRingStep = 0.75; // degrees
+const uint ScreenMoonRings = 20u;      // 15 degrees
+const uint ScreenMoonSectors = 8u;
+const uint ScreenMoonMinDirs = 5u;
+// A disc half behind a wall or the horizon (Upper Cathedral Ward's moon, 14 rings wide, its
+// centre 2.7 degrees up, its lower half under the ruins): 4 rims on the circle are enough when
+// at most one other direction has a rim at all (the disc just runs on there until something
+// hides it; the ruins' arches gave one stray rim in half the searches) and the disc is far
+// brighter than the whole sky on screen (ScreenMoonHalfGlow; that moon 31-75). Lit cloud
+// patches with 4 rims on a circle (the Hunter's Dream: 1.1-1.6 over the sky) stay out.
+const uint ScreenMoonHalfDirs = 4u;
+const float ScreenMoonHalfGlow = 8.0;
+const uint ScreenMoonGap = 2u; // rings with no sky (a branch) a rim may sit behind
+// Where the sky behind the disc is at the disc's own range the share never falls: the rim is
+// then the first ring whose rim samples (ScreenMoonEdge, facing away from the centre) are this
+// share of its sky samples over 3 rings (a rim square to the direction has 0.22), when that is
+// ScreenMoonEdgeLead rings or more before the share's fall. Cathedral Ward, a cloud sheet
+// 600-617 m behind the whole blood moon at 594-597 m: the disc came out 15-19 rings wide (it is
+// 6) and was dropped; those directions also leave the test of the rings past the disc (that
+// blood moon's glow: 2.4-2.5).
+const float ScreenMoonRimShare = 0.08;
+const float ScreenMoonRimSamples = 3.0;
+const float ScreenMoonEdgeLead = 1.5;
+// Rim radius in rings: at least 3 (2.25 degrees; the moons are 5.9-8), at most 17 (12.75).
+const float ScreenMoonMinRim = 3.0;
+const float ScreenMoonMaxRim = 17.0;
+// A rim is on the circle within half of this (rings); the worst rim on it as well.
+const float ScreenMoonRound = 2.5;
+// The disc is whole: in the directions whose rims are on the circle, at least this share of the
+// sky inside it is on the disc, at most ScreenMoonSpill of the 3 rings past it. A far pillar's
+// stub in the Hunter's Dream (773 m, 6 rims on a circle of 3.8 rings, 43% inside) passed without
+// it and took the light 80 degrees off the moon.
+const float ScreenMoonFill = 0.85;
+const float ScreenMoonSpill = 0.2;
+// Only a disc the player can see counts; with none in the sky the game's own direction stays
+// (the user's rule). Seen = the luminance inside the circle (geometric mean) is ScreenMoonGlow
+// times the sky's in the 3 rings past it. In clear view the Hunter's Dream moon has 2.0-2.5, the
+// blood moon 2.4-4.2, Upper Cathedral Ward's 10+; at the screen edge or behind branches the Dream
+// moon drops to 1.6 and is not confirmed (the light keeps its place). Not seen, with every depth
+// test passed: the Nightmare Frontier's sun, a disc at 1010 m behind the haze with only a glow
+// in the clouds, 1.58-1.59; in the Dream a moonlit round cloud (1320-1345 m, 6 rims),
+// 1.42-1.46; under the blood moon an unlit round mesh (672-680 m, 6 rims) and rounded cloud
+// sheets, 0.4-1.5. A halo rule (1.55 with 1.8 over the whole sky) let the veiled sun in.
+// rt_gi.comp FindLayerMoon also never lets a disc with less glow replace one with more.
+const float ScreenMoonGlow = 1.8;
+// And never under this over the whole sky (the moons and the veiled sun: 1.6-75). A far rock in
+// the Nightmare Frontier (759 m, 6 rims; darker than the sky, 0.4, the haze around it darker
+// still: rings 1.97) passed on the rings alone and, with more ring glow than that sky's veiled sun
+// (1.59), took its place: the light came from the rocks.
+const float ScreenMoonSkyFloor = 1.3;
+const float ScreenMoonTag = 0.5; // in w of a find (the sample count is whole): it passed the test
+shared uint m_s[2u * 8u * 20u];   // per sector and ring: samples on the disc, sky samples
+shared vec4 md_res;               // rims on the circle, its radius, worst misfit (rings), disc samples
+shared vec3 md_centre;            // the circle's centre
+shared vec2 md_fill;              // share of the sky on the disc: inside the circle, just outside
+shared float md_rims;             // directions with a rim, on the circle or not
+shared uint m_lum[2u * 8u * 20u]; // per sector and ring: log luminance sum of the sky, rim samples
+shared float md_disc_lum;         // the disc's mean log luminance (SkyLogLum units)
+shared float md_glow;             // the luminance inside the circle over the 3 rings past it (geometric means)
+
+// Range of a sky sample the moon search may use (metres, SkyFar at depth 1); 0 when not sky.
+float SkyRange(ivec2 pixel, vec3 w) {
+    if (!Finite(w) || w.y < 0.02) {
+        return 0.0;
+    }
+    const float range = PixelRange(pixel);
+    return range >= DomeFraction * DomeRange(w) ? range : 0.0;
+}
+
+// Pixel of a world direction; false behind the camera or off screen.
+bool DirPixel(vec3 w, out ivec2 pixel) {
+    pixel = ivec2(0);
+    const vec3 v = vec3(dot(view_rows[0].xyz, w), dot(view_rows[1].xyz, w), dot(view_rows[2].xyz, w));
+    if (v.z <= 1e-4) {
+        return false;
+    }
+    const vec2 ndc = vec2(v.x * proj.x, v.y * proj.y) / v.z;
+    pixel = ivec2(floor(vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * Size() + Jitter()));
+    return all(greaterThanEqual(pixel, ivec2(0))) && all(lessThan(pixel, ivec2(Size())));
+}
+
+// See ScreenMoonProbeArc.
+bool FrontSample(vec3 w, float range) {
+    const float phi = radians(ScreenMoonProbeArc) / max(length(w.xz), 0.25);
+    const float cs = cos(phi), sn = sin(phi);
+    for (int side = -1; side <= 1; side += 2) {
+        const float sd = sn * float(side);
+        const vec3 p = vec3(w.x * cs - w.z * sd, w.y, w.x * sd + w.z * cs);
+        ivec2 px;
+        if (DirPixel(p, px) && SkyRange(px, p) >= ScreenMoonFront * range) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// See ScreenMoonEdge: n = the way out of the mesh in pixels (unit), toward the farther side.
+bool RimSample(ivec2 pixel, vec3 w, float range, int step, out vec2 n) {
+    n = vec2(0.0);
+    if (range >= SkyFar) {
+        return false;
+    }
+    vec2 g = vec2(0.0);
+    for (int axis = 0; axis < 2; ++axis) {
+        const ivec2 o = axis == 0 ? ivec2(step, 0) : ivec2(0, step);
+        const ivec2 pa = pixel - o, pb = pixel + o;
+        if (any(lessThan(pa, ivec2(0))) || any(greaterThanEqual(pb, ivec2(Size())))) {
+            continue;
+        }
+        const float ra = SkyRange(pa, w), rb = SkyRange(pb, w);
+        if (ra <= 0.0 || rb <= 0.0) {
+            continue;
+        }
+        const float da = ra - range, db = rb - range;
+        const float e = (da + db) / range;
+        if (e > ScreenMoonEdge) {
+            g[axis] = db > da ? e : -e;
+        }
+    }
+    if (dot(g, g) <= 0.0) {
+        return false;
+    }
+    n = normalize(g);
+    return true;
+}
+
+// Mean range of the sky within a ring of centre (0: none there).
+float NearRange(vec3 centre, bool run) {
+    const uint t = gl_LocalInvocationIndex;
+    const uint step = max(1u, uint(Size().x) / ScreenMoonGrid);
+    const uint nx = uint(Size().x) / step, ny = uint(Size().y) / step;
+    if (t == 0u) {
+        m_near[0] = 0u;
+        m_near[1] = 0u;
+    }
+    barrier();
+    if (run) {
+        const float cone = cos(radians(ScreenMoonRingStep));
+        for (uint k = t; k < nx * ny; k += 256u) {
+            const ivec2 pixel = ivec2((k % nx) * step, (k / nx) * step);
+            const vec3 w = PixelWorldDir(vec2(pixel));
+            if (dot(w, centre) < cone) {
+                continue;
+            }
+            const float range = SkyRange(pixel, w);
+            if (range > 0.0 && range < SkyFar) {
+                atomicAdd(m_near[0], uint(range * 8.0));
+                atomicAdd(m_near[1], 1u);
+            }
+        }
+    }
+    barrier();
+    const float near = m_near[1] >= 4u ? float(m_near[0]) / (8.0 * float(m_near[1])) : 0.0;
+    barrier();
+    return near;
+}
+
+// Log luminance of a pixel, fixed point (64 per stop, 2^-16 at 0).
+uint SkyLogLum(ivec2 pixel) {
+    const vec3 c = imageLoad(scene_img, pixel).rgb;
+    const float y = Finite(c) ? dot(max(c, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722)) : 0.0;
+    return uint(clamp(log2(max(y, 1e-6)) + 16.0, 0.0, 32.0) * 64.0);
+}
+
+// Where the circle fit (radius, centre from the start) meets the ray from the start along dir.
+float CircleRim(vec3 fit, vec2 dir) {
+    const float across = fit.y * dir.y - fit.z * dir.x;
+    const float h = fit.x * fit.x - across * across;
+    return h > 0.0 ? dot(fit.yz, dir) + sqrt(h) : 99.0;
+}
+
+// Sector/ring profile of the sky around centre, then (thread 0) md_res, md_centre and md_fill:
+// per direction the rim radius, and the circle through them. near.x to near.y: the disc's
+// ranges (its centre's and its rim samples': Upper Cathedral Ward's moon is over 3% farther at
+// the rim, and the band about the centre alone cut its disc from 14.3 rings to 8.6, its centre
+// a degree low).
+void DiscProfile(vec3 centre, vec2 near, bool run, bool glow) {
+    const uint t = gl_LocalInvocationIndex;
+    const uint step = max(1u, uint(Size().x) / ScreenMoonGrid);
+    const uint nx = uint(Size().x) / step, ny = uint(Size().y) / step;
+    const uint cnt0 = ScreenMoonSectors * ScreenMoonRings;
+    for (uint i = t; i < 2u * cnt0; i += 256u) {
+        m_s[i] = 0u;
+        m_lum[i] = 0u;
+    }
+    barrier();
+    const vec3 ax_u = normalize(abs(centre.y) < 0.99 ? cross(centre, vec3(0.0, 1.0, 0.0))
+                                                     : vec3(1.0, 0.0, 0.0));
+    const vec3 ax_v = cross(ax_u, centre);
+    if (run && near.x > 0.0) {
+        const float ring_w = radians(ScreenMoonRingStep);
+        const vec3 cv = vec3(dot(view_rows[0].xyz, centre), dot(view_rows[1].xyz, centre),
+                             dot(view_rows[2].xyz, centre));
+        const vec2 centre_px = (vec2(cv.x * proj.x, -cv.y * proj.y) / max(cv.z, 1e-4) * 0.5 + 0.5) * Size();
+        for (uint k = t; k < nx * ny; k += 256u) {
+            const ivec2 pixel = ivec2((k % nx) * step, (k / nx) * step);
+            const vec3 w = PixelWorldDir(vec2(pixel));
+            const uint b = uint(acos(clamp(dot(w, centre), -1.0, 1.0)) / ring_w);
+            if (b >= ScreenMoonRings) {
+                continue;
+            }
+            const float range = SkyRange(pixel, w);
+            if (range <= 0.0 || range * ScreenMoonBand < near.x) {
+                continue; // not sky, or sky nearer than the disc: it hides it
+            }
+            const float az = atan(dot(w, ax_v), dot(w, ax_u)) + Pi;
+            const uint s = min(uint(az / (2.0 * Pi) * float(ScreenMoonSectors)),
+                               ScreenMoonSectors - 1u);
+            const bool on_disc = range <= near.y * ScreenMoonBand;
+            if (on_disc) {
+                atomicAdd(m_s[s * ScreenMoonRings + b], 1u);
+            }
+            atomicAdd(m_s[cnt0 + s * ScreenMoonRings + b], 1u);
+            vec2 n;
+            const vec2 out_px = vec2(pixel) - centre_px;
+            if (RimSample(pixel, w, range, int(step), n) && dot(n, out_px) > 0.3 * length(out_px)) {
+                atomicAdd(m_lum[cnt0 + s * ScreenMoonRings + b], 1u);
+            }
+            if (glow) {
+                atomicAdd(m_lum[s * ScreenMoonRings + b], SkyLogLum(pixel));
+            }
+        }
+    }
+    barrier();
+    if (t == 0u) {
+        float rims[ScreenMoonSectors];
+        bool by_edge[ScreenMoonSectors]; // the rim is from the rim samples, see ScreenMoonRimShare
+        for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+            rims[s] = 99.0;
+            by_edge[s] = false;
+            float in_lv = -1.0; // the last ring on the disc: its share, its index
+            uint in_b = 0u;
+            for (uint b = 0u; b < ScreenMoonRings; ++b) {
+                const float n = float(m_s[cnt0 + s * ScreenMoonRings + b]);
+                if (n < 2.0) {
+                    continue; // no sky in this ring that way (a branch)
+                }
+                const float lv = float(m_s[s * ScreenMoonRings + b]) / n;
+                if (lv >= 0.5) {
+                    in_lv = lv;
+                    in_b = b;
+                    continue;
+                }
+                // The first ring off the disc: the rim is where the share crosses half.
+                if (in_lv >= 0.0 && b - in_b <= ScreenMoonGap + 1u) {
+                    rims[s] = float(in_b) + 0.5 + (in_lv - 0.5) / (in_lv - lv) * float(b - in_b);
+                }
+                break;
+            }
+            for (uint b = 1u; b + 1u < ScreenMoonRings; ++b) {
+                const vec3 c = vec3(float(m_lum[cnt0 + s * ScreenMoonRings + b - 1u]),
+                                    float(m_lum[cnt0 + s * ScreenMoonRings + b]),
+                                    float(m_lum[cnt0 + s * ScreenMoonRings + b + 1u]));
+                const float sky = float(m_s[cnt0 + s * ScreenMoonRings + b - 1u] + m_s[cnt0 + s * ScreenMoonRings + b] +
+                                        m_s[cnt0 + s * ScreenMoonRings + b + 1u]);
+                const float sum = c.x + c.y + c.z;
+                if (sum >= ScreenMoonRimSamples && sum >= ScreenMoonRimShare * sky && c.y >= c.z && c.y > 0.0) {
+                    const float edge = float(b) + 0.5 + (c.z - c.x) / sum;
+                    if (edge + ScreenMoonEdgeLead <= rims[s]) {
+                        rims[s] = edge;
+                        by_edge[s] = true;
+                    }
+                    break;
+                }
+            }
+        }
+        // The rims that agree on one circle are the disc. Each rim is a point (its radius along
+        // its direction, from the start); a circle through points q is |q|^2 = 2 c.q + k, linear
+        // in the centre c and k = R^2 - |c|^2. It comes from every 3 rims (exact solve), the one
+        // most rims agree with (within ScreenMoonRound / 2) wins; then least squares over those.
+        // The first-order form r(a) = R + c.(cos a, sin a) only holds near the centre; a
+        // half disc (Upper Cathedral Ward: only the 4 upper rims, 14 rings out) has no second
+        // pass from its own centre to make up for it.
+        const float tol = 0.5 * ScreenMoonRound;
+        vec2 dirs[ScreenMoonSectors];
+        vec3 rows[ScreenMoonSectors];
+        for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+            const float a = (float(s) + 0.5) / float(ScreenMoonSectors) * 2.0 * Pi - Pi;
+            dirs[s] = vec2(cos(a), sin(a));
+            rows[s] = vec3(2.0 * rims[s] * dirs[s], 1.0);
+        }
+        float n_in = 0.0;
+        float best_err = 1e9;
+        vec3 fit = vec3(99.0, 0.0, 0.0); // radius, centre from the start (rings)
+        for (uint i = 0u; i < ScreenMoonSectors; ++i) {
+            for (uint j = i + 1u; j < ScreenMoonSectors; ++j) {
+                for (uint k = j + 1u; k < ScreenMoonSectors; ++k) {
+                    if (rims[i] > 98.0 || rims[j] > 98.0 || rims[k] > 98.0) {
+                        continue;
+                    }
+                    const mat3 M = transpose(mat3(rows[i], rows[j], rows[k]));
+                    if (abs(determinant(M)) < 1e-2) {
+                        continue;
+                    }
+                    const vec3 q = inverse(M) * vec3(rims[i] * rims[i], rims[j] * rims[j], rims[k] * rims[k]);
+                    const float r2 = q.z + dot(q.xy, q.xy);
+                    if (!(r2 > dot(q.xy, q.xy))) {
+                        continue; // the start is not inside the circle
+                    }
+                    const vec3 p = vec3(sqrt(r2), q.xy);
+                    float cnt = 0.0, err = 0.0;
+                    for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+                        const float e = abs(rims[s] - CircleRim(p, dirs[s]));
+                        if (rims[s] < 98.0 && e <= tol) {
+                            cnt += 1.0;
+                            err += e;
+                        }
+                    }
+                    if (cnt > n_in || (cnt == n_in && err < best_err)) {
+                        n_in = cnt;
+                        best_err = err;
+                        fit = p;
+                    }
+                }
+            }
+        }
+        // Least squares over the agreeing rims.
+        mat3 A = mat3(0.0);
+        vec3 rhs = vec3(0.0);
+        for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+            if (rims[s] > 98.0 || abs(rims[s] - CircleRim(fit, dirs[s])) > tol) {
+                continue;
+            }
+            A += outerProduct(rows[s], rows[s]);
+            rhs += rows[s] * rims[s] * rims[s];
+        }
+        if (n_in >= 4.0 && abs(determinant(A)) > 1e-2) {
+            const vec3 q = inverse(A) * rhs;
+            const float r2 = q.z + dot(q.xy, q.xy);
+            if (r2 > dot(q.xy, q.xy)) {
+                fit = vec3(sqrt(r2), q.xy);
+            }
+        }
+        // The worst rim on the circle, and (those directions only) the sky on the disc a ring
+        // inside the circle and in the 3 rings past it.
+        float worst = 0.0;
+        vec2 in_sum = vec2(0.0), out_sum = vec2(0.0);
+        vec2 in_lum = vec2(0.0), out_lum = vec2(0.0); // log luminance sum, samples
+        for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+            const float rim = CircleRim(fit, dirs[s]);
+            const float e = abs(rims[s] - rim);
+            if (rims[s] > 98.0 || e > tol + 0.5) {
+                continue;
+            }
+            worst = max(worst, e);
+            for (uint b = 0u; b < ScreenMoonRings; ++b) {
+                const vec2 v = vec2(float(m_s[s * ScreenMoonRings + b]), float(m_s[cnt0 + s * ScreenMoonRings + b]));
+                const float mid = float(b) + 0.5;
+                if (mid <= rim - 1.0) {
+                    in_sum += v;
+                    in_lum += vec2(float(m_lum[s * ScreenMoonRings + b]), v.y);
+                } else if (mid >= rim + 1.0 && mid <= rim + 4.0) {
+                    out_sum += by_edge[s] ? vec2(0.0) : v;
+                    out_lum += vec2(float(m_lum[s * ScreenMoonRings + b]), v.y);
+                }
+            }
+        }
+        md_fill = vec2(in_sum.y > 0.0 ? in_sum.x / in_sum.y : 0.0, out_sum.y > 0.0 ? out_sum.x / out_sum.y : 0.0);
+        md_res = vec4(n_in, n_in > 0.0 ? fit.x : 99.0, worst, in_sum.x);
+        md_rims = 0.0;
+        for (uint s = 0u; s < ScreenMoonSectors; ++s) {
+            md_rims += rims[s] < 98.0 ? 1.0 : 0.0;
+        }
+        md_glow = in_lum.y > 0.0 && out_lum.y > 0.0
+                      ? exp2((in_lum.x / in_lum.y - out_lum.x / out_lum.y) / 64.0) : 0.0;
+        md_disc_lum = in_lum.y > 0.0 ? in_lum.x / in_lum.y : 0.0;
+        const vec2 d = n_in >= 3.0 && length(fit.yz) < fit.x ? fit.yz * radians(ScreenMoonRingStep) : vec2(0.0);
+        md_centre = normalize(centre + ax_u * d.x + ax_v * d.y);
+    }
+    barrier();
+}
+
+shared vec4 mr_moon;  // the disc's centre, w = samples on it when it passed
+shared vec4 mr_stats; // see FindScreenMoon
+
+void ScreenMoonPass() {
+    const uint t = gl_LocalInvocationIndex;
+    const uint step = max(1u, uint(Size().x) / ScreenMoonGrid);
+    const uint nx = uint(Size().x) / step, ny = uint(Size().y) / step;
+    const uint cells = ScreenMoonVoteX * ScreenMoonVoteY;
+    for (uint i = t; i < cells; i += 256u) {
+        m_vote[i] = 0u;
+    }
+    const uint front_cells = ScreenMoonCellsX * ScreenMoonCellsY;
+    for (uint i = t; i < 3u * front_cells; i += 256u) {
+        m_cell[i] = 0u;
+    }
+    if (t == 0u) {
+        m_sky = 0u;
+        m_skylum = 0u;
+    }
+    barrier();
+    // Pixels per ring at the screen centre.
+    const float ring_px = radians(ScreenMoonRingStep) * 0.5 * Size().x * proj.x;
+    const vec2 cell_px = Size() / vec2(float(ScreenMoonVoteX), float(ScreenMoonVoteY));
+    uint sky = 0u, skylum = 0u;
+    for (uint k = t; k < nx * ny; k += 256u) {
+        const ivec2 pixel = ivec2((k % nx) * step, (k / nx) * step);
+        const vec3 w = PixelWorldDir(vec2(pixel));
+        const float range = SkyRange(pixel, w);
+        if (range <= 0.0) {
+            continue;
+        }
+        ++sky;
+        skylum += SkyLogLum(pixel);
+        if (range < SkyFar && FrontSample(w, range)) {
+            const uint cell = min(uint(pixel.x) * ScreenMoonCellsX / uint(Size().x), ScreenMoonCellsX - 1u) +
+                              ScreenMoonCellsX * min(uint(pixel.y) * ScreenMoonCellsY / uint(Size().y), ScreenMoonCellsY - 1u);
+            atomicAdd(m_cell[cell], 1u);
+            atomicAdd(m_cell[front_cells + cell], uint(pixel.x));
+            atomicAdd(m_cell[2u * front_cells + cell], uint(pixel.y));
+        }
+        vec2 n;
+        if (!RimSample(pixel, w, range, int(step), n)) {
+            continue;
+        }
+        for (float r = ScreenMoonMinRim; r <= ScreenMoonMaxRim; r += 1.0) {
+            const vec2 c = (vec2(pixel) - n * r * ring_px) / cell_px;
+            if (c.x >= 0.0 && c.y >= 0.0 && c.x < float(ScreenMoonVoteX) && c.y < float(ScreenMoonVoteY)) {
+                atomicAdd(m_vote[uint(c.y) * ScreenMoonVoteX + uint(c.x)], 1u);
+            }
+        }
+    }
+    atomicAdd(m_sky, sky);
+    atomicAdd(m_skylum, skylum);
+    barrier();
+    if (t == 0u) {
+        // Candidates: the 3 x 3 cell blocks with the most votes, 4 cells or more apart (the
+        // step's direction is known to 45 degrees, so a rim's votes spread over the cells next
+        // to its centre); each at the mean of its votes.
+        for (uint y = 0u; y < ScreenMoonVoteY; ++y) {
+            for (uint x = 0u; x < ScreenMoonVoteX; ++x) {
+                uint sum = 0u;
+                if (y > 0u && x > 0u && y + 1u < ScreenMoonVoteY && x + 1u < ScreenMoonVoteX) {
+                    for (uint j = 0u; j < 3u; ++j) {
+                        for (uint i = 0u; i < 3u; ++i) {
+                            sum += m_vote[(y + j - 1u) * ScreenMoonVoteX + x + i - 1u];
+                        }
+                    }
+                }
+                m_block[y * ScreenMoonVoteX + x] = sum;
+            }
+        }
+        for (uint c = 0u; c < ScreenMoonCands; ++c) {
+            uint best = 0u, at = 0u;
+            for (uint i = 0u; i < cells; ++i) {
+                if (m_block[i] > best) {
+                    best = m_block[i];
+                    at = i;
+                }
+            }
+            m_cand[c] = vec3(0.0);
+            if (best == 0u) {
+                continue;
+            }
+            const int x = int(at % ScreenMoonVoteX), y = int(at / ScreenMoonVoteX);
+            vec2 mean = vec2(0.0);
+            for (int j = -1; j <= 1; ++j) {
+                for (int i = -1; i <= 1; ++i) {
+                    mean += float(m_vote[uint(y + j) * ScreenMoonVoteX + uint(x + i)]) *
+                            vec2(float(x + i) + 0.5, float(y + j) + 0.5);
+                }
+            }
+            m_cand[c] = vec3(mean / float(best) * cell_px, 1.0);
+            for (int j = -3; j <= 3; ++j) {
+                for (int i = -3; i <= 3; ++i) {
+                    if (x + i >= 0 && y + j >= 0 && x + i < int(ScreenMoonVoteX) && y + j < int(ScreenMoonVoteY)) {
+                        m_block[uint(y + j) * ScreenMoonVoteX + uint(x + i)] = 0u;
+                    }
+                }
+            }
+        }
+        for (uint i = 0u; i < ScreenMoonCands * 16u; ++i) {
+            m_cr[i] = 0u;
+            m_cw[i] = 0u;
+            m_cn[i] = 0u;
+            m_cl[i] = 0u;
+        }
+    }
+    barrier();
+    for (uint k = t; k < nx * ny; k += 256u) {
+        const ivec2 pixel = ivec2((k % nx) * step, (k / nx) * step);
+        const vec3 w = PixelWorldDir(vec2(pixel));
+        const float range = SkyRange(pixel, w);
+        vec2 n;
+        if (range <= 0.0 || !RimSample(pixel, w, range, int(step), n)) {
+            continue;
+        }
+        const uint way = 1u << (uint(floor(atan(n.y, n.x) / (Pi / 4.0) + 8.5)) % 8u);
+        const uint lum = SkyLogLum(pixel);
+        for (uint c = 0u; c < ScreenMoonCands; ++c) {
+            const vec2 o = vec2(pixel) - m_cand[c].xy;
+            const float dist = length(o) / ring_px - (ScreenMoonMinRim - 0.5);
+            // The step faces away from the candidate within 37 degrees.
+            if (m_cand[c].z <= 0.0 || dist < 0.0 || dist >= 15.0 || dot(o, n) < 0.8 * length(o)) {
+                continue;
+            }
+            atomicAdd(m_cr[c * 16u + uint(dist)], 1u);
+            atomicOr(m_cw[c * 16u + uint(dist)], way);
+            atomicAdd(m_cn[c * 16u + uint(dist)], uint(min(range, 60000.0)));
+            atomicAdd(m_cl[c * 16u + uint(dist)], lum);
+        }
+    }
+    barrier();
+    if (t == 0u) {
+        // Each candidate's best radius, over 5 rings (a candidate is off its disc's centre by up
+        // to 2): most ways, then most samples. Of those with ScreenMoonMinWays the brightest rims
+        // are tested (the moon is a light): a tangle of cloud edges around a candidate scores as
+        // many ways as the disc (the Hunter's Dream: the moon was the best by ways and samples in
+        // 1 search of 3; Upper Cathedral Ward: cloud sheets' corners always were), and only the
+        // disc test tells them apart.
+        float score[ScreenMoonCands];
+        float cand_lum[ScreenMoonCands];
+        float cand_near[ScreenMoonCands];
+        for (uint c = 0u; c < ScreenMoonCands; ++c) {
+            score[c] = -1.0;
+            cand_lum[c] = -1.0;
+            cand_near[c] = 0.0;
+            for (int r = 0; r < 15 && m_cand[c].z > 0.0; ++r) {
+                uint ways = 0u, count = 0u, ranges = 0u, lums = 0u;
+                for (int q = max(r - 2, 0); q <= min(r + 2, 14); ++q) {
+                    ways |= m_cw[c * 16u + uint(q)];
+                    count += m_cr[c * 16u + uint(q)];
+                    ranges += m_cn[c * 16u + uint(q)];
+                    lums += m_cl[c * 16u + uint(q)];
+                }
+                const float sc = float(bitCount(ways)) * 1.0e5 + float(min(count, 99999u));
+                if (bitCount(ways) >= ScreenMoonMinWays && sc > score[c]) {
+                    score[c] = sc;
+                    cand_lum[c] = float(lums) / float(count);
+                    cand_near[c] = float(ranges) / float(count);
+                }
+            }
+        }
+        // The first try is the front cell's (see ScreenMoonProbeArc), the others the votes'.
+        uint front = 0u;
+        for (uint i = 1u; i < front_cells; ++i) {
+            front = m_cell[i] > m_cell[front] ? i : front;
+        }
+        const float fc = float(m_cell[front]);
+        m_try[0] = m_cell[front] >= ScreenMoonMinFront
+                       ? PixelWorldDir(vec2(float(m_cell[front_cells + front]), float(m_cell[2u * front_cells + front])) / fc)
+                       : vec3(0.0);
+        m_try_near[0] = 0.0;
+        for (uint k = 1u; k < ScreenMoonTries; ++k) {
+            uint best = 0u;
+            for (uint c = 1u; c < ScreenMoonCands; ++c) {
+                best = cand_lum[c] > cand_lum[best] ? c : best;
+            }
+            const bool any = cand_lum[best] >= 0.0;
+            m_try[k] = any ? PixelWorldDir(m_cand[best].xy) : vec3(0.0);
+            m_try_near[k] = any ? cand_near[best] : 0.0;
+            cand_lum[best] = -1.0;
+        }
+        m_done = 0u;
+        mr_moon = vec4(0.0);
+        mr_stats = vec4(0.0);
+    }
+    barrier();
+    const uint samples = m_sky;
+    const float sky_lum = float(m_skylum) / max(float(m_sky), 1.0);
+    barrier();
+    for (uint k = 0u; k < ScreenMoonTries; ++k) {
+        // From the candidate, and again from the circle's centre with the range there.
+        vec3 centre = m_try[k];
+        const bool run = m_done == 0u && Finite(centre) && dot(centre, centre) > 0.5;
+        barrier();
+        // The range at the centre; the rim samples' when something hides the centre.
+        float near = NearRange(centre, run);
+        near = near > 0.0 ? near : m_try_near[k];
+        const float rim_near = m_try_near[k] > 0.0 ? m_try_near[k] : near;
+        DiscProfile(centre, vec2(min(near, rim_near), max(near, rim_near)), run, false);
+        const bool refit = md_res.x >= 3.0;
+        const vec3 rim_centre = refit ? md_centre : centre;
+        barrier();
+        const float near2 = NearRange(rim_centre, run && refit);
+        near = near2 > 0.0 ? near2 : near;
+        DiscProfile(rim_centre, vec2(min(near, rim_near), max(near, rim_near)), run, true);
+        if (t == 0u && run) {
+            const float dirs = md_res.x, radius = md_res.y, misfit = md_res.z, members = md_res.w;
+            const float sky_glow = exp2((md_disc_lum - sky_lum) / 64.0);
+            const bool enough = dirs >= float(ScreenMoonMinDirs) ||
+                                (dirs >= float(ScreenMoonHalfDirs) && md_rims <= dirs + 1.0 &&
+                                 sky_glow >= ScreenMoonHalfGlow);
+            const bool round = enough && radius >= ScreenMoonMinRim &&
+                               radius <= ScreenMoonMaxRim && misfit <= 0.5 * ScreenMoonRound &&
+                               md_fill.x >= ScreenMoonFill && md_fill.y <= ScreenMoonSpill &&
+                               sky_glow >= ScreenMoonSkyFloor && md_glow >= ScreenMoonGlow;
+            const bool valid = round && members >= ScreenMoonMinSamples &&
+                               samples >= ScreenMoonMinSky && md_centre.y > 0.02;
+            // The log: rims on the circle*1e6 + radius*1e4 (tenths of a ring) + ring glow*100,
+            // of the disc that passed, else of the first candidate tested.
+            if (valid || mr_stats.y == 0.0) {
+                const float code = dirs * 1.0e6 + floor(min(radius, 99.0) * 10.0 + 0.5) * 1000.0 +
+                                   min(floor(md_glow * 100.0), 999.0);
+                mr_stats = vec4(valid ? md_glow : 0.0, code, sky_glow, near);
+            }
+            if (valid) {
+                mr_moon = vec4(md_centre, members);
+                m_done = 1u;
+            }
+        }
+        barrier();
+    }
+}
+
+// 2 vote passes over the sample grid, then 4 per candidate tested (depth, and luminance for
+// the glow). Only finds that passed reach the layer search, tagged ScreenMoonTag (rt_gi.comp
+// FindLayerMoon: the first of a run replaces the kept moon at once).
+// Stats for the log ("peak / mean / spread / bright samples" there): the ring glow of the disc
+// that passed (else 0; rt_gi.comp ranks discs by it), the code above, the glow over the whole
+// sky, the disc's range (m; rt_gi.comp places the moon in the world with it).
+void FindScreenMoon() {
+    const uint slot = LayerBase() + LayerW * LayerH + 2u;
+    if (slot + 1u >= material.length()) {
+        return;
+    }
+    // The layer search takes a result every 4th frame (rt_gi.h SkyLayerEvery) and clears w: a
+    // result still waiting means no search (every frame cost 0.64 ms: 59.9 against 62.3 fps).
+    if (material[slot].w != 0.0) {
+        return;
+    }
+    ScreenMoonPass();
+    if (gl_LocalInvocationIndex == 0u) {
+        // w -1: searched, no disc (rt_gi.comp counts it against a stray spot).
+        material[slot] = mr_moon.w > 0.0 ? vec4(mr_moon.xyz, mr_moon.w + ScreenMoonTag)
+                                         : vec4(0.0, 0.0, 0.0, -1.0);
+        material[slot + 1u] = mr_stats;
+    }
+}
+
+void main() {
+    if (Phase() == 0u) {
+        FitAndFill();
+    } else if (Phase() == 3u) {
+        FindScreenMoon();
+    } else if (Phase() == 2u) {
+        CaptureSky();
+    } else {
+        DebugView();
+    }
+}

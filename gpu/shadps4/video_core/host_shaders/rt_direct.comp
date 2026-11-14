@@ -1,0 +1,2220 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_samplerless_texture_functions : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TlasSpace {
+    vec4 tlas_rows[3];
+};
+
+TlasSpace TlasSpaceOf(uvec2 tlas) {
+    return TlasSpace(uvec2(tlas.x - 256u, tlas.y - (tlas.x < 256u ? 1u : 0u)));
+}
+
+vec3 TlasPoint(uvec2 tlas, vec3 p) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0], vec4(p, 1.0)), dot(s.tlas_rows[1], vec4(p, 1.0)),
+                dot(s.tlas_rows[2], vec4(p, 1.0)));
+}
+
+vec3 TlasDir(uvec2 tlas, vec3 d) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0].xyz, d), dot(s.tlas_rows[1].xyz, d), dot(s.tlas_rows[2].xyz, d));
+}
+
+mat3 TlasToView(uvec2 tlas, mat3 m) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return mat3(s.tlas_rows[0].xyz, s.tlas_rows[1].xyz, s.tlas_rows[2].xyz) * m;
+}
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1, r11f_g11f_b10f) uniform image2D diffuse_img;
+layout(binding = 2, r11f_g11f_b10f) uniform image2D spec_img;
+layout(binding = 3) uniform texture2D normal_tex;
+layout(binding = 4) uniform texture2D g3_tex;
+layout(binding = 5) uniform texture2D g1_tex;
+layout(binding = 14) uniform texture2D shadow_mask_tex;
+layout(binding = 16) uniform texture2D water_keep_tex;
+
+struct DirectLight {
+    vec4 pos_inv_r2;
+    vec4 color_sp;
+    vec4 spec_kind;
+    vec4 wrap_r_flag;
+    mat4 cone;
+};
+
+layout(binding = 6, std140) uniform Params {
+    vec4 proj;
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    uvec4 tlas_count_flags;
+    uvec4 cfg;
+    vec4 bias_tmin_gap_sets;
+    vec4 prev_proj;
+    vec4 reproject[3];
+    vec4 prev_jitter;
+    uvec4 restir;
+    vec4 shadow_color;
+    vec4 fx;
+    vec4 far_fade;
+    vec4 ambient_cut;
+    vec4 ambient_spec_cut;
+};
+
+layout(binding = 7, std430) readonly buffer Lights {
+    DirectLight lights[];
+};
+
+layout(binding = 8, std430) readonly buffer DirSets {
+    vec4 sets[];
+};
+
+struct SurfaceRecord {
+    uint texture;
+    uint flags;
+    uint uv_base;
+    float alpha_ref;
+    uint flags2;
+};
+
+layout(binding = 12, std430) readonly buffer Surfaces {
+    SurfaceRecord surfaces[];
+};
+
+layout(binding = 13, std430) readonly buffer UvPool {
+    uint uv_pool[];
+};
+
+const uint MaxSurfaceTextures = 1024u;
+layout(set = 1, binding = 0) uniform sampler2D surface_textures[MaxSurfaceTextures];
+
+const uint SurfaceAlphaTest = 1u;
+const uint SurfaceHasUv = 2u;
+const uint SurfaceHasTexture = 4u;
+const uint SurfaceBlended = 32u;
+const uint SurfaceUsable = SurfaceHasUv | SurfaceHasTexture;
+const uint TriangleWords = 8u;
+
+#ifdef RT_RESTIR_PASS
+struct Reservoir {
+    uint light;
+    float weight;
+    uint m_phat;
+    uint z_normal;
+};
+
+layout(binding = 9, std430) readonly buffer ReservoirsIn {
+    Reservoir res_in[];
+};
+
+layout(binding = 10, std430) writeonly buffer ReservoirsOut {
+    Reservoir res_out[];
+};
+
+layout(binding = 11, std430) readonly buffer Remap {
+    uint remap[];
+};
+#else
+layout(binding = 15, std430) buffer Pick {
+    uint pick[256]; // 0..95 pick, 96..112 rt_fog.comp, 128..255 KeptProbe
+};
+
+// Moon visibility history (FlagMoonHistory): x = visibility (-1 none), y = view z.
+layout(binding = 17, std430) readonly buffer MoonHistIn {
+    vec2 moon_hist_in[];
+};
+layout(binding = 18, std430) writeonly buffer MoonHistOut {
+    vec2 moon_hist_out[];
+};
+// The game's object motion (FlagObjectMotion, vk_object_motion): rg pixels previous - current
+// (unjittered), b = valid, a = the depth it was written with.
+layout(binding = 19) uniform texture2D object_motion_tex;
+#endif
+
+const uint FlagNoVis = 1u;
+const uint FlagSpec = 2u;
+const uint FlagG1 = 4u;
+const uint FlagDirSets = 8u;
+const uint FlagRestirReset = 16u;
+const uint FlagAdd = 32u;
+const uint FlagShadowMask = 64u;
+const uint FlagMoonMask = 128u;
+const uint FlagMoonStatic = 256u;
+const uint FlagMoonOwnSet = 512u;
+const uint FlagPortals = 1024u; // rt_direct.h DirectFlagPortals
+const uint FlagMoonHalf = 2048u;
+const uint FlagMoonHalfAlt = 4096u;
+const uint FlagWaterKeep = 8192u;
+const uint FlagMoonHistory = 16384u;      // rt_direct.h DirectFlagMoonHistory: buffers bound
+const uint FlagMoonHistoryValid = 32768u; // last frame's history matches this camera
+const uint FlagObjectMotion = 65536u;     // rt_direct.h DirectFlagObjectMotion: binding 19 valid
+const uint FlagKeptProbe = 131072u;       // rt_direct.h DirectFlagKeptProbe: KeptProbe runs
+const uint SurfacePortalPane = 0x40000000u; // rt_surface.h SurfacePortal
+const uint MaskPortal = 0x08u; // rt_geometry.h MaskPortal
+// Painted windows are drawn a few cm in front of a solid wall (0.63 m measured at the tall
+// arched windows, item 32h): past a pane, rays skip this much and then go on testing for
+// blockers outside (other buildings, trees), so the outside still casts shadows through it.
+const float PortalWall = 1.5;
+const uint NormalFromDepth = 0u;
+const uint NormalUnorm = 1u;
+const uint NormalWorldSpace = 0x10u;
+const uint MaxLights = 1024u;
+const uint MaxTileLights = MaxLights;
+const uint MaxRays = 64u;
+const float RayCutoff = 0.01;
+const uint NoLight = 0xFFFFFFFFu;
+const float FormatMax = 64512.0;
+
+shared uint tile_count;
+shared uint tile_list[MaxTileLights];
+shared uint tile_mask[MaxLights / 32u];
+shared uint tile_zmin, tile_zmax;
+// One moon for every surface (FlagMoonWorld): the game gives each material group its own
+// directional set (map pieces a warm moon, characters a moon at 1/7 of it plus a camera-turning
+// key light), so a character beside a moonlit wall stayed dark. Each workgroup votes over a fixed
+// 16x16 grid of screen pixels and every pixel uses the moon (light 1) of the set most of the
+// screen uses. Same grid in every workgroup, so the whole frame agrees.
+const uint MaxVoteSets = 256u;
+shared uint set_votes[MaxVoteSets];
+shared uint world_set_shared;
+uint world_set = 0xFFFFFFFFu;
+#ifdef RT_RESTIR_PASS
+shared float tile_cdf[MaxTileLights];
+#else
+shared vec4 moon_pv[256];
+shared uint moon_n[256];
+shared float moon_w[256];
+// MoonHalfShare jobs: the tile's moon rays packed onto the first lanes, so whole warps idle
+// instead of half of every warp (the checkerboard left each warp as slow as a full one).
+shared vec4 moon_job_o[256]; // ray origin, L1.x
+shared vec4 moon_job_n[256]; // traced side's normal, L1.y
+shared float moon_job_l[256]; // L1.z
+shared uint moon_job_src[256]; // local index of the pixel
+shared uint moon_jobs, moon_pen_jobs;
+#endif
+float moon_given = -1.0;
+float moon_lo = 1.0, moon_hi = 0.0; // MoonHalfShare: traced range in the 5x5 window
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+uint LightCount() { return tlas_count_flags.z; }
+uint Flags() { return tlas_count_flags.w; }
+uint NormalMode() { return cfg.x & 0xFu; }
+bool NormalWorld() { return (cfg.x & NormalWorldSpace) != 0u; }
+uint NormalSwizzle() { return cfg.x >> 8u; }
+uint NormalComponents() { return (cfg.x >> 16u) & 0xFu; }
+uint Frame() { return cfg.y; }
+uint Rays() { return cfg.z; }
+uint Debug() { return cfg.w; }
+float Bias() { return bias_tmin_gap_sets.x; }
+float TMin() { return bias_tmin_gap_sets.y; }
+float EndGap() { return bias_tmin_gap_sets.z; }
+float FarWeight(vec3 p) {
+    return far_fade.w > 0.0 ? clamp((far_fade.y - length(p)) * far_fade.z, 0.0, 1.0) : 1.0;
+}
+uint DirSetCount() { return uint(bias_tmin_gap_sets.w); }
+uint Candidates() { return restir.x; }
+uint MaxHistory() { return restir.y; }
+uint SpatialTaps() { return restir.z; }
+uint PrevLightCount() { return restir.w; }
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+vec2 ViewToPixel(vec3 p, vec4 projection, vec2 jitter) {
+    const vec2 ndc = vec2(p.x * projection.x, p.y * projection.y) / p.z;
+    return vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * Size() + jitter - 0.5;
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+vec3 ViewAt(ivec2 pixel) {
+    return PixelToView(vec2(pixel), DepthAt(pixel));
+}
+
+vec3 NormalFromDepthAt(ivec2 pixel, vec3 p) {
+    const vec3 px = ViewAt(pixel + ivec2(1, 0)), mx = ViewAt(pixel - ivec2(1, 0));
+    const vec3 py = ViewAt(pixel + ivec2(0, 1)), my = ViewAt(pixel - ivec2(0, 1));
+    const vec3 dx = abs(px.z - p.z) < abs(p.z - mx.z) ? px - p : p - mx;
+    const vec3 dy = abs(py.z - p.z) < abs(p.z - my.z) ? py - p : p - my;
+    const vec3 n = cross(dy, dx);
+    return dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, -1.0);
+}
+
+float Component(vec4 v, uint index) {
+    return index == 0u ? v.x : index == 1u ? v.y : index == 2u ? v.z : v.w;
+}
+
+vec3 SurfaceNormal(ivec2 pixel, vec3 p) {
+    vec3 n;
+    if (NormalMode() == NormalFromDepth) {
+        n = NormalFromDepthAt(pixel, p);
+    } else {
+        const vec4 t = texelFetch(normal_tex, pixel, 0);
+        const uint sw = NormalSwizzle();
+        n = vec3(Component(t, sw & 3u), Component(t, (sw >> 2u) & 3u),
+                 NormalComponents() == 3u ? Component(t, (sw >> 4u) & 3u) : 0.0);
+        if (NormalMode() == NormalUnorm) {
+            n = n * 2.0 - 1.0;
+        }
+        if (NormalComponents() == 2u) {
+            n.z = -sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        if (NormalWorld()) {
+            n = vec3(dot(view_rows[0].xyz, n), dot(view_rows[1].xyz, n), dot(view_rows[2].xyz, n));
+        }
+        if (any(isnan(n)) || dot(n, n) < 1e-6) {
+            n = NormalFromDepthAt(pixel, p);
+        } else {
+            n = normalize(n);
+        }
+    }
+    if (dot(n, p) > 0.0) {
+        n = -n;
+    }
+    return n;
+}
+
+const uint SurfaceOmm = 16u;
+
+uint SurfaceAlphaTexture(SurfaceRecord r) {
+    const uint slot = (r.flags >> 6u) & 1023u;
+    return slot != 0u ? slot : r.texture;
+}
+
+uint SurfaceAlphaChannel(SurfaceRecord r) {
+    return ((r.flags >> 26u) & 3u) ^ 3u;
+}
+
+bool SurfaceTests(SurfaceRecord r) {
+    const uint alpha_tex = SurfaceAlphaTexture(r);
+    return (r.flags & SurfaceAlphaTest) != 0u && (r.flags & SurfaceHasUv) != 0u &&
+           alpha_tex != 0u && alpha_tex < MaxSurfaceTextures;
+}
+
+float SurfaceAlpha(SurfaceRecord r, uint primitive, vec2 barycentrics) {
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return 1.0;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(SurfaceAlphaTexture(r))], uv, 0.0)[SurfaceAlphaChannel(r)];
+}
+
+// Mean alpha around a hit from a coarse mip (about 16x16 texels). A leaf or petal card has cutouts
+// there; a brick wall drawn with an alpha-tested material has none. -1 without a mip chain.
+float SurfaceAlphaCoarse(SurfaceRecord r, uint primitive, vec2 barycentrics) {
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return -1.0;
+    }
+    const uint tex = SurfaceAlphaTexture(r);
+    const int levels = textureQueryLevels(surface_textures[nonuniformEXT(tex)]);
+    if (levels < 3) {
+        return -1.0;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(tex)], uv, float(min(levels - 1, 4)))[SurfaceAlphaChannel(r)];
+}
+
+bool AlphaTestPasses(uint instance, uint primitive, vec2 barycentrics) {
+    if (instance >= surfaces.length()) {
+        return true;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    if (!SurfaceTests(r)) {
+        return true;
+    }
+    return !(SurfaceAlpha(r, primitive, barycentrics) < r.alpha_ref);
+}
+
+// Glass at a hit: SurfaceGlass records. A masked one (alpha_ref < 0, RayTracing::GlassMaskSlots)
+// is glass only where its hand-painted mask (texture slot -alpha_ref) is white: the bottle
+// shelves mix glass and metal in one mesh.
+bool GlassAt(uint instance, uint primitive, vec2 barycentrics) {
+    if (instance >= surfaces.length()) {
+        return false;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    if ((r.flags & 0x10000000u) == 0u) {
+        return false;
+    }
+    if (!(r.alpha_ref < 0.0)) {
+        return true;
+    }
+    const uint slot = uint(-r.alpha_ref + 0.5);
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (slot == 0u || slot >= MaxSurfaceTextures || (r.flags & 2u) == 0u ||
+        base + 2u >= uv_pool.length()) {
+        return false;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    return textureLod(surface_textures[nonuniformEXT(slot)], uv, 0.0).r > 0.5;
+}
+
+float SmokeOpacity(uint instance, uint primitive, vec2 barycentrics) {
+    const SurfaceRecord r = surfaces[instance];
+    const float alpha = SurfaceTests(r) ? SurfaceAlpha(r, primitive, barycentrics) : 1.0;
+    return clamp(alpha * fx.x, 0.0, 1.0);
+}
+
+vec3 BlockerDebug(vec3 origin, vec3 dir, float t_max) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu, TlasPoint(tlas_count_flags.xy, origin), TMin(), TlasDir(tlas_count_flags.xy, dir), t_max);
+    vec3 c = vec3(0.0);
+    bool seen = false;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (!seen) {
+            seen = true;
+            if (instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u) {
+                c = vec3(1.0, 0.0, 1.0) * max(SmokeOpacity(instance, primitive, b), 0.25);
+            } else if (instance >= surfaces.length() || !SurfaceTests(surfaces[instance])) {
+                c = vec3(1.0, 0.0, 0.0);
+            } else {
+                const SurfaceRecord r = surfaces[instance];
+                c = vec3(0.0, SurfaceAlpha(r, primitive, b), (r.flags & SurfaceOmm) != 0u ? 0.5 : 0.0);
+            }
+        }
+        if (AlphaTestPasses(instance, primitive, b)) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        if (seen) {
+            c.r = max(c.r, 0.5);
+        } else {
+            const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+            const bool omm = instance < surfaces.length() && (surfaces[instance].flags & SurfaceOmm) != 0u;
+            c = omm ? vec3(0.0, 1.0, 1.0) : vec3(0.0, 0.0, 1.0);
+        }
+    }
+    return c;
+}
+
+// Glass panes (rt_surface.h SurfaceGlass, forced non-opaque) let the light through.
+const float GlassTransmit = 0.85;
+
+// Transmittance over [t_min, t_max], portal panes left out.
+float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu & ~MaskPortal, TlasPoint(tlas_count_flags.xy, origin), t_min, TlasDir(tlas_count_flags.xy, dir),
+                          t_max);
+    float t = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (GlassAt(instance, primitive, b)) {
+            t *= GlassTransmit;
+        } else if (instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u) {
+            t *= 1.0 - SmokeOpacity(instance, primitive, b);
+            if (t < 0.02) {
+                rayQueryConfirmIntersectionEXT(q);
+            }
+        } else if (AlphaTestPasses(instance, primitive, b)) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT
+               ? 0.0
+               : t;
+}
+
+// Painted windows (SurfacePortal, own mask bit MaskPortal): with portals in the frame a query
+// over the panes alone finds the nearest pane; a ray with nothing in front of it skips the wall
+// behind the pane (PortalWall) and is tested on to the light outside.
+bool through_portal = false;
+bool PortalAhead(vec3 origin, vec3 dir, float t_max) {
+    rayQueryEXT p;
+    rayQueryInitializeEXT(p, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, MaskPortal,
+                          TlasPoint(tlas_count_flags.xy, origin), TMin(), TlasDir(tlas_count_flags.xy, dir), t_max);
+    while (rayQueryProceedEXT(p)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(p, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+float Transmittance(vec3 origin, vec3 dir, float t_max) {
+    through_portal = false;
+    float t_end = t_max;
+    if ((Flags() & FlagPortals) != 0u) {
+        rayQueryEXT p;
+        rayQueryInitializeEXT(p, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsOpaqueEXT,
+                              MaskPortal, TlasPoint(tlas_count_flags.xy, origin), TMin(), TlasDir(tlas_count_flags.xy, dir), t_max);
+        while (rayQueryProceedEXT(p)) {
+        }
+        if (rayQueryGetIntersectionTypeEXT(p, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+            t_end = rayQueryGetIntersectionTEXT(p, true);
+            through_portal = true;
+        }
+    }
+    float t = SegmentTransmittance(origin, dir, TMin(), t_end);
+    if (through_portal && t > 0.0 && t_end + PortalWall < t_max) {
+        t *= SegmentTransmittance(origin, dir, t_end + PortalWall, t_max);
+    }
+    through_portal = through_portal && t > 0.0;
+    return t;
+}
+
+bool Finite(vec3 v) {
+    return !(any(isnan(v)) || any(isinf(v)));
+}
+
+vec3 TileCornerDir(vec2 px, float zsign) {
+    const vec2 ndc = vec2(px.x / Size().x * 2.0 - 1.0, 1.0 - px.y / Size().y * 2.0);
+    return vec3(ndc.x * zsign / proj.x, ndc.y * zsign / proj.y, zsign);
+}
+
+bool SphereInTile(vec3 c, float r, uvec2 tile, float zsign, float znear, float zfar) {
+    const float az = c.z * zsign;
+    if (az + r < znear || az - r > zfar) {
+        return false;
+    }
+    const vec2 p0 = vec2(tile) * 16.0;
+    const vec3 corners[4] = vec3[4](TileCornerDir(p0, zsign), TileCornerDir(p0 + vec2(16.0, 0.0), zsign),
+                                   TileCornerDir(p0 + vec2(16.0), zsign), TileCornerDir(p0 + vec2(0.0, 16.0), zsign));
+    const vec3 centre = TileCornerDir(p0 + vec2(8.0), zsign);
+    for (int i = 0; i < 4; ++i) {
+        vec3 n = normalize(cross(corners[i], corners[(i + 1) % 4]));
+        if (dot(n, centre) < 0.0) {
+            n = -n;
+        }
+        if (dot(n, c) < -r) {
+            return false;
+        }
+    }
+    return true;
+}
+
+float SpecPower(float term, float g1x) {
+    const float e = exp2(13.0 * g1x);
+    return max(1.0, term * e / (0.01 * e + term));
+}
+
+// Flag 4 (real emitter, EmitterFalloff): a bounded inverse square, s2 / (d2 + s2), with s2 the
+// source size squared in wrap_r_flag.z. It equals 1 at the source (the game's legacy peak), falls
+// as 1/d2 far away and is shifted to reach 0 at the cull radius.
+// Flag 16 (glow lamp in its glass): no light on its own housing. The lit iron next to the light
+// outshone the glass the game draws over it, so the panes read black; stock frames stay dark.
+// Zero within 0.3 m of the light, full at 0.6 m (the neighbouring heads on the same post).
+float HousingFade(uint flags, float d2) {
+    return (flags & 16u) != 0u ? smoothstep(0.09, 0.36, d2) : 1.0;
+}
+
+float EmitterAtten(float d2, float inv_r2, float s2) {
+    return max(0.0, s2 / (d2 + s2) - s2 / (1.0 / inv_r2 + s2));
+}
+
+float LegacyAtten(float d2, float inv_r2) {
+    const float f = 1.0 - sqrt(clamp(d2 * inv_r2, 0.0, 1.0));
+    return f * f;
+}
+
+float LegacySpecular(vec3 n, vec3 V, vec3 L, float sp) {
+    const vec3 R = reflect(-V, n);
+    return pow(clamp(dot(R, L), 0.0, 1.0), 0.25 * sp) * (0.25 + 0.125 * sp);
+}
+
+const float SpotKindFalloff = 1.0;
+const float SpotKindAxial = 2.0;
+
+bool SpotFactor(DirectLight l, vec3 p, float d2, out float cone, out float atten, out float range,
+                out bool legacy_spec) {
+    const float inv_r2 = l.pos_inv_r2.w;
+    cone = 1.0;
+    atten = max(0.0, 1.0 / d2 - inv_r2);
+    if ((uint(l.wrap_r_flag.w + 0.5) & 4u) != 0u) {
+        atten = EmitterAtten(d2, inv_r2, l.wrap_r_flag.z) *
+                HousingFade(uint(l.wrap_r_flag.w + 0.5), d2);
+    }
+    range = 1.0 - clamp(d2 * inv_r2, 0.0, 1.0);
+    legacy_spec = false;
+    const float kind = l.spec_kind.w;
+    if (kind < 0.5) {
+        return true;
+    }
+    const vec4 hp = vec4(p, 1.0);
+    const vec4 q = vec4(dot(l.cone[0], hp), dot(l.cone[1], hp), dot(l.cone[2], hp), dot(l.cone[3], hp));
+    if (q.z <= 0.0 || q.w == 0.0) {
+        return false;
+    }
+    const vec2 xy = q.xy / q.w;
+    const float disc = clamp(1.0 - dot(xy, xy), 0.0, 1.0);
+    if (kind < 1.5) {
+        cone = disc;
+    } else {
+        const float axial = clamp(1.0 - q.w / l.wrap_r_flag.z, 0.0, 1.0);
+        cone = disc * disc * axial * axial;
+        atten = 1.0;
+        range = 1.0;
+        legacy_spec = true;
+    }
+    return cone > 0.0;
+}
+
+float SpotConeMask(uint index, vec3 p) {
+    const DirectLight l = lights[index];
+    if (l.spec_kind.w < 0.5) {
+        return 0.0;
+    }
+    const vec3 d = l.pos_inv_r2.xyz - p;
+    const float d2 = dot(d, d);
+    if (d2 <= 1e-8 || d2 * l.pos_inv_r2.w >= 1.0) {
+        return 0.0;
+    }
+    float cone, atten, range;
+    bool legacy_spec;
+    return SpotFactor(l, p, d2, cone, atten, range, legacy_spec) ? cone : 0.0;
+}
+
+float MaskAo(ivec2 pixel) {
+    return (Flags() & FlagShadowMask) != 0u ? texelFetch(shadow_mask_tex, pixel, 0).x : 1.0;
+}
+
+float Visibility(vec3 origin, vec3 target_dir, float dist) {
+    if ((Flags() & FlagNoVis) != 0u) {
+        return 1.0;
+    }
+    const float t_max = max(dist - EndGap(), TMin());
+    return Transmittance(origin, target_dir, t_max);
+}
+
+struct Surface {
+    vec3 p;
+    vec3 n;
+    vec3 V;
+    vec3 origin;
+    vec2 g1;
+    vec3 g2;
+    float w;
+    float fres;
+    float zbuf;
+    vec3 ng; // depth-derived (geometric) normal, facing the camera; no normal map
+    bool thin; // MoonTerms: a thin card (alpha-tested petal or leaf) lit through from behind
+};
+
+bool CompareDepth(uint func, float frag, float stored) {
+    switch (func & 7u) {
+    case 0u:
+        return false;
+    case 1u:
+        return frag < stored;
+    case 2u:
+        return frag == stored;
+    case 3u:
+        return frag <= stored;
+    case 4u:
+        return frag > stored;
+    case 5u:
+        return frag != stored;
+    case 6u:
+        return frag >= stored;
+    default:
+        return true;
+    }
+}
+
+bool HasStockDepth(DirectLight l) {
+    return l.spec_kind.w < 0.5 && l.cone[1].y > 0.5;
+}
+
+const float StockDepthSlack = 1.0e-5;
+
+// Depth-buffer value of a view-space z (inverse of ViewZ).
+float DepthOfZ(float z) {
+    return proj.z + proj.w / z;
+}
+
+// The game's depth window must hold the light's own centre. The player's hand torch came with a
+// window for a volume ~20 m away while the light sat 4.6 m from the camera: looking down, every
+// floor pixel failed it and the torch light vanished. Such a test is not this light's: skip it.
+bool StockDepthOwnsLight(DirectLight l) {
+    const float z = l.pos_inv_r2.z;
+    if (abs(z) < 1e-4 || sign(z) != sign(ViewZ(0.5))) {
+        return false;
+    }
+    const float dl = DepthOfZ(z);
+    if (l.cone[1].x > 0.5 && (dl < l.cone[0].z - StockDepthSlack || dl > l.cone[0].w + StockDepthSlack)) {
+        return false;
+    }
+    return CompareDepth(uint(l.cone[0].x + 0.5), l.cone[0].y - StockDepthSlack, dl) ||
+           CompareDepth(uint(l.cone[0].x + 0.5), l.cone[0].y + StockDepthSlack, dl);
+}
+
+bool StockDepthPasses(DirectLight l, float stored) {
+    if (!HasStockDepth(l) || !StockDepthOwnsLight(l)) {
+        return true;
+    }
+    if (l.cone[1].x > 0.5 && (stored < l.cone[0].z || stored > l.cone[0].w)) {
+        return false;
+    }
+    return CompareDepth(uint(l.cone[0].x + 0.5), l.cone[0].y, stored);
+}
+
+bool g_ignore_stock_depth = false;
+
+bool ShadeLight(uint index, Surface s, out vec3 ld, out vec3 ls) {
+    ld = vec3(0.0);
+    ls = vec3(0.0);
+    const DirectLight l = lights[index];
+    if (!g_ignore_stock_depth && !StockDepthPasses(l, s.zbuf)) {
+        return false;
+    }
+    const vec3 d = l.pos_inv_r2.xyz - s.p;
+    const float d2 = dot(d, d);
+    const float inv_r2 = l.pos_inv_r2.w;
+    if (d2 <= 1e-8 || d2 * inv_r2 >= 1.0) {
+        return false;
+    }
+    float cone, atten, range;
+    bool spot_legacy;
+    if (!SpotFactor(l, s.p, d2, cone, atten, range, spot_legacy)) {
+        return false;
+    }
+    const float dist = sqrt(d2);
+    const vec3 L = d / dist;
+    const float nl = dot(s.n, L);
+    const float nlc = clamp(nl, 0.0, 1.0);
+    float diffuse_term;
+    const bool legacy_flag = (uint(l.wrap_r_flag.w + 0.5) & 1u) != 0u;
+    const bool legacy = legacy_flag || spot_legacy;
+    if (legacy_flag) {
+        atten = LegacyAtten(d2, inv_r2);
+    }
+    // Plain Lambert for every material: the game's wrap and back-light rim terms add light
+    // that no traced path carries (full path tracing plan item 2).
+    if (nlc <= 0.0 && !legacy) {
+        return false;
+    }
+    diffuse_term = nlc * atten;
+    const float sp = SpecPower(l.color_sp.w, s.g1.x);
+    const vec3 H = normalize(L + s.V);
+    const float nh = clamp(dot(s.n, H), 0.0, 1.0);
+    // A converted emitter (flag 4) scales its specular by the same bounded inverse square as its
+    // diffuse: the game's non-legacy term only fades by range = 1 - d2/R2, which over an
+    // emitter's extended reach would give every glossy surface in the hall a full highlight.
+    const bool emitter_flag = (uint(l.wrap_r_flag.w + 0.5) & 4u) != 0u;
+    const float spec_fade = emitter_flag ? atten : range;
+    const float spec_term = legacy ? LegacySpecular(s.n, s.V, L, sp) * atten
+                                   : pow(nh, sp) * pow(nlc, 0.1) * spec_fade * (0.25 + 0.125 * sp);
+    ld = l.color_sp.rgb * (diffuse_term * cone) * (vec3(1.0) - s.g2 * 0.5);
+    ls = l.spec_kind.rgb * (spec_term * cone) * s.g2;
+    return true;
+}
+
+bool LightUnshadowed(uint index) {
+    return (uint(lights[index].wrap_r_flag.w + 0.5) & 2u) != 0u;
+}
+
+float LightVisibility(uint index, Surface s) {
+    if (LightUnshadowed(index)) {
+        return 1.0;
+    }
+    const vec3 ray = lights[index].pos_inv_r2.xyz - s.origin;
+    const float ray_len = length(ray);
+    if (ray_len <= 1e-3) {
+        return 1.0;
+    }
+    return Visibility(s.origin, ray / ray_len, ray_len);
+}
+
+float Luma(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+const float MoonRayEpsilon = 1.0e-3;
+const float TwoPi = 6.2831853;
+
+uint Pcg(inout uint state) {
+    state = state * 747796405u + 2891336453u;
+    const uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float Rand(inout uint state) {
+    return float(Pcg(state) >> 8u) * (1.0 / 16777216.0);
+}
+
+float MoonCosHalfAngle() { return shadow_color.w; }
+
+vec3 ConeSample(vec3 axis, float cos_half, vec2 u) {
+    const float cos_t = 1.0 - u.x * (1.0 - cos_half);
+    const float sin_t = sqrt(max(0.0, 1.0 - cos_t * cos_t));
+    const float phi = TwoPi * u.y;
+    const vec3 helper = abs(axis.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 t = normalize(cross(helper, axis));
+    const vec3 b = cross(axis, t);
+    return normalize(axis * cos_t + (t * cos(phi) + b * sin(phi)) * sin_t);
+}
+
+float ThinMoonVisibility(vec3 origin, vec3 dir);
+
+// With the moon history the samples must change every frame (the history averages them);
+// without it a static seed keeps the speckle still.
+bool MoonFrameSeed() {
+    return (Flags() & (FlagMoonStatic | FlagMoonHistory)) != FlagMoonStatic;
+}
+
+uint MoonSeed(ivec2 pixel, uint salt) {
+    const uint frame_seed = MoonFrameSeed() ? Frame() * 26699u : 0u;
+    uint state = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + frame_seed + 4441u + salt;
+    Pcg(state);
+    return state;
+}
+
+// The per-pixel half of a moon ray: the side it leaves from (origin, n) and whether the moon can
+// reach the pixel at all (false = no moon whatever the cone sample). MoonTraceAt is the rest, so
+// MoonHalfShare can hand the rays of a tile to packed lanes (MoonHalfShare jobs).
+bool MoonRayPrep(Surface s, vec3 L1, out vec3 origin, out vec3 n) {
+    origin = s.origin;
+    n = s.n;
+    // A translucent surface (MoonTerms wrap branch or a thin card) lit from behind is traced from
+    // its back face.
+    const bool translucent = s.g1.y > 0.0 || s.thin;
+    if (translucent && dot(L1, n) < 0.0) {
+        n = -n;
+        origin = s.p + n * (Bias() + abs(s.p.z) * 2e-4);
+    }
+    // Normal maps tilt brick edges toward a moon behind the wall; the shadow ray then skips the
+    // wall's own triangle and leaves through its back (moonlight leaking through walls). An
+    // opaque surface whose real (depth) normal faces away from the moon gets none. The small
+    // tolerance keeps depth-edge noise from darkening grazing-lit surfaces.
+    return translucent || !(dot(L1, s.ng) < -0.1);
+}
+
+float MoonTraceAt(vec3 origin, vec3 n, vec3 L1, vec2 u);
+
+float MoonVisibilityAt(Surface s_in, vec3 L1, vec2 u) {
+    vec3 origin, n;
+    return MoonRayPrep(s_in, L1, origin, n) ? MoonTraceAt(origin, n, L1, u) : 0.0;
+}
+
+vec2 MoonConeU(ivec2 pixel) {
+    uint state = MoonSeed(pixel, 0u);
+    // Stratified cone: the 8 checkerboard pixels of each 4x4 block (MoonHalfShare traces one
+    // colour) take 8 different cells (2 equal-area rings x 4 sectors), so MoonHalfShare's 5x5
+    // average sees the whole cone instead of 1-ray speckle in soft penumbras.
+    const uint row = uint(pixel.y) & 3u, half_x = (uint(pixel.x) & 3u) >> 1u;
+    const uint spin = MoonFrameSeed() ? Frame() : 0u;
+    const float ring = float(half_x), sector = float((row + half_x + spin) & 3u);
+    return vec2((ring + Rand(state)) * 0.5, fract((sector + Rand(state)) * 0.25 + ring * 0.125));
+}
+
+float MoonVisibility(Surface s_in, vec3 L1, ivec2 pixel) {
+    return MoonVisibilityAt(s_in, L1, MoonConeU(pixel));
+}
+
+// Penumbra rays (MoonHalfShare): more cone samples for pixels of mixed windows. With 2 rays, one
+// per ring, the sectors turned per pixel; with 1 ray (default since 2026-11-13: -1.3 ms direct at
+// Hemwick, same edge noise) the cell opposite the pixel's MoonConeU cell.
+const uint MoonPenumbraRays = 1u;
+
+float MoonPenumbraTrace(vec3 origin, vec3 n, vec3 L1, ivec2 pixel) {
+    uint state = MoonSeed(pixel, 7919u);
+    if (MoonPenumbraRays == 1u) {
+        // One ray: the cell opposite this pixel's MoonConeU cell (other ring, sector + 2), so the
+        // 16 pixels of a 4x4 block cover all 8 cone cells twice and the 5x5 average stays
+        // stratified.
+        const uint row = uint(pixel.y) & 3u, half_x = (uint(pixel.x) & 3u) >> 1u;
+        const uint spin = MoonFrameSeed() ? Frame() : 0u;
+        const float ring = float(1u - half_x), sector = float((row + half_x + spin + 2u) & 3u);
+        return MoonTraceAt(origin, n, L1,
+                           vec2((ring + Rand(state)) * 0.5,
+                                fract((sector + Rand(state)) * 0.25 + ring * 0.125)));
+    }
+    const float turn = Rand(state);
+    float sum = 0.0;
+    for (uint j = 0u; j < MoonPenumbraRays; ++j) {
+        const vec2 u = vec2((float(j & 1u) + Rand(state)) * 0.5,
+                            fract((float(j >> 1u) + Rand(state)) * (2.0 / float(MoonPenumbraRays)) + turn));
+        sum += MoonTraceAt(origin, n, L1, u);
+    }
+    return sum;
+}
+
+float MoonTraceAt(vec3 origin, vec3 n, vec3 L1, vec2 u) {
+    const vec3 dir = ConeSample(L1, MoonCosHalfAngle(), u);
+    if (dot(dir, n) <= 0.0) {
+        return 0.0;
+    }
+    // Moonlight through a painted window: the moon cone (BB_RT_MOON_ANGLE) is wider than the gaps
+    // between the window bars at room distances, so a cone sample there is speckle that the fixed
+    // seed never averages (and conditioning extra samples on the first one biased the patch dark).
+    // With portals in the frame the exact moon direction is traced first; through a portal it is
+    // the answer, and a cone ray counts through a portal only when the exact direction got
+    // through too, so moonlight through windows is hard-edged (a sharp window-shaped beam).
+    // Elsewhere the cone ray runs as before.
+    if ((Flags() & FlagPortals) != 0u) {
+        // Reset here: Visibility can return without tracing (BB_RT_DIRECT_NOVIS) and the centre
+        // ray is skipped on back faces, which would leave a lamp ray's flag behind.
+        through_portal = false;
+        const bool lit = dot(L1, n) > 0.0;
+        const bool no_pane = lit && (Flags() & (FlagMoonHalf | FlagNoVis)) == FlagMoonHalf &&
+                             !PortalAhead(origin, L1, max(1.0e4 - EndGap(), TMin()));
+        const float centre = lit && !no_pane ? Visibility(origin, L1, 1.0e4) : 0.0;
+        if (through_portal) {
+            return centre;
+        }
+        const float cone = Visibility(origin, dir, 1.0e4);
+        return through_portal ? 0.0 : cone;
+    }
+    return ThinMoonVisibility(origin, dir);
+}
+
+// The set whose light 1 shades a pixel. The game gives materials their own moon colour (Central
+// Yharnam: ground blue, foliage and characters near white); taking the world set's for every
+// pixel made the whole screen's moonlight change colour as the vote followed the camera (sky
+// up: trees win, white; ground: blue). A pixel keeps its own set when that set's light 1 points
+// where the world set's does (rt_moon_dir.comp points them all at the sky's moon); the world
+// set lights it only when its own light 1 is missing or aims elsewhere.
+uint MoonSet(uint own) {
+    if (world_set >= DirSetCount() || world_set == own) {
+        return own;
+    }
+    const vec3 c = sets[own * 18u + 4u].xyz;
+    const vec3 d_own = sets[own * 18u].xyz;
+    const vec3 d_world = sets[world_set * 18u].xyz;
+    const bool aligned = dot(c, c) > 0.0 && dot(d_own, d_own) > 0.0 && dot(d_world, d_world) > 0.0 &&
+                         dot(normalize(d_own), normalize(d_world)) > 0.9999;
+    return aligned ? own : world_set;
+}
+
+// Thin cards (BB_RT_THIN_TRANSMIT, prev_jitter.w; 0 = off). Petals and leaves are alpha-tested
+// single sheets: lit from behind, real ones pass a share of the light through and glow, which
+// is what a field of lilies looks like facing the moon. The game marks only some foliage as
+// translucent (g1.y, the wrap branch); Hemwick's lilies have wrap 0, so facing the moon every
+// visible petal showed its unlit side (BB_RT_DIRECT_DEBUG=11 blue). A pixel is a thin card when
+// the camera ray to its G-buffer point lands on an alpha-tested surface or on the back face of
+// an opaque one (rt_gi.comp GlassFind's confirm window) and it is not metal (spec colour below ThinMaxSpec, so iron grilles stay solid).
+const uint ThinMaskSolid = 0x09u;     // rt_gi.comp MaskSolid
+const float ThinWindow = 0.01;        // rt_gi.comp GlassDepthWindow
+const float ThinSlack = 0.03;         // rt_gi.comp GlassDepthSlack
+const float ThinMaxSpec = 0.1;
+
+float ThinTransmit() { return prev_jitter.w; }
+
+// Petals shade petals: with the moon low, a lily's moon ray crosses the flower bed and hit the
+// next petal 0.5 m away, so the whole field read as shadowed (BB_RT_PICK blocker: instance 36,
+// alpha-tested ps dbeccd9c). Within ThinNear of the surface a thin card on the moon ray (alpha-
+// tested, or an opaque sheet hit on its back face) passes ThinTransmit of the light instead of
+// blocking it; past ThinNear (tree canopies, walls) every blocker is solid as before. The near
+// segment is traced with every geometry non-opaque so OMM-opaque petals reach the loop too.
+const float ThinNear = 1.5;
+
+float ThinMoonVisibility(vec3 origin, vec3 dir) {
+    const float t_max = max(1.0e4 - EndGap(), TMin());
+    if (!(ThinTransmit() > 0.0) || (Flags() & FlagNoVis) != 0u || t_max <= ThinNear) {
+        return Visibility(origin, dir, 1.0e4);
+    }
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoOpaqueEXT,
+                          0x6Fu & ~MaskPortal, TlasPoint(tlas_count_flags.xy, origin), TMin(),
+                          TlasDir(tlas_count_flags.xy, dir), ThinNear);
+    float t = 1.0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (instance >= surfaces.length()) {
+            rayQueryConfirmIntersectionEXT(q);
+            continue;
+        }
+        const uint flags = surfaces[instance].flags;
+        if (GlassAt(instance, primitive, b)) {
+            t *= GlassTransmit;
+        } else if ((flags & SurfaceBlended) != 0u) {
+            t *= 1.0 - SmokeOpacity(instance, primitive, b);
+        } else if (!AlphaTestPasses(instance, primitive, b)) {
+            continue;
+        } else if (SurfaceTests(surfaces[instance]) || !rayQueryGetIntersectionFrontFaceEXT(q, false)) {
+            t *= ThinTransmit();
+        } else {
+            rayQueryConfirmIntersectionEXT(q);
+            continue;
+        }
+        if (t < 0.02) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return 0.0;
+    }
+    return t * SegmentTransmittance(origin, dir, ThinNear, t_max);
+}
+
+// One answer per pixel: MoonHalfShare and DirectionalSets both ask.
+int thin_cached = -1;
+
+const float ThinSolidAlpha = 0.98;
+const uint Surface2OneSided = 1u;
+
+bool ThinCard(Surface s) {
+    if (thin_cached >= 0) {
+        return thin_cached == 1;
+    }
+    thin_cached = 0;
+    if (!(ThinTransmit() > 0.0) || Luma(s.g2) >= ThinMaxSpec) {
+        return false;
+    }
+    const float dist = length(s.p);
+    if (!(dist > 1e-3)) {
+        return false;
+    }
+    const vec3 dir = s.p / dist;
+    const float window = ThinWindow * dist + ThinSlack;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT,
+                          ThinMaskSolid, TlasPoint(tlas_count_flags.xy, vec3(0.0)), max(dist - window, 0.0),
+                          TlasDir(tlas_count_flags.xy, dir), dist + window);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            AlphaTestPasses(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                            rayQueryGetIntersectionBarycentricsEXT(q, false))) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return false;
+    }
+    // A sheet is alpha-tested, or opaque but seen from its back face: a closed solid never shows
+    // the camera a back face, double-sided petals do (Hemwick's near lilies, ps bb10e440).
+    const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+    // An alpha-tested front face with no cutouts around the hit is a solid wall (Cathedral Ward
+    // brick walls use alpha-tested materials), not a card: moonlight leaked through it.
+    const SurfaceRecord rec = surfaces[min(instance, surfaces.length() - 1)];
+    bool tested = SurfaceTests(rec);
+    if (tested) {
+        const float coarse = SurfaceAlphaCoarse(rec, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)),
+                                                rayQueryGetIntersectionBarycentricsEXT(q, true));
+        tested = !(coarse >= ThinSolidAlpha);
+    }
+    const bool sheet = tested || (!rayQueryGetIntersectionFrontFaceEXT(q, true) &&
+                                  (rec.flags2 & Surface2OneSided) == 0u);
+    const bool thin = instance < surfaces.length() && sheet &&
+                      (surfaces[instance].flags & SurfaceBlended) == 0u;
+    thin_cached = thin ? 1 : 0;
+    return thin;
+}
+
+bool MoonTerms(inout Surface s, vec4 g3, out vec3 L1, out vec3 dd1, out vec3 ds1, out bool trace) {
+    L1 = vec3(0.0);
+    dd1 = vec3(0.0);
+    ds1 = vec3(0.0);
+    trace = false;
+    if ((Flags() & FlagDirSets) == 0u) {
+        return false;
+    }
+    const uint own = uint(g3.a * 255.0);
+    if (own >= DirSetCount()) {
+        return false;
+    }
+    const uint id = MoonSet(own);
+    const vec3 n = s.n, V = s.V;
+    const vec3 g2 = s.g2;
+    const vec2 g1 = s.g1;
+    const uint base = id * 18u;
+    const vec4 d1 = sets[base];
+    const vec3 c1 = sets[base + 4u].xyz;
+    const vec3 s1 = sets[base + 8u].xyz;
+    L1 = normalize(vec3(dot(view_rows[0].xyz, d1.xyz), dot(view_rows[1].xyz, d1.xyz),
+                        dot(view_rows[2].xyz, d1.xyz)));
+    const float nl1 = dot(n, L1);
+    if (g1.y > 0.0) {
+        // Thin translucent materials (the game's wrap branch, g1.y > 0: petals, leaves, cloth)
+        // scatter moonlight to both sides, about half each at the game's w = 10 g1.y. With plain
+        // Lambert (79b602e) Hemwick's white lily field went black wherever the petals face away
+        // from the moon, and everything did when facing it (stock 53 vs 12 lower-half luma).
+        // MoonVisibility traces these from the side the moon is on. No rim term.
+        dd1 = c1 * (max(0.0, nl1 + s.w) / (2.0 * s.w + 1.0));
+    } else if (nl1 < 0.0 && ThinCard(s)) {
+        // Lit through the card: Lambert on the back side times the share it passes on.
+        s.thin = true;
+        dd1 = c1 * (-nl1 * ThinTransmit());
+    } else {
+        // Plain Lambert (plan item 2).
+        dd1 = c1 * clamp(nl1, 0.0, 1.0) * (vec3(1.0) - g2);
+    }
+    const float sp1 = SpecPower(d1.w, g1.x);
+    const vec3 H1 = normalize(L1 + V);
+    const float nh1 = clamp(dot(n, H1), 0.0, 1.0);
+    const float vh1 = clamp(dot(V, H1), 0.0, 1.0);
+    const vec3 F1 = g2 + (vec3(1.0) - g2) * pow(1.0 - vh1, 5.0);
+    ds1 = s1 * ((0.25 + 0.125 * sp1) * pow(nh1, sp1) * clamp(16.0 * nl1, 0.0, 1.0)) * F1;
+    trace = dot(c1 + s1, c1 + s1) > 0.0 && Luma(dd1 + ds1) > MoonRayEpsilon;
+    return true;
+}
+
+// Our diffuse before visibility (lamps + moon) for CutAmbient, -1 when the caller did not track it.
+float g_open_diffuse = -1.0;
+
+// BB_RT_DIRECT_DEBUG=9: the moon visibility this pixel used (-1 = no moon term).
+float debug_moon = -1.0;
+// BB_RT_DIRECT_DEBUG=11: why a pixel has or lacks moonlight. Green = lit (by visibility),
+// cyan = lit through a thin card, black = shadowed, blue = faces away from the moon, dark red =
+// no moon term.
+vec3 debug_moon_class = vec3(0.4, 0.0, 0.0);
+
+void DirectionalSets(Surface s, vec4 g3, ivec2 pixel, inout vec3 diffuse, inout vec3 specular) {
+    vec3 L1, dd1, ds1;
+    bool trace;
+    if (!MoonTerms(s, g3, L1, dd1, ds1, trace)) {
+        return;
+    }
+    vec3 shadow = vec3(1.0);
+    vec3 spec_shadow = vec3(1.0);
+    const bool have_mask = (Flags() & FlagShadowMask) != 0u;
+    const bool moon_mask = have_mask && (Flags() & FlagMoonMask) != 0u;
+    vec3 stock_moon = vec3(1.0);
+    if (have_mask) {
+        const vec4 sm = texelFetch(shadow_mask_tex, pixel, 0);
+        if (Finite(vec3(sm.zw, 0.0))) {
+            const vec3 fill = clamp(shadow_color.rgb, vec3(0.0), vec3(1.0));
+            stock_moon = clamp(sm.z, 0.0, 1.0) * mix(vec3(1.0), vec3(clamp(sm.w, 0.0, 1.0)), fill);
+        }
+        if (moon_mask) {
+            shadow = vec3(sm.z);
+            spec_shadow = shadow;
+        }
+    }
+    if (!moon_mask) {
+        const float far_w = have_mask ? FarWeight(s.p) : 1.0;
+        float moon_vis = 1.0;
+        if (trace && far_w > 0.0) {
+            moon_vis = moon_given >= 0.0 ? moon_given : MoonVisibility(s, L1, pixel);
+        }
+        shadow = mix(stock_moon, vec3(moon_vis), far_w);
+        spec_shadow = vec3(mix(1.0, moon_vis, far_w));
+    }
+    debug_moon = shadow.x;
+    debug_moon_class = s.thin ? vec3(0.0, shadow.x, shadow.x)
+                       : dot(s.n, L1) <= 0.0 && s.g1.y <= 0.0 ? vec3(0.0, 0.0, 0.5)
+                                                              : vec3(0.0, shadow.x, 0.0);
+    // No AO factor on traced light: the visibility rays already shadow it (plan items 1, 10).
+    if (g_open_diffuse >= 0.0) {
+        g_open_diffuse += dot(dd1, vec3(1.0));
+    }
+    diffuse += dd1 * shadow;
+    specular += ds1 * spec_shadow;
+}
+
+vec3 CutAmbient(vec3 c, float strength, vec3 ours) {
+    const vec3 a = ambient_cut.rgb;
+    if (strength <= 0.0 || min(a.r, min(a.g, a.b)) <= 0.0) {
+        return c;
+    }
+    const float k = min(c.r / a.r, min(c.g / a.g, c.b / a.b));
+    const vec3 rest = max(c - a * k, vec3(0.0));
+    const float total = dot(c, vec3(1.0));
+    const float rest_sum = dot(rest, vec3(1.0));
+    const float share = total > 0.0 ? rest_sum / total : 0.0;
+    const float lo = ambient_spec_cut.y, hi = max(ambient_spec_cut.z, lo + 1e-3);
+    const float lit = ambient_spec_cut.w;
+    // The game's leftover light is kept where our lights reach (open, before visibility) and
+    // shadowed by our visibility linearly. The smoothstep used to run on the shadowed sum, so a
+    // few percent of moon or lamp visibility (cone speckle on the coat) switched the whole
+    // leftover on: on/off pixels that FSR blew up into blocks crawling along the player's shadow
+    // edges (2026-11-12).
+    const float o = dot(ours, vec3(1.0));
+    const float reach = g_open_diffuse >= 0.0 ? g_open_diffuse : o;
+    const float vis = g_open_diffuse > 0.0 ? clamp(o / g_open_diffuse, 0.0, 1.0) : 1.0;
+    const float near = lit > 0.0 ? smoothstep(0.0, 1.0, reach / max(lit * rest_sum, 1e-6)) * vis : 1.0;
+    return mix(c, rest * (smoothstep(lo, hi, share) * near), strength);
+}
+
+void WriteResult(ivec2 pixel, vec3 diffuse, vec3 specular) {
+    diffuse = Finite(diffuse) ? clamp(diffuse, vec3(0.0), vec3(FormatMax)) : vec3(0.0);
+    specular = Finite(specular) ? clamp(specular, vec3(0.0), vec3(FormatMax)) : vec3(0.0);
+    const uint debug = Debug();
+    if (debug == 9u) {
+        imageStore(diffuse_img, pixel,
+                   vec4(debug_moon < 0.0 ? vec3(0.4, 0.0, 0.0) : vec3(debug_moon) * 0.5, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 1u) {
+        imageStore(diffuse_img, pixel, vec4(diffuse, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 3u) {
+        const vec3 game_d = imageLoad(diffuse_img, pixel).rgb;
+        const vec3 game_s = imageLoad(spec_img, pixel).rgb;
+        imageStore(diffuse_img, pixel, vec4(min(abs(game_d - diffuse), vec3(FormatMax)), 1.0));
+        imageStore(spec_img, pixel, vec4(min(abs(game_s - specular), vec3(FormatMax)), 1.0));
+        return;
+    }
+    if ((Flags() & FlagAdd) != 0u) {
+        float under = 1.0;
+        float scatter = max(prev_jitter.z, 0.0);
+        if ((Flags() & FlagWaterKeep) != 0u) {
+            // -under under water; -(2 + under) on a decal under it (blood): no scatter.
+            const float k = texelFetch(water_keep_tex, pixel, 0).r;
+            under = k < -1.5 ? clamp(-k - 2.0, 0.0, 1.0) : k < 0.0 ? clamp(-k, 0.0, 1.0) : 1.0;
+            scatter = k < -1.5 ? 0.0 : scatter;
+        }
+        const vec3 base_d = imageLoad(diffuse_img, pixel).rgb;
+        const vec3 base_s = imageLoad(spec_img, pixel).rgb;
+        const vec3 lit = diffuse + CutAmbient(Finite(base_d) ? max(base_d, vec3(0.0)) : vec3(0.0), ambient_cut.w, diffuse);
+        diffuse = clamp(lit * under, vec3(0.0), vec3(FormatMax));
+        specular = clamp(specular * under + (Finite(base_s) ? max(base_s, vec3(0.0)) : vec3(0.0)) * (1.0 - clamp(ambient_spec_cut.x, 0.0, 1.0)) +
+                         (Finite(base_d) ? max(base_d, vec3(0.0)) : vec3(0.0)) * (scatter * (1.0 - under)), vec3(0.0), vec3(FormatMax));
+    }
+    imageStore(diffuse_img, pixel, vec4(diffuse, 1.0));
+    imageStore(spec_img, pixel, vec4(specular, 1.0));
+}
+
+void WriteTileDebug(ivec2 pixel, uint tile_lights) {
+    const float red = tile_lights > 0u ? 4.0 : 0.0;
+    const float green = (pixel.y < 24 && uint(pixel.x) < LightCount() * 16u) ? 4.0 : 0.0;
+    imageStore(diffuse_img, pixel, vec4(red, green, 0.5, 1.0));
+    imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+}
+
+Surface MakeSurface(ivec2 pixel, vec3 p, out vec4 g3) {
+    Surface s;
+    s.p = p;
+    s.zbuf = DepthAt(pixel);
+    s.n = SurfaceNormal(pixel, p);
+    s.origin = p + s.n * (Bias() + abs(p.z) * 2e-4);
+    s.ng = NormalFromDepthAt(pixel, p);
+    if (dot(s.ng, p) > 0.0) {
+        s.ng = -s.ng;
+    }
+    s.V = -normalize(p);
+    g3 = vec4(0.0);
+    if ((Flags() & FlagSpec) != 0u) {
+        g3 = texelFetch(g3_tex, pixel, 0);
+        g3 = Finite(g3.rgb) ? clamp(g3, vec4(0.0), vec4(1.0)) : vec4(0.0);
+    }
+    s.g1 = vec2(0.0);
+    if ((Flags() & FlagG1) != 0u) {
+        s.g1 = texelFetch(g1_tex, pixel, 0).xy;
+        s.g1 = Finite(vec3(s.g1, 0.0)) ? clamp(s.g1, vec2(0.0), vec2(1.0)) : vec2(0.0);
+    }
+    s.g2 = g3.rgb * g3.rgb;
+    s.w = 10.0 * s.g1.y;
+    s.fres = pow(max(0.0, 1.0 + dot(s.n, s.V)) * 0.5, 2.0);
+    s.thin = false;
+    return s;
+}
+
+#ifndef RT_RESTIR_PASS
+bool MoonHalfOn() {
+    const uint mask = FlagShadowMask | FlagMoonMask;
+    return (Flags() & (FlagMoonHalf | FlagDirSets)) == (FlagMoonHalf | FlagDirSets) && Debug() == 0u &&
+           (Flags() & mask) != mask && (Flags() & FlagMoonOwnSet) == 0u;
+}
+
+void MoonJobPush(uint j, uint src, vec3 o, vec3 n, vec3 l) {
+    moon_job_o[j] = vec4(o, l.x);
+    moon_job_n[j] = vec4(n, l.y);
+    moon_job_l[j] = l.z;
+    moon_job_src[j] = src;
+}
+
+uint MoonJobGet(uint j, out vec3 o, out vec3 n, out vec3 l) {
+    const vec4 a = moon_job_o[j], b = moon_job_n[j];
+    o = a.xyz;
+    n = b.xyz;
+    l = vec3(a.w, b.w, moon_job_l[j]);
+    return moon_job_src[j];
+}
+
+ivec2 MoonJobPixel(uint src) {
+    return ivec2(gl_WorkGroupID.xy) * 16 + ivec2(src & 15u, src >> 4u);
+}
+
+void MoonHalfShare(Surface s, vec4 g3, ivec2 pixel, bool surface) {
+    const uint li = gl_LocalInvocationIndex;
+    const ivec2 lp = ivec2(gl_LocalInvocationID.xy);
+    vec3 L1, dd1, ds1;
+    bool trace = false;
+    if (surface) {
+        MoonTerms(s, g3, L1, dd1, ds1, trace);
+        if ((Flags() & FlagShadowMask) != 0u && FarWeight(s.p) <= 0.0) {
+            trace = false;
+        }
+    }
+    const uint parity = (Flags() & FlagMoonHalfAlt) != 0u ? (Frame() & 1u) : 0u;
+    const bool own = ((uint(pixel.x) + uint(pixel.y) + parity) & 1u) == 0u;
+    vec3 ray_o = vec3(0.0), ray_n = vec3(0.0);
+    const bool reach = trace && MoonRayPrep(s, L1, ray_o, ray_n);
+    if (li == 0u) {
+        moon_jobs = 0u;
+        moon_pen_jobs = 0u;
+    }
+    barrier();
+    if (trace && own && reach) {
+        MoonJobPush(atomicAdd(moon_jobs, 1u), li, ray_o, ray_n, L1);
+    }
+    barrier();
+    if (li < moon_jobs) {
+        vec3 o, n, l;
+        const uint src = MoonJobGet(li, o, n, l);
+        moon_w[src] = MoonTraceAt(o, n, l, MoonConeU(MoonJobPixel(src)));
+    }
+    barrier();
+    const float v = trace && own ? (reach ? moon_w[li] : 0.0) : -1.0;
+    moon_pv[li] =vec4(surface ? s.p : vec3(0.0), v);
+    moon_n[li] = surface ? packSnorm4x8(vec4(s.n, 0.0)) : 0u;
+    barrier();
+    // Every pixel (traced or not) averages the traced pixels of its 5x5 window on the same
+    // plane, the cone cells stratified per 4x4 block (MoonVisibility). Where that window is
+    // mixed (a penumbra or shadow edge) every pixel traces MoonPenumbraRays more cone rays first,
+    // so a wide penumbra gets ~37 rays per pixel instead of 1-ray speckle; fully lit or shadowed
+    // areas stay at half a ray per pixel.
+    const float plane = trace ? 0.005 * abs(s.p.z) + 0.02 : 0.0;
+    float lo = 1.0, hi = 0.0;
+    if (trace) {
+        for (int k = 0; k < 25; ++k) {
+            const ivec2 q = lp + ivec2(k % 5 - 2, k / 5 - 2);
+            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(16)))) {
+                continue;
+            }
+            const uint qi = uint(q.y) * 16u + uint(q.x);
+            const vec4 pv = moon_pv[qi];
+            if (pv.w < 0.0 || dot(unpackSnorm4x8(moon_n[qi]).xyz, s.n) < 0.8 ||
+                abs(dot(s.n, pv.xyz - s.p)) > plane) {
+                continue;
+            }
+            lo = min(lo, pv.w);
+            hi = max(hi, pv.w);
+        }
+    }
+    moon_lo = lo;
+    moon_hi = hi;
+    float own_sum = max(v, 0.0), own_n = v >= 0.0 ? 1.0 : 0.0;
+    // Penumbra rays as jobs too: only the pixels of mixed windows trace them.
+    const bool pen = trace && hi > lo;
+    if (pen && reach) {
+        MoonJobPush(atomicAdd(moon_pen_jobs, 1u), li, ray_o, ray_n, L1);
+    }
+    barrier();
+    if (li < moon_pen_jobs) {
+        vec3 o, n, l;
+        const uint src = MoonJobGet(li, o, n, l);
+        moon_w[src] = MoonPenumbraTrace(o, n, l, MoonJobPixel(src));
+    }
+    barrier();
+    if (pen) {
+        own_sum += reach ? moon_w[li] : 0.0;
+        own_n += float(MoonPenumbraRays);
+    }
+    barrier();
+    moon_pv[li].w = own_n > 0.0 ? own_sum / own_n : -1.0;
+    moon_w[li] = own_n;
+    barrier();
+    if (!trace) {
+        return;
+    }
+    float sum = 0.0, count = 0.0;
+    for (int k = 0; k < 25; ++k) {
+        const ivec2 q = lp + ivec2(k % 5 - 2, k / 5 - 2);
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(16)))) {
+            continue;
+        }
+        const uint qi = uint(q.y) * 16u + uint(q.x);
+        const vec4 pv = moon_pv[qi];
+        if (pv.w < 0.0 || dot(unpackSnorm4x8(moon_n[qi]).xyz, s.n) < 0.8 ||
+            abs(dot(s.n, pv.xyz - s.p)) > plane) {
+            continue;
+        }
+        sum += pv.w * moon_w[qi];
+        count += moon_w[qi];
+    }
+    moon_given = count > 0.0 ? sum / count : MoonVisibility(s, L1, pixel);
+}
+
+// Moon visibility over time (FlagMoonHistory): the frame-varying samples of MoonHalfShare
+// blend into last frame's value at this surface point (camera reprojection, view-z check).
+// Where the 5x5 window is uniform (fully lit or shadowed) the history is clamped to the new
+// value, so a moving shadow edge never trails into open ground; in a penumbra it may differ
+// by MoonHistorySpread at most. Only the moon visibility is kept, never the lighting.
+const float MoonHistoryBlend = 0.1;
+const float MoonHistorySpread = 0.35;
+// View-z match for a pixel moved by object motion: the camera's prev.z ignores the object's
+// own motion, so the test is looser (5% of depth + 10 cm).
+const float MoonObjectZTol = 0.05;
+
+void MoonHistory(ivec2 pixel, vec3 p, bool inside) {
+    if ((Flags() & FlagMoonHistory) == 0u || !inside) {
+        return;
+    }
+    const vec2 size = Size();
+    float vis = moon_given;
+    if (vis >= 0.0 && (Flags() & FlagMoonHistoryValid) != 0u) {
+        const vec3 prev = vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
+                               dot(reproject[2], vec4(p, 1.0)));
+        if (abs(prev.z) > 1e-4) {
+            vec2 from = ViewToPixel(prev, prev_proj, prev_jitter.xy);
+            // A moving object (the player, enemies, cloth) follows the game's own motion
+            // vector, the one FSR gets: the camera path alone missed it, so the history never
+            // matched on an animated character and its cone speckle flickered.
+            bool object = false;
+            if ((Flags() & FlagObjectMotion) != 0u) {
+                const vec4 om = texelFetch(object_motion_tex, pixel, 0);
+                const float d = DepthAt(pixel);
+                if (om.b > 0.99 && abs(om.a - d) < max(2e-7, (proj.z - d) * 0.01) &&
+                    !any(isnan(om.rg)) && !any(isinf(om.rg))) {
+                    from = vec2(pixel) + om.rg + prev_jitter.xy - Jitter();
+                    object = true;
+                }
+            }
+            const ivec2 pp = ivec2(floor(from + 0.5));
+            const float z_tol = object ? MoonObjectZTol * abs(prev.z) + 0.1
+                                       : 0.02 * abs(prev.z) + 0.05;
+            if (all(greaterThanEqual(pp, ivec2(0))) && all(lessThan(pp, ivec2(size)))) {
+                const vec2 h = moon_hist_in[uint(pp.y) * uint(size.x) + uint(pp.x)];
+                if (h.x >= 0.0 && abs(h.y - prev.z) < z_tol) {
+                    const float spread = moon_hi > moon_lo ? MoonHistorySpread : 0.0;
+
+                    vis = mix(clamp(h.x, vis - spread, vis + spread), vis, MoonHistoryBlend);
+                }
+            }
+        }
+    }
+    if (vis >= 0.0) {
+        moon_given = vis;
+    }
+    moon_hist_out[uint(pixel.y) * uint(size.x) + uint(pixel.x)] = vec2(vis >= 0.0 ? vis : -1.0, p.z);
+}
+
+bool PickPixel(ivec2 pixel) {
+    return fx.z >= 0.0 && pixel == ivec2(fx.zw);
+}
+
+void PickRay(uint base, uint light, float w, Surface s) {
+    const vec3 lp = lights[light].pos_inv_r2.xyz;
+    const vec3 ray = lp - s.origin;
+    const float ray_len = length(ray);
+    pick[base] = light;
+    pick[base + 1u] = floatBitsToUint(w);
+    pick[base + 8u] = floatBitsToUint(ray_len);
+    pick[base + 16u] = floatBitsToUint(lp.x);
+    pick[base + 17u] = floatBitsToUint(lp.y);
+    pick[base + 18u] = floatBitsToUint(lp.z);
+    pick[base + 19u] = floatBitsToUint(inversesqrt(max(lights[light].pos_inv_r2.w, 1e-12)));
+    pick[base + 20u] = floatBitsToUint(lights[light].spec_kind.w);
+    pick[base + 21u] = 0xFFFFFFFFu;
+    {
+        vec3 pld, pls;
+        const bool shaded = ShadeLight(light, s, pld, pls);
+        pick[base + 22u] = floatBitsToUint(shaded ? Luma(pld) : -1.0);
+        pick[base + 23u] = floatBitsToUint(dot(s.n, normalize(lp - s.p)));
+    }
+    if (ray_len <= 1e-3) {
+        pick[base + 2u] = floatBitsToUint(1.0);
+        return;
+    }
+    const vec3 dir = ray / ray_len;
+    pick[base + 2u] = floatBitsToUint(Visibility(s.origin, dir, ray_len));
+    const float t_max = max(ray_len - EndGap(), TMin());
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT, 0x6Fu,
+                          TlasPoint(tlas_count_flags.xy, s.origin), TMin(), TlasDir(tlas_count_flags.xy, dir), t_max);
+    uint rejected = 0u;
+    uint first = 0xFFFFFFFFu;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+            continue;
+        }
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if (first == 0xFFFFFFFFu) {
+            first = instance;
+        }
+        if (instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u) {
+            ++rejected;
+        } else if (AlphaTestPasses(instance, primitive, b)) {
+            rayQueryConfirmIntersectionEXT(q);
+        } else {
+            ++rejected;
+        }
+    }
+    pick[base + 14u] = rejected;
+    pick[base + 21u] = first;
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return;
+    }
+    const float t = rayQueryGetIntersectionTEXT(q, true);
+    pick[base + 3u] = 1u;
+    pick[base + 4u] = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+    pick[base + 5u] = uint(rayQueryGetIntersectionInstanceIdEXT(q, true));
+    pick[base + 6u] = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+    pick[base + 7u] = floatBitsToUint(t);
+    pick[base + 15u] = rayQueryGetIntersectionFrontFaceEXT(q, true) ? 1u : 0u;
+    const vec3 hit = s.origin + dir * t;
+    pick[base + 12u] = floatBitsToUint(hit.z);
+    if (abs(hit.z) < 1e-4) {
+        return;
+    }
+    const ivec2 hp = ivec2(floor(ViewToPixel(hit, proj, Jitter()) + 0.5));
+    const bool inside = all(greaterThanEqual(hp, ivec2(0))) && all(lessThan(hp, ivec2(Size())));
+    pick[base + 9u] = inside ? 1u : 0u;
+    pick[base + 13u] = uint(clamp(hp.x, 0, 65535)) | (uint(clamp(hp.y, 0, 65535)) << 16u);
+    if (inside) {
+        const float d = DepthAt(hp);
+        const bool raster = d < 1.0 && d >= 0.0 && !isnan(d);
+        pick[base + 10u] = raster ? 1u : 0u;
+        pick[base + 11u] = floatBitsToUint(raster ? ViewZ(d) : 0.0);
+    }
+}
+
+// Glass diagnosis (words 66..79, fits the 80-word ring). The camera ray through the pick pixel:
+// the first PickCamHits triangles (any TLAS mask, no alpha test, each skipped past), then
+// rt_gi.comp GlassFind's confirm ray (solid mask, alpha-tested, t within the depth window).
+// Word 66: confirm TLAS instance (24 bits) | hits << 24 | 1 << 27 (ran) | confirm hit 1 << 28,
+// front 1 << 29, glass 1 << 30. Word 67: confirm t. Per hit 68 + 3k: t, TLAS instance |
+// bits << 24 (front 1, glass 2, alpha test passes 4, blended 8), triangle.
+const uint PickCamHits = 4u;
+const uint PickMaskSolid = 0x09u;         // rt_gi.comp MaskSolid
+const uint PickSurfaceGlass = 0x10000000u; // rt_surface.h SurfaceGlass
+const float PickGlassWindow = 0.01;       // rt_gi.comp GlassDepthWindow
+const float PickGlassSlack = 0.03;        // rt_gi.comp GlassDepthSlack
+
+bool PickGlassBit(uint instance) {
+    return instance < surfaces.length() && (surfaces[instance].flags & PickSurfaceGlass) != 0u;
+}
+
+void PickCamera(vec3 p) {
+    const float dist = length(p);
+    if (dist <= 1e-4) {
+        return;
+    }
+    const vec3 dir = p / dist;
+    float t_min = 0.0;
+    uint hits = 0u;
+    for (uint k = 0u; k < PickCamHits; ++k) {
+        rayQueryEXT q;
+        rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT,
+                              0x7Fu, TlasPoint(tlas_count_flags.xy, vec3(0.0)), t_min, TlasDir(tlas_count_flags.xy, dir), 1e6);
+        while (rayQueryProceedEXT(q)) {
+            if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+                rayQueryConfirmIntersectionEXT(q);
+            }
+        }
+        if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+            break;
+        }
+        const float t = rayQueryGetIntersectionTEXT(q, true);
+        const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+        const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+        uint bits = rayQueryGetIntersectionFrontFaceEXT(q, true) ? 1u : 0u;
+        bits |= PickGlassBit(instance) ? 2u : 0u;
+        bits |= AlphaTestPasses(instance, primitive, rayQueryGetIntersectionBarycentricsEXT(q, true)) ? 4u : 0u;
+        bits |= instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u ? 8u : 0u;
+        const uint base = 68u + k * 3u;
+        pick[base] = floatBitsToUint(t);
+        pick[base + 1u] = (uint(rayQueryGetIntersectionInstanceIdEXT(q, true)) & 0xFFFFFFu) | (bits << 24u);
+        pick[base + 2u] = primitive;
+        hits = k + 1u;
+        // Skip past this hit (coplanar decals within 1 mm are skipped too).
+        t_min = t + 1e-3 + t * 1e-5;
+    }
+    const float window = PickGlassWindow * dist + PickGlassSlack;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT,
+                          PickMaskSolid, TlasPoint(tlas_count_flags.xy, vec3(0.0)), max(dist - window, 0.0), TlasDir(tlas_count_flags.xy, dir), dist + window);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            AlphaTestPasses(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                            rayQueryGetIntersectionBarycentricsEXT(q, false))) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    uint head = (hits << 24u) | (1u << 27u);
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        head |= (uint(rayQueryGetIntersectionInstanceIdEXT(q, true)) & 0xFFFFFFu) | (1u << 28u);
+        head |= rayQueryGetIntersectionFrontFaceEXT(q, true) ? 1u << 29u : 0u;
+        head |= PickGlassBit(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true))) ? 1u << 30u : 0u;
+        pick[67] = floatBitsToUint(rayQueryGetIntersectionTEXT(q, true));
+    }
+    pick[66] = head;
+}
+
+void PickWrite(ivec2 pixel, Surface s, uint tile_lights, float depth) {
+    pick[0] = 1u;
+    pick[1] = uint(pixel.x) | (uint(pixel.y) << 16u);
+    pick[2] = tile_lights;
+    pick[3] = LightCount();
+    pick[4] = floatBitsToUint(s.p.x);
+    pick[5] = floatBitsToUint(s.p.y);
+    pick[6] = floatBitsToUint(s.p.z);
+    pick[7] = floatBitsToUint(s.n.x);
+    pick[8] = floatBitsToUint(s.n.y);
+    pick[9] = floatBitsToUint(s.n.z);
+    pick[11] = floatBitsToUint(depth);
+    pick[12] = floatBitsToUint(s.g1.x);
+    pick[13] = floatBitsToUint(s.g1.y);
+    pick[14] = floatBitsToUint((Flags() & FlagSpec) != 0u ? texelFetch(g3_tex, pixel, 0).a : -1.0);
+    pick[15] = floatBitsToUint(MaskAo(pixel));
+    {
+        const vec4 pg3 = (Flags() & FlagSpec) != 0u ? texelFetch(g3_tex, pixel, 0) : vec4(0.0);
+        vec3 pd = vec3(0.0), ps = vec3(0.0);
+        DirectionalSets(s, pg3, pixel, pd, ps);
+        pick[16u + 2u * 24u] = floatBitsToUint(Luma(pd));
+        pick[16u + 2u * 24u + 1u] = floatBitsToUint(Luma(ps));
+        const uint own_set = uint(pg3.a * 255.0);
+        const uint mid = own_set < DirSetCount() ? MoonSet(own_set) : own_set;
+        pick[89] = own_set;
+        if ((Flags() & FlagDirSets) != 0u && own_set < DirSetCount() && mid < DirSetCount()) {
+            const vec4 md = sets[mid * 18u];
+            const vec3 mL = normalize(vec3(dot(view_rows[0].xyz, md.xyz), dot(view_rows[1].xyz, md.xyz),
+                                           dot(view_rows[2].xyz, md.xyz)));
+            const vec3 mc = sets[mid * 18u + 4u].xyz;
+            pick[80] = floatBitsToUint(mL.x);
+            pick[81] = floatBitsToUint(mL.y);
+            pick[82] = floatBitsToUint(mL.z);
+            pick[83] = floatBitsToUint(dot(s.n, mL));
+            pick[84] = floatBitsToUint(Luma(mc));
+            pick[85] = floatBitsToUint(dot(s.n, mL) > 0.0 ? MoonVisibility(s, mL, pixel) : -1.0);
+            pick[86] = floatBitsToUint(Luma(vec3(1.0) - s.g2));
+            pick[87] = mid;
+            pick[88] = 1u;
+            // What the moon's centre ray meets (solid or alpha-passing), for the log.
+            if (dot(s.n, mL) > 0.0) {
+                rayQueryEXT q;
+                rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT,
+                                      0x6Fu & ~MaskPortal, TlasPoint(tlas_count_flags.xy, s.origin), TMin(),
+                                      TlasDir(tlas_count_flags.xy, mL), 1.0e4);
+                while (rayQueryProceedEXT(q)) {
+                    if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
+                        continue;
+                    }
+                    const uint instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false));
+                    const uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+                    const vec2 b = rayQueryGetIntersectionBarycentricsEXT(q, false);
+                    const bool smoke = instance < surfaces.length() && (surfaces[instance].flags & SurfaceBlended) != 0u;
+                    if (!smoke && AlphaTestPasses(instance, primitive, b)) {
+                        rayQueryConfirmIntersectionEXT(q);
+                    }
+                }
+                if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+                    pick[90] = 1u;
+                    pick[91] = uint(rayQueryGetIntersectionInstanceIdEXT(q, true));
+                    pick[92] = floatBitsToUint(rayQueryGetIntersectionTEXT(q, true));
+                    pick[93] = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true));
+                    pick[94] = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+                    pick[95] = rayQueryGetIntersectionFrontFaceEXT(q, true) ? 1u : 0u;
+                }
+            }
+        }
+    }
+    uint best[2] = uint[2](NoLight, NoLight);
+    float wbest[2] = float[2](0.0, 0.0);
+    float total = 0.0;
+    for (uint t = 0u; t < tile_lights; ++t) {
+        vec3 ld, ls;
+        if (!ShadeLight(tile_list[t], s, ld, ls)) {
+            continue;
+        }
+        const float w = dot(ld + ls, vec3(1.0));
+        total += max(w, 0.0);
+        if (w > wbest[0]) {
+            best[1] = best[0];
+            wbest[1] = wbest[0];
+            best[0] = tile_list[t];
+            wbest[0] = w;
+        } else if (w > wbest[1]) {
+            best[1] = tile_list[t];
+            wbest[1] = w;
+        }
+    }
+    uint rays = 0u;
+    for (uint k = 0u; k < 2u; ++k) {
+        if (best[k] != NoLight) {
+            PickRay(16u + rays * 24u, best[k], total > 0.0 ? wbest[k] / total : 0.0, s);
+            ++rays;
+        }
+    }
+    pick[10] = rays;
+    PickCamera(s.p);
+}
+
+// Kept-instance probe (FlagKeptProbe, rt_direct.h KeptProbeBase): on a 32-pixel grid, a camera
+// ray to just short of the drawn surface. A solid hit there is not in this frame's G-buffer:
+// a kept off-screen instance the game no longer draws (the far LOD twin of a floor, 2-4 cm over
+// the near one, shaded it black). The CPU keeps only the kept ones among the reported indices.
+const uint KeptProbeGrid = 32u;
+const uint KeptProbeBase = 128u;
+const uint KeptProbeMax = 127u;
+
+bool KeptProbePixel(ivec2 pixel) {
+    return uint(pixel.x) % KeptProbeGrid == KeptProbeGrid / 2u &&
+           uint(pixel.y) % KeptProbeGrid == KeptProbeGrid / 2u;
+}
+
+void KeptProbe(vec3 p) {
+    const float dist = length(p);
+    if (dist < 0.5 || dist > 60.0) {
+        return;
+    }
+    // 1 cm + 0.4 %: the drawn surface itself sits at +0.000 m in the picks, a twin 2-4 cm before it.
+    const float margin = 0.01 + 0.004 * dist;
+    const vec3 dir = p / dist;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoneEXT,
+                          PickMaskSolid, TlasPoint(tlas_count_flags.xy, vec3(0.0)), 0.3,
+                          TlasDir(tlas_count_flags.xy, dir), dist - margin);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            AlphaTestPasses(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                            rayQueryGetIntersectionBarycentricsEXT(q, false))) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return;
+    }
+    const uint slot = atomicAdd(pick[KeptProbeBase], 1u);
+    if (slot < KeptProbeMax) {
+        pick[KeptProbeBase + 1u + slot] = uint(rayQueryGetIntersectionInstanceIdEXT(q, true));
+    }
+}
+#endif
+
+#ifdef RT_RESTIR_PASS
+uint Seed(ivec2 pixel) {
+    uint s = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + Frame() * 26699u + uint(RT_RESTIR_PASS) * 7919u;
+    Pcg(s);
+    return s;
+}
+
+float TargetPdf(uint light, Surface s) {
+    vec3 ld, ls;
+    if (light == NoLight || light >= LightCount() || !ShadeLight(light, s, ld, ls)) {
+        return 0.0;
+    }
+    const float v = Luma(ld + ls);
+    return (isnan(v) || isinf(v)) ? 0.0 : max(v, 0.0);
+}
+
+uint PackNormal(vec3 n) {
+    const vec3 a = n / (abs(n.x) + abs(n.y) + abs(n.z) + 1e-8);
+    const vec2 o = a.z >= 0.0 ? a.xy : (1.0 - abs(a.yx)) * vec2(a.x >= 0.0 ? 1.0 : -1.0, a.y >= 0.0 ? 1.0 : -1.0);
+    const uvec2 q = uvec2(clamp(o * 0.5 + 0.5, 0.0, 1.0) * 255.0 + 0.5);
+    return q.x | (q.y << 8u);
+}
+
+vec3 UnpackNormal(uint packed) {
+    const vec2 o = vec2(float(packed & 0xFFu), float((packed >> 8u) & 0xFFu)) / 255.0 * 2.0 - 1.0;
+    vec3 n = vec3(o, 1.0 - abs(o.x) - abs(o.y));
+    if (n.z < 0.0) {
+        n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+    }
+    return normalize(n);
+}
+
+struct Res {
+    uint light;
+    float w_sum;
+    float m;
+    float p_hat;
+};
+
+Res EmptyRes() {
+    return Res(NoLight, 0.0, 0.0, 0.0);
+}
+
+void ResUpdate(inout Res r, uint light, float w, float p_hat, float u) {
+    r.w_sum += w;
+    r.m += 1.0;
+    if (w > 0.0 && u * r.w_sum < w) {
+        r.light = light;
+        r.p_hat = p_hat;
+    }
+}
+
+void ResMerge(inout Res r, uint light, float weight, float m, float p_hat_here, float u) {
+    const float w = p_hat_here * weight * m;
+    r.w_sum += w;
+    r.m += m;
+    if (w > 0.0 && u * r.w_sum < w) {
+        r.light = light;
+        r.p_hat = p_hat_here;
+    }
+}
+
+float ResWeight(Res r) {
+    return (r.p_hat > 0.0 && r.m > 0.0) ? r.w_sum / (r.m * r.p_hat) : 0.0;
+}
+
+Reservoir Pack(Res r, float z, vec3 n) {
+    Reservoir out_r;
+    out_r.light = r.light;
+    out_r.weight = ResWeight(r);
+    out_r.m_phat = packHalf2x16(vec2(min(r.m, 65504.0), min(r.p_hat, 65504.0)));
+    out_r.z_normal = (packHalf2x16(vec2(min(abs(z), 65504.0), 0.0)) & 0xFFFFu) | (PackNormal(n) << 16u);
+    return out_r;
+}
+
+bool Similar(Reservoir r, float z, vec3 n, out float m, out float p_hat) {
+    const vec2 mp = unpackHalf2x16(r.m_phat);
+    m = mp.x;
+    p_hat = mp.y;
+    const float rz = unpackHalf2x16(r.z_normal & 0xFFFFu).x;
+    const vec3 rn = UnpackNormal(r.z_normal >> 16u);
+    return r.light != NoLight && m > 0.0 && abs(abs(z) - rz) <= 0.05 * abs(z) + 0.02 && dot(rn, n) > 0.9;
+}
+
+uint PixelIndex(ivec2 pixel) {
+    return uint(pixel.y) * uint(Size().x) + uint(pixel.x);
+}
+#endif
+
+uint VoteWorldSet() {
+    if (gl_LocalInvocationIndex < MaxVoteSets) {
+        set_votes[gl_LocalInvocationIndex] = 0u;
+    }
+    barrier();
+    const uint need = FlagSpec | FlagDirSets;
+    if ((Flags() & need) == need && (Flags() & FlagMoonOwnSet) == 0u) {
+        const ivec2 sp = ivec2((vec2(gl_LocalInvocationID.xy) + 0.5) / 16.0 * Size());
+        const float d = DepthAt(sp);
+        if (d < 1.0 && d >= 0.0 && !isnan(d)) {
+            const float a = texelFetch(g3_tex, sp, 0).a;
+            const uint id = isnan(a) || isinf(a) ? MaxVoteSets : uint(clamp(a, 0.0, 1.0) * 255.0);
+            if (id < DirSetCount() && id < MaxVoteSets) {
+                const vec3 c = sets[id * 18u + 4u].xyz;
+                if (dot(c, c) > 0.0) {
+                    atomicAdd(set_votes[id], 1u);
+                }
+            }
+        }
+    }
+    barrier();
+    if (gl_LocalInvocationIndex == 0u) {
+        uint best = 0xFFFFFFFFu, n = 0u;
+        for (uint i = 0u; i < MaxVoteSets; ++i) {
+            if (set_votes[i] > n) {
+                n = set_votes[i];
+                best = i;
+            }
+        }
+        world_set_shared = best;
+    }
+    barrier();
+    return world_set_shared;
+}
+
+void main() {
+    world_set = VoteWorldSet();
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const vec2 size = Size();
+    const bool inside = pixel.x < int(size.x) && pixel.y < int(size.y);
+    const float depth = inside ? DepthAt(pixel) : 1.0;
+    const bool surface = inside && depth < 1.0 && depth >= 0.0 && !isnan(depth);
+    const vec3 p = surface ? PixelToView(vec2(pixel), depth) : vec3(0.0);
+    const float zsign = sign(ViewZ(0.5));
+    const uint debug = Debug();
+
+#if !defined(RT_RESTIR_PASS) || RT_RESTIR_PASS == 1
+    if (gl_LocalInvocationIndex == 0u) {
+        tile_count = 0u;
+        tile_zmin = 0xFFFFFFFFu;
+        tile_zmax = 0u;
+    }
+    if (gl_LocalInvocationIndex < MaxLights / 32u) {
+        tile_mask[gl_LocalInvocationIndex] = 0u;
+    }
+    barrier();
+    if (surface) {
+        const uint az = uint(clamp(abs(p.z) * 64.0, 0.0, 4.0e9));
+        atomicMin(tile_zmin, az);
+        atomicMax(tile_zmax, az);
+    }
+    barrier();
+    const float znear = float(tile_zmin) / 64.0;
+    const float zfar = float(tile_zmax) / 64.0 + 1.0 / 64.0;
+    const uint count = LightCount();
+    if (tile_zmax >= tile_zmin) {
+        for (uint i = gl_LocalInvocationIndex; i < min(count, MaxLights); i += 256u) {
+            if (SphereInTile(lights[i].pos_inv_r2.xyz, inversesqrt(max(lights[i].pos_inv_r2.w, 1e-12)),
+                             gl_WorkGroupID.xy, zsign, znear, zfar)) {
+                atomicOr(tile_mask[i >> 5u], 1u << (i & 31u));
+            }
+        }
+    }
+    barrier();
+    if (gl_LocalInvocationIndex == 0u) {
+        uint n = 0u;
+        for (uint w = 0u; w < MaxLights / 32u; ++w) {
+            uint bits = tile_mask[w];
+            while (bits != 0u) {
+                const uint b = uint(findLSB(bits));
+                bits &= bits - 1u;
+                if (n < MaxTileLights) {
+                    tile_list[n] = w * 32u + b;
+                }
+                ++n;
+            }
+        }
+        tile_count = n;
+    }
+    barrier();
+    const uint tile_lights = min(tile_count, MaxTileLights);
+#endif
+
+#ifndef RT_RESTIR_PASS
+    vec4 g3 = vec4(0.0);
+    Surface s;
+    if (surface) {
+        s = MakeSurface(pixel, p, g3);
+    }
+    if (MoonHalfOn()) {
+        MoonHalfShare(s, g3, pixel, surface);
+    }
+    MoonHistory(pixel, p, inside);
+    if (!surface) {
+        return;
+    }
+    if (debug == 2u) {
+        const float c = float(tile_lights) / 16.0;
+        imageStore(diffuse_img, pixel, vec4(c, c, tile_count > MaxTileLights ? 1.0 : c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 4u) {
+        WriteTileDebug(pixel, tile_lights);
+        return;
+    }
+    if (debug == 6u) {
+        const float ao = MaskAo(pixel);
+        imageStore(diffuse_img, pixel, vec4(ao, ao, ao, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 7u) {
+        const float id = (Flags() & FlagSpec) != 0u ? texelFetch(g3_tex, pixel, 0).a * 255.0 : -1.0;
+        const vec3 c0 = sets[4u].xyz;
+        const vec3 col = id < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(id / 32.0);
+        imageStore(diffuse_img, pixel, vec4(pixel.y < 64 ? c0 * 4.0 : col, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    vec3 diffuse = vec3(0.0), specular = vec3(0.0);
+    const uint rays = min(Rays(), MaxRays);
+    float w_max = 0.0;
+    for (uint t = 0u; t < tile_lights; ++t) {
+        vec3 ld, ls;
+        if (!ShadeLight(tile_list[t], s, ld, ls)) {
+            continue;
+        }
+        diffuse += ld;
+        specular += ls;
+        w_max = max(w_max, dot(ld + ls, vec3(1.0)));
+    }
+    if (PickPixel(pixel)) {
+        PickWrite(pixel, s, tile_lights, depth);
+    }
+    if ((Flags() & FlagKeptProbe) != 0u && KeptProbePixel(pixel)) {
+        KeptProbe(s.p);
+    }
+    if (debug == 5u) {
+        vec3 c = vec3(0.0);
+        float w_best = 0.0;
+        uint best = NoLight;
+        for (uint t = 0u; t < tile_lights; ++t) {
+            vec3 ld, ls;
+            if (!ShadeLight(tile_list[t], s, ld, ls)) {
+                continue;
+            }
+            const float w = dot(ld + ls, vec3(1.0));
+            if (w > w_best) {
+                w_best = w;
+                best = tile_list[t];
+            }
+        }
+        if (best != NoLight) {
+            const vec3 ray = lights[best].pos_inv_r2.xyz - s.origin;
+            const float ray_len = length(ray);
+            if (ray_len > 1e-3) {
+                c = BlockerDebug(s.origin, ray / ray_len, max(ray_len - EndGap(), TMin()));
+            }
+        }
+        imageStore(diffuse_img, pixel, vec4(c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 8u) {
+        float w_best = 0.0, w_total = 0.0;
+        uint best = NoLight;
+        for (uint t = 0u; t < tile_lights; ++t) {
+            vec3 ld, ls;
+            if (!ShadeLight(tile_list[t], s, ld, ls)) {
+                continue;
+            }
+            const float w = max(dot(ld + ls, vec3(1.0)), 0.0);
+            w_total += w;
+            if (w > w_best) {
+                w_best = w;
+                best = tile_list[t];
+            }
+        }
+        vec3 c = vec3(0.0);
+        if (best != NoLight) {
+            c = (vec3(float(((best * 37u) & 7u) + 1u), float(((best * 101u) & 7u) + 1u),
+                      float(((best * 59u) & 7u) + 1u)) / 8.0) *
+                (0.25 + 0.75 * w_best / max(w_total, 1e-6));
+        }
+        imageStore(diffuse_img, pixel, vec4(c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 11u) {
+        DirectionalSets(s, g3, pixel, diffuse, specular);
+        imageStore(diffuse_img, pixel, vec4(debug_moon_class, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 10u) {
+        // Red: light that reaches the pixel only because the end gap skipped a blocker near the
+        // light (a wall right behind a lamp). Green: light that reaches it with a 2 cm gap too.
+        vec3 lit = vec3(0.0), gap_only = vec3(0.0);
+        for (uint t = 0u; t < tile_lights; ++t) {
+            vec3 ld, ls;
+            if (!ShadeLight(tile_list[t], s, ld, ls) || LightUnshadowed(tile_list[t])) {
+                continue;
+            }
+            const vec3 ray = lights[tile_list[t]].pos_inv_r2.xyz - s.origin;
+            const float ray_len = length(ray);
+            if (ray_len <= 1e-3) {
+                continue;
+            }
+            const float vis_gap = LightVisibility(tile_list[t], s);
+            const float vis_tight = Transmittance(s.origin, ray / ray_len, max(ray_len - 0.02, TMin()));
+            lit += ld * vis_tight;
+            gap_only += ld * max(vis_gap - vis_tight, 0.0);
+        }
+        imageStore(diffuse_img, pixel, vec4(Luma(gap_only) * 4.0, Luma(lit) * 2.0, 0.0, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 9u) {
+        g_ignore_stock_depth = true;
+        float w_best = 0.0;
+        uint best = NoLight;
+        for (uint t = 0u; t < tile_lights; ++t) {
+            vec3 ld, ls;
+            if (!ShadeLight(tile_list[t], s, ld, ls)) {
+                continue;
+            }
+            const float w = max(dot(ld + ls, vec3(1.0)), 0.0);
+            if (w > w_best) {
+                w_best = w;
+                best = tile_list[t];
+            }
+        }
+        g_ignore_stock_depth = false;
+        vec3 c = vec3(0.0);
+        if (best != NoLight) {
+            const DirectLight l = lights[best];
+            const float k = 0.25 + 0.75 * clamp(w_best, 0.0, 1.0);
+            c = !HasStockDepth(l)                ? vec3(0.0, 0.0, k)
+                : StockDepthPasses(l, s.zbuf) ? vec3(0.0, k, 0.0)
+                                                 : vec3(k, 0.0, 0.0);
+        }
+        imageStore(diffuse_img, pixel, vec4(c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    const float w_min = RayCutoff * w_max;
+    const float far_w = FarWeight(s.p);
+    g_open_diffuse = dot(diffuse, vec3(1.0));
+    uint traced = 0u;
+    for (uint t = 0u; t < tile_lights && traced < rays && w_max > 0.0 && far_w > 0.0; ++t) {
+        vec3 ld, ls;
+        if (!ShadeLight(tile_list[t], s, ld, ls)) {
+            continue;
+        }
+        const float w = dot(ld + ls, vec3(1.0));
+        if (!(w >= w_min) || !(w > 0.0)) {
+            continue;
+        }
+        ++traced;
+        const float vis = mix(1.0, LightVisibility(tile_list[t], s), far_w);
+        if (vis < 1.0) {
+            diffuse -= ld * (1.0 - vis);
+            specular -= ls * (1.0 - vis);
+        }
+    }
+    diffuse = max(diffuse, vec3(0.0));
+    specular = max(specular, vec3(0.0));
+    DirectionalSets(s, g3, pixel, diffuse, specular);
+    WriteResult(pixel, diffuse, specular);
+#elif RT_RESTIR_PASS == 1
+    if (gl_LocalInvocationIndex == 0u) {
+        float total = 0.0;
+        for (uint t = 0u; t < tile_lights; ++t) {
+            const DirectLight l = lights[tile_list[t]];
+            total += max(Luma(l.color_sp.rgb) + Luma(l.spec_kind.rgb), 0.0) + 1e-4;
+            tile_cdf[t] = total;
+        }
+    }
+    barrier();
+    if (!inside) {
+        return;
+    }
+    const uint index = PixelIndex(pixel);
+    if (!surface) {
+        res_out[index] = Reservoir(NoLight, 0.0, 0u, 0u);
+        return;
+    }
+    if (debug == 2u) {
+        const float c = float(tile_lights) / 16.0;
+        imageStore(diffuse_img, pixel, vec4(c, c, tile_count > MaxTileLights ? 1.0 : c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        res_out[index] = Reservoir(NoLight, 0.0, 0u, 0u);
+        return;
+    }
+    if (debug == 4u) {
+        WriteTileDebug(pixel, tile_lights);
+        res_out[index] = Reservoir(NoLight, 0.0, 0u, 0u);
+        return;
+    }
+    vec4 g3;
+    const Surface s = MakeSurface(pixel, p, g3);
+    uint seed = Seed(pixel);
+    Res r = EmptyRes();
+    if (tile_lights > 0u) {
+        const float total = tile_cdf[tile_lights - 1u];
+        const uint candidates = Candidates();
+        for (uint c = 0u; c < candidates; ++c) {
+            const float u = Rand(seed) * total;
+            uint lo = 0u, hi = tile_lights - 1u;
+            while (lo < hi) {
+                const uint mid = (lo + hi) >> 1u;
+                if (tile_cdf[mid] <= u) {
+                    lo = mid + 1u;
+                } else {
+                    hi = mid;
+                }
+            }
+            const float pdf = (tile_cdf[lo] - (lo > 0u ? tile_cdf[lo - 1u] : 0.0)) / total;
+            const uint light = tile_list[lo];
+            const float p_hat = TargetPdf(light, s);
+            ResUpdate(r, light, pdf > 0.0 ? p_hat / pdf : 0.0, p_hat, Rand(seed));
+        }
+    }
+    if ((Flags() & FlagRestirReset) == 0u && MaxHistory() > 0u) {
+        const vec3 prev = vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
+                               dot(reproject[2], vec4(p, 1.0)));
+        if (abs(prev.z) > 1e-4) {
+            const ivec2 prev_pixel = ivec2(floor(ViewToPixel(prev, prev_proj, prev_jitter.xy) + 0.5));
+            if (all(greaterThanEqual(prev_pixel, ivec2(0))) && all(lessThan(prev_pixel, ivec2(size)))) {
+                const Reservoir h = res_in[PixelIndex(prev_pixel)];
+                const vec3 n_prev = vec3(dot(reproject[0].xyz, s.n), dot(reproject[1].xyz, s.n),
+                                         dot(reproject[2].xyz, s.n));
+                float hm, hp;
+                if (Similar(h, prev.z, n_prev, hm, hp) && h.light < PrevLightCount()) {
+                    const uint light = remap[h.light];
+                    if (light != NoLight) {
+                        const float p_hat = TargetPdf(light, s);
+                        ResMerge(r, light, h.weight, min(hm, float(MaxHistory())), p_hat, Rand(seed));
+                    }
+                }
+            }
+        }
+    }
+    res_out[index] = Pack(r, p.z, s.n);
+#else
+    if (!surface || debug == 2u || debug == 4u) {
+        if (inside) {
+            res_out[PixelIndex(pixel)] = Reservoir(NoLight, 0.0, 0u, 0u);
+        }
+        return;
+    }
+    const uint index = PixelIndex(pixel);
+    vec4 g3;
+    const Surface s = MakeSurface(pixel, p, g3);
+    uint seed = Seed(pixel);
+    const Reservoir own = res_in[index];
+    Res r = EmptyRes();
+    {
+        const vec2 mp = unpackHalf2x16(own.m_phat);
+        if (own.light != NoLight && own.light < LightCount() && mp.x > 0.0) {
+            r.light = own.light;
+            r.p_hat = mp.y;
+            r.m = mp.x;
+            r.w_sum = own.weight * mp.x * mp.y;
+        }
+    }
+    const uint taps = SpatialTaps();
+    const float radius = 16.0;
+    for (uint t = 0u; t < taps; ++t) {
+        const float a = Rand(seed) * 6.2831853;
+        const float d = sqrt(Rand(seed)) * radius;
+        const ivec2 tap = pixel + ivec2(floor(vec2(cos(a), sin(a)) * d + 0.5));
+        if (all(equal(tap, pixel)) || any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, ivec2(size)))) {
+            continue;
+        }
+        const Reservoir h = res_in[PixelIndex(tap)];
+        float hm, hp;
+        if (!Similar(h, p.z, s.n, hm, hp) || h.light >= LightCount()) {
+            continue;
+        }
+        ResMerge(r, h.light, h.weight, hm, TargetPdf(h.light, s), Rand(seed));
+    }
+    vec3 diffuse = vec3(0.0), specular = vec3(0.0);
+    float W = ResWeight(r);
+    if (r.light != NoLight && W > 0.0) {
+        vec3 ld, ls;
+        if (ShadeLight(r.light, s, ld, ls)) {
+            const float far_w = FarWeight(s.p);
+            const float vis = far_w > 0.0 ? mix(1.0, LightVisibility(r.light, s), far_w) : 1.0;
+            if (vis <= 0.0) {
+                r.w_sum = 0.0;
+            }
+            diffuse = ld * (W * vis);
+            specular = ls * (W * vis);
+        } else {
+            r.w_sum = 0.0;
+        }
+    }
+    res_out[index] = Pack(r, p.z, s.n);
+    DirectionalSets(s, g3, pixel, diffuse, specular);
+    WriteResult(pixel, diffuse, specular);
+#endif
+}

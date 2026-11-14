@@ -96,6 +96,22 @@ public:
     bool EvaluateFrameGen(vk::CommandBuffer command, const FrameGenFrame& frame);
     void ReleaseFrameGen();
 
+    struct RrGuides {
+        Resource diffuse_albedo, specular_albedo, normal_roughness, specular_hit;
+    };
+    struct RrFrame {
+        Frame base;
+        RrGuides guides;
+        bool has_matrices{};
+        std::array<float, 16> world_to_view{};
+        std::array<float, 16> view_to_clip{};
+    };
+    [[nodiscard]] bool RayReconstructionAvailable() const;
+    [[nodiscard]] bool HasRrFeature(const FeatureDesc& desc) const;
+    bool CreateRrFeature(vk::CommandBuffer command, const FeatureDesc& desc);
+    bool EvaluateRr(vk::CommandBuffer command, const RrFrame& frame);
+    void ReleaseRrFeature();
+
 private:
     Dlss();
     struct Impl;

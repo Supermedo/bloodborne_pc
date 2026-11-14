@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
+#include "bbport_stdout.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
@@ -102,13 +103,15 @@ void GpuProfiler::Print() {
     for (const auto& [key, total] : sorted) {
         sum += total.ms;
     }
-    std::printf("GPU profile: %.2f ms/frame over %llu frames, %zu labels\n", sum / frames,
+    BbOut::Line text;
+    text.Add("GPU profile: %.2f ms/frame over %llu frames, %zu labels\n", sum / frames,
                 static_cast<unsigned long long>(frames), sorted.size());
     for (size_t i = 0; i < std::min<size_t>(sorted.size(), 30); ++i) {
         const auto& [key, total] = sorted[i];
-        std::printf("  %6.3f ms/frame %5.1f/frame  %s\n", total.ms / frames,
+        text.Add("  %6.3f ms/frame %5.1f/frame  %s\n", total.ms / frames,
                     double(total.segments) / frames, described[key].c_str());
     }
+    text.Flush();
     totals.clear();
     frames = 0;
 }

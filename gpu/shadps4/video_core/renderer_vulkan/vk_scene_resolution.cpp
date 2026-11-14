@@ -162,6 +162,9 @@ void SceneTargets::Copy(Entry& e, VideoCore::Image& original, bool to_native) {
     }
     const vk::Image src = to_native ? vk::Image(e.image) : original.GetImage();
     const vk::Image dst = to_native ? original.GetImage() : vk::Image(e.image);
+    Checkpoint::Set(scheduler.CommandBuffer(),
+                    to_native ? Checkpoint::Op::ProxyResolve : Checkpoint::Op::ProxyFill,
+                    u64(e.source.index) | (u64(e.level) << 32));
     if (ShaderResampled(original)) {
         constexpr auto read_layout = vk::ImageLayout::eShaderReadOnlyOptimal;
         constexpr auto write_layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
@@ -503,6 +506,10 @@ SceneTargets::Target SceneTargets::Read(VideoCore::ImageId id,
     auto& original = *lookup(id, 0);
     auto& e = Get(id);
     Transition(e, original.aspect_mask, vk::ImageLayout::eGeneral, stages, access);
+    constexpr auto writes = vk::AccessFlagBits2::eShaderWrite |
+                            vk::AccessFlagBits2::eShaderStorageWrite |
+                            vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eMemoryWrite;
+    e.state.ProxyAccess(bool(access & writes));
     return {e.image, View(e, original, info), e.layout, e.image.image_ci.usage};
 }
 } // namespace Vulkan

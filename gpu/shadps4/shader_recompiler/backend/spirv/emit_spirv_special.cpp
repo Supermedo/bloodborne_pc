@@ -241,6 +241,154 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);
 
+    Id load_header = store_merge;
+    if (MotionVectors::uvs_address != 0) {
+        const Id uv_select = ctx.OpCompositeExtract(u32_type, offsets, 3u);
+        const Id uv_wanted = ctx.OpLogicalAnd(
+            bool_type, do_store,
+            ctx.OpINotEqual(bool_type, ctx.OpBitwiseAnd(u32_type, uv_select, ctx.ConstU32(0x80000000u)),
+                            ctx.u32_zero_value));
+        const Id uv_label = ctx.OpLabel();
+        const Id uv_merge = ctx.OpLabel();
+        ctx.OpSelectionMerge(uv_merge, spv::SelectionControlMask::MaskNone);
+        ctx.OpBranchConditional(uv_wanted, uv_label, uv_merge);
+        ctx.AddLabel(uv_label);
+        const Id param_wanted = ctx.OpBitwiseAnd(u32_type, uv_select, ctx.ConstU32(0xFFu));
+        const Id zero4 = ctx.ConstantComposite(ctx.F32[4], ctx.Constant(ctx.F32[1], 0.0f),
+                                               ctx.Constant(ctx.F32[1], 0.0f),
+                                               ctx.Constant(ctx.F32[1], 0.0f),
+                                               ctx.Constant(ctx.F32[1], 0.0f));
+        const auto select_param = [&](Id wanted) {
+            Id chosen = zero4;
+            for (u32 i = 0; i < ctx.output_params.size(); ++i) {
+                const auto& param = ctx.output_params[i];
+                if (!Sirit::ValidId(param.id) || param.num_components == 0 ||
+                    param.num_components > 4 || param.is_integer || param.is_array ||
+                    param.pointer_type.value == 0) {
+                    continue;
+                }
+                Id value;
+                if (param.num_components == 1) {
+                    value = ctx.OpLoad(ctx.F32[1], param.id);
+                    value = ctx.OpCompositeConstruct(ctx.F32[4], value, ctx.Constant(ctx.F32[1], 0.0f),
+                                                     ctx.Constant(ctx.F32[1], 0.0f),
+                                                     ctx.Constant(ctx.F32[1], 0.0f));
+                } else {
+                    const Id loaded = ctx.OpLoad(ctx.F32[param.num_components], param.id);
+                    if (param.num_components == 4) {
+                        value = loaded;
+                    } else {
+                        std::array<Id, 4> parts{};
+                        for (u32 c = 0; c < 4; ++c) {
+                            parts[c] = c < param.num_components
+                                           ? ctx.OpCompositeExtract(ctx.F32[1], loaded, c)
+                                           : ctx.Constant(ctx.F32[1], 0.0f);
+                        }
+                        value = ctx.OpCompositeConstruct(ctx.F32[4], parts);
+                    }
+                }
+                chosen = ctx.OpSelect(ctx.F32[4], ctx.OpIEqual(bool_type, wanted, ctx.ConstU32(i)),
+                                      value, chosen);
+            }
+            return chosen;
+        };
+        if (MotionVectors::normals_address != 0) {
+            const Id u32_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
+            const Id normal_wanted = ctx.OpINotEqual(
+                bool_type, ctx.OpBitwiseAnd(u32_type, uv_select, ctx.ConstU32(0x08200000u)),
+                ctx.u32_zero_value);
+            const Id n_label = ctx.OpLabel();
+            const Id n_merge = ctx.OpLabel();
+            ctx.OpSelectionMerge(n_merge, spv::SelectionControlMask::MaskNone);
+            ctx.OpBranchConditional(normal_wanted, n_label, n_merge);
+            ctx.AddLabel(n_label);
+            const Id param_a = ctx.OpBitwiseAnd(
+                u32_type, ctx.OpShiftRightLogical(u32_type, uv_select, ctx.ConstU32(16u)),
+                ctx.ConstU32(31u));
+            const Id param_b = ctx.OpBitwiseAnd(
+                u32_type, ctx.OpShiftRightLogical(u32_type, uv_select, ctx.ConstU32(22u)),
+                ctx.ConstU32(31u));
+            const Id a_valid = ctx.OpINotEqual(
+                bool_type, ctx.OpBitwiseAnd(u32_type, uv_select, ctx.ConstU32(0x00200000u)),
+                ctx.u32_zero_value);
+            const Id b_valid = ctx.OpINotEqual(
+                bool_type, ctx.OpBitwiseAnd(u32_type, uv_select, ctx.ConstU32(0x08000000u)),
+                ctx.u32_zero_value);
+            const Id va = ctx.OpSelect(ctx.F32[4], a_valid, select_param(param_a), zero4);
+            const Id vb = ctx.OpSelect(ctx.F32[4], b_valid, select_param(param_b), zero4);
+            const auto pack = [&](Id v) {
+                const Id xyz = ctx.OpVectorShuffle(ctx.F32[3], v, v, 0, 1, 2);
+                const Id len = ctx.OpDot(ctx.F32[1], xyz, xyz);
+                const Id ok = ctx.OpFOrdGreaterThan(bool_type, len, ctx.Constant(ctx.F32[1], 1e-12f));
+                const Id unit = ctx.OpNormalize(ctx.F32[3], xyz);
+                const Id packed = ctx.OpPackSnorm4x8(
+                    u32_type, ctx.OpCompositeConstruct(ctx.F32[4], ctx.OpCompositeExtract(ctx.F32[1], unit, 0u),
+                                                       ctx.OpCompositeExtract(ctx.F32[1], unit, 1u),
+                                                       ctx.OpCompositeExtract(ctx.F32[1], unit, 2u),
+                                                       ctx.Constant(ctx.F32[1], 0.0f)));
+                return ctx.OpSelect(u32_type, ok, packed, ctx.u32_zero_value);
+            };
+            const Id n_address = address(MotionVectors::normals_address,
+                                         ctx.OpIAdd(u32_type, store_base, slot), 8);
+            ctx.OpStore(ctx.OpConvertUToPtr(u32_ptr, n_address), pack(va),
+                        spv::MemoryAccessMask::Aligned, 4u);
+            ctx.OpStore(ctx.OpConvertUToPtr(u32_ptr, ctx.OpIAdd(ctx.U64, n_address, ctx.Constant(ctx.U64, u64(4)))),
+                        pack(vb), spv::MemoryAccessMask::Aligned, 4u);
+            ctx.OpBranch(n_merge);
+            ctx.AddLabel(n_merge);
+        }
+        Id chosen = zero4;
+        for (u32 i = 0; i < ctx.output_params.size(); ++i) {
+            const auto& param = ctx.output_params[i];
+            if (!Sirit::ValidId(param.id) || param.num_components == 0 ||
+                param.num_components > 4 || param.is_integer || param.is_array ||
+                param.pointer_type.value == 0) {
+                continue;
+            }
+            Id value;
+            if (param.num_components == 1) {
+                value = ctx.OpLoad(ctx.F32[1], param.id);
+                value = ctx.OpCompositeConstruct(ctx.F32[4], value, ctx.Constant(ctx.F32[1], 0.0f),
+                                                 ctx.Constant(ctx.F32[1], 0.0f),
+                                                 ctx.Constant(ctx.F32[1], 0.0f));
+            } else {
+                const Id loaded = ctx.OpLoad(ctx.F32[param.num_components], param.id);
+                if (param.num_components == 4) {
+                    value = loaded;
+                } else {
+                    std::array<Id, 4> parts{};
+                    for (u32 c = 0; c < 4; ++c) {
+                        parts[c] = c < param.num_components
+                                       ? ctx.OpCompositeExtract(ctx.F32[1], loaded, c)
+                                       : ctx.Constant(ctx.F32[1], 0.0f);
+                    }
+                    value = ctx.OpCompositeConstruct(ctx.F32[4], parts);
+                }
+            }
+            chosen = ctx.OpSelect(ctx.F32[4],
+                                  ctx.OpIEqual(bool_type, param_wanted, ctx.ConstU32(i)), value,
+                                  chosen);
+        }
+        const Id comp_u = ctx.OpBitwiseAnd(u32_type, ctx.OpShiftRightLogical(u32_type, uv_select,
+                                                                             ctx.ConstU32(8u)),
+                                           ctx.ConstU32(3u));
+        const Id comp_v = ctx.OpBitwiseAnd(u32_type, ctx.OpShiftRightLogical(u32_type, uv_select,
+                                                                             ctx.ConstU32(12u)),
+                                           ctx.ConstU32(3u));
+        const Id uv = ctx.OpCompositeConstruct(
+            ctx.F32[2], ctx.OpVectorExtractDynamic(ctx.F32[1], chosen, comp_u),
+            ctx.OpVectorExtractDynamic(ctx.F32[1], chosen, comp_v));
+        const Id packed = ctx.OpPackHalf2x16(u32_type, uv);
+        const Id u32_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
+        const Id uv_address = address(MotionVectors::uvs_address,
+                                      ctx.OpIAdd(u32_type, store_base, slot), 4);
+        ctx.OpStore(ctx.OpConvertUToPtr(u32_ptr, uv_address), packed,
+                    spv::MemoryAccessMask::Aligned, 4u);
+        ctx.OpBranch(uv_merge);
+        ctx.AddLabel(uv_merge);
+        load_header = uv_merge;
+    }
+
     const Id load_label = ctx.OpLabel();
     const Id load_merge = ctx.OpLabel();
     ctx.OpSelectionMerge(load_merge, spv::SelectionControlMask::MaskNone);
@@ -251,7 +399,7 @@ static void EmitVertexMotion(EmitContext& ctx) {
             ctx.OpIAdd(u32_type, load_base, slot), 16)), spv::MemoryAccessMask::Aligned, 16u);
     ctx.OpBranch(load_merge);
     ctx.AddLabel(load_merge);
-    Id previous = ctx.OpPhi(ctx.F32[4], position, store_merge, loaded, load_label);
+    Id previous = ctx.OpPhi(ctx.F32[4], position, load_header, loaded, load_label);
     const Id valid = ctx.OpSelect(ctx.F32[1], do_load, ctx.Constant(ctx.F32[1], 1.0f),
                                   ctx.Constant(ctx.F32[1], 0.0f));
     previous = ctx.OpCompositeInsert(ctx.F32[4], valid, previous, 2u);

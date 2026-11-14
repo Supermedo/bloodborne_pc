@@ -1,0 +1,163 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(local_size_x = 64) in;
+
+struct Probe {
+    uvec4 slots;
+    uint entry;
+    uint mode;
+    uint keep;
+    uint placement;
+    vec4 rows[3];
+};
+
+layout(binding = 0, std430) readonly buffer Probes { Probe probes[]; };
+layout(binding = 1, std430) buffer Fingerprints { vec4 fingerprints[]; };
+// Five words per probe: the mismatch word, then the first readable sample in the entry's build
+// view (x, y, z) and its sample index (~0 when none), so the CPU can place the draw in the world.
+layout(binding = 2, std430) writeonly buffer Flags { uint flags[]; };
+layout(binding = 3, std430) buffer Instances { uint instance_words[]; };
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer PtlasState {
+    uint state_words[];
+};
+layout(buffer_reference, std430, buffer_reference_align = 16) writeonly buffer PtlasCenters {
+    vec4 centers[];
+};
+
+const uint PtlasRecordWords = 26u;
+const uint PtlasShadowWords = 28u;
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Positions {
+    vec4 clip[];
+};
+
+layout(push_constant) uniform Constants {
+    uvec2 positions_address;
+    uint probe_count;
+    uint ptlas;
+    vec2 proj_scale;
+    float shelf_metres;
+};
+
+void PtlasApply(uint i, bool hide) {
+    if (i >= instance_words[7]) {
+        return;
+    }
+    const uint aux = instance_words[1] + i * 4u;
+    const uint index = instance_words[aux + 2u];
+    if (index == 0xFFFFFFFFu) {
+        return;
+    }
+    PtlasState s = PtlasState(uvec2(instance_words[5], instance_words[6]));
+    const uint shadow = instance_words[3] + index * PtlasShadowWords;
+    const bool was = s.state_words[shadow + PtlasRecordWords] != 0u;
+    const uint written = instance_words[aux + 3u];
+    if (hide) {
+        atomicAdd(s.state_words[0], 1u);
+    }
+    if (written != 0u) {
+        const uint rec = instance_words[2] + (written - 1u) * PtlasRecordWords;
+        for (uint w = 0u; w < PtlasRecordWords; ++w) {
+            s.state_words[shadow + w] = instance_words[rec + w];
+        }
+        if (hide) {
+            instance_words[rec + 24u] = 0u;
+            instance_words[rec + 25u] = 0u;
+        }
+    } else if (hide != was) {
+        const uint n = atomicAdd(instance_words[instance_words[4]], 1u);
+        const uint rec = instance_words[2] + n * PtlasRecordWords;
+        for (uint w = 0u; w < PtlasRecordWords; ++w) {
+            instance_words[rec + w] = s.state_words[shadow + w];
+        }
+        if (hide) {
+            instance_words[rec + 24u] = 0u;
+            instance_words[rec + 25u] = 0u;
+        }
+    }
+    s.state_words[shadow + PtlasRecordWords] = hide ? 1u : 0u;
+}
+
+void PtlasCenter(uint entry, vec3 lo, vec3 hi, bool any_sample) {
+    PtlasCenters c = PtlasCenters(uvec2(instance_words[8], instance_words[9]));
+    c.centers[entry] = any_sample ? vec4((lo + hi) * 0.5, 1.0) : vec4(0.0);
+}
+
+void main() {
+    const uint i = gl_GlobalInvocationID.x;
+    if (i >= probe_count) {
+        return;
+    }
+    const Probe p = probes[i];
+    if (p.mode == 2u) {
+        if (ptlas != 0u) {
+            PtlasApply(i, false);
+        }
+        flags[i * 5u] = 0u;
+        flags[i * 5u + 4u] = 0xFFFFFFFFu;
+        return;
+    }
+    Positions positions = Positions(positions_address);
+    uint mismatch = 0u;
+    float worst = 0.0;
+    vec3 lo = vec3(3.0e38);
+    vec3 hi = vec3(-3.0e38);
+    bool any_sample = false;
+    uint point_k = 0xFFFFFFFFu;
+    vec3 point = vec3(0.0);
+    for (uint k = 0u; k < 4u; ++k) {
+        const vec4 c = positions.clip[p.slots[k]];
+        const vec3 v = vec3(c.x / proj_scale.x, c.y / proj_scale.y, c.w);
+        const uint f = p.entry * 4u + k;
+        // The sample in the entry's build view: an anchored refit's BLAS (and so its
+        // fingerprint) lives in the view of the frame it was anchored to, not this one.
+        const vec3 built = vec3(dot(p.rows[0].xyz, v) + p.rows[0].w,
+                                dot(p.rows[1].xyz, v) + p.rows[1].w,
+                                dot(p.rows[2].xyz, v) + p.rows[2].w);
+        if (point_k == 0xFFFFFFFFu && p.slots[k] != 0u && !(any(isnan(built)) || any(isinf(built)))) {
+            point_k = k;
+            point = built;
+        }
+        if (p.mode == 0u) {
+            fingerprints[f] = vec4(built, 1.0);
+            if (p.slots[k] != 0u && !(any(isnan(v)) || any(isinf(v)))) {
+                lo = min(lo, v);
+                hi = max(hi, v);
+                any_sample = true;
+            }
+            continue;
+        }
+        const vec3 stored = fingerprints[f].xyz;
+        const bool finite_now = !(any(isnan(built)) || any(isinf(built)));
+        const bool finite_then = !(any(isnan(stored)) || any(isinf(stored)));
+        if (finite_now != finite_then) {
+            mismatch = 1u;
+        } else if (finite_now) {
+            const float tol = 2e-3 + 1e-3 * abs(stored.z);
+            if (any(greaterThan(abs(built - stored), vec3(tol)))) {
+                mismatch = 1u;
+                const vec3 d = abs(built - stored);
+                worst = max(worst, max(d.x, max(d.y, d.z)));
+            }
+        }
+    }
+    // A static mesh off by more than BB_RT_SHELF metres is the same draw at another placement:
+    // its BLAS is still right where it was built, so it stays (the CPU shelves it on readback).
+    const bool moved = p.placement != 0u && shelf_metres > 0.0 && worst > shelf_metres;
+    const bool hide = mismatch != 0u && p.keep == 0u && !moved;
+    if (ptlas != 0u) {
+        if (p.mode == 0u) {
+            PtlasCenter(p.entry, lo, hi, any_sample);
+        }
+        PtlasApply(i, hide);
+    } else if (hide) {
+        instance_words[i * 16u + 12u] &= 0x00FFFFFFu;
+    }
+    // Mismatch flag: the worst sample error in metres (as float bits, never 0), 1 for NaN changes.
+    flags[i * 5u] = mismatch != 0u ? max(floatBitsToUint(worst), 1u) : 0u;
+    flags[i * 5u + 1u] = floatBitsToUint(point.x);
+    flags[i * 5u + 2u] = floatBitsToUint(point.y);
+    flags[i * 5u + 3u] = floatBitsToUint(point.z);
+    flags[i * 5u + 4u] = point_k;
+}

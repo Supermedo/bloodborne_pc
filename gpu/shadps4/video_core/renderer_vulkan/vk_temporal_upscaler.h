@@ -38,6 +38,8 @@ class Runtime;
 class CameraMotion;
 class SceneTargets;
 class FrameGenerator;
+class RayTracing;
+class DlssGuides;
 
 class TemporalUpscaler {
 public:
@@ -54,6 +56,9 @@ public:
     /// the upscaler's trigger, the picture before the UI at the frame's first UI draw.
     void SetFrameGenerator(FrameGenerator* generator) noexcept {
         frame_generator = generator;
+    }
+    void SetRayTracing(RayTracing* tracing) noexcept {
+        ray_tracing = tracing;
     }
 
     /// A draw into a full-size RGBA16F target with the scene depth: the scene color.
@@ -185,6 +190,11 @@ private:
     bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
                     const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
                     bool hdr);
+    [[nodiscard]] bool UseRayReconstruction() const;
+    [[nodiscard]] const char* ProfileLabel(bool scaled) const;
+    bool RecordRayReconstruction(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
+                                 const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh,
+                                 float frame_ms, bool hdr);
     /// Records FSR 4 and returns its actual output when requested; FSR 3 takes over on failure.
     bool RecordFsr4(vk::CommandBuffer &cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
                     u32 w, u32 h, u32 ow, u32 oh, float frame_ms, bool hdr = true,
@@ -281,6 +291,15 @@ private:
     std::unique_ptr<Fsr4Upscaler> fsr4;
     bool fsr4_failed = false;
     bool dlss_failed = false;
+    RayTracing* ray_tracing = nullptr;
+    std::unique_ptr<DlssGuides> rr_guides;
+    int rr_wanted = -1;
+    bool rr_linearize = true;
+    bool rr_linear_frame = false;
+    bool rr_failed = false;
+    bool rr_active = false;
+    bool rr_logged = false;
+    u32 rr_path_logged = 0;
     VideoCore::UniqueImage motion_image;
     VideoCore::UniqueImage output_image;
     vk::UniqueImageView motion_view;

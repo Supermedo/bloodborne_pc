@@ -87,7 +87,7 @@ public:
     bool IsHdrGammaEnabled() { static const auto value = Flag("BB_HDR_GAMMA", true); return value; }
     bool IsInlineFetchShader() { return false; }
     bool IsNullGPU() { static const auto value = Flag("BB_NULL_GPU", false); return value; }
-    bool IsPatchShaders() { return false; }
+    bool IsPatchShaders() { static const auto value = Flag("BB_PATCH_SHADERS", false); return value; }
     bool IsPipelineCacheArchived() { return false; }
     bool IsPipelineCacheEnabled() { static const auto value = Flag("BB_PIPELINE_CACHE", true); return value; }
     bool IsRcasEnabled() { static const auto value = Flag("BB_RCAS", true); return value; }

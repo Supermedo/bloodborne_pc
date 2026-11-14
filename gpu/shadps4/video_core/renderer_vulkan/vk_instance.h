@@ -6,6 +6,7 @@
 #include <span>
 #include <unordered_map>
 
+#include "video_core/renderer_vulkan/gpu_checkpoint.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/fsr_support_cache.h"
 
@@ -148,6 +149,50 @@ public:
 
     /// bbport: prints the driver's fault report after a device loss (VK_EXT_device_fault), once.
     void ReportDeviceLost(const char* where) const;
+    void ReportCheckpoints() const;
+    static inline void (*lost_hook)() = nullptr;
+
+    bool IsRayQuerySupported() const {
+        return ray_query;
+    }
+
+    bool IsOpacityMicromapSupported() const {
+        return ray_query && opacity_micromap;
+    }
+
+    bool IsClusterAccelerationStructureExposed() const {
+        return cluster_as_exposed;
+    }
+
+    bool IsPartitionedAccelerationStructureSupported() const {
+        return ray_query && partitioned_as;
+    }
+
+    const std::string& PartitionedAccelerationStructureProblem() const {
+        return ptlas_problem;
+    }
+
+    bool IsRayTracingPipelineSupported() const {
+        return ray_query && ray_tracing_pipeline;
+    }
+
+    bool IsRayTracingReorderSupported() const {
+        return ray_query && ray_tracing_pipeline && ray_tracing_reorder;
+    }
+
+    bool IsRayTracingPipelineExposed() const {
+        return ray_tracing_pipeline_exposed;
+    }
+
+    bool IsRayTracingReorderExposed() const {
+        return ray_tracing_reorder_exposed;
+    }
+
+    bool IsRtSurfaceSupported() const {
+        return ray_query && vk12_features.descriptorBindingPartiallyBound &&
+               vk12_features.runtimeDescriptorArray &&
+               vk12_features.shaderSampledImageArrayNonUniformIndexing;
+    }
 
     /// Returns true if VK_KHR_maintenance5 is supported
     bool IsMaintenance5Supported() const {
@@ -642,6 +687,7 @@ private:
     bool maintenance_5{};
     bool maintenance_6{};
     bool device_fault{};
+    bool checkpoints{};
     bool maintenance_8{};
     bool attachment_feedback_loop{};
     bool image_2d_view_of_3d{};
@@ -653,6 +699,15 @@ private:
     bool amd_anti_lag{};
     bool nv_checkpoints{};
     bool amd_buffer_marker{};
+    bool ray_query{};
+    bool opacity_micromap{};
+    bool cluster_as_exposed{};
+    bool partitioned_as{};
+    std::string ptlas_problem{"ray queries unavailable"};
+    bool ray_tracing_pipeline{};
+    bool ray_tracing_reorder{};
+    bool ray_tracing_pipeline_exposed{};
+    bool ray_tracing_reorder_exposed{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool fsr4vk{};

@@ -5,8 +5,10 @@
 #include <cmath>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 #include "video_core/renderer_vulkan/ui_composition.h"
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
 #include "core/debug_state.h"
@@ -22,6 +24,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_checkpoints.h"
+#include "video_core/renderer_vulkan/rt/rt_toggle.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "bbport_threads.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -71,8 +74,12 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     object_motion = std::make_unique<ObjectMotion>(instance, scheduler);
     camera_motion = std::make_unique<CameraMotion>(instance, scheduler, texture_cache, runtime);
     camera_motion->SetObjectMotion(object_motion.get());
-    upscaler = std::make_unique<TemporalUpscaler>(instance, scheduler, texture_cache, runtime,
+    ray_tracing = std::make_unique<RayTracing>(instance, scheduler, runtime, texture_cache,
+                                              buffer_cache);
+    ray_tracing->SetObjectMotion(object_motion.get());
+    upscaler =std::make_unique<TemporalUpscaler>(instance, scheduler, texture_cache, runtime,
                                                   *camera_motion, *scene_targets);
+    upscaler->SetRayTracing(ray_tracing.get());
     if (!EmulatorSettings.IsNullGPU()) {
         liverpool->BindRasterizer(this);
     }
@@ -284,9 +291,120 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     }
     // bbport: the G-buffer pass (5+ color targets) holds the scene depth, and its constants the
     // main camera (shadow passes bind the same layout with the light's camera).
-    gbuffer_draw = camera_motion->Enabled() && std::popcount(key.mrt_mask) >= 5 && db_desc.first;
+    const u32 scene_width = camera_motion->RenderSize()[0];
+    side_gbuffer_draw = std::popcount(key.mrt_mask) >= 5 && db_desc.first && scene_width &&
+                        texture_cache.GetImage(db_desc.first).info.size.width < scene_width;
+    gbuffer_draw = camera_motion->Enabled() && std::popcount(key.mrt_mask) >= 5 && db_desc.first &&
+                   !side_gbuffer_draw;
+    light_draw = false;
+    ao_draw = false;
+    dir_shadow_draw = false;
+    skip_light_draw = false;
+    const u64 hook_ps = key.mrt_mask ? pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash : 0;
+    composite_draw = ray_tracing->WantsDirect() && Rt::DirectHookDraw(hook_ps);
+    composite_ps = hook_ps == Rt::LightCompositeShader;
+    if (ray_tracing->WantsLightBuffers() &&
+        u32(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash) == Rt::LightAccVertexShader) {
+        const u64 ps_hash =
+            key.mrt_mask ? pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash : 0;
+        ray_tracing->OnLightDraw(ps_hash);
+        ray_tracing->OnLightStencil(Rt::PackLightStencil(
+            regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid(),
+            u32(regs.depth_control.stencil_ref_func), regs.stencil_ref_front.stencil_test_val,
+            regs.stencil_ref_front.stencil_mask));
+        {
+            Rt::LightDrawState st{};
+            st.valid = true;
+            if ((key.mrt_mask & 1u) && cb_descs[0].first) {
+                st.diffuse = cb_descs[0].first.index;
+                st.width = texture_cache.GetImage(cb_descs[0].first).info.size.width;
+            }
+            if ((key.mrt_mask & 2u) && cb_descs[1].first) {
+                st.specular = cb_descs[1].first.index;
+            }
+            st.mask0 = u8(regs.color_target_mask.GetMask(0));
+            st.mask1 = u8(regs.color_target_mask.GetMask(1));
+            const auto& b0 = regs.blend_control[0];
+            const auto& b1 = regs.blend_control[1];
+            st.blend0 = b0.enable && !regs.color_buffers[0].info.blend_bypass;
+            st.blend1 = b1.enable && !regs.color_buffers[1].info.blend_bypass;
+            st.src0 = u8(b0.color_src_factor);
+            st.dst0 = u8(b0.color_dst_factor);
+            st.func0 = u8(b0.color_func);
+            st.src1 = u8(b1.color_src_factor);
+            st.dst1 = u8(b1.color_dst_factor);
+            st.func1 = u8(b1.color_func);
+            st.depth = regs.depth_control.depth_enable && regs.depth_buffer.DepthValid();
+            st.zfunc = u8(regs.depth_control.depth_func);
+            st.bounds = regs.depth_control.depth_bounds_enable;
+            st.bounds_min = regs.depth_bounds_min;
+            st.bounds_max = regs.depth_bounds_max;
+            st.depth_write = regs.depth_control.depth_write_enable;
+            st.cull = u8(regs.polygon_control.CullingMode());
+            st.zscale = regs.viewport_control.zscale_enable ? regs.viewports[0].zscale : 1.0f;
+            st.zoffset = regs.viewport_control.zoffset_enable ? regs.viewports[0].zoffset : 0.0f;
+            ray_tracing->OnLightState(st);
+        }
+        light_draw = ps_hash != 0;
+        ao_draw = ps_hash == Rt::DeferredAoShader;
+        dir_shadow_draw = ray_tracing->WantsDirShadowMask(ps_hash);
+        if (light_draw) {
+            const VideoCore::ImageId diffuse =
+                (key.mrt_mask & 1u) ? cb_descs[0].first : VideoCore::ImageId{};
+            const VideoCore::ImageId specular =
+                (key.mrt_mask & 2u) ? cb_descs[1].first : VideoCore::ImageId{};
+            ray_tracing->OnLightTargets(diffuse, specular);
+            skip_light_draw = ray_tracing->SkipLightDraw(
+                diffuse, specular, Rt::DirectHookDraw(ps_hash),
+                regs.blend_control[0].enable && !regs.color_buffers[0].info.blend_bypass,
+                regs.depth_control.depth_enable && regs.depth_control.depth_write_enable,
+                regs.depth_control.stencil_enable &&
+                    (regs.stencil_ref_front.stencil_write_mask ||
+                     regs.stencil_ref_back.stencil_write_mask));
+            skip_light_draw = skip_light_draw ||
+                              ray_tracing->SkipHalfResLight(
+                                  diffuse,
+                                  regs.blend_control[0].enable &&
+                                      !regs.color_buffers[0].info.blend_bypass,
+                                  ps_hash);
+        }
+    }
+    if (ray_tracing->WantsDirect() && key.mrt_mask) {
+        ray_tracing->OnAccTargetDraw(cb_descs[0].first,
+                                     pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash, hook_ps,
+                                     key.mrt_mask, light_draw);
+    }
+    if (composite_draw) {
+        RayTracing::SceneInputs inputs{
+            .depth = camera_motion->Depth(),
+            .projection = camera_motion->CurrentProjection(),
+            .jitter = upscaler->Jitter(),
+            .scene_targets = scene_targets.get(),
+            .reduced = upscaler->RasterScaling(),
+        };
+        inputs.camera_valid = camera_motion->WorldCamera(inputs.inv_view);
+        ray_tracing->OnLightComposite(inputs, hook_ps);
+    }
+    if (ao_draw && ray_tracing->WantsAo()) {
+        RayTracing::SceneInputs inputs{
+            .depth = camera_motion->Depth(),
+            .projection = camera_motion->CurrentProjection(),
+            .jitter = upscaler->Jitter(),
+            .scene_targets = scene_targets.get(),
+            .reduced = upscaler->RasterScaling(),
+        };
+        inputs.camera_valid = camera_motion->WorldCamera(inputs.inv_view);
+        ray_tracing->OnAoDraw(inputs);
+    }
     if (gbuffer_draw) {
         camera_motion->OnGBufferPass(db_desc.first);
+        if (ray_tracing->Enabled()) {
+            std::array<VideoCore::ImageId, AmdGpu::NUM_COLOR_BUFFERS> targets{};
+            for (u32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
+                targets[cb] = cb_descs[cb].first;
+            }
+            ray_tracing->OnGBufferPass(targets);
+        }
     }
     if (upscaler->Enabled() && cb_descs[0].first) {
         upscaler->OnColorTarget(cb_descs[0].first);
@@ -300,6 +418,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
             color.info.size.width == depth.info.size.width &&
             color.info.size.height == depth.info.size.height) {
             upscaler->OnSceneColor(cb_descs[0].first);
+            ray_tracing->OnSceneColor(cb_descs[0].first);
             // Blended geometry without depth writes (not full-screen passes): transparents and
             // effects start. Blended layers writing depth (decals, wet/blood ground) are
             // surfaces and stay in the history.
@@ -313,6 +432,13 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
             }
         }
     }
+}
+
+static u64 DrawMarkHash(const GraphicsPipeline* pipeline) {
+    const u64 ps = pipeline->GetGraphicsKey().mrt_mask
+                       ? pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash
+                       : 0;
+    return ps ? ps : pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash;
 }
 
 static std::pair<u32, u32> GetDrawOffsets(
@@ -347,6 +473,9 @@ void Rasterizer::EliminateFastClear() {
     }
     auto& image = texture_cache.GetImage(image_id);
     const auto clear_value = LiverpoolToVK::ColorBufferClearValue(col_buf);
+    if (ray_tracing->WantsDirect()) {
+        ray_tracing->OnFastClearEliminate(image_id);
+    }
 
     ScopeMarkerBegin(fmt::format("EliminateFastClear:MRT={:#x}:M={:#x}", col_buf.Address(),
                                  col_buf.CmaskAddress()));
@@ -870,13 +999,14 @@ void Rasterizer::PrintPipeStats() {
     const u64 tsc = __rdtsc();
     const double cycles = double(tsc - last_tsc);
     const u64 busy = draw_pipe->busy_cycles.load(std::memory_order_relaxed);
-    std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited, stage A waited "
+    BbOut::Line text;
+    text.Add("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited, stage A waited "
                 "%.1f%%, stage B busy %.1f%%\n",
                 (draw_pipe->packets - last_packets) / seconds,
                 (draw_pipe->drains - last_drains) / seconds,
                 100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
                 100.0 * (busy - last_busy) / cycles);
-    std::printf("  drains by reason/s:");
+    text.Add("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {
         if (const u64 n = draw_pipe->drains_by_reason[r]) {
             static constexpr const char* names[] = {"ConstRam", "commands", "compute",
@@ -884,23 +1014,24 @@ void Rasterizer::PrintPipeStats() {
             const double share = 100.0 * draw_pipe->cycles_by_reason[r] / cycles;
             draw_pipe->cycles_by_reason[r] = 0;
             if (r < 256) {
-                std::printf(" %s=%.0f (%.1f%%)",
+                text.Add(" %s=%.0f (%.1f%%)",
                             magic_enum::enum_name(AmdGpu::PM4ItOpcode(r)).data(), n / seconds,
                             share);
             } else {
-                std::printf(" %s=%.0f (%.1f%%)", names[r - 256], n / seconds, share);
+                text.Add(" %s=%.0f (%.1f%%)", names[r - 256], n / seconds, share);
             }
         }
     }
-    std::printf("\n  stage A waits over 0.5%%:");
+    text.Add("\n  stage A waits over 0.5%%:");
     for (const auto& [function, lines] : drain_sites) {
         for (const auto& [line, waited] : lines) {
             if (waited * 200 > cycles) {
-                std::printf(" %s:%u %.1f%%", function, line, 100.0 * waited / cycles);
+                text.Add(" %s:%u %.1f%%", function, line, 100.0 * waited / cycles);
             }
         }
     }
-    std::printf("\n");
+    text.Add("\n");
+    text.Flush();
     drain_sites.clear();
     draw_pipe->drains_by_reason = {};
     window = now;
@@ -931,6 +1062,264 @@ bool Rasterizer::FilterDrawPasses() const {
         regs.depth_buffer.StencilWriteValid() &&
         regs.depth_buffer.StencilAddress() != regs.depth_buffer.StencilWriteAddress();
     return !(mode == Mode::Disable && (depth_copy || stencil_copy));
+}
+
+void Rasterizer::CaptureSmokePatch(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
+                                   bool is_indexed, u32 index_offset, bool flame) {
+    const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+    const auto& ps = pipeline->GetStage(Shader::SwStage::Fragment);
+    const auto& fetch = pipeline->GetFetchShader();
+    if (!fetch) {
+        return;
+    }
+    const Shader::Gcn::VertexAttribute* pos_attr = nullptr;
+    const Shader::Gcn::VertexAttribute* size_attr = nullptr;
+    for (const auto& attr : fetch->attributes) {
+        if (attr.semantic == 0) {
+            pos_attr = &attr;
+        } else if (attr.semantic == Rt::FxSmokeSizeAttr()) {
+            size_attr = &attr;
+        }
+    }
+    if (!pos_attr ||
+        pos_attr->GetStepRate() != Shader::Gcn::VertexAttribute::InstanceIdType::None) {
+        return;
+    }
+    const auto pos_buf = pos_attr->GetSharp(vs);
+    if (!pos_buf.Valid() || pos_buf.GetDataFmt() != AmdGpu::DataFormat::Format32_32_32 ||
+        pos_buf.GetNumberFmt() != AmdGpu::NumberFormat::Float || pos_buf.GetStride() < 12) {
+        return;
+    }
+    const AmdGpu::Buffer size_buf = size_attr ? size_attr->GetSharp(vs) : AmdGpu::Buffer{};
+    const bool size_ok = size_attr && size_buf.Valid() &&
+                         size_buf.GetNumberFmt() == AmdGpu::NumberFormat::Float &&
+                         size_buf.GetStride() >= 4 * (Rt::FxSmokeSizeComponent() + 1);
+    const auto [first_vertex, first_instance] = GetDrawOffsets(regs, vs, fetch);
+    const u32 index_size =
+        regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2u : 4u;
+    const VAddr index_address =
+        is_indexed ? regs.index_base_address.Address<VAddr>() + u64(index_offset) * index_size
+                   : 0;
+    const u32 count = regs.num_indices;
+    const auto readable = [&](VAddr address, u64 bytes) {
+        return address && memory->IsValidGpuMapping(address, 0) &&
+               memory->ClampRangeSize(address, bytes) == bytes;
+    };
+    if (is_indexed && !readable(index_address, u64(count) * index_size)) {
+        return;
+    }
+    std::array<float, 12> inv_view{};
+    if (!camera_motion->WorldCamera(inv_view)) {
+        return;
+    }
+    const Rt::Affine view = Rt::InverseRigid(inv_view);
+    const u32 used = std::min(count, Rt::FxSmokeMaxParticles);
+    const bool fog_sheet = ray_tracing->FogSheet(ps.pgm_hash);
+    const bool haze = ray_tracing->HazeLit(ps.pgm_hash);
+    const bool fog = fog_sheet || haze;
+    std::vector<std::pair<VAddr, u32>> haze_patch;
+    smoke_particles.clear();
+    for (u32 i = 0; i < used; ++i) {
+        u32 index = i;
+        if (is_indexed) {
+            index = index_size == 2 ? reinterpret_cast<const u16*>(index_address)[i]
+                                    : reinterpret_cast<const u32*>(index_address)[i];
+        }
+        const u64 vertex = u64(first_vertex) + index;
+        const VAddr pos_address = pos_buf.base_address + vertex * pos_buf.GetStride();
+        if (!readable(pos_address, 12)) {
+            continue;
+        }
+        std::array<float, 3> world{};
+        float fog_size = 0.0f;
+        std::array<u8, 4> fog_rgba{255, 255, 255, 255};
+        std::memcpy(world.data(), reinterpret_cast<const void*>(pos_address), 12);
+        if (flame || fog) {
+            std::array<float, 12> rows{};
+            if (pos_buf.GetStride() < Rt::FlameRecordBytes ||
+                !readable(pos_address + Rt::FlameMatrixOffset, sizeof(rows))) {
+                continue;
+            }
+            std::memcpy(rows.data(),
+                        reinterpret_cast<const void*>(pos_address + Rt::FlameMatrixOffset),
+                        sizeof(rows));
+            const std::array<float, 3> local = world;
+            for (u32 r = 0; r < 3; ++r) {
+                world[r] = rows[r * 4] * local[0] + rows[r * 4 + 1] * local[1] +
+                           rows[r * 4 + 2] * local[2] + rows[r * 4 + 3];
+            }
+            fog_size = std::sqrt(rows[0] * rows[0] + rows[4] * rows[4] + rows[8] * rows[8]) * ray_tracing->MistSheetScale();
+            if (flame && readable(pos_address + Rt::FogColorOffset, 4)) {
+                std::memcpy(fog_rgba.data(), reinterpret_cast<const void*>(pos_address + Rt::FogColorOffset), 4);
+            }
+            if (fog && readable(pos_address + Rt::FogColorOffset, 4)) {
+                std::memcpy(fog_rgba.data(), reinterpret_cast<const void*>(pos_address + Rt::FogColorOffset), 4);
+                if (haze && Rt::FxFinite(world[0]) && Rt::FxFinite(world[1]) && Rt::FxFinite(world[2])) {
+                    u32 word = 0;
+                    std::memcpy(&word, fog_rgba.data(), 4);
+                    haze_patch.emplace_back(pos_address + Rt::FogColorOffset, ray_tracing->HazeColor(world, word));
+                }
+            }
+        }
+        if (!Rt::FxFinite(world[0]) || !Rt::FxFinite(world[1]) || !Rt::FxFinite(world[2])) {
+            continue;
+        }
+        std::array<float, 4> size_words{};
+        const float* size_ptr = nullptr;
+        if (size_ok) {
+            const VAddr size_address = size_buf.base_address + vertex * size_buf.GetStride();
+            const u32 size_bytes = 4 * (Rt::FxSmokeSizeComponent() + 1);
+            if (readable(size_address, size_bytes)) {
+                std::memcpy(size_words.data(), reinterpret_cast<const void*>(size_address),
+                            size_bytes);
+                size_ptr = size_words.data();
+            }
+        }
+        smoke_particles.push_back({
+            .centre = flame || fog ? world : Rt::Transform(view, world),
+            .size = fog ? fog_size : Rt::FxParticleSize(size_ptr, 4, Rt::FxSmokeSizeComponent(),
+                                       Rt::FxSmokeSizeScale(), Rt::FxSmokeSizeFixed(),
+                                       Rt::FxSmokeSizeFallback()),
+            .alpha = fog ? float(fog_rgba[3]) / 255.0f : 1.0f,
+            .rgb = u32(fog_rgba[0]) | (u32(fog_rgba[1]) << 8) | (u32(fog_rgba[2]) << 16),
+        });
+    }
+    if (Rt::FxSmokeLog()) {
+        static std::mutex log_mutex;
+        static std::unordered_set<u64> logged;
+        std::scoped_lock lock{log_mutex};
+        if (logged.insert(ps.pgm_hash ^ vs.pgm_hash).second) {
+            std::printf("RT smoke patch: ps %016llx vs %016llx: %u patch vertices (%s, offset "
+                        "%u), position stride %u, size attr %u %s stride %u, %zu particles "
+                        "captured\n",
+                        static_cast<unsigned long long>(ps.pgm_hash),
+                        static_cast<unsigned long long>(vs.pgm_hash), count,
+                        is_indexed ? "indexed" : "linear", first_vertex, pos_buf.GetStride(),
+                        Rt::FxSmokeSizeAttr(), size_ok ? "found" : "missing",
+                        size_ok ? size_buf.GetStride() : 0u, smoke_particles.size());
+        }
+    }
+    if (!haze_patch.empty()) {
+        scheduler.EndRendering();
+        const auto cmdbuf = scheduler.CommandBuffer();
+        const vk::MemoryBarrier2 before{.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                                        .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+                                        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                                        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite};
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &before});
+        for (const auto& [address, word] : haze_patch) {
+            const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, 4, false, false, true);
+            if (buffer && offset % 4 == 0) {
+                cmdbuf.updateBuffer(buffer->Handle(), offset, 4, &word);
+            }
+        }
+        const vk::MemoryBarrier2 after{.srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                                       .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                                       .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                                       .dstAccessMask = vk::AccessFlagBits2::eMemoryRead};
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{.memoryBarrierCount = 1, .pMemoryBarriers = &after});
+    }
+    if (smoke_particles.empty()) {
+        return;
+    }
+    if (flame) {
+        ray_tracing->AddFlames(smoke_particles);
+        return;
+    }
+    if (fog) {
+        if (fog_sheet) {
+            ray_tracing->AddFog(smoke_particles);
+        }
+        return;
+    }
+    Rt::DrawTag tag{};
+    tag.ps = ps.pgm_hash;
+    tag.vs = vs.pgm_hash;
+    tag.mrt_mask = u32(pipeline->GetGraphicsKey().mrt_mask);
+    tag.target_mask = regs.color_target_mask.raw;
+    tag.cb0 = regs.color_buffers[0] ? regs.color_buffers[0].Address() : 0;
+    tag.zbuf = regs.depth_buffer.DepthValid() ? regs.depth_buffer.DepthAddress() : 0;
+    tag.ztest = u32(regs.depth_control.depth_enable);
+    tag.zfunc = u32(regs.depth_control.depth_func);
+    tag.prim = u32(regs.primitive_type);
+    tag.caster = u32(Rt::CasterAlpha::Blend);
+    ray_tracing->AddSmoke(smoke_particles, tag);
+}
+
+void Rasterizer::CaptureGlow(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
+                             bool is_indexed, u32 index_offset) {
+    const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+    const auto& fetch = pipeline->GetFetchShader();
+    if (!fetch) {
+        return;
+    }
+    const Shader::Gcn::VertexAttribute* pos_attr = nullptr;
+    const Shader::Gcn::VertexAttribute* col_attr = nullptr;
+    for (const auto& attr : fetch->attributes) {
+        if (attr.semantic == 0) {
+            pos_attr = &attr;
+        } else if (attr.semantic == 1) {
+            col_attr = &attr;
+        }
+    }
+    constexpr auto PerVertex = Shader::Gcn::VertexAttribute::InstanceIdType::None;
+    if (!pos_attr || !col_attr || pos_attr->GetStepRate() != PerVertex ||
+        col_attr->GetStepRate() != PerVertex) {
+        return;
+    }
+    const auto pos_buf = pos_attr->GetSharp(vs);
+    const auto col_buf = col_attr->GetSharp(vs);
+    if (!pos_buf.Valid() || pos_buf.GetDataFmt() != AmdGpu::DataFormat::Format32_32_32 ||
+        pos_buf.GetNumberFmt() != AmdGpu::NumberFormat::Float || pos_buf.GetStride() < 12 ||
+        !col_buf.Valid() || col_buf.GetDataFmt() != AmdGpu::DataFormat::Format8_8_8_8 ||
+        col_buf.GetStride() < 4) {
+        return;
+    }
+    const auto [first_vertex, first_instance] = GetDrawOffsets(regs, vs, fetch);
+    const u32 index_size =
+        regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2u : 4u;
+    const VAddr index_address =
+        is_indexed ? regs.index_base_address.Address<VAddr>() + u64(index_offset) * index_size
+                   : 0;
+    const u32 count = std::min(regs.num_indices, 1024u);
+    const auto readable = [&](VAddr address, u64 bytes) {
+        return address && memory->IsValidGpuMapping(address, 0) &&
+               memory->ClampRangeSize(address, bytes) == bytes;
+    };
+    if (is_indexed && !readable(index_address, u64(count) * index_size)) {
+        return;
+    }
+    std::vector<std::array<float, 6>> vertices;
+    vertices.reserve(count);
+    for (u32 i = 0; i < count; ++i) {
+        u32 index = i;
+        if (is_indexed) {
+            index = index_size == 2 ? reinterpret_cast<const u16*>(index_address)[i]
+                                    : reinterpret_cast<const u32*>(index_address)[i];
+            if (index == (index_size == 2 ? 0xFFFFu : 0xFFFFFFFFu)) {
+                continue;
+            }
+        }
+        const u64 vertex = u64(first_vertex) + index;
+        const VAddr pos_address = pos_buf.base_address + vertex * pos_buf.GetStride();
+        const VAddr col_address = col_buf.base_address + vertex * col_buf.GetStride();
+        if (!readable(pos_address, 12) || !readable(col_address, 4)) {
+            continue;
+        }
+        std::array<float, 3> world{};
+        std::memcpy(world.data(), reinterpret_cast<const void*>(pos_address), 12);
+        std::array<u8, 4> c{};
+        std::memcpy(c.data(), reinterpret_cast<const void*>(col_address), 4);
+        if (!Rt::FxFinite(world[0]) || !Rt::FxFinite(world[1]) || !Rt::FxFinite(world[2])) {
+            continue;
+        }
+        const float a = float(c[3]) / (255.0f * 255.0f);
+        vertices.push_back({world[0], world[1], world[2], float(c[2]) * a, float(c[1]) * a,
+                            float(c[0]) * a});
+    }
+    if (!vertices.empty()) {
+        ray_tracing->AddGlows(vertices);
+    }
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
@@ -987,21 +1376,59 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         if (upscaler->OnFrameStart()) {
             object_motion->InvalidateHistory();
             camera_motion->InvalidateHistory();
+            ray_tracing->InvalidateHistory();
         }
         camera_motion->SetJitter(upscaler->Jitter());
+        if (ray_tracing->Enabled()) {
+            RayTracing::SceneInputs inputs{
+                .depth = camera_motion->Depth(),
+                .projection = camera_motion->CurrentProjection(),
+                .jitter = upscaler->Jitter(),
+                .scene_targets = scene_targets.get(),
+                .reduced = upscaler->RasterScaling(),
+            };
+            inputs.camera_valid = camera_motion->WorldCamera(inputs.inv_view);
+            ray_tracing->OnDisplayPass(inputs);
+        }
         object_motion->OnFrameStart();
+        rt_prepass_alpha.clear();
         pipeline_cache.NoteMotionFrame();
         NoteFrameStart();
         static const char* scene_debug = std::getenv("BB_SCENE_DEBUG");
-        scene_debug_frame = scene_debug && std::remove(scene_debug) == 0;
+        if (scene_debug && std::remove(scene_debug) == 0) {
+            scene_debug_frame = true;
+            scene_debug_used = false;
+        } else if (scene_debug_used) {
+            scene_debug_frame = false;
+        }
         scene_targets->debug = scene_debug_frame;
     }
     bind_prepared = used_prepared;
-    motion_draw = pipeline->GetGraphicsKey().motion_vectors;
+    motion_draw = pipeline->GetGraphicsKey().motion_vectors != 0;
     motion_geometry = 0;
 
     PrepareRenderState(pipeline);
-    if (SkipOutputlessDraw(pipeline)) {
+    LogSmokeSeen(pipeline, "draw");
+    LogDrawResources(pipeline);
+    if (SkipOutputlessDraw(pipeline) || SkipShadowDraw()) {
+        bind_prepared = nullptr;
+        ResetBindings(false);
+        return;
+    }
+    water_sheet_draw = false;
+    fog_sheet_draw = false;
+    sheet_hidden = false;
+    if (ray_tracing->Enabled() && pipeline->GetGraphicsKey().mrt_mask &&
+        pipeline->HasStage(Shader::SwStage::Fragment)) {
+        const u64 ps_hash = pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash;
+        water_sheet_draw = pipeline->GetGraphicsKey().motion_vectors == 2 &&
+                           Rt::WaterSheetShader(ps_hash) && ray_tracing->WaterSheet(ps_hash);
+        fog_sheet_draw = ray_tracing->FogSheet(ps_hash);
+        sheet_hidden = (water_sheet_draw && ray_tracing->SheetHidden(ps_hash)) ||
+                       (fog_sheet_draw && !ray_tracing->FxSheets());
+    }
+    if (ray_tracing->Enabled() && pipeline->GetGraphicsKey().mrt_mask && !water_sheet_draw && !fog_sheet_draw &&
+        ray_tracing->SkipPs(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash)) {
         bind_prepared = nullptr;
         ResetBindings(false);
         return;
@@ -1016,6 +1443,15 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     // bbport: vertex and index buffers are resolved while the helper binds textures (their
     // commands are recorded after BeginRendering, as before).
     draw_inputs = {pipeline, draw_prepared, index_offset, is_indexed, true, false};
+    rt_albedo_view = vk::ImageView{};
+    rt_albedo_image = {};
+    rt_albedo_uid = 0;
+    rt_normal_view = vk::ImageView{};
+    rt_normal_image = {};
+    rt_alpha_view = vk::ImageView{};
+    rt_alpha_image = {};
+    rt_alpha_uid = 0;
+    rt_alpha_channel = 3;
     const bool bound = BindResources(pipeline);
     bind_prepared = nullptr; // indirect draws and dispatches bind without prepared sharps
     const bool inputs_resolved = draw_inputs.resolved;
@@ -1023,7 +1459,17 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (!bound) {
         return;
     }
+    if (skip_light_draw) {
+        if (needs_barrier) {
+            runtime.FlushBarriers();
+        }
+        ResetBindings(false);
+        return;
+    }
     const auto state = BeginRendering(pipeline);
+    if (composite_draw) {
+        ray_tracing->OnCompositeDraw(cb_descs[0].first, db_desc.first);
+    }
 
     if (!inputs_resolved) {
         ResolveVertexBuffers(pipeline, draw_prepared);
@@ -1045,6 +1491,53 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     push_data.xoffset *= target_scale[0];
     push_data.yscale *= target_scale[1];
     push_data.yoffset *= target_scale[1];
+    if (motion_draw && !motion_geometry && pipeline->GetGraphicsKey().motion_vectors == 2) {
+        const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+        motion_geometry = vs.pgm_hash | 1ull;
+        if (Rt::FxSmokeLog()) {
+            static std::mutex log_mutex;
+            static std::unordered_set<u64> logged;
+            std::scoped_lock lock{log_mutex};
+            if (logged.insert(vs.pgm_hash).second) {
+                std::printf("Smoke draw: vs %016llx has no vertex streams, keyed by shader\n",
+                            static_cast<unsigned long long>(vs.pgm_hash));
+            }
+        }
+    }
+    rt_prepass_key = 0;
+    rt_inherit = false;
+    if (ray_tracing->Enabled() && Rt::AlphaInheritWanted() && is_indexed &&
+        Rt::DepthOnlyDraw(pipeline->GetGraphicsKey().mrt_mask) &&
+        pipeline->HasStage(Shader::SwStage::Vertex) &&
+        pipeline->HasStage(Shader::SwStage::Fragment) &&
+        pipeline->GetStage(Shader::SwStage::Fragment).has_discard) {
+        const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+        const auto [base_vertex, first_instance] =
+            GetDrawOffsets(regs, vs, pipeline->GetFetchShader());
+        const u32 index_size =
+            regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2u : 4u;
+        rt_prepass_key = Rt::PrepassKey(
+            regs.index_base_address.Address<VAddr>() + u64(index_offset) * index_size,
+            regs.num_indices, regs.num_instances.NumInstances(), s32(base_vertex), first_instance);
+        rt_prepass_ps = pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash;
+    }
+    if (regs.primitive_type == AmdGpu::PrimitiveType::PatchPrimitive &&
+        pipeline->HasStage(Shader::SwStage::Vertex) &&
+        pipeline->HasStage(Shader::SwStage::Fragment) &&
+        (fog_sheet_draw || ray_tracing->HazeLit(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash) ||
+         (db_desc.first && db_desc.first == camera_motion->Depth()))) {
+        const bool flame =
+            ray_tracing->FlameShader(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
+        const bool haze = ray_tracing->HazeLit(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
+        if (flame || haze || (ray_tracing->FxSmoke() && (fog_sheet_draw || Rt::FxSmokePatchRule(Rt::FxState(regs))))) {
+            CaptureSmokePatch(pipeline, regs, is_indexed, index_offset, flame);
+        }
+    }
+    if (pipeline->HasStage(Shader::SwStage::Vertex) &&
+        pipeline->HasStage(Shader::SwStage::Fragment) &&
+        ray_tracing->GlowShader(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash)) {
+        CaptureGlow(pipeline, regs, is_indexed, index_offset);
+    }
     if (motion_draw && motion_geometry) {
         const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
         const auto [base_vertex, first_instance] =
@@ -1060,7 +1553,10 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
-        bool gated = !all_motion;
+        bool gated = !(all_motion || ray_tracing->Enabled());
+        const bool rt_bones = ray_tracing->Enabled();
+        bool skinned = false;
+        bool unreadable = false;
         u64 palette = 0;
         for (const auto& resource : vs.buffers) {
             if (resource.IsSpecial()) continue;
@@ -1068,16 +1564,19 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const u32 size = buffer.GetSize();
             if (!buffer.Valid() || buffer.GetStride() != 16) continue;
             const auto role = Motion::ClassifyBuffer(size);
+            if (role == Motion::BufferRole::Other) continue;
             if (role == Motion::BufferRole::Skeleton) {
                 gated = false;
-                break;
+                skinned = true;
+                if (!rt_bones) break;
             }
             const VAddr address = buffer.base_address;
-            if (role == Motion::BufferRole::SmallSkeleton &&
-                memory->IsValidGpuMapping(address, 0) &&
+            if (memory->IsValidGpuMapping(address, 0) &&
                 memory->ClampRangeSize(address, size) == size) {
                 palette = XXH3_64bits_withSeed(reinterpret_cast<const void*>(address), size,
                                                palette);
+            } else if (role == Motion::BufferRole::Skeleton) {
+                unreadable = true;
             }
         }
         push_data.motion_param = 0;
@@ -1115,6 +1614,130 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                     topology = scanned.topology;
                 }
             }
+            u32 uv_select = 0;
+            bool alpha_test = false;
+            const bool blended_fx = pipeline->GetGraphicsKey().motion_vectors == 2 &&
+                                    ray_tracing->FxSmoke() && Rt::FxSmokeDraw(regs) &&
+                                    db_desc.first && db_desc.first == camera_motion->Depth();
+            if (Rt::FxSmokeLog() && ray_tracing->FxSmoke()) {
+                const auto st = Rt::FxState(regs);
+                if (st.blend_enable && st.src_factor == Rt::FxBlendSrcAlpha) {
+                    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+                    static std::mutex log_mutex;
+                    static std::unordered_set<u64> logged;
+                    std::scoped_lock lock{log_mutex};
+                    if (logged.insert((ps ? ps->pgm_hash : 0) ^ (u64(st.primitive) << 48) ^
+                                      (u64(st.indices) << 32)).second) {
+                        std::printf("Smoke select: ps %016llx prim %u idx %u inst %u dst %u func %u "
+                                    "fmt %u z %u%u rule %d motion %u depth %d\n",
+                                    static_cast<unsigned long long>(ps ? ps->pgm_hash : 0),
+                                    st.primitive, st.indices, regs.num_instances.NumInstances(),
+                                    st.dst_factor, st.blend_func, st.color_format,
+                                    u32(st.depth_test), u32(st.depth_write),
+                                    int(Rt::FxSmokeRule(st)),
+                                    u32(pipeline->GetGraphicsKey().motion_vectors),
+                                    int(db_desc.first && db_desc.first == camera_motion->Depth()));
+                    }
+                }
+            }
+            Rt::DrawTag rt_tag{};
+            if (ray_tracing->Enabled()) {
+                rt_tag.vs = vs.pgm_hash;
+                rt_tag.mrt_mask = u32(pipeline->GetGraphicsKey().mrt_mask);
+                rt_tag.target_mask = regs.color_target_mask.raw;
+                for (u32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
+                    if (regs.color_buffers[cb] && regs.color_target_mask.GetMask(cb)) {
+                        rt_tag.bound_mask |= 1u << cb;
+                    }
+                }
+                rt_tag.cb0 = regs.color_buffers[0] ? regs.color_buffers[0].Address() : 0;
+                rt_tag.zbuf = regs.depth_buffer.DepthValid() ? regs.depth_buffer.DepthAddress() : 0;
+                rt_tag.ztest = u32(regs.depth_control.depth_enable);
+                rt_tag.zfunc = u32(regs.depth_control.depth_func);
+                rt_tag.zwrite = u32(regs.depth_control.depth_write_enable);
+                rt_tag.stencil = u32(regs.depth_control.stencil_enable);
+                rt_tag.prim = u32(regs.primitive_type);
+                rt_tag.cull = LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
+                                  ? u32(regs.polygon_control.CullingMode())
+                                  : 0u;
+            }
+            if (ray_tracing->Enabled() && pipeline->HasStage(Shader::SwStage::Fragment)) {
+                const auto& ps = pipeline->GetStage(Shader::SwStage::Fragment);
+                alpha_test = ps.has_discard;
+                rt_tag.ps = ps.pgm_hash;
+                const auto st = Rt::FxState(regs);
+                const bool a2c =
+                    (regs.reg_array[AmdGpu::Regs::ContextRegWordOffset + 0x2DCu] & 1u) != 0 &&
+                    !regs.depth_shader_control.alpha_to_mask_disable;
+                const bool blend_card = st.blend_enable && !st.blend_bypass && !st.depth_write;
+                const auto prepass =
+                    alpha_test || !is_indexed
+                        ? rt_prepass_alpha.end()
+                        : rt_prepass_alpha.find(Rt::PrepassKey(
+                              index_address, regs.num_indices, regs.num_instances.NumInstances(),
+                              s32(base_vertex), first_instance));
+                const Rt::CasterAlpha caster = Rt::PickCasterAlpha(
+                    alpha_test, Rt::AlphaInheritWanted(), prepass != rt_prepass_alpha.end(), a2c,
+                    blend_card);
+                if (caster == Rt::CasterAlpha::Prepass) {
+                    rt_inherit = true;
+                    rt_inherit_alpha = prepass->second;
+                }
+                alpha_test = caster != Rt::CasterAlpha::None;
+                rt_tag.caster = u32(caster);
+                if (Rt::CasterLog() && caster != Rt::CasterAlpha::Own) {
+                    static std::mutex caster_log_mutex;
+                    static std::unordered_set<u64> caster_logged;
+                    std::scoped_lock lock{caster_log_mutex};
+                    if (caster_logged.insert(ps.pgm_hash ^ (u64(caster) << 56)).second) {
+                        std::printf(
+                            "RT caster: ps %016llx vs %016llx alpha %s (prepass ps %016llx), "
+                            "blend %u bypass %u src %u dst %u func %u a2c %u zfunc %u zwrite %u "
+                            "mrt %x idx %u inst %u indexed %u\n",
+                            static_cast<unsigned long long>(ps.pgm_hash),
+                            static_cast<unsigned long long>(vs.pgm_hash), Rt::CasterAlphaName(caster),
+                            static_cast<unsigned long long>(
+                                caster == Rt::CasterAlpha::Prepass ? prepass->second.ps : 0),
+                            u32(st.blend_enable), u32(st.blend_bypass), st.src_factor,
+                            st.dst_factor, st.blend_func, u32(a2c),
+                            u32(regs.depth_control.depth_func), u32(st.depth_write),
+                            u32(pipeline->GetGraphicsKey().mrt_mask), regs.num_indices,
+                            regs.num_instances.NumInstances(), u32(is_indexed));
+                    }
+                }
+                const bool alpha_uv = alpha_test && Rt::AlphaSourceWanted() &&
+                                      ps.rt_alpha_input >= 0 && ps.rt_alpha_input < 32 &&
+                                      (ps.rt_albedo_input < 0 ||
+                                       (ps.rt_albedo_input == ps.rt_alpha_input &&
+                                        ps.rt_albedo_components == ps.rt_alpha_components));
+                const s32 uv_input = alpha_uv ? ps.rt_alpha_input : ps.rt_albedo_input;
+                const u8 uv_components = alpha_uv ? ps.rt_alpha_components : ps.rt_albedo_components;
+                if (uv_input >= 0 && uv_input < 32) {
+                    uv_select = Rt::UvSelect(s32(regs.ps_inputs[uv_input].input_offset),
+                                             uv_components & 3u, (uv_components >> 4) & 3u);
+                }
+                if (Rt::AlphaSourceLog() && alpha_test) {
+                    static std::mutex alpha_log_mutex;
+                    static std::unordered_set<u64> alpha_logged;
+                    std::scoped_lock lock{alpha_log_mutex};
+                    if (alpha_logged.insert(ps.pgm_hash).second) {
+                        std::printf("RT alpha source: ps %016llx albedo image %d input %d comp %u, "
+                                    "discard image %d input %d comp %u channel %u, uv from %s\n",
+                                    static_cast<unsigned long long>(ps.pgm_hash), ps.rt_albedo_image,
+                                    ps.rt_albedo_input, u32(ps.rt_albedo_components),
+                                    ps.rt_alpha_image, ps.rt_alpha_input,
+                                    u32(ps.rt_alpha_components), u32(ps.rt_alpha_channel),
+                                    alpha_uv ? "discard" : "albedo");
+                    }
+                }
+                if (uv_select) {
+                    const auto input_param = [&](s32 input) {
+                        return input >= 0 && input < 32 ? s32(regs.ps_inputs[input].input_offset) : -1;
+                    };
+                    uv_select |= Rt::NormalSelect(input_param(ps.rt_normal_inputs[0]),
+                                                  input_param(ps.rt_normal_inputs[1]));
+                }
+            }
             push_data.motion_param = object_motion->PrepareDraw({
                 .shader = vs.pgm_hash,
                 .geometry = motion_geometry,
@@ -1124,7 +1747,70 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 .instances = regs.num_instances.NumInstances(),
                 .first_instance = first_instance,
                 .vertices = range,
-            });
+            }, uv_select);
+            const bool fx_strip = blended_fx && uv_select != 0 &&
+                                  regs.primitive_type == AmdGpu::PrimitiveType::TriangleStrip;
+            if (fx_strip) {
+                const bool restart = regs.enable_primitive_restart != 0;
+                const u32 count = regs.num_indices;
+                const auto* data = reinterpret_cast<const void*>(index_address);
+                const u64 bytes = u64(count) * index_size;
+                const bool readable = !is_indexed ||
+                    (index_address && memory->IsValidGpuMapping(index_address, 0) &&
+                     memory->ClampRangeSize(index_address, bytes) == bytes);
+                fx_strip_indices.clear();
+                if (readable) {
+                    const auto at = [&](u32 i) -> u32 {
+                        return !is_indexed ? i
+                               : index_size == 2 ? static_cast<const u16*>(data)[i]
+                                                 : static_cast<const u32*>(data)[i];
+                    };
+                    const u32 marker = index_size == 2 ? 0xFFFFu : 0xFFFFFFFFu;
+                    Rt::ExpandStrip(at, count, is_indexed && restart, marker, fx_strip_indices);
+                }
+            }
+            const bool fx_list = fx_strip && !fx_strip_indices.empty();
+            const bool fx_pipeline = pipeline->GetGraphicsKey().motion_vectors == 2;
+            // The moon and cloud layer: captured like a water sheet, traced only by the sky
+            // layer pass (vk_ray_tracing.cpp gives it MaskSky).
+            const bool sky_layer_draw =
+                fx_pipeline && pipeline->HasStage(Shader::SwStage::Fragment) &&
+                u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash) == Rt::SkyLayerPs;
+            if (push_data.motion_param && ray_tracing->Enabled() && range.count && !side_gbuffer_draw &&
+                (!fx_pipeline || (blended_fx && uv_select != 0) || water_sheet_draw ||
+                 sky_layer_draw) &&
+                (regs.primitive_type == AmdGpu::PrimitiveType::TriangleList || fx_list)) {
+                ray_tracing->AddDraw({
+                    .key = {.shader = vs.pgm_hash,
+                            .geometry = motion_geometry,
+                            .indices = index_address,
+                            .topology = fx_list ? topology ^ 0x5745ull : topology,
+                            .index_count = fx_list ? u32(fx_strip_indices.size()) : regs.num_indices,
+                            .instances = regs.num_instances.NumInstances(),
+                            .first_instance = first_instance,
+                            .first_vertex = range.first,
+                            .vertex_count = range.count},
+                    .palette = palette,
+                    .skinned = skinned,
+                    .unreadable = unreadable,
+                    .store_base = object_motion->StoreBase(push_data.motion_param),
+                    .first_vertex = range.first,
+                    .vertex_count = range.count,
+                    .instances = regs.num_instances.NumInstances(),
+                    .base_vertex = s32(base_vertex),
+                    .indices = fx_list ? static_cast<const void*>(fx_strip_indices.data())
+                               : is_indexed ? reinterpret_cast<const void*>(index_address) : nullptr,
+                    .index_count = fx_list ? u32(fx_strip_indices.size()) : regs.num_indices,
+                    .index_size = fx_list ? 4u : is_indexed ? index_size : 0u,
+                    .restart = !fx_list && regs.enable_primitive_restart != 0,
+                    .alpha_test = alpha_test && !water_sheet_draw,
+                    .uv_captured = uv_select != 0,
+                    .normal_captured = Rt::NormalSelectValid(uv_select),
+                    .depth_only = Rt::DepthOnlyDraw(pipeline->GetGraphicsKey().mrt_mask),
+                    .blended = blended_fx && uv_select != 0,
+                    .tag = rt_tag,
+                });
+            }
         }
     }
     // bbport: jitter geometry drawn with the scene depth, not full-screen passes (a shifted
@@ -1136,6 +1822,42 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     SetProjectionJitter(push_data, regs, draw_jitter);
     pipeline->BindResources(set_writes, push_data);
+    if (rt_prepass_key) {
+        const RtPrepassAlpha entry{rt_alpha_view, rt_alpha_image, rt_alpha_uid, rt_alpha_channel,
+                                   rt_prepass_ps};
+        if (entry.view) {
+            rt_prepass_alpha[rt_prepass_key] = entry;
+        }
+        if (Rt::CasterLog()) {
+            static std::mutex prepass_log_mutex;
+            static std::unordered_set<u64> prepass_logged;
+            std::scoped_lock lock{prepass_log_mutex};
+            if (prepass_logged.insert(rt_prepass_ps).second) {
+                std::printf("RT prepass: depth-only ps %016llx discards, mask %s channel %u, "
+                            "%zu prepass draws keyed this frame\n",
+                            static_cast<unsigned long long>(rt_prepass_ps),
+                            entry.view ? "bound" : "none", entry.channel,
+                            rt_prepass_alpha.size());
+            }
+        }
+    } else if (rt_inherit && !rt_alpha_view && rt_inherit_alpha.view) {
+        const auto* image = rt_inherit_alpha.image
+                                ? texture_cache.TryGetImage(rt_inherit_alpha.image, 0)
+                                : nullptr;
+        if (image && image->image_uid == rt_inherit_alpha.uid) {
+            rt_alpha_view = rt_inherit_alpha.view;
+            rt_alpha_image = rt_inherit_alpha.image;
+            rt_alpha_uid = rt_inherit_alpha.uid;
+            rt_alpha_channel = rt_inherit_alpha.channel;
+        }
+    }
+    ray_tracing->OnDrawBound(rt_albedo_view, rt_albedo_image, rt_albedo_uid, rt_normal_view,
+                             rt_normal_image, rt_alpha_view, rt_alpha_image, rt_alpha_uid,
+                             rt_alpha_channel);
+    if (rt_sky_view) {
+        ray_tracing->OnSkyDome(rt_sky_view, rt_sky_image, rt_sky_uid);
+        rt_sky_view = vk::ImageView{};
+    }
     if (motion_draw)
         object_motion->BindParameters(pipeline->GetLayout());
     UpdateDynamicState(pipeline, is_indexed);
@@ -1154,7 +1876,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const auto* marked_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
     const u32 checkpoint = Checkpoints::Note("draw vs/ps/indices", vs_info.pgm_hash,
                                        marked_ps ? marked_ps->pgm_hash : 0, num_indices);
+    const u64 mark_hash = DrawMarkHash(pipeline);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::GameDraw, mark_hash);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
         if (is_indexed) {
@@ -1164,6 +1888,17 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         }
         Checkpoints::Finish(cmdbuf, checkpoint);
     });
+    if (composite_ps && ray_tracing->Enabled()) {
+        RayTracing::SceneInputs inputs{
+            .depth = camera_motion->Depth(),
+            .projection = camera_motion->CurrentProjection(),
+            .jitter = upscaler->Jitter(),
+            .scene_targets = scene_targets.get(),
+            .reduced = upscaler->RasterScaling(),
+        };
+        inputs.camera_valid = camera_motion->WorldCamera(inputs.inv_view);
+        ray_tracing->OnAfterComposite(inputs);
+    }
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
@@ -1218,6 +1953,9 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 
 void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_indexed,
                                     const IndirectDraw& indirect) {
+    water_sheet_draw = false;
+    fog_sheet_draw = false;
+    sheet_hidden = false;
     if (DrawPipe::OnStageB()) {
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
@@ -1230,7 +1968,8 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     motion_draw = false;
     motion_geometry = 0;
     PrepareRenderState(pipeline);
-    if (SkipOutputlessDraw(pipeline)) {
+    LogSmokeSeen(pipeline, "indirect");
+    if (SkipOutputlessDraw(pipeline) || SkipShadowDraw()) {
         ResetBindings(false);
         return;
     }
@@ -1241,6 +1980,13 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
                          UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2));
     }
     if (!BindResources(pipeline)) {
+        return;
+    }
+    if (skip_light_draw) {
+        if (needs_barrier) {
+            runtime.FlushBarriers();
+        }
+        ResetBindings(false);
         return;
     }
     const auto state = BeginRendering(pipeline);
@@ -1295,7 +2041,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u32 checkpoint = Checkpoints::Note("draw indirect vs/ps/count",
                                        pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
                                        marked_ps ? marked_ps->pgm_hash : 0, max_count);
+    const u64 mark_hash = DrawMarkHash(pipeline);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::GameDrawIndirect, mark_hash);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
         if (is_indexed) {
@@ -1340,12 +2088,19 @@ void Rasterizer::DispatchDirect() {
 void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     FrameCapture::Poll();
     gbuffer_draw = false;
+    side_gbuffer_draw = false;
 
     scheduler.PopPendingOperations();
 
     const auto& cs_program = CsRegs();
 
     const auto& cs = pipeline->GetStage(Shader::SwStage::Compute);
+    if (scene_debug_frame) {
+        ray_tracing->DebugLine(fmt::format("Scene dispatch cs {:016x} {}x{}x{}", cs.pgm_hash,
+                                           cs_program.dim_x, cs_program.dim_y, cs_program.dim_z)
+                                   .c_str());
+        scene_debug_used = true;
+    }
     // After the resource binding: its transfers (image uploads, downloads) mark themselves.
     const auto mark = [&] {
         if (auto* profiler = GpuProfiler::Get()) {
@@ -1355,6 +2110,17 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
             });
         }
     };
+    if (ray_tracing->Enabled()) {
+        RayTracing::SceneInputs inputs{
+            .depth = camera_motion->Depth(),
+            .projection = camera_motion->CurrentProjection(),
+            .jitter = upscaler->Jitter(),
+            .scene_targets = scene_targets.get(),
+            .reduced = upscaler->RasterScaling(),
+        };
+        inputs.camera_valid = camera_motion->WorldCamera(inputs.inv_view);
+        ray_tracing->OnDispatch(cs.pgm_hash, inputs);
+    }
     if (upscaler->Enabled()) {
         upscaler->OnDispatch(cs.pgm_hash);
     }
@@ -1380,7 +2146,9 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         FrameCapture::Dispatch(cs.pgm_hash, dim_x, dim_y, dim_z);
     }
     const u32 checkpoint = Checkpoints::Note("dispatch cs/groups", cs.pgm_hash, 0, u64(dim_x) * dim_y * dim_z);
+    const u64 mark_hash = cs.pgm_hash;
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::GameDispatch, mark_hash);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
         cmdbuf.dispatch(dim_x, dim_y, dim_z);
@@ -1435,7 +2203,9 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const u64 args_offset = base;
     const u32 checkpoint = Checkpoints::Note("dispatch indirect cs",
                                        pipeline->GetStage(Shader::SwStage::Compute).pgm_hash);
+    const u64 mark_hash = pipeline->GetStage(Shader::SwStage::Compute).pgm_hash;
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::GameDispatchIndirect, mark_hash);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
         cmdbuf.dispatchIndirect(args, args_offset);
@@ -1491,9 +2261,9 @@ u64 Rasterizer::Flush() {
     return current_tick;
 }
 
-void Rasterizer::Finish() {
+void Rasterizer::Finish(std::source_location loc) {
     DrainDrawPipe();
-    scheduler.Finish();
+    scheduler.Finish(loc);
 }
 
 void Rasterizer::OnSubmit() {
@@ -1631,6 +2401,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     set_writes.clear();
     buffer_infos.clear();
     image_infos.clear();
+    image_info_ids.clear();
     // bbport: G-buffer passes sample material textures for a scene rendered below the output
     // size; the temporal upscaler restores the detail of the output's mip level (FSR guide:
     // log2(render / output)). Shadows, post-processing and UI keep the guest's bias.
@@ -1655,7 +2426,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         if (now - window >= std::chrono::seconds(5)) {
             window = now;
             const double forks = std::max<double>(1, helper_full + helper_partial);
-            std::printf("Texture helper: %llu binds in parallel, %llu partly, %llu serial; "
+            BbOut::Print("Texture helper: %llu binds in parallel, %llu partly, %llu serial; "
                         "per fork %.0f cycles helper task, %.0f cycles GPU thread wait\n",
                         static_cast<unsigned long long>(helper_full),
                         static_cast<unsigned long long>(helper_partial),
@@ -1900,10 +2671,12 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     }
 
     // Map buffers for merged ranges
+    const bool haze = ray_tracing->Enabled() && pipeline->HasStage(Shader::SwStage::Fragment) &&
+                      ray_tracing->HazeLit(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
     for (auto& range : ranges_merged) {
         const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
         std::tie(range.buffer, range.offset) =
-            buffer_cache.ObtainBuffer(range.base_address, size, false);
+            buffer_cache.ObtainBuffer(range.base_address, size, false, false, haze);
         needs_barrier |= runtime.IsBufferAccessed(range.buffer, range.offset, size);
     }
 
@@ -2180,6 +2953,19 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     memory->IsValidGpuMapping(ring->address, 0)) {
                     camera_motion->OnConstants(reinterpret_cast<const float*>(ring->address));
                 }
+                if (light_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+                    ray_tracing->OnLightBuffer(
+                        ring->size, ring->address && memory->IsValidGpuMapping(ring->address, ring->size)
+                                        ? reinterpret_cast<const void*>(ring->address)
+                                        : constant_ring->Data(ring->offset));
+                }
+                if (light_draw && stage.sw_stage == Shader::SwStage::Vertex && !desc.is_formatted &&
+                    !desc.is_written) {
+                    ray_tracing->OnLightVtxParam(
+                        ring->size, ring->address && memory->IsValidGpuMapping(ring->address, ring->size)
+                                        ? reinterpret_cast<const void*>(ring->address)
+                                        : constant_ring->Data(ring->offset));
+                }
                 push_data.AddOffset(binding.buffer, 0);
             }
             buffer_infos.emplace_back(constant_ring->Handle(), ring->offset, ring->size);
@@ -2241,6 +3027,30 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 memory->IsValidGpuMapping(vsharp.base_address, 0)) {
                 camera_motion->OnConstants(reinterpret_cast<const float*>(vsharp.base_address));
             }
+            if (light_draw && stage.sw_stage == Shader::SwStage::Fragment &&
+                vsharp.base_address != 0 && vsharp.GetSize() != 0 &&
+                memory->IsValidGpuMapping(vsharp.base_address, 0)) {
+                ray_tracing->OnLightBuffer(
+                    u32(memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize())),
+                    reinterpret_cast<const void*>(vsharp.base_address));
+                ray_tracing->OnLightSetBuffer(
+                    vsharp.base_address,
+                    u32(memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize())));
+            }
+            if (composite_ps && stage.sw_stage == Shader::SwStage::Fragment &&
+                vsharp.base_address != 0 && vsharp.GetSize() != 0 &&
+                memory->IsValidGpuMapping(vsharp.base_address, 0)) {
+                ray_tracing->OnCompositeBuffer(
+                    u32(buffer_index), vsharp.base_address,
+                    u32(memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize())));
+            }
+            if (light_draw && stage.sw_stage == Shader::SwStage::Vertex && !desc.is_formatted &&
+                !desc.is_written && vsharp.base_address != 0 && vsharp.GetSize() != 0 &&
+                memory->IsValidGpuMapping(vsharp.base_address, 0)) {
+                ray_tracing->OnLightVtxParam(
+                    u32(memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize())),
+                    reinterpret_cast<const void*>(vsharp.base_address));
+            }
             // Object motion research: the vertex shader buffers of G-buffer draws.
             if (FrameCapture::Active() && gbuffer_draw && stage.sw_stage == Shader::SwStage::Vertex &&
                 vsharp.base_address != 0 && memory->IsValidGpuMapping(vsharp.base_address, 0)) {
@@ -2269,6 +3079,10 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 }
                 const auto [buffer, offset] = buffer_cache.ObtainBuffer(
                     vsharp.base_address, size, desc.is_written, desc.is_formatted);
+                if (desc.is_written && ray_tracing) {
+                    ray_tracing->OnLightSetStorageWrite(vsharp.base_address, u32(size),
+                                                        stage.pgm_hash, u32(stage.sw_stage));
+                }
                 const u64 offset_aligned = Common::AlignDown(offset, alignment);
                 const u64 adjust = offset - offset_aligned;
                 if (adjust % 4 != 0) {
@@ -2422,13 +3236,15 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         // BB_SCENE_DEBUG: proxied scene targets this binding reads at the native size, and why.
         const auto debug_native = [&](const VideoCore::Image& image) {
             if (!scene_debug_frame || proxy_candidate || !image.scene_proxy) return;
-            std::printf("Scene native read: %s %016llx %s %ux%u needs_native %d written %d "
-                        "bindings %u mip_fallback %d\n",
-                        stage.sw_stage == Shader::SwStage::Compute ? "cs" : "gfx",
-                        (unsigned long long)stage.pgm_hash,
-                        vk::to_string(image.info.pixel_format).c_str(), image.info.size.width,
-                        image.info.size.height, int(image_desc.needs_native),
-                        int(image_desc.is_written), num_bindings, int(mip_fallback_mode));
+            ray_tracing->DebugLine(
+                fmt::format("Scene native read: {} {:016x} {} {}x{} needs_native {} written {} "
+                            "bindings {} mip_fallback {}",
+                            stage.sw_stage == Shader::SwStage::Compute ? "cs" : "gfx",
+                            stage.pgm_hash, vk::to_string(image.info.pixel_format),
+                            image.info.size.width, image.info.size.height,
+                            int(image_desc.needs_native), int(image_desc.is_written), num_bindings,
+                            int(mip_fallback_mode))
+                    .c_str());
         };
         for (auto i = 0; i < num_bindings; i++) {
             // bbport: a plain binding (no mip override) of the same T# resolves to the same image
@@ -2505,6 +3321,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
         if (!image_id) {
             image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            image_info_ids.emplace_back();
         } else {
             if (auto& old_image = texture_cache.GetImage(image_id);
                 old_image.binding.needs_rebind) {
@@ -2517,6 +3334,12 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             }
 
             bound_images.emplace_back(image_id);
+            if (ao_draw && !is_storage && stage.sw_stage == Shader::SwStage::Fragment) {
+                ray_tracing->OnAoInput(image_id);
+            }
+            if (dir_shadow_draw && !is_storage && stage.sw_stage == Shader::SwStage::Fragment) {
+                ray_tracing->OnDirShadowInput(image_id);
+            }
 
             auto& image = texture_cache.GetImage(image_id);
             auto& image_view = texture_cache.FindTexture(
@@ -2530,7 +3353,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 !(upscaler->Enabled() && upscaler->RedirectsSampled(image_id))) {
                 if (const auto proxy = scene_targets->SampleProxy(image, desc.view_info)) {
                     image.usage.texture = 1u;
+                    if (composite_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+                        ray_tracing->OnCompositeInput(image_id, true);
+                    }
                     image_infos.emplace_back(VK_NULL_HANDLE, proxy->view, proxy->layout);
+                    image_info_ids.emplace_back();
                     if (set_ok && binding_index < resolved.size()) {
                         resolved[binding_index] = {image_id, proxy->view, image.backing,
                                                    desc.view_info.range, true};
@@ -2569,6 +3396,9 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             }
             image.usage.storage |= is_storage;
             image.usage.texture |= !is_storage;
+            if (composite_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+                ray_tracing->OnCompositeInput(image_id, false);
+            }
             if (FrameCapture::Active()) {
                 FrameCapture::Sampled(image.info, is_storage);
             }
@@ -2580,6 +3410,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 upscaler->RedirectSampled(image_id, image_view.info, view, layout);
             }
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
+            image_info_ids.emplace_back(image_id);
             if (set_ok && binding_index < resolved.size()) {
                 resolved[binding_index] = {image_id, *image_view.image_view, image.backing,
                                            desc.view_info.range};
@@ -2597,6 +3428,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         set_slot->key = 0;
     }
 
+    CaptureRtTextures(stage, first_image_idx, image_descriptor_array_sizes.data(),
+                      u32(image_descriptor_array_sizes.size()));
     u32 image_info_idx = first_image_idx;
     u32 image_binding_idx = 0;
     for (u32 array_size : image_descriptor_array_sizes) {
@@ -2628,6 +3461,7 @@ void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* pr
         const auto vk_sampler = texture_cache.GetSampler(
             ssharp, Regs().ta_bc_base, sampler.is_depth, sampler.is_depth ? 0.0f : sampler_lod_bias);
         image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+        image_info_ids.emplace_back();
         auto& set_write = set_writes[write_index++];
         set_write.dstSet = VK_NULL_HANDLE;
         set_write.dstBinding = binding.unified++;
@@ -2656,7 +3490,7 @@ Rasterizer::BeginSignature Rasterizer::MakeBeginSignature(const GraphicsPipeline
     }
     sig.mrt_mask = key.mrt_mask;
     sig.num_samples = key.num_samples;
-    sig.motion = key.motion_vectors;
+    sig.motion = key.motion_vectors == 1;
     sig.scene_started = scene_started;
     sig.raster_scaling = upscaler->RasterScaling();
     sig.upscaler_state = upscaler->RedirectState();
@@ -2665,6 +3499,71 @@ Rasterizer::BeginSignature Rasterizer::MakeBeginSignature(const GraphicsPipeline
     sig.depth_valid = regs.depth_buffer.DepthValid();
     sig.stencil_valid = regs.depth_buffer.StencilValid();
     return sig;
+}
+
+void Rasterizer::CaptureRtTextures(const Shader::Info& stage, u32 first_image_idx,
+                                   const u32* sizes, u32 size_count) {
+    if (stage.sw_stage == Shader::SwStage::Fragment && u32(stage.pgm_hash) == Rt::SkyDomePs &&
+        size_count > 0 && first_image_idx < image_infos.size() &&
+        first_image_idx < image_info_ids.size()) {
+        rt_sky_view = image_infos[first_image_idx].imageView;
+        rt_sky_image = image_info_ids[first_image_idx];
+        const auto* image = rt_sky_image ? texture_cache.TryGetImage(rt_sky_image, 0) : nullptr;
+        rt_sky_uid = image ? image->image_uid : 0;
+        if (!image) {
+            rt_sky_view = vk::ImageView{};
+        }
+    }
+    if (stage.sw_stage == Shader::SwStage::Fragment && stage.rt_albedo_image >= 0 &&
+        u32(stage.rt_albedo_image) < size_count) {
+        u32 albedo_idx = first_image_idx;
+        for (u32 i = 0; i < u32(stage.rt_albedo_image); ++i) {
+            albedo_idx += (sizes ? sizes[i] : 1u);
+        }
+        rt_albedo_view = albedo_idx < image_infos.size() ? image_infos[albedo_idx].imageView
+                                                         : vk::ImageView{};
+        rt_albedo_image = albedo_idx < image_info_ids.size() ? image_info_ids[albedo_idx]
+                                                             : VideoCore::ImageId{};
+        const auto* image = rt_albedo_image ? texture_cache.TryGetImage(rt_albedo_image, 0) : nullptr;
+        rt_albedo_uid = image ? image->image_uid : 0;
+        if (!image) {
+            rt_albedo_image = {};
+        }
+    }
+    if (stage.sw_stage == Shader::SwStage::Fragment && stage.rt_normal_image >= 0 &&
+        stage.rt_normal_image != stage.rt_albedo_image &&
+        u32(stage.rt_normal_image) < size_count) {
+        u32 normal_idx = first_image_idx;
+        for (u32 i = 0; i < u32(stage.rt_normal_image); ++i) {
+            normal_idx += (sizes ? sizes[i] : 1u);
+        }
+        rt_normal_view = normal_idx < image_infos.size() ? image_infos[normal_idx].imageView
+                                                         : vk::ImageView{};
+        rt_normal_image = normal_idx < image_info_ids.size() ? image_info_ids[normal_idx]
+                                                             : VideoCore::ImageId{};
+        if (!rt_normal_image || !texture_cache.TryGetImage(rt_normal_image, 0)) {
+            rt_normal_view = vk::ImageView{};
+            rt_normal_image = {};
+        }
+    }
+    if (stage.sw_stage == Shader::SwStage::Fragment && stage.rt_alpha_image >= 0 &&
+        Rt::AlphaSourceWanted() && u32(stage.rt_alpha_image) < size_count) {
+        u32 alpha_idx = first_image_idx;
+        for (u32 i = 0; i < u32(stage.rt_alpha_image); ++i) {
+            alpha_idx += (sizes ? sizes[i] : 1u);
+        }
+        rt_alpha_view = alpha_idx < image_infos.size() ? image_infos[alpha_idx].imageView
+                                                       : vk::ImageView{};
+        rt_alpha_image = alpha_idx < image_info_ids.size() ? image_info_ids[alpha_idx]
+                                                           : VideoCore::ImageId{};
+        const auto* image = rt_alpha_image ? texture_cache.TryGetImage(rt_alpha_image, 0) : nullptr;
+        rt_alpha_uid = image ? image->image_uid : 0;
+        rt_alpha_channel = stage.rt_alpha_channel & 3u;
+        if (!image) {
+            rt_alpha_view = vk::ImageView{};
+            rt_alpha_image = {};
+        }
+    }
 }
 
 bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedStage* prepared,
@@ -2729,16 +3628,27 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         const auto& entry = set.entries[i];
         if (!entry.id) {
             image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
+            image_info_ids.emplace_back();
             continue;
         }
         texture_cache.MarkFound(entry.id);
         auto& image = texture_cache.GetImage(entry.id);
         image.binding.is_bound = 1u;
         bound_images.emplace_back(entry.id);
+        if (ao_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+            ray_tracing->OnAoInput(entry.id);
+        }
+        if (dir_shadow_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+            ray_tracing->OnDirShadowInput(entry.id);
+        }
+        if (composite_draw && stage.sw_stage == Shader::SwStage::Fragment) {
+            ray_tracing->OnCompositeInput(entry.id, entry.proxy);
+        }
         image.usage.texture = 1u;
         if (entry.proxy) {
             image_infos.emplace_back(VK_NULL_HANDLE, entry.view,
                                      scene_targets->PrepareSample(image, entry.range.base.level));
+            image_info_ids.emplace_back();
             ++proxy_samples;
             continue;
         }
@@ -2748,8 +3658,9 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         barrier |= runtime.Transit(&image, new_layout, vk::PipelineStageFlagBits2::eAllCommands,
                                    vk::AccessFlagBits2::eShaderRead, entry.range);
         image_infos.emplace_back(VK_NULL_HANDLE, entry.view, image.backing->state.layout);
+        image_info_ids.emplace_back(entry.id);
     }
-    (void)first_image_idx;
+    CaptureRtTextures(stage, first_image_idx, nullptr, count);
     return true;
 }
 
@@ -2757,17 +3668,17 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     // bbport: RenderStateMemo (see BeginMemo).
     const bool memo_on = !BbToggle::Disabled(BbToggle::RenderStateMemo) && !FrameCapture::Active();
     if (BbStats::enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
-        std::printf("Render state memo: %llu hits, %llu misses; texture sets: %llu hits, %llu "
-                    "misses\n",
+        BbOut::Print("Render state memo: %llu hits, %llu misses; texture sets: %llu hits, %llu "
+                    "misses\n"
+                    "  texture set misses: other key %llu, generation %llu, image check %llu, "
+                    "other %llu\n"
+                    "  scene proxies sampled directly: %llu bindings\n",
                     static_cast<unsigned long long>(begin_memo_hits),
                     static_cast<unsigned long long>(begin_memo_misses),
                     static_cast<unsigned long long>(texture_set_hits),
-                    static_cast<unsigned long long>(texture_set_misses));
-        std::printf("  texture set misses: other key %llu, generation %llu, image check %llu, "
-                    "other %llu\n",
+                    static_cast<unsigned long long>(texture_set_misses),
                     (unsigned long long)texture_set_why[0], (unsigned long long)texture_set_why[1],
-                    (unsigned long long)texture_set_why[2], (unsigned long long)texture_set_why[3]);
-        std::printf("  scene proxies sampled directly: %llu bindings\n",
+                    (unsigned long long)texture_set_why[2], (unsigned long long)texture_set_why[3],
                     static_cast<unsigned long long>(proxy_samples));
         proxy_samples = 0;
         texture_set_why = {};
@@ -2847,7 +3758,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     bool reduced = scene_started && upscaler->RasterScaling() && key.num_samples == 1;
     // BB_SCENE_DEBUG=<file>: once the file exists, why the passes of one frame keep the
     // native size (see NoteFrameStart).
-    const bool debug_pass = scene_debug_frame && scene_started;
+    const bool debug_pass = scene_debug_frame;
     std::string why;
     if (debug_pass) {
         why = fmt::format("pass vs {:08x} ps {:08x} mrt {:#x} samples {} raster_scaling {}:",
@@ -2897,7 +3808,8 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
                                vk::to_string(depth.info.pixel_format), depth.info.size.width,
                                depth.info.size.height, scene_targets->Eligible(depth));
         }
-        std::printf("Scene pass: reduced %d %s\n", reduced, why.c_str());
+        ray_tracing->DebugLine(fmt::format("Scene pass: reduced {} {}", int(reduced), why).c_str());
+        scene_debug_used = true;
     }
     push_data.scene_size = reduced ? SceneResolution::Pack(scene_targets->Size()) : 0;
     if (BbStats::enabled) {
@@ -2930,6 +3842,11 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         const auto& col_buf = regs.color_buffers[cb];
         const bool is_clear = texture_cache.IsMetaCleared(col_buf.CmaskAddress(), slice);
         texture_cache.TouchMeta(col_buf.CmaskAddress(), slice, false);
+        if (ray_tracing->WantsDirect()) {
+            ray_tracing->OnColorTarget(
+                image_id, is_clear,
+                key.mrt_mask ? pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash : 0);
+        }
 
         if (reduced) {
             // The native image is resolved lazily when a shader/copy actually reads it.
@@ -3132,7 +4049,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         FrameCapture::BeginPass(colors.data(), state.num_color_attachments, depth);
     }
     // bbport: object motion vector attachment of G-buffer pipelines.
-    if (key.motion_vectors) {
+    if (key.motion_vectors == 1) {
         object_motion->Attach(state, state.width, state.height);
     }
     return state;
@@ -3187,6 +4104,10 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
+        if (ray_tracing) {
+            ray_tracing->OnLightSetWrite(address, num_bytes, 0,
+                                         !buffer_cache.IsRegionGpuModified(address, num_bytes));
+        }
         if (!buffer_cache.IsRegionGpuModified(address, num_bytes)) {
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
@@ -3209,8 +4130,14 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             !texture_cache.FindImageFromRange(src, num_bytes)) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
+            if (ray_tracing) {
+                ray_tracing->OnLightSetWrite(dst, num_bytes, src, true);
+            }
             return;
         }
+    }
+    if (ray_tracing && !dst_gds) {
+        ray_tracing->OnLightSetWrite(dst, num_bytes, src_gds ? 0 : src, false);
     }
     texture_cache.InvalidateMemoryFromGPU(dst, num_bytes);
     const auto* gds_buffer = buffer_cache.GetGdsBuffer();
@@ -3486,6 +4413,11 @@ void Rasterizer::UpdateViewportScissorState() const {
         viewports.push_back(empty_viewport);
         scissors.push_back(empty_scissor);
     }
+    if (sheet_hidden) {
+        for (auto& scissor : scissors) {
+            scissor.extent = vk::Extent2D{0, 0};
+        }
+    }
 
     auto& dynamic_state = scheduler.GetDynamicState();
     dynamic_state.SetViewports(viewports);
@@ -3697,6 +4629,281 @@ namespace Vulkan {
 // them for nothing. The GPU profile shows them as "pass ... [] depth -". On by default;
 // BB_SKIP_EMPTY_DRAWS=0 draws them. With BB_FRAME_STATS=1 each new shader pair that
 // qualifies is printed once, skipped or not.
+// BB_LOG_PS=<hex ps hash>: prints the textures and buffers of the first 8 draws with that pixel
+// shader (diagnostic for locating game passes such as the sky).
+void Rasterizer::LogDrawResources(const GraphicsPipeline* pipeline) {
+    // BB_LOG_PS=blend: instead of one hash, the first draw of every pixel shader that blends onto
+    // the scene depth (transparents and particles), up to 96 shaders, with its blend state.
+    // BB_LOG_PS=depth: draws into a depth image other than the scene depth (shadow maps), once
+    // per vs/ps hash and depth image, up to 64 lines.
+    // The knob is live (rt.cfg): every change of the file re-reads it and starts a fresh log, so
+    // a new place in the game can be listed without a restart.
+    static u64 knob_generation = ~0ull;
+    static bool want_blend = false;
+    static bool want_depth = false;
+    static bool want_scene = false;
+    static bool want_gbuffer = false;
+    static u64 want = 0;
+    static int printed = 0;
+    static std::unordered_set<u64> seen_depth;
+    static std::unordered_set<u32> seen_blend;
+    if (const u64 generation = Rt::LiveKnobs().Generation(); generation != knob_generation) {
+        knob_generation = generation;
+        const char* want_str = Rt::Knob("BB_LOG_PS");
+        want_blend = want_str && std::strcmp(want_str, "blend") == 0;
+        want_depth = want_str && std::strcmp(want_str, "depth") == 0;
+        want_scene = want_str && std::strcmp(want_str, "scene") == 0;
+        want_gbuffer = want_str && std::strcmp(want_str, "gbuffer") == 0;
+        want = want_str && !want_blend && !want_depth && !want_scene && !want_gbuffer
+                   ? std::strtoull(want_str, nullptr, 16)
+                   : 0ull;
+        printed = 0;
+        seen_depth.clear();
+        seen_blend.clear();
+        if (want_blend || want_depth || want_scene || want_gbuffer) {
+            std::printf("BB_LOG_PS=%s: new log\n", want_str);
+            std::fflush(stdout);
+        }
+    }
+    // BB_LOG_PS=gbuffer: every pixel shader that writes the camera depth (opaque G-buffer and
+    // forward geometry), once per ps hash, up to 256 lines; feeds BB_RT_SKIP_PS bisects.
+    if (want_gbuffer) {
+        const auto& r = Regs();
+        if (!camera_motion->Depth() || db_desc.first != camera_motion->Depth() ||
+            !r.depth_control.depth_write_enable || !pipeline->HasStage(Shader::SwStage::Fragment)) {
+            return;
+        }
+        const u32 ps_hash = u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
+        if (seen_blend.size() >= 256 || !seen_blend.insert(ps_hash).second) {
+            return;
+        }
+        std::printf("GBuffer draw: ps %08x vs %08x mrt %x indices %u instances %u\n", ps_hash,
+                    pipeline->HasStage(Shader::SwStage::Vertex)
+                        ? u32(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash)
+                        : 0u,
+                    pipeline->GetGraphicsKey().mrt_mask, r.num_indices, r.num_instances.NumInstances());
+        std::fflush(stdout);
+        return;
+    }
+    // BB_LOG_PS=scene: every pixel shader drawing into a full-size RGBA16F target (the scene
+    // colour), blended or not, with or without depth, once per ps hash, up to 128 lines.
+    if (want_scene) {
+        const auto& r = Regs();
+        if (!cb_descs[0].first || !camera_motion->Depth() ||
+            !pipeline->HasStage(Shader::SwStage::Fragment)) {
+            return;
+        }
+        const auto& target = texture_cache.GetImage(cb_descs[0].first);
+        const auto& depth = texture_cache.GetImage(camera_motion->Depth());
+        if (target.info.size.width != depth.info.size.width ||
+            target.info.size.height != depth.info.size.height ||
+            target.info.pixel_format != vk::Format::eR16G16B16A16Sfloat) {
+            return;
+        }
+        const u32 ps_hash = u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
+        if (seen_blend.size() >= 128 || !seen_blend.insert(ps_hash).second) {
+            return;
+        }
+        const auto st = Rt::FxState(r);
+        std::printf("Scene draw: ps %08x vs %08x blend %u src %u dst %u z %u%u scene_depth %d "
+                    "target %u indices %u prim %u\n",
+                    ps_hash,
+                    pipeline->HasStage(Shader::SwStage::Vertex)
+                        ? u32(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash)
+                        : 0u,
+                    u32(st.blend_enable), st.src_factor, st.dst_factor, u32(st.depth_test),
+                    u32(st.depth_write), int(db_desc.first == camera_motion->Depth()),
+                    cb_descs[0].first.index, r.num_indices, st.primitive);
+        std::fflush(stdout);
+        return;
+    }
+    if (want_depth) {
+        const auto& r = Regs();
+        const u32 mrt = pipeline->GetGraphicsKey().mrt_mask;
+        if (!db_desc.first || db_desc.first == camera_motion->Depth() ||
+            !r.depth_control.depth_write_enable) {
+            return;
+        }
+        auto& seen = seen_depth;
+        const u64 vs = pipeline->HasStage(Shader::SwStage::Vertex)
+                           ? u32(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash)
+                           : 0;
+        const u64 ps = pipeline->HasStage(Shader::SwStage::Fragment)
+                           ? u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash)
+                           : 0;
+        if (seen.size() >= 64 || !seen.insert((vs << 32) ^ ps ^ (u64(db_desc.first.index) << 20)).second) {
+            return;
+        }
+        const auto& depth = texture_cache.GetImage(db_desc.first);
+        std::printf("Depth draw: mrt %x vs %08x ps %08x depth image %u %ux%u layers %u vkfmt %u indices %u "
+                    "viewport %.0f %.0f %.0f %.0f\n",
+                    mrt, u32(vs), u32(ps), db_desc.first.index, depth.info.size.width,
+                    depth.info.size.height, depth.info.resources.layers,
+                    u32(depth.info.pixel_format), r.num_indices, r.viewports[0].xscale,
+                    r.viewports[0].yscale, r.viewports[0].xoffset, r.viewports[0].yoffset);
+        std::fflush(stdout);
+        return;
+    }
+    if ((!want && !want_blend) || !pipeline->HasStage(Shader::SwStage::Fragment)) {
+        return;
+    }
+    const auto& ps = pipeline->GetStage(Shader::SwStage::Fragment);
+    const auto& regs = Regs();
+    if (want_blend) {
+        const auto st = Rt::FxState(regs);
+        if (!st.blend_enable || !db_desc.first || db_desc.first != camera_motion->Depth()) {
+            return;
+        }
+        auto& seen = seen_blend;
+        if (seen.size() >= 96 || !seen.insert(u32(ps.pgm_hash)).second) {
+            return;
+        }
+        std::printf("Blend draw: ps %08x src %u dst %u func %u z %u%u prim %u fmt %u\n",
+                    u32(ps.pgm_hash), st.src_factor, st.dst_factor, st.blend_func,
+                    u32(st.depth_test), u32(st.depth_write), st.primitive, st.color_format);
+    } else {
+        if (printed >= 8 || u32(ps.pgm_hash) != u32(want)) {
+            return;
+        }
+    }
+    ++printed;
+    std::printf("Draw resources: ps %08x vs %08x indices %u instances %u prim %u depth %d\n",
+                u32(ps.pgm_hash), u32(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash),
+                regs.num_indices, regs.num_instances.NumInstances(), u32(regs.primitive_type),
+                int(db_desc.first != VideoCore::ImageId{}));
+    if (cb_descs[0].first) {
+        const auto& target = texture_cache.GetImage(cb_descs[0].first);
+        std::printf("  target 0: image %u %ux%u vkfmt %u, viewport scale %.1f %.1f offset %.1f %.1f\n",
+                    cb_descs[0].first.index, target.info.size.width, target.info.size.height,
+                    u32(target.info.pixel_format), regs.viewports[0].xscale,
+                    regs.viewports[0].yscale, regs.viewports[0].xoffset, regs.viewports[0].yoffset);
+    }
+    // BB_LOG_PS_VERTS=<dir>: also write each matching draw's vertex buffers raw, one file per
+    // binding (<dir>/ps<hash>_d<draw>_b<binding>.bin), for offline layout and UV fitting.
+    static const char* vert_dir = std::getenv("BB_LOG_PS_VERTS");
+    {
+        VertexInputs<vk::VertexInputAttributeDescription2EXT> attrs;
+        VertexInputs<vk::VertexInputBindingDescription2EXT> binds;
+        VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> divs;
+        VertexInputs<AmdGpu::Buffer> bufs;
+        pipeline->GetVertexInputs(attrs, binds, divs, bufs, regs.vgt_instance_step_rate_0,
+                                  regs.vgt_instance_step_rate_1);
+        for (const auto& at : attrs) {
+            const u32 bi = at.binding;
+            const AmdGpu::Buffer vb = bi < bufs.size() ? bufs[bi] : AmdGpu::Buffer{};
+            std::printf("  attr loc %u binding %u vkfmt %u offset %u: buffer %llx stride %u size %u\n",
+                        at.location, bi, u32(at.format), at.offset,
+                        static_cast<unsigned long long>(vb.base_address), vb.GetStride(),
+                        vb.GetSize());
+            if (vert_dir && at.offset == 0 && vb.base_address && vb.GetSize() &&
+                memory->IsValidGpuMapping(vb.base_address, vb.GetSize())) {
+                char path[512];
+                std::snprintf(path, sizeof(path), "%s/ps%08x_d%d_b%u.bin", vert_dir, u32(ps.pgm_hash),
+                              printed, bi);
+                if (FILE* out = std::fopen(path, "wb")) {
+                    std::fwrite(reinterpret_cast<const void*>(vb.base_address), 1, vb.GetSize(), out);
+                    std::fclose(out);
+                    std::printf("    wrote %s\n", path);
+                }
+            }
+            if (vb.base_address &&
+                memory->IsValidGpuMapping(vb.base_address,
+                                          u64(3) * vb.GetStride() + at.offset + 16)) {
+                for (u32 vtx = 0; vtx < 4; ++vtx) {
+                    const u8* q = reinterpret_cast<const u8*>(vb.base_address) +
+                                  u64(vtx) * vb.GetStride() + at.offset;
+                    const float* f = reinterpret_cast<const float*>(q);
+                    const u32* w = reinterpret_cast<const u32*>(q);
+                    std::printf("    v%u: %08x %08x %08x %08x = %g %g %g %g\n", vtx, w[0], w[1],
+                                w[2], w[3], f[0], f[1], f[2], f[3]);
+                }
+            }
+        }
+    }
+    for (const auto stage_kind : {Shader::SwStage::Vertex, Shader::SwStage::Fragment}) {
+        if (!pipeline->HasStage(stage_kind)) {
+            continue;
+        }
+        const auto& st = pipeline->GetStage(stage_kind);
+        for (u32 i = 0; i < st.images.size(); ++i) {
+            const auto t = st.images[i].GetSharp(st);
+            std::printf("  %s image %u: addr %llx type %u %llux%llu fmt %u/%u levels %u\n",
+                        stage_kind == Shader::SwStage::Vertex ? "vs" : "ps", i,
+                        static_cast<unsigned long long>(t.Address()), u32(t.GetType()),
+                        static_cast<unsigned long long>(t.width + 1),
+                        static_cast<unsigned long long>(t.height + 1), u32(t.GetDataFmt()),
+                        u32(t.GetNumberFmt()), u32(t.last_level + 1));
+        }
+        for (u32 i = 0; i < st.buffers.size(); ++i) {
+            if (st.buffers[i].IsSpecial()) {
+                continue;
+            }
+            const auto b = st.buffers[i].GetSharp(st);
+            std::printf("  %s buffer %u: addr %llx size %u stride %u\n",
+                        stage_kind == Shader::SwStage::Vertex ? "vs" : "ps", i,
+                        static_cast<unsigned long long>(b.base_address), b.GetSize(),
+                        b.GetStride());
+            if (b.GetSize() <= 512 && b.GetSize() >= 16 && memory->IsValidGpuMapping(b.base_address, 0)) {
+                const float* f = reinterpret_cast<const float*>(b.base_address);
+                for (u32 k = 0; k + 4 <= b.GetSize() / 4; k += 4) {
+                    std::printf("    [%2u] %9.4f %9.4f %9.4f %9.4f\n", k / 4, f[k], f[k + 1],
+                                f[k + 2], f[k + 3]);
+                }
+            }
+        }
+    }
+    std::fflush(stdout);
+}
+
+void Rasterizer::LogSmokeSeen(const GraphicsPipeline* pipeline, const char* path) {
+    if (!Rt::FxSmokeLog() || !Rt::FxSmokeWanted()) {
+        return;
+    }
+    const auto& regs = Regs();
+    const auto st = Rt::FxState(regs);
+    if (!st.blend_enable || st.src_factor != Rt::FxBlendSrcAlpha ||
+        st.color_format != Rt::FxFormat16_16_16_16) {
+        return;
+    }
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    const auto* vs = pipeline->GetStages()[u32(Shader::SwStage::Vertex)];
+    const u64 ps_hash = ps ? ps->pgm_hash : 0;
+    const u64 vs_hash = vs ? vs->pgm_hash : 0;
+    static std::mutex log_mutex;
+    static std::unordered_set<u64> logged;
+    std::scoped_lock lock{log_mutex};
+    if (logged.insert(ps_hash ^ (vs_hash << 1) ^ (u64(st.primitive) << 56)).second) {
+        std::printf("Smoke seen (%s): ps %016llx vs %016llx prim %u idx %u dst %u func %u z %u%u "
+                    "rule %d patch %d stages %u export %x motion %u depth %d\n",
+                    path, static_cast<unsigned long long>(ps_hash),
+                    static_cast<unsigned long long>(vs_hash), st.primitive, st.indices,
+                    st.dst_factor, st.blend_func, u32(st.depth_test), u32(st.depth_write),
+                    int(Rt::FxSmokeRule(st)), int(Rt::FxSmokePatchRule(st)), st.stages,
+                    pipeline->GetGraphicsKey().mrt_mask,
+                    pipeline->GetGraphicsKey().motion_vectors,
+                    int(db_desc.first && db_desc.first == camera_motion->Depth()));
+    }
+}
+
+// The game's shadow atlas: depth-writing draws into a square depth target of 2048 or more that is
+// not the scene depth (Bloodborne: one 4096x4096 atlas of four 2048 cascades). Skipped only while
+// RayTracing::SkipShadowMaps() says our direct pass replaces the light that samples it.
+bool Rasterizer::SkipShadowDraw() {
+    if (!ray_tracing->Enabled() || !db_desc.first || db_desc.first == camera_motion->Depth() ||
+        !Regs().depth_control.depth_write_enable || !ray_tracing->SkipShadowMaps()) {
+        return false;
+    }
+    const auto& depth = texture_cache.GetImage(db_desc.first);
+    if (depth.info.size.width < 2048 || depth.info.size.width != depth.info.size.height) {
+        return false;
+    }
+    if ((++shadow_draws_skipped & 0x3fffu) == 1u) {
+        BbOut::Print("Shadow draws skipped: %llu\n",
+                    static_cast<unsigned long long>(shadow_draws_skipped));
+    }
+    return true;
+}
+
 bool Rasterizer::SkipOutputlessDraw(const GraphicsPipeline* pipeline) {
     static const bool skip = [] {
         const char* value = std::getenv("BB_SKIP_EMPTY_DRAWS");
@@ -3815,13 +5022,14 @@ void Rasterizer::NoteFrameStart() {
     ++lag_histogram[lag];
     frame_ticks[frame % frame_ticks.size()] = scheduler.CurrentTick();
     if (frame % 600 == 0) {
-        std::printf("GPU lag at frame start (frames not finished: count):");
+        BbOut::Line text;
+        text.Add("GPU lag at frame start (frames not finished: count):");
         for (u32 i = 0; i < lag_histogram.size(); ++i) {
             if (lag_histogram[i]) {
-                std::printf(" %u:%llu", i, static_cast<unsigned long long>(lag_histogram[i]));
+                text.Add(" %u:%llu", i, static_cast<unsigned long long>(lag_histogram[i]));
             }
         }
-        std::printf("\n");
+        text.Add("\n");
         lag_histogram = {};
     }
 }

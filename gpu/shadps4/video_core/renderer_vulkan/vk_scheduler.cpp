@@ -391,29 +391,78 @@ void Scheduler::Flush() {
     Flush(info);
 }
 
-void Scheduler::Finish() {
+void Scheduler::Finish(std::source_location loc) {
     // When finishing, we need to wait for the submission to have executed on the device.
     const u64 presubmit_tick = CurrentTick();
     SubmitInfo info{};
     SubmitExecution(info);
-    Wait(presubmit_tick);
+    Wait(presubmit_tick, loc);
 }
 
-void Scheduler::WaitSubmitted() {
+void Scheduler::WaitSubmitted(std::source_location loc) {
     const u64 tick = CurrentTick();
     if (tick > 1) {
-        Wait(tick - 1);
+        Wait(tick - 1, loc);
     }
 }
 
-void Scheduler::Wait(u64 tick) {
+namespace {
+struct WaitSite {
+    const char* file;
+    u32 line;
+    u64 ns;
+    u64 count;
+};
+std::mutex wait_sites_mutex;
+std::vector<WaitSite> wait_sites;
+} // namespace
+
+std::string Scheduler::TakeWaitSites(double frames) {
+    std::vector<WaitSite> sites;
+    {
+        std::scoped_lock lk{wait_sites_mutex};
+        sites.swap(wait_sites);
+    }
+    std::sort(sites.begin(), sites.end(), [](const auto& a, const auto& b) { return a.ns > b.ns; });
+    std::string out;
+    for (size_t i = 0; i < sites.size() && i < 8; ++i) {
+        const char* name = sites[i].file;
+        for (const char* p = name; *p; ++p) {
+            if (*p == '/' || *p == '\\') {
+                name = p + 1;
+            }
+        }
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "  wait %6.2f ms/frame %5.1f/frame %s:%u\n",
+                      sites[i].ns / 1e6 / frames, sites[i].count / frames, name, sites[i].line);
+        out += buf;
+    }
+    return out;
+}
+
+void Scheduler::Wait(u64 tick, std::source_location loc) {
     if (tick >= work_semaphore.CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         SubmitInfo info{};
         Flush(info);
     }
-    BbStats::WaitTimer timer{BbStats::tick_wait_ns};
-    work_semaphore.Wait(tick);
+    const auto start = std::chrono::steady_clock::now();
+    {
+        BbStats::WaitTimer timer{BbStats::tick_wait_ns};
+        work_semaphore.Wait(tick);
+    }
+    const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - start)
+                       .count();
+    std::scoped_lock lk{wait_sites_mutex};
+    for (auto& site : wait_sites) {
+        if (site.line == loc.line() && site.file == loc.file_name()) {
+            site.ns += ns;
+            ++site.count;
+            return;
+        }
+    }
+    wait_sites.push_back({loc.file_name(), loc.line(), ns, 1});
 }
 
 void Scheduler::PopPendingOperations() {

@@ -31,6 +31,7 @@
 #include "bbport_fsr4vk_package.h"
 
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #endif
@@ -804,7 +805,7 @@ struct Fsr4Vk::Impl {
         }
         ticks.push_back(scheduler.CurrentTick());
         if (BbStats::enabled && ++recorded_frames % 300 == 0) {
-            std::printf("fsr4vk retirement: frames=%llu mode=%s full_finishes=%llu "
+            BbOut::Print("fsr4vk retirement: frames=%llu mode=%s full_finishes=%llu "
                         "slot_waits=%llu full_wait_ms=%.3f slot_wait_ms=%.3f\n",
                         static_cast<unsigned long long>(recorded_frames),
                         full_wait ? "full" : "ring",

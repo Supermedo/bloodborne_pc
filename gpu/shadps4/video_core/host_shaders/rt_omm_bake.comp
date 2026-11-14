@@ -1,0 +1,181 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(local_size_x = 64) in;
+
+const uint MaxSurfaceTextures = 1024u;
+const uint SpecialTransparent = 0xFFFFFFFFu;
+const uint SpecialOpaque = 0xFFFFFFFEu;
+const uint Format4State = 2u;
+
+layout(binding = 0, std430) readonly buffer UvPool { uint uv_pool[]; };
+layout(binding = 1, std430) writeonly buffer Output { uint out_words[]; };
+layout(set = 1, binding = 0) uniform sampler2D surface_textures[MaxSurfaceTextures];
+
+layout(push_constant) uniform Constants {
+    uint uv_base;
+    uint triangle_count;
+    uint data_word_offset;
+    uint record_word_offset;
+    uint index_word_offset;
+    uint texture_slot;
+    uint level;
+    float alpha_ref;
+    uint alpha_channel;
+};
+
+// Each sample reads the mip whose texel spans the sample spacing, so it averages its whole patch
+// instead of one texel: a thin gap or bar between two point samples still shows. A micro-triangle
+// is solid or open only when every sample is clearly past alpha_ref (ClassMargin); anything near
+// the edge stays unknown and the ray's any-hit runs the exact per-texel test. Point samples at mip
+// 0 marked whole micro-triangles of fences and branches solid or open, so their shadows came out
+// in staircase blocks.
+const float ClassMargin = 0.2;
+float BakeLod;
+
+float SampleAlpha(vec2 uv) {
+    return textureLod(surface_textures[nonuniformEXT(texture_slot)], uv, BakeLod)[alpha_channel & 3u];
+}
+
+// 1 solid, 0 open, 2 near the edge (both bits set by the caller).
+uint Classify(float alpha) {
+    if (alpha >= min(alpha_ref + ClassMargin, 0.99)) {
+        return 1u;
+    }
+    return alpha < max(alpha_ref - ClassMargin, 0.01) ? 0u : 2u;
+}
+
+uint CurveIndex(float u, float v, uint lvl) {
+    u = clamp(u, 0.0, 1.0);
+    v = clamp(v, 0.0, 1.0);
+    const uint n = 1u << lvl;
+    const float fu = u * float(n);
+    const float fv = v * float(n);
+    uint iu = uint(fu);
+    uint iv = uint(fv);
+    const float uf = fu - float(iu);
+    const float vf = fv - float(iv);
+    if (iu >= n) {
+        iu = n - 1u;
+    }
+    if (iv >= n) {
+        iv = n - 1u;
+    }
+    const uint iuv = iu + iv;
+    if (iuv >= n) {
+        iu -= iuv - n + 1u;
+    }
+    uint iw = ~(iu + iv);
+    if (uf + vf >= 1.0 && iuv < n - 1u) {
+        --iw;
+    }
+    uint b0 = ~(iu ^ iw);
+    b0 &= (n - 1u);
+    const uint t = (iu ^ iv) & b0;
+    uint f = t;
+    f ^= f >> 1u;
+    f ^= f >> 2u;
+    f ^= f >> 4u;
+    f ^= f >> 8u;
+    uint b1 = ((f ^ iu) & ~b0) | t;
+    b0 = (b0 | (b0 << 8u)) & 0x00ff00ffu;
+    b0 = (b0 | (b0 << 4u)) & 0x0f0f0f0fu;
+    b0 = (b0 | (b0 << 2u)) & 0x33333333u;
+    b0 = (b0 | (b0 << 1u)) & 0x55555555u;
+    b1 = (b1 | (b1 << 8u)) & 0x00ff00ffu;
+    b1 = (b1 | (b1 << 4u)) & 0x0f0f0f0fu;
+    b1 = (b1 | (b1 << 2u)) & 0x33333333u;
+    b1 = (b1 | (b1 << 1u)) & 0x55555555u;
+    return b0 | (b1 << 1u);
+}
+
+void main() {
+    const uint t = gl_GlobalInvocationID.x;
+    if (t >= triangle_count) {
+        return;
+    }
+    const uint micro = 1u << (2u * level);
+    const uint words = max(1u, micro * 2u / 32u);
+    const uint data_word = data_word_offset + t * words;
+    out_words[record_word_offset + t * 2u] = t * words * 4u;
+    out_words[record_word_offset + t * 2u + 1u] = level | (Format4State << 16u);
+    const vec2 uv0 = unpackHalf2x16(uv_pool[uv_base + t * 8u]);
+    const vec2 uv1 = unpackHalf2x16(uv_pool[uv_base + t * 8u + 1u]);
+    const vec2 uv2 = unpackHalf2x16(uv_pool[uv_base + t * 8u + 2u]);
+    uint opaque_lo = 0u, opaque_hi = 0u, trans_lo = 0u, trans_hi = 0u;
+    uint state_words[32];
+    for (uint w = 0u; w < 32u; ++w) {
+        state_words[w] = 0u;
+    }
+    const uint n = 1u << (level + 2u);
+    bool any_opaque = false, any_transparent = false;
+    const bool textured = texture_slot != 0u && texture_slot < MaxSurfaceTextures;
+    BakeLod = 0.0;
+    if (textured) {
+        const vec2 size = vec2(textureSize(surface_textures[nonuniformEXT(texture_slot)], 0));
+        const float edge = max(max(length((uv1 - uv0) * size), length((uv2 - uv0) * size)),
+                               length((uv2 - uv1) * size));
+        BakeLod = max(0.0, log2(max(edge / float(n), 1.0)));
+    }
+    if (level <= 3u) {
+        for (uint j = 0u; j < n; ++j) {
+            for (uint i = 0u; i + j < n; ++i) {
+                const float u = (float(i) + 0.5) / float(n);
+                const float v = (float(j) + 0.5) / float(n);
+                const vec2 uv = uv0 * (1.0 - u - v) + uv1 * u + uv2 * v;
+                const uint c = textured ? Classify(SampleAlpha(uv)) : 1u;
+                const uint k = CurveIndex(u, v, level);
+                const uint bit = 1u << (k & 31u);
+                if (c != 0u) {
+                    if (k < 32u) opaque_lo |= bit; else opaque_hi |= bit;
+                }
+                if (c != 1u) {
+                    if (k < 32u) trans_lo |= bit; else trans_hi |= bit;
+                }
+            }
+        }
+        bool all_opaque = true, all_transparent = true;
+        for (uint k = 0u; k < micro; ++k) {
+            const uint bit = 1u << (k & 31u);
+            const bool o = ((k < 32u ? opaque_lo : opaque_hi) & bit) != 0u;
+            const bool tr = ((k < 32u ? trans_lo : trans_hi) & bit) != 0u;
+            const uint state = (o && !tr) ? 1u : (tr && !o) ? 0u : 3u;
+            all_opaque = all_opaque && state == 1u;
+            all_transparent = all_transparent && state == 0u;
+            state_words[k / 16u] |= state << ((k % 16u) * 2u);
+        }
+        for (uint w = 0u; w < words; ++w) {
+            out_words[data_word + w] = state_words[w];
+        }
+        out_words[index_word_offset + t] = all_opaque ? SpecialOpaque
+                                           : all_transparent ? SpecialTransparent : t;
+    } else {
+        for (uint w = 0u; w < words; ++w) {
+            uint word = 0u;
+            for (uint s = 0u; s < 16u; ++s) {
+                const uint k = w * 16u + s;
+                uint o = 0u, tr = 0u;
+                for (uint j = 0u; j < n; ++j) {
+                    for (uint i = 0u; i + j < n; ++i) {
+                        const float u = (float(i) + 0.5) / float(n);
+                        const float v = (float(j) + 0.5) / float(n);
+                        if (CurveIndex(u, v, level) != k) {
+                            continue;
+                        }
+                        const vec2 uv = uv0 * (1.0 - u - v) + uv1 * u + uv2 * v;
+                        const uint c = textured ? Classify(SampleAlpha(uv)) : 1u;
+                        if (c != 0u) o = 1u;
+                        if (c != 1u) tr = 1u;
+                    }
+                }
+                const uint state = (o == 1u && tr == 0u) ? 1u : (tr == 1u && o == 0u) ? 0u : 3u;
+                any_opaque = any_opaque || state != 0u;
+                any_transparent = any_transparent || state != 1u;
+                word |= state << (s * 2u);
+            }
+            out_words[data_word + w] = word;
+        }
+        out_words[index_word_offset + t] = !any_transparent ? SpecialOpaque
+                                           : !any_opaque ? SpecialTransparent : t;
+    }
+}

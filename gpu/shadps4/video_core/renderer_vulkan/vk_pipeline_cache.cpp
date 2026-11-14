@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,10 @@
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
+#include "video_core/renderer_vulkan/rt/rt_gi.h"
+#include "video_core/renderer_vulkan/rt/rt_hot.h"
+#include "video_core/renderer_vulkan/rt/rt_moon_haze.h"
+#include "video_core/renderer_vulkan/rt/rt_toggle.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
@@ -179,7 +184,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
             !instance.IsDepthClipControlSupported() &&
             regs.clipper_control.clip_space == AmdGpu::ClipSpace::MinusWToW;
         info.hw.vs.clip_disable = regs.IsClipDisabled();
-        info.hw.vs.motion_vectors = sel.motion;
+        info.hw.vs.motion_vectors = sel.motion || sel.motion_store;
         break;
     }
     case HwStage::Fragment: {
@@ -786,18 +791,26 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     // Only potentially animated G-buffer draws may use the extra motion attachment. The
     // ordinary stage variant is needed first to inspect the vertex shader's resources.
     bool motion_possible = false;
+    u32 bound_colors = 0;
+    u32 bound_mask = 0;
     {
-        u32 bound = 0;
         for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {
-            bound += (regs.color_buffers[cb] && regs.color_target_mask.GetMask(cb)) ? 1 : 0;
+            if (regs.color_buffers[cb] && regs.color_target_mask.GetMask(cb)) {
+                bound_mask |= 1u << cb;
+            }
         }
-        motion_possible = Shader::MotionVectors::positions_address != 0 && bound >= 5 &&
+        const u32 bound = u32(std::popcount(bound_mask));
+        bound_colors = bound;
+        motion_possible = Shader::MotionVectors::positions_address != 0 &&
+                          (bound >= 5 ||
+                           (bound >= 1 && (Rt::FxSmokeWanted() || Rt::WaterSheetWanted()))) &&
                           !regs.color_buffers[Shader::MotionVectors::Output] &&
                           regs.depth_buffer.DepthValid() &&
                           regs.depth_buffer.NumSamples() == 1 && !regs.IsClipDisabled() &&
                           regs.stage_enable.raw == AmdGpu::ShaderStageEnable::VgtStages::Vs;
     }
     sel.motion = false;
+    sel.motion_store = false;
 
     // First pass to fill render target information needed by shader recompiler
     for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {
@@ -828,7 +841,41 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     if (!RefreshGraphicsStages(sel)) {
         return false;
     }
-    if (motion_possible) {
+    const bool fx_targets = Rt::FxSmokeTargets(bound_mask, key.mrt_mask);
+    const auto* sheet_ps = sel.infos[u32(Shader::SwStage::Fragment)];
+    // Smoke, water sheets and the game's moon and cloud layer store their positions for the TLAS.
+    if (motion_possible && fx_targets &&
+        (Rt::FxSmokeDraw(regs) ||
+         (sheet_ps && (Rt::WaterSheetShader(sheet_ps->pgm_hash) ||
+                       u32(sheet_ps->pgm_hash) == Rt::SkyLayerPs)))) {
+        sel.motion_store = true;
+    }
+    if (Rt::FxSmokeLog() && Rt::FxSmokeWanted() && (bound_mask & 1u)) {
+        const auto st = Rt::FxState(regs);
+        if (st.blend_enable && st.src_factor == Rt::FxBlendSrcAlpha) {
+            const auto* ps = sel.infos[u32(Shader::SwStage::Fragment)];
+            static std::mutex log_mutex;
+            static std::unordered_set<u64> logged;
+            std::scoped_lock lock{log_mutex};
+            if (logged.insert((ps ? ps->pgm_hash : 0) ^ (u64(st.primitive) << 48) ^
+                              (u64(st.indices) << 32) ^ (u64(motion_possible) << 31) ^
+                              (u64(bound_mask) << 24) ^ (u64(key.mrt_mask) << 16)).second) {
+                std::printf("Smoke key: ps %016llx prim %u idx %u inst %u dst %u func %u fmt %u "
+                            "z %u%u rule %d patch %d possible %d (positions %d depth %d samples %u "
+                            "clip %d stages %u) bound %x export %x targets %d store %d\n",
+                            static_cast<unsigned long long>(ps ? ps->pgm_hash : 0), st.primitive,
+                            st.indices, regs.num_instances.NumInstances(), st.dst_factor,
+                            st.blend_func, st.color_format, u32(st.depth_test), u32(st.depth_write),
+                            int(Rt::FxSmokeRule(st)), int(Rt::FxSmokePatchRule(st)),
+                            int(motion_possible),
+                            int(Shader::MotionVectors::positions_address != 0),
+                            int(regs.depth_buffer.DepthValid()), u32(regs.depth_buffer.NumSamples()),
+                            int(!regs.IsClipDisabled()), u32(regs.stage_enable.raw), bound_mask,
+                            key.mrt_mask, int(fx_targets), int(sel.motion_store));
+            }
+        }
+    }
+    if (motion_possible && bound_colors >= 5) {
         const auto* vs = sel.infos[static_cast<u32>(Shader::SwStage::Vertex)];
         if (vs) {
             // Shaders with a bone palette (motion_history.h). Small skeletons (weapons,
@@ -894,6 +941,11 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             }
         }
     }
+    // RT position stores (smoke, water sheets, sky layer) without G-buffer motion: the stages
+    // were compiled before motion_store was chosen.
+    if (sel.motion_store && !sel.motion && !RefreshGraphicsStages(sel)) {
+        return false;
+    }
 
     // Second pass to mask out render targets not written by shader and fill remaining info
     u8 color_samples = 0;
@@ -925,6 +977,9 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         key.num_samples = std::max(key.num_samples, color_samples);
     }
 
+    if (sel.motion_store) {
+        key.motion_vectors = 2;
+    }
     if (sel.motion) {
         constexpr u32 mv = Shader::MotionVectors::Output;
         key.motion_vectors = 1;
@@ -1120,7 +1175,13 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     vk::ShaderModule module;
 
     auto patch = GetShaderPatch(info.pgm_hash, info.hw_stage, perm_idx, "spv");
-    const bool is_patched = patch && EmulatorSettings.IsPatchShaders();
+    bool is_patched = patch && EmulatorSettings.IsPatchShaders();
+    if (!is_patched) {
+        if (auto source_patch = GetSourcePatch(info.pgm_hash, info.hw_stage, spv)) {
+            patch = std::move(source_patch);
+            is_patched = true;
+        }
+    }
     if (is_patched) {
         LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.hw_stage, info.pgm_hash);
         module = CompileSPV(*patch, instance.GetDevice());
@@ -1315,6 +1376,61 @@ void PipelineCache::DumpShader(std::span<const u32> code, u64 hash, Shader::HwSt
     const auto filename = fmt::format("{}.{}", GetShaderName(stage, hash, perm_idx), ext);
     const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
     file.WriteSpan(code);
+}
+
+// bbport: fixes to the game's own shaders, made from the SPIR-V the recompiler emits for this
+// player's game, on compile and on the pipeline-cache preload (which stores the unpatched SPIR-V).
+// 1. A dev override, <user>/shader/patch/<stage>_<program hash>_src<FNV-1a 64 of that SPIR-V>.spv:
+//    keyed by the source, it never lands on another permutation (their indices follow the order
+//    the game first draws them) and goes stale silently with a new recompiler build.
+// 2. Built-in passes: the moon disc kept out of the dome's fog (rt_moon_haze.h,
+//    BB_RT_MOON_HAZE = the part of the fog taken off the disc, default 0.09, 0 off; read at boot).
+std::optional<std::vector<u32>> PipelineCache::GetSourcePatch(u64 hash, Shader::HwStage stage,
+                                                              std::span<const u32> spv) {
+    static const auto files = [] {
+        std::unordered_map<std::string, std::filesystem::path> found;
+        std::error_code ec;
+        const auto dir = Common::FS::GetUserPath(Common::FS::PathType::ShaderDir) / "patch";
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            const auto name = entry.path().filename().string();
+            if (name.find("_src") != std::string::npos && entry.path().extension() == ".spv") {
+                found.try_emplace(name, entry.path());
+            }
+        }
+        if (!found.empty()) {
+            std::printf("Shader patches: %zu source-matched patches\n", found.size());
+        }
+        return found;
+    }();
+    if (!files.empty()) {
+        u64 fnv = 0xcbf29ce484222325ull;
+        for (const std::byte b : std::as_bytes(spv)) {
+            fnv = (fnv ^ static_cast<u8>(b)) * 0x100000001b3ull;
+        }
+        const auto it = files.find(fmt::format("{}_{:#018x}_src{:016x}.spv", stage, hash, fnv));
+        if (it != files.end()) {
+            const auto file = Common::FS::IOFile{it->second, Common::FS::FileAccessMode::Read};
+            std::vector<u32> code(file.GetSize() / sizeof(u32));
+            if (!code.empty() && file.Read(code) == code.size() && code[0] == 0x07230203u) {
+                return code;
+            }
+            std::printf("Shader patch %s: not SPIR-V, ignored\n", it->first.c_str());
+        }
+    }
+    if (hash == Rt::MoonDomePs && stage == Shader::HwStage::Fragment) {
+        static const float cut = [] {
+            const char* v = Rt::Knob("BB_RT_MOON_HAZE");
+            return v ? std::strtof(v, nullptr) : 0.09f;
+        }();
+        auto fixed = Rt::MoonHazeFix(spv, cut);
+        static std::atomic<int> logged{0};
+        if (logged.fetch_add(1) < 4) {
+            std::printf("Moon haze: dome shader %s (BB_RT_MOON_HAZE %.2f)\n",
+                        fixed ? "patched" : "not matched, left as it is", cut);
+        }
+        return fixed;
+    }
+    return {};
 }
 
 std::optional<std::vector<u32>> PipelineCache::GetShaderPatch(u64 hash, Shader::HwStage stage,

@@ -1,0 +1,406 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_samplerless_texture_functions : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TlasSpace {
+    vec4 tlas_rows[3];
+};
+
+TlasSpace TlasSpaceOf(uvec2 tlas) {
+    return TlasSpace(uvec2(tlas.x - 256u, tlas.y - (tlas.x < 256u ? 1u : 0u)));
+}
+
+vec3 TlasPoint(uvec2 tlas, vec3 p) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0], vec4(p, 1.0)), dot(s.tlas_rows[1], vec4(p, 1.0)),
+                dot(s.tlas_rows[2], vec4(p, 1.0)));
+}
+
+vec3 TlasDir(uvec2 tlas, vec3 d) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0].xyz, d), dot(s.tlas_rows[1].xyz, d), dot(s.tlas_rows[2].xyz, d));
+}
+
+mat3 TlasToView(uvec2 tlas, mat3 m) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return mat3(s.tlas_rows[0].xyz, s.tlas_rows[1].xyz, s.tlas_rows[2].xyz) * m;
+}
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1, rgba8) uniform image2D mask_img;
+layout(binding = 2) uniform texture2D normal_tex;
+layout(binding = 3) uniform texture2D history_tex;
+layout(binding = 4, rgba16f) uniform image2D history_img;
+
+layout(binding = 5, std140) uniform Params {
+    vec4 proj;
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    uvec4 tlas_rays_flags;
+    uvec4 cfg;
+    vec4 radius_bias_tmin;
+    vec4 prev_proj;
+    vec4 reproject[3];
+    vec4 prev_jitter;
+    uvec4 cell;
+};
+
+layout(binding = 6, std430) buffer Stats {
+    uint stats[];
+};
+
+layout(push_constant) uniform AoPush {
+    uint ao_resolve;
+};
+
+struct SurfaceRecord {
+    uint texture;
+    uint flags;
+    uint uv_base;
+    float alpha_ref;
+    uint flags2;
+};
+
+layout(binding = 12, std430) readonly buffer Surfaces {
+    SurfaceRecord surfaces[];
+};
+
+layout(binding = 13, std430) readonly buffer UvPool {
+    uint uv_pool[];
+};
+
+const uint MaxSurfaceTextures = 1024u;
+layout(set = 1, binding = 0) uniform sampler2D surface_textures[MaxSurfaceTextures];
+
+const uint SurfaceAlphaTest = 1u;
+const uint SurfaceHasUv = 2u;
+const uint SurfaceHasTexture = 4u;
+const uint SurfaceUsable = SurfaceHasUv | SurfaceHasTexture;
+const uint TriangleWords = 8u;
+const uint FlagHistory = 1u;
+const uint FlagNormal = 2u;
+const uint NormalFromDepth = 0u;
+const uint NormalUnorm = 1u;
+const uint NormalWorldSpace = 0x10u;
+const uint MaxRays = 16u;
+const uint MaxScale = 4u;
+const float TwoPi = 6.2831853;
+const float HistoryZTolerance = 0.05;
+const float BlockZTolerance = 0.02;
+const uint StatsStride = 8u;
+const float StatsScale = 1024.0;
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+uint Rays() { return tlas_rays_flags.z; }
+uint Flags() { return tlas_rays_flags.w; }
+uint NormalMode() { return cfg.x & 0xFu; }
+bool NormalWorld() { return (cfg.x & NormalWorldSpace) != 0u; }
+uint NormalSwizzle() { return cfg.x >> 8u; }
+uint NormalComponents() { return (cfg.x >> 16u) & 0xFu; }
+uint Frame() { return cfg.y; }
+uint MaxHistory() { return cfg.z; }
+uint Debug() { return cfg.w; }
+float Radius() { return radius_bias_tmin.x; }
+float Bias() { return radius_bias_tmin.y; }
+float TMin() { return radius_bias_tmin.z; }
+uint Scale() { return clamp(cell.x, 1u, MaxScale); }
+ivec2 Cells() { return ivec2(cell.y, cell.z); }
+uint StatsSlot() { return cell.w; }
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+vec2 ViewToPixel(vec3 p, vec4 projection, vec2 jitter) {
+    const vec2 ndc = vec2(p.x * projection.x, p.y * projection.y) / p.z;
+    return vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * Size() + jitter - 0.5;
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+vec3 ViewAt(ivec2 pixel) {
+    return PixelToView(vec2(pixel), DepthAt(pixel));
+}
+
+vec3 NormalFromDepthAt(ivec2 pixel, vec3 p) {
+    const vec3 px = ViewAt(pixel + ivec2(1, 0)), mx = ViewAt(pixel - ivec2(1, 0));
+    const vec3 py = ViewAt(pixel + ivec2(0, 1)), my = ViewAt(pixel - ivec2(0, 1));
+    const vec3 dx = abs(px.z - p.z) < abs(p.z - mx.z) ? px - p : p - mx;
+    const vec3 dy = abs(py.z - p.z) < abs(p.z - my.z) ? py - p : p - my;
+    const vec3 n = cross(dy, dx);
+    return dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, -1.0);
+}
+
+float Component(vec4 v, uint index) {
+    return index == 0u ? v.x : index == 1u ? v.y : index == 2u ? v.z : v.w;
+}
+
+vec3 SurfaceNormal(ivec2 pixel, vec3 p) {
+    vec3 n;
+    if ((Flags() & FlagNormal) == 0u || NormalMode() == NormalFromDepth) {
+        n = NormalFromDepthAt(pixel, p);
+    } else {
+        const vec4 t = texelFetch(normal_tex, pixel, 0);
+        const uint sw = NormalSwizzle();
+        n = vec3(Component(t, sw & 3u), Component(t, (sw >> 2u) & 3u),
+                 NormalComponents() == 3u ? Component(t, (sw >> 4u) & 3u) : 0.0);
+        if (NormalMode() == NormalUnorm) {
+            n = n * 2.0 - 1.0;
+        }
+        if (NormalComponents() == 2u) {
+            n.z = -sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        if (NormalWorld()) {
+            n = vec3(dot(view_rows[0].xyz, n), dot(view_rows[1].xyz, n), dot(view_rows[2].xyz, n));
+        }
+        if (any(isnan(n)) || dot(n, n) < 1e-6) {
+            n = NormalFromDepthAt(pixel, p);
+        } else {
+            n = normalize(n);
+        }
+    }
+    if (dot(n, p) > 0.0) {
+        n = -n;
+    }
+    return n;
+}
+
+uint SurfaceAlphaTexture(SurfaceRecord r) {
+    const uint slot = (r.flags >> 6u) & 1023u;
+    return slot != 0u ? slot : r.texture;
+}
+
+uint SurfaceAlphaChannel(SurfaceRecord r) {
+    return ((r.flags >> 26u) & 3u) ^ 3u;
+}
+
+bool AlphaTestPasses(uint instance, uint primitive, vec2 barycentrics) {
+    if (instance >= surfaces.length()) {
+        return true;
+    }
+    const SurfaceRecord r = surfaces[instance];
+    const uint alpha_tex = SurfaceAlphaTexture(r);
+    if ((r.flags & SurfaceAlphaTest) == 0u || (r.flags & SurfaceHasUv) == 0u ||
+        alpha_tex == 0u || alpha_tex >= MaxSurfaceTextures) {
+        return true;
+    }
+    const uint base = r.uv_base + primitive * TriangleWords;
+    if (base + 2u >= uv_pool.length()) {
+        return true;
+    }
+    const vec2 a = unpackHalf2x16(uv_pool[base]);
+    const vec2 b = unpackHalf2x16(uv_pool[base + 1u]);
+    const vec2 c = unpackHalf2x16(uv_pool[base + 2u]);
+    const vec2 uv = a * (1.0 - barycentrics.x - barycentrics.y) + b * barycentrics.x + c * barycentrics.y;
+    const float alpha = textureLod(surface_textures[nonuniformEXT(alpha_tex)], uv, 0.0)[SurfaceAlphaChannel(r)];
+    return !(alpha < r.alpha_ref);
+}
+
+float Occlusion(vec3 origin, vec3 dir, float t_max) {
+    rayQueryEXT q;
+    const bool falloff = (uint(radius_bias_tmin.w) & 1u) != 0u;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_rays_flags.xy),
+                          falloff ? gl_RayFlagsNoneEXT : gl_RayFlagsTerminateOnFirstHitEXT, 0x01u,
+                          TlasPoint(tlas_rays_flags.xy, origin), TMin(), TlasDir(tlas_rays_flags.xy, dir), t_max);
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            AlphaTestPasses(uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)),
+                            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                            rayQueryGetIntersectionBarycentricsEXT(q, false))) {
+            rayQueryConfirmIntersectionEXT(q);
+        }
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) {
+        return 0.0;
+    }
+    if (!falloff) {
+        return 1.0;
+    }
+    return clamp(1.0 - rayQueryGetIntersectionTEXT(q, true) / t_max, 0.0, 1.0);
+}
+
+uint Pcg(inout uint state) {
+    state = state * 747796405u + 2891336453u;
+    const uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float Rand(inout uint state) {
+    return float(Pcg(state) >> 8u) * (1.0 / 16777216.0);
+}
+
+float TraceAo(ivec2 cell_id, vec3 p, vec3 n) {
+    const vec3 helper = abs(n.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 tangent = normalize(cross(helper, n));
+    const vec3 bitangent = cross(n, tangent);
+    const vec3 origin = p + n * (Bias() + abs(p.z) * 2e-4);
+    uint state = uint(cell_id.x) * 1973u + uint(cell_id.y) * 9277u + Frame() * 26699u + 7873u;
+    Pcg(state);
+    const uint rays = clamp(Rays(), 1u, MaxRays);
+    float occluded = 0.0;
+    for (uint i = 0u; i < rays; ++i) {
+        const float u1 = (float(i) + Rand(state)) / float(rays);
+        const float u2 = Rand(state);
+        const float r = sqrt(u1);
+        const float phi = TwoPi * u2;
+        const vec3 local = vec3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - u1)));
+        const vec3 dir = tangent * local.x + bitangent * local.y + n * local.z;
+        occluded += Occlusion(origin, dir, Radius());
+    }
+    return 1.0 - occluded / float(rays);
+}
+
+float HistoryAo(vec3 p, float ao_now, out float count) {
+    count = 0.0;
+    if ((Flags() & FlagHistory) == 0u || MaxHistory() == 0u || Debug() == 1u) {
+        return ao_now;
+    }
+    const vec3 prev = vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
+                           dot(reproject[2], vec4(p, 1.0)));
+    if (abs(prev.z) <= 1e-4) {
+        return ao_now;
+    }
+    const float scale = float(Scale());
+    const vec2 prev_cell = (ViewToPixel(prev, prev_proj, prev_jitter.xy) + 0.5) / scale - 0.5;
+    const ivec2 base = ivec2(floor(prev_cell));
+    const vec2 f = prev_cell - vec2(base);
+    float ao_sum = 0.0, w_sum = 0.0, n_sum = 0.0;
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            const ivec2 tap = base + ivec2(i, j);
+            if (any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, Cells()))) {
+                continue;
+            }
+            const vec4 h = texelFetch(history_tex, tap, 0);
+            if (h.z <= 0.0 || abs(prev.z - h.y) > HistoryZTolerance * max(1.0, abs(prev.z))) {
+                continue;
+            }
+            const float w = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+            ao_sum += h.x * w;
+            n_sum += h.z * w;
+            w_sum += w;
+        }
+    }
+    if (w_sum <= 1e-4) {
+        return ao_now;
+    }
+    const float history_ao = ao_sum / w_sum;
+    const float history_count = n_sum / w_sum;
+    count = min(history_count, float(MaxHistory()));
+    return mix(history_ao, ao_now, 1.0 / (count + 1.0));
+}
+
+void AddStats(ivec2 cell_id, float stock, float ours) {
+    if ((cell_id.x & 7) != 0 || (cell_id.y & 7) != 0) {
+        return;
+    }
+    const uint base = StatsSlot() * StatsStride;
+    atomicAdd(stats[base], uint(stock * StatsScale));
+    atomicAdd(stats[base + 1u], uint(ours * StatsScale));
+    atomicAdd(stats[base + 2u], 1u);
+}
+
+void StoreAo(ivec2 target, float ao) {
+    vec4 mask = imageLoad(mask_img, target);
+    mask.x = ao;
+    if ((uint(radius_bias_tmin.w) & 2u) != 0u) {
+        mask.y *= ao;
+    }
+    imageStore(mask_img, target, mask);
+}
+
+void Resolve(ivec2 pixel) {
+    if (pixel.x >= int(Size().x) || pixel.y >= int(Size().y)) {
+        return;
+    }
+    const float depth = DepthAt(pixel);
+    if (!(depth < 1.0 && depth >= 0.0)) {
+        return;
+    }
+    const float z = ViewZ(depth);
+    const float tolerance = BlockZTolerance * max(1.0, abs(z));
+    const ivec2 own = pixel / int(Scale());
+    const vec4 h = imageLoad(history_img, own);
+    if (h.z > 0.0 && abs(h.y - z) <= tolerance) {
+        return;
+    }
+    float best = 1e30;
+    float ao = -1.0;
+    for (int j = -1; j <= 1; ++j) {
+        for (int i = -1; i <= 1; ++i) {
+            const ivec2 c = own + ivec2(i, j);
+            if ((i == 0 && j == 0) || any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, Cells()))) {
+                continue;
+            }
+            const vec4 n = imageLoad(history_img, c);
+            const float d = abs(n.y - z);
+            if (n.z > 0.0 && d < best) {
+                best = d;
+                ao = n.x;
+            }
+        }
+    }
+    if (ao < 0.0 && h.z > 0.0) {
+        ao = h.x;
+    }
+    if (ao >= 0.0) {
+        StoreAo(pixel, clamp(ao, 0.0, 1.0));
+    }
+}
+
+void main() {
+    if (ao_resolve != 0u) {
+        Resolve(ivec2(gl_GlobalInvocationID.xy));
+        return;
+    }
+    const ivec2 cell_id = ivec2(gl_GlobalInvocationID.xy);
+    if (cell_id.x >= Cells().x || cell_id.y >= Cells().y) {
+        return;
+    }
+    const int scale = int(Scale());
+    const ivec2 pixel = min(cell_id * scale, ivec2(Size()) - 1);
+    const float depth = DepthAt(pixel);
+    const bool surface = depth < 1.0 && depth >= 0.0 && !isnan(depth);
+    if (!surface) {
+        imageStore(history_img, cell_id, vec4(1.0, 0.0, 0.0, 0.0));
+        return;
+    }
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const vec3 n = SurfaceNormal(pixel, p);
+    const float ao_now = TraceAo(cell_id, p, n);
+    float count;
+    float ao = HistoryAo(p, ao_now, count);
+    ao = isnan(ao) ? 1.0 : clamp(ao, 0.0, 1.0);
+    imageStore(history_img, cell_id, vec4(ao, p.z, count + 1.0, 0.0));
+    AddStats(cell_id, imageLoad(mask_img, pixel).x, ao);
+    for (int j = 0; j < scale; ++j) {
+        for (int i = 0; i < scale; ++i) {
+            const ivec2 target = cell_id * scale + ivec2(i, j);
+            if (target.x >= int(Size().x) || target.y >= int(Size().y)) {
+                continue;
+            }
+            if (target != pixel) {
+                const float z = ViewZ(DepthAt(target));
+                if (abs(z - p.z) > BlockZTolerance * max(1.0, abs(p.z))) {
+                    continue;
+                }
+            }
+            StoreAo(target, ao);
+        }
+    }
+}

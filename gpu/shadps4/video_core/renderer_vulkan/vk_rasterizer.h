@@ -4,6 +4,7 @@
 #pragma once
 
 #include <chrono>
+#include <unordered_map>
 
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
@@ -14,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_constant_ring.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
+#include "video_core/renderer_vulkan/rt/vk_ray_tracing.h"
 #include "video_core/renderer_vulkan/vk_draw_pipe.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
@@ -146,7 +148,7 @@ public:
     void UnmapMemory(VAddr addr, u64 size);
 
     u64 Flush();
-    void Finish();
+    void Finish(std::source_location loc = std::source_location::current());
     /// bbport: BB_EARLY_SUBMIT=1: the frame's work goes to the GPU in parts while it is
     /// recorded, so the GPU starts drawing before the frame is complete (less latency).
     void MaybeSubmitEarly();
@@ -287,6 +289,8 @@ private:
     std::array<TextureSet, 32768> texture_sets{};
     u64 texture_set_hits = 0, texture_set_misses = 0;
     std::array<u64, 4> texture_set_why{}; ///< misses: other key, generation, image check, new
+    void CaptureRtTextures(const Shader::Info& stage, u32 first_image_idx, const u32* sizes,
+                           u32 size_count);
     /// Returns true when the stage's images were bound from the memo.
     bool BindTexturesFromSet(const Shader::Info& stage, const PreparedStage* prepared,
                              u32 first_image_idx, bool& barrier, TextureSet*& slot);
@@ -306,6 +310,15 @@ private:
     /// BB_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
     bool SkipOutputlessDraw(const GraphicsPipeline* pipeline);
+    bool SkipShadowDraw();
+    u64 shadow_draws_skipped = 0;
+    void LogSmokeSeen(const GraphicsPipeline* pipeline, const char* path);
+    void LogDrawResources(const GraphicsPipeline* pipeline);
+    void CaptureSmokePatch(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
+                           bool is_indexed, u32 index_offset, bool flame);
+    void CaptureGlow(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs, bool is_indexed,
+                     u32 index_offset);
+    std::vector<Rt::FxParticle> smoke_particles;
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
     void BindIndexBuffer(u32 index_offset = 0);
@@ -341,9 +354,21 @@ private:
     std::unique_ptr<SceneTargets> scene_targets;
     bool scene_started = false;
     std::unique_ptr<ObjectMotion> object_motion;
+    std::unique_ptr<RayTracing> ray_tracing;
     bool motion_draw = false;
     u64 motion_geometry{};    ///< vertex-stream identity of the current direct draw
+    std::vector<u32> fx_strip_indices;
     bool gbuffer_draw = false;
+    bool side_gbuffer_draw = false;
+    bool water_sheet_draw = false;
+    bool fog_sheet_draw = false;
+    bool sheet_hidden = false;
+    bool light_draw = false;
+    bool ao_draw = false;
+    bool dir_shadow_draw = false;
+    bool composite_draw = false;
+    bool composite_ps = false;
+    bool skip_light_draw = false;
     std::unique_ptr<TemporalUpscaler> upscaler; // bbport: FSR (docs/upscaler.md)
     std::array<float, 2> draw_jitter{};         ///< viewport offset of the current draw, pixels
     std::array<float, 2> target_scale{1.0f, 1.0f}; ///< pass drawn into the upscaler's output-size images
@@ -360,6 +385,31 @@ private:
     std::array<RenderTargetInfo, AmdGpu::NUM_COLOR_BUFFERS> cb_descs;
     std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc> db_desc;
     boost::container::static_vector<vk::DescriptorImageInfo, Shader::NUM_IMAGES> image_infos;
+    boost::container::static_vector<VideoCore::ImageId, Shader::NUM_IMAGES> image_info_ids;
+    vk::ImageView rt_albedo_view{};
+    VideoCore::ImageId rt_albedo_image{};
+    u64 rt_albedo_uid{};
+    vk::ImageView rt_alpha_view{};
+    VideoCore::ImageId rt_alpha_image{};
+    u64 rt_alpha_uid{};
+    u32 rt_alpha_channel{3};
+    vk::ImageView rt_sky_view{};
+    VideoCore::ImageId rt_sky_image{};
+    u64 rt_sky_uid{};
+    struct RtPrepassAlpha {
+        vk::ImageView view{};
+        VideoCore::ImageId image{};
+        u64 uid{};
+        u32 channel{3};
+        u64 ps{};
+    };
+    std::unordered_map<u64, RtPrepassAlpha> rt_prepass_alpha;
+    u64 rt_prepass_key{};
+    u64 rt_prepass_ps{};
+    bool rt_inherit{};
+    RtPrepassAlpha rt_inherit_alpha{};
+    vk::ImageView rt_normal_view{};
+    VideoCore::ImageId rt_normal_image{};
     boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
     boost::container::static_vector<VideoCore::ImageId, Shader::NUM_IMAGES> bound_images;
     struct BoundBuffer {
@@ -511,6 +561,7 @@ private:
     u64 proxy_samples = 0; ///< texture bindings that read a scene proxy (statistics)
     float sampler_lod_bias = 0.0f; ///< bbport: extra bias of this draw's samplers
     bool scene_debug_frame = false; ///< BB_SCENE_DEBUG: this frame's passes are printed
+    bool scene_debug_used = false;
     bool PendingWriteOverlaps(VAddr address, u64 size);
     /// Stage B: the ring bindings of the stages of the packet being recorded.
     struct RingStage {

@@ -66,9 +66,14 @@ comparison. The package also ships that document under `docs/`.
 DLSS (optional): `DLSS_SDK_ROOT=<checkout of github.com/NVIDIA/DLSS> bash
 packaging/windows/build_dlss.sh` builds `bbport_dlss.dll` (`gpu/dlss_bridge`, the only code that
 uses the NVIDIA SDK, compiled with MSVC 2022) and copies it with `nvngx_dlss.dll` next to
-`out/bb-probe.exe`; `package.sh` ships both when present. The renderer loads the bridge at run
-time (`vk_dlss.cpp`), adds the Vulkan extensions NGX asks for, and DLSS gets the same inputs as
-FSR 3 (scene color, depth, render-pixel motion vectors, jitter). `BB_DLSS=0` turns it off.
+`out/bb-probe.exe`, with `nvngx_dlssg.dll` (Frame Generation) and `nvngx_dlssd.dll` (Ray
+Reconstruction, `BB_RT_DLSS_RR=1` with `BB_RT=1`, docs/PATH_TRACING.md slice 9); `package.sh`
+ships what is present. The SDK checkout is a release tag of the official repo only
+(`git clone --depth 1 --branch v310.9.16 https://github.com/NVIDIA/DLSS <empty dir>`); the
+NVIDIA DLLs are never committed. `out/bb-dlss-capabilities.exe out` (built by the same script)
+prints which features NGX offers on this GPU without the game. The renderer loads the bridge at
+run time (`vk_dlss.cpp`), adds the Vulkan extensions NGX asks for, and DLSS gets the same inputs
+as FSR 3 (scene color, depth, render-pixel motion vectors, jitter). `BB_DLSS=0` turns it off.
 
 The launcher texts are written in English with the Russian beside them; the other languages
 are in `launcher/bbport_lang.py` (one list per language in the order of `KEYS`; a missing or
