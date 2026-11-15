@@ -1502,6 +1502,27 @@ int PS4_SYSV_ABI sceHttpCreateConnectionWithURL(int tmplId, const char* url, boo
         return ORBIS_HTTP_ERROR_INVALID_URL;
     }
 
+    // bbport: the region unlock patch (the only way to get the Chinese text out of the retail
+    // builds) makes the game's region 5, which indexes one past its four-entry server URL table
+    // and yields the empty string there. The game then asks for the server information with an
+    // empty URL, so online play never starts ("Unable to obtain Bloodborne server information").
+    // Every /bb-xx/ path on the server answers the same document, so fall back to the EU endpoint
+    // of the game's own host: the host overrides written by run.py still redirect it to the
+    // community server, and BB_SERVER_INFO_URL replaces the fallback (0 disables it).
+    std::string url_fallback;
+    if (*url == '\0' || std::strstr(url, "://") == nullptr) {
+        const char* configured = std::getenv("BB_SERVER_INFO_URL");
+        if (configured == nullptr) {
+            configured = "https://ss4.scej-network.jp:20443/bb-eu/ss.info";
+        }
+        if (std::strcmp(configured, "0") != 0) {
+            LOG_WARNING(Lib_Http, "URL '{}' has no scheme (region unlock?); using '{}'", url,
+                        configured);
+            url_fallback = configured;
+            url = url_fallback.c_str();
+        }
+    }
+
     u64 required = 0;
     int parse_ret = sceHttpUriParse(nullptr, url, nullptr, &required, 0);
     if (parse_ret < 0) {
