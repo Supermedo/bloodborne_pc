@@ -18,6 +18,7 @@
 #include "video_core/renderer_vulkan/rt/rt_sharc.h"
 #include "video_core/renderer_vulkan/rt/rt_direct.h"
 #include "video_core/renderer_vulkan/rt/rt_fx.h"
+#include "video_core/renderer_vulkan/rt/rt_geo_cache.h"
 #include "video_core/renderer_vulkan/rt/rt_geometry.h"
 #include "video_core/renderer_vulkan/rt/rt_gi.h"
 #include "video_core/renderer_vulkan/rt/rt_gi_pipeline.h"
@@ -25,6 +26,8 @@
 #include "video_core/renderer_vulkan/rt/rt_lights.h"
 #include "video_core/renderer_vulkan/rt/rt_live.h"
 #include "video_core/renderer_vulkan/rt/rt_moon_cache.h"
+#include "video_core/renderer_vulkan/rt/rt_sky_finder.h"
+#include "video_core/renderer_vulkan/rt/rt_placement.h"
 #include "video_core/renderer_vulkan/rt/rt_sky_cache.h"
 #include "video_core/renderer_vulkan/rt/rt_restir_gi.h"
 #include "video_core/renderer_vulkan/rt/rt_surface.h"
@@ -102,11 +105,42 @@ public:
                ps == Rt::FxSheetShader;
     }
     [[nodiscard]] u32 HazeColor(const std::array<float, 3>& world, u32 rgba) const;
+    // Takes the newest finished fog light read-back (BB_RT_HAZE_RT) for HazeColor.
+    void ReadFogLight();
     [[nodiscard]] float MistSheetScale() const noexcept {
         return mist_sheet_scale;
     }
 
     void AddDraw(const Rt::DrawInput& draw);
+    // A scene draw the object-motion history had no room for (vertex store full, or past its
+    // draws a frame): its positions are not captured, so it cannot be in the TLAS. Logged by
+    // pixel shader, a few a window, so a mesh with no shadow can be named.
+    void NoteNoPositions(u64 ps, u64 vs, u32 indices, u32 vertices, u32 draw_instances,
+                         const char* why);
+    // A tessellated G-buffer draw (stages LsHs, three control points a patch). The position
+    // store does not cover tessellation, so such a mesh was never in the TLAS (the big trees
+    // of the Forbidden Woods cast no shadow). Its control mesh is read on the CPU instead:
+    // model-space positions, the index list, and the game's world matrix per instance. Each
+    // mesh gets one BLAS; its instances stand in the TLAS as shadow casters.
+    struct PatchDraw {
+        u64 ps{}, vs{};
+        u64 geometry{}; // identity of the mesh: its position and index streams
+        const u8* positions{};
+        u32 position_stride{}, vertex_count{};
+        const void* indices{};
+        u32 index_size{}, index_count{};
+        s32 base_vertex{};
+        const float* matrices{}; // 12 floats an instance
+        u32 instances{};
+    };
+    void AddPatchDraw(const PatchDraw& draw);
+    [[nodiscard]] bool PatchMeshes() const noexcept {
+        return enabled && patch_on;
+    }
+    /// BB_RT_PLACEMENT: whether the rasterizer looks for the draws' world matrices.
+    [[nodiscard]] bool PlacementOn() const noexcept {
+        return placement_on;
+    }
     void AddSmoke(std::span<const Rt::FxParticle> particles, const Rt::DrawTag& tag);
     [[nodiscard]] bool FlameShader(u64 ps) const {
         return enabled && water_on && Rt::HashListed(flame_ps, ps, 0);
@@ -318,6 +352,9 @@ private:
         u64 omm_scratch_bytes{};
         u32 record{};
         bool anchored{};
+        // Its triangles when they are not in the soup (the geometry cache writes them into
+        // geo_ring): the device address of 9 floats a triangle, 0 = the soup at triangle_base.
+        u64 soup_address{};
     };
     struct FrameInstance {
         u32 entry_id{};
@@ -343,6 +380,14 @@ private:
         bool anchored{};
         bool kept{};
         u32 glass_mask{};
+        // A placement of a shared mesh entry: `relocate` moves the BLAS from the placement it
+        // was built from onto this one (world space). `same_frame`: the entry was built earlier
+        // this frame by another placement, so its build view is this frame's.
+        bool relocated{};
+        bool same_frame{};
+        Rt::Affine relocate{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        bool shadow_only{}; // from the geometry cache: TLAS mask MaskKept whatever BB_RT_KEEP_GI
+        u64 placed_record{}; // a kept placement of a shared mesh: its key in placed_records
     };
     struct SkinState {
         u32 entry{}, mode{}, step{}, mask{}, flags{}, slot{}, triangles{};
@@ -537,6 +582,12 @@ private:
     u64 gi_fog_frame = ~0ull;
     u32 gi_fog_bytes = 0;
     u32 gi_fog_log_lines = 0;
+    // The game's fog sets table (fixed address, rewritten on the GPU every frame) as last seen at
+    // the composite; the reflect pass copies it again before the composite (CopyFogTableEarly).
+    VAddr fog_src_address = 0;
+    u32 fog_src_bytes = 0;
+    u64 fog_src_frame = ~0ull;
+    void CopyFogTableEarly();
     u32 miss_log_lines = 0;
     u32 rebuild_log_lines = 0;
     u32 superset_log_lines = 0;
@@ -553,11 +604,14 @@ private:
     // not kept again until the game draws it.
     bool kept_probe = true;
     std::array<std::vector<u32>, Slots> kept_snap; // TLAS index -> kept entry id, ~0u otherwise
+    // TLAS index -> the kept placement's key in placed_records (a shared mesh), 0 otherwise.
+    std::array<std::vector<u64>, Slots> kept_snap_place;
     std::array<u64, Slots> kept_snap_frame{};
     std::array<u64, Slots> kept_probe_tick{};
     std::array<u64, Slots> kept_probe_frame{~0ull, ~0ull, ~0ull};
     std::array<u32, Slots> kept_probe_built{};
     u64 kept_probe_hidden = 0, kept_probe_reads = 0, kept_probe_hits = 0;
+    u64 kept_probe_hidden_placed = 0; // of kept_probe_hidden: kept placements of shared meshes
     u32 kept_probe_log_lines = 0;
     void ReadKeptProbe();
     std::vector<Rt::DrawTag> entry_tags;
@@ -645,6 +699,80 @@ private:
     float shelf_metres = 1.0f;
     u64 shelved_total = 0, unshelved_total = 0;
     u32 shelf_log_lines = 0;
+    // Placement identity (rt_placement.h, BB_RT_PLACEMENT, live): static draws keyed by the
+    // world matrix from the game's constants, once the probe confirmed that shader's matrices.
+    bool placement_on = true;
+    std::unordered_map<u64, Rt::PlacementTrust> placement_trust;
+    std::vector<Rt::PlacementCheck> placement_checks;
+    std::array<std::vector<Rt::PlacementCheck>, Slots> slot_placement_checks;
+    // Vertex shaders whose verdict changed: their entries of the other keying are erased at the
+    // next frame start, so the two never stand side by side in the TLAS.
+    std::vector<u64> placement_trusted_vs, placement_rejected_vs;
+    bool placement_purge_placed = false, placement_purge_trusted = false;
+    u64 placement_draws = 0, placement_instances = 0, placement_fallbacks = 0;
+    u64 placement_kept_skipped = 0, placement_moving_draws = 0, placement_movers_found = 0;
+    // Placements drawn this frame (every draw whose matrices were read), and the movers.
+    Rt::DrawnPlacements drawn_placements;
+    Rt::PlacementMovers placement_movers;
+    u32 mover_log_lines = 0;
+    // Draw failures for lack of ids / pool space and over the record or triangle capacity at
+    // the last stats line: the stats line prints what happened since.
+    u64 placement_pool_full_seen = 0, placement_capacity_seen = 0;
+    // One BLAS per mesh shared by its placements (BB_RT_PLACEMENT_SHARED, rt_placement.h). A
+    // record per placement seen: what a kept (not drawn this frame) placement needs to stand in
+    // the TLAS again. `key` is the placed key with the placement id; `mesh` the hash of the
+    // shared entry's key, checked against the entry because ids are reused.
+    bool placement_shared = true;
+    struct PlacedRecord {
+        u32 entry_id{};
+        u64 mesh{};
+        Rt::DrawKey key{};
+        Rt::Affine matrix{};
+        u64 first_frame{}, last_frame{};
+        // The frame the kept probe found this placement in front of the drawn surface: not
+        // kept again until the game draws it (last_frame passes it).
+        u64 probe_hidden{};
+        std::array<float, 3> seen_camera{};
+        // Its piece in the geometry cache: map index (-2 not looked up, -1 none), placement, mesh.
+        s32 geo_map = -2;
+        u32 geo_place = 0, geo_mesh = 0;
+    };
+    std::unordered_map<u64, PlacedRecord> placed_records;
+    // New records of this frame (entry id, translation): a settled record of the same mesh drawn
+    // last frame and not now, within MoverReach of one of these, is the same object having
+    // moved (a door, a lift), not a second copy: it is dropped instead of kept.
+    std::vector<std::pair<u32, std::array<float, 3>>> placed_new;
+    // (mesh, placement) pairs added this frame: a second draw of the same pair (another pass)
+    // adds no second instance.
+    std::unordered_set<u64> placed_frame_seen;
+    u64 placed_shared_instances = 0, placed_kept_last = 0, placed_ghosts = 0;
+    void NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key, const Rt::DrawKey& placed_key,
+                    const float* matrix);
+    struct KeptItem {
+        Rt::CacheEntry* entry;
+        bool relocated;
+        Rt::Affine relocate;
+        bool shadow_only = false; // a piece from the geometry cache: no material, shadows only
+        u64 record = 0;           // a kept placement: its key in placed_records
+    };
+    void CollectKeptPlacements(const std::array<float, 3>& camera, std::vector<KeptItem>& out);
+    void CollectPatchInstances(const std::array<float, 3>& camera, std::vector<KeptItem>& out);
+    // A kept entry's textures as resolved this frame (frame + 1; 0 = never), by entry id.
+    struct KeptMemo {
+        u64 frame = 0;
+        u32 texture = 0;
+        u32 alpha_texture = 0;
+        u32 normal_map = 0;
+    };
+    std::vector<KeptMemo> kept_memo;
+    void FindPlacementMovers();
+    // Instances the last AddDraw appended (a placed instanced draw appends one per instance);
+    // OnDrawBound gives all of them the draw's textures.
+    u32 last_add_count = 1;
+    void AddOne(const Rt::DrawInput& draw, u32 draw_index);
+    void QueuePlacementCheck(const Rt::DrawInput& draw, u32 instance, u64 trust_key);
+    void ReadPlacementChecks(u32 slot, const u32* flags);
+    void ApplyPlacementPurges();
     u64 masked_instances = 0, camera_masked = 0, last_masked = 0;
     u64 kept_instances = 0, last_kept = 0, kept_untextured = 0;
     u64 kept_tris_last = 0, kept_alpha_last = 0, kept_over_budget_last = 0, kept_too_big_last = 0;
@@ -670,6 +798,43 @@ private:
     HostRing records_ring, indices_ring, instances_ring, params_ring, probes_ring, flags_ring,
         shadow_params_ring, direct_params_ring, direct_lights_ring, direct_sets_ring,
         gi_lights_ring, gi_sets_ring, gi_fog_ring, restir_remap_ring, sets_readback_ring;
+    // Geometry cache (rt_geo_cache.h, BB_RT_GEO_DIR): the map's pieces from the game's files,
+    // as shadow-only casters where the game has not drawn them (within BB_RT_GEO_RADIUS of the
+    // camera). `geo_ring`: the triangles of the BLAS built this frame, one slot per frame slot.
+    struct GeoMapState {
+        Rt::GeoMap map;
+        std::vector<u32> entry;  // per mesh: cache entry id of its BLAS, ~0 none
+        std::vector<u32> nearby; // placements within reach of `near_at`
+        std::array<float, 3> near_at{};
+        bool near_valid = false;
+        u64 hit_frame = 0; // last frame the game's own placements matched this map's
+        u32 hits_now = 0;
+        // Which collision's display groups fit the pieces the game draws (rt_geo_cache.h
+        // GeoVisible): evidence gathers over frames and starts over when no set fits any more
+        // (the player walked onto another collision).
+        Rt::GeoVisible visible;
+        std::vector<u32> drawn_now; // this frame's drawn placements of this map
+    };
+    std::vector<GeoMapState> geo_maps;
+    bool geo_loaded = false;
+    HostRing geo_ring;
+    float geo_radius = 50.0f;
+    u32 geo_min_triangles = 32;
+    // (map, placement, mesh) of what stands in the TLAS from the game's own draws, this frame
+    // and the one before: the file's copy of those stays out.
+    std::unordered_set<u64> geo_live, geo_live_prev;
+    std::vector<float> geo_vertices;
+    std::vector<u32> geo_indices;
+    u64 geo_instances_last = 0, geo_builds = 0, geo_build_triangles = 0, geo_build_failures = 0;
+    std::vector<float> geo_soup;
+    bool alloc_skip_uv = false; // AllocateEntry: no UV block (a geometry cache BLAS)
+    static u64 GeoKey(size_t map, u32 place, u32 mesh) {
+        return u64(map) << 44 | u64(place) << 22 | mesh;
+    }
+    void LoadGeoMaps();
+    Rt::CacheEntry* GeoEntry(GeoMapState& state, size_t map, u32 mesh);
+    bool QueueGeoBuilds(u32 slot);
+    void CollectGeoInstances(const std::array<float, 3>& camera, std::vector<KeptItem>& out);
     std::array<Rt::SetReadback, Slots> sets_readback{};
     DeviceBuffer soup, scratch, pool_buffer, tlas_buffer, fingerprints, material, material_accum;
     std::vector<u32> material_resets;
@@ -768,6 +933,7 @@ private:
     float exposure_rate = 0.03f;
     float exposure_white = 3.0f;
     float thin_transmit = 0.4f; // BB_RT_THIN_TRANSMIT: moonlight through thin cards
+    float moon_reach = 0.0f;    // BB_RT_MOON_REACH: moon shadow ray metres, 0 = 10 km
     u64 exposure_frames = 0;
     u64 moon_dir_frames = 0;
     bool moon_from_sky = true;
@@ -781,8 +947,47 @@ private:
     // sky layer pass, seeded into it while the game culls the disc.
     Rt::SkyKey sky_key;
     Rt::MoonCache moon_cache;
+    // The sky the game draws, known by its cloud draws' vertices, and its moon from the game's
+    // files (rt_sky_finder.h): the light points at it without a look at the disc or a cache.
+    Rt::SkyFinder sky_finder;
+    bool moon_files = true;    // BB_RT_MOON_FILES
+    // Tessellated meshes (AddPatchDraw). BB_RT_PATCH_MESHES.
+    bool patch_on = true;
+    struct PatchBuild {
+        u64 geometry{};
+        u32 triangles{};
+        std::vector<float> soup; // 9 floats a triangle, model space
+    };
+    std::vector<PatchBuild> patch_builds;        // meshes waiting for their BLAS
+    std::unordered_map<u64, u32> patch_entries;  // mesh -> BLAS entry id
+    struct PatchRecord {
+        u64 geometry{};
+        Rt::Affine matrix{};
+        u64 last_frame{};
+        std::array<float, 3> seen_camera{};
+    };
+    std::unordered_map<u64, PatchRecord> patch_records; // by mesh and matrix
+    u64 patch_draws = 0, patch_built = 0, patch_built_triangles = 0, patch_failed = 0;
+    u64 patch_instances_last = 0;
+    u32 soup_ring_used = 0; // bytes of this frame's slot of geo_ring taken so far
+    bool EnsureSoupRing();
+    Rt::CacheEntry* PatchEntry(u64 geometry);
+    bool QueuePatchBuilds(u32 slot);
+    u64 no_positions_total = 0, no_positions_window = ~0ull;
+    std::unordered_set<u64> no_positions_logged;
+    // The draws name a sky of the game's files (with or without a moon).
+    bool MoonSkyKnown() const {
+        return moon_files && sky_finder.Sky() >= 0;
+    }
+    int moon_file_logged = -2; // the sky last logged (-1 none)
+    bool moon_file_on = false; // the file's moon lights the scene
+    u64 moon_file_draws = 0, moon_file_known = 0, moon_file_placed = 0;
+    std::array<float, 3> moon_file_camera{};
+    bool moon_file_camera_valid = false;
     std::string moon_cache_path;
     u64 moon_generation = 0;
+    std::array<float, 3> moon_seed_logged{}; // the cached moon the seed points at, logged on change
+    bool moon_seed_on = false;
     bool moon_found_run = false; // a confirmed find this layer run
     bool moon_last_found = false;
     // Logged source of light 1 (0 game sets, 1 sky moon, 2 sky moon fading out).
@@ -799,6 +1004,25 @@ private:
     std::array<u64, 3> moon_ring_frame{~0ull, ~0ull, ~0ull};
     std::array<u64, 3> moon_ring_key{};
     std::array<u64, 3> moon_ring_gen{};
+    // RT-lit stock haze (BB_RT_HAZE_RT): the share of moon and sky light reaching each fog
+    // particle (rt_gi.comp FogLight, sky layer pass phase 2), read back and matched to the
+    // game's particles by world position in HazeColor.
+    static constexpr u32 FogLightSlotBytes = u32(Rt::FogMaxParticles) * 16;
+    HostRing fog_light_ring;
+    std::array<u64, 3> fog_light_tick{};
+    std::array<u64, 3> fog_light_frame{~0ull, ~0ull, ~0ull};
+    std::array<std::vector<std::array<float, 3>>, 3> fog_light_centres;
+    std::vector<std::array<float, 3>> fog_upload_centres; // world centres of the uploaded fog block
+    // A world grid of the light share (HazeCell), blended over read-backs and sampled
+    // trilinearly: the nearest read-back puff popped between lit and shadowed every 4 frames.
+    struct HazeCellLight {
+        std::array<float, 3> factor;
+        u64 read;
+    };
+    std::unordered_map<u64, HazeCellLight> haze_light; // by HazeCell
+    u64 haze_reads = 0;
+    std::array<float, 3> haze_light_mean{1.0f, 1.0f, 1.0f};
+    bool haze_light_valid = false;
     // The learned sky image per sky model on disk (rt_sky_cache.h, BB_RT_SKY_CACHE): loaded when
     // a sky appears, read back every SkyIoEvery frames and saved when it has grown.
     static constexpr u64 SkyIoEvery = 240;
@@ -1183,6 +1407,7 @@ private:
     u64 restir_frames = 0, restir_resets = 0;
     bool fog_enabled = false;
     bool fog_stock = false;
+    bool fog_early = true; // BB_RT_FX_FOG_EARLY: fog right after GXLightComposite
     bool skip_volumes = true;
     std::vector<u64> sky_ps;
     bool direct_base = false;
@@ -1251,14 +1476,14 @@ private:
     float water_puddle_wet = 0.6f;
     float water_ripple = 0.1f;
     float water_sheet_f0 = 0.5f;
-    float water_mist = 0.0f;
+    float water_mist = 1.0f;
     float water_mist_height = 5.0f;
     float water_mist_albedo = 1.0f;
     u32 water_mist_steps = 8;
     float water_mist_patch = 0.5f;
     float water_mist_glow = 0.25f;
     float water_mist_glow_dark = 0.6f;
-    float water_mist_fog = 5.0f;
+    float water_mist_fog = 0.25f;
     bool mist_sheets = true;
     float mist_sheet_scale = 0.5f;
     std::vector<Rt::FxParticle> fog_filling;
@@ -1313,6 +1538,8 @@ private:
     bool stock_haze = true;
     int pause_knob = -1;
     bool haze_lit = true;
+    bool haze_rt = true;     // BB_RT_HAZE_RT
+    float haze_shade = 0.8f; // BB_RT_HAZE_SHADE
     float haze_floor = 0.3f;
     float haze_gain = 1.0f;
     float haze_tint = 0.5f;
@@ -1346,6 +1573,8 @@ private:
     std::vector<HeldDraw> fx_held;
     struct LateDraw {
         Rt::DrawInput draw{};
+        // The draw's matrices: the game's constant buffers are rewritten by the next frame.
+        std::vector<float> placements;
         Rt::Affine inv_view{};
         bool camera_valid{};
         // The moon and cloud layer keeps its texture over to the replay (OnDrawBound).

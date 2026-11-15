@@ -9,8 +9,8 @@ static int MotionHistorySsboGpuTest(const std::filesystem::path& dir) {
         const auto device = instance.GetDevice();
         const auto allocator = instance.GetAllocator();
         Scheduler scheduler(instance, std::getenv("BB_OMV_TEST_THREADED") != nullptr);
-        constexpr size_t P = Shader::MotionVectors::PositionsPerHalf;
-        constexpr size_t Slots = Shader::MotionVectors::PositionSlots, Bytes = Slots * 16;
+        const size_t P = Shader::MotionVectors::PositionsPerHalf;
+        const size_t Slots = Shader::MotionVectors::PositionSlots(), Bytes = Slots * 16;
         Buffer history(allocator, Bytes,
                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         Buffer indices(allocator, 3072 * 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);

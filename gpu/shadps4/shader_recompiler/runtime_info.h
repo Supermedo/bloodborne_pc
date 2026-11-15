@@ -83,8 +83,12 @@ struct SwVertexRuntimeInfo {
 /// fragment shader writes the screen-space difference to an extra color attachment.
 struct MotionVectors {
     static constexpr u32 ParamSlots = 1 + 4 * 8192;
-    static constexpr u32 PositionsPerHalf = 8u << 20; // bbport: matches ObjectMotion::PositionsPerFrame (RT stores)
-    static constexpr u32 PositionSlots = 1 + 2 * PositionsPerHalf;
+    // bbport: the vertex store's size per frame, set by ObjectMotion before any motion shader
+    // is compiled (those shaders are built every session, never loaded from disk).
+    static inline u32 PositionsPerHalf = 8u << 20;
+    static u32 PositionSlots() {
+        return 1 + 2 * PositionsPerHalf;
+    }
     static constexpr u32 ParamDescriptorSet = 1, ParamBinding = 0;
     static constexpr u32 SafeCurrentLocation = 24, SafePreviousLocation = 25;
     // Fixed before motion pipelines are compiled; the ordinary setting still enables OMV.

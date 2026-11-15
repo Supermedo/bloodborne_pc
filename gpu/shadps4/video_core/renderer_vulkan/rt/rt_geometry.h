@@ -43,6 +43,10 @@ struct DrawKey {
     uint64_t shader{}, geometry{}, indices{}, topology{};
     uint32_t index_count{}, instances{}, first_instance{}, first_vertex{}, vertex_count{};
     uint32_t occurrence{};
+    // Hash of the draw's world matrix (rt_placement.h PlacementId), 0 = none. A map piece drawn
+    // with a verified matrix is keyed by it instead of by its order among identical draws, so
+    // the same placement finds the same entry whatever else the view draws.
+    uint64_t placement{};
     bool operator==(const DrawKey&) const = default;
 };
 
@@ -57,6 +61,11 @@ struct DrawKeyHash {
         mix(uint64_t(k.index_count) << 32 | k.instances);
         mix(uint64_t(k.first_instance) << 32 | k.first_vertex);
         mix(uint64_t(k.vertex_count) << 32 | k.occurrence);
+        // Only placed keys mix the placement: with BB_RT_PLACEMENT=0 (or an occurrence-keyed
+        // draw) the hash stays bit for bit what it was before placements existed.
+        if (k.placement) {
+            mix(k.placement);
+        }
         return size_t(h);
     }
 };
@@ -185,6 +194,23 @@ struct DrawInput {
     float alpha_ref{0.5f};
     bool blended{};
     DrawTag tag{};
+    // Placement (rt_placement.h): the game's world matrix per instance, 12 floats each, read
+    // from vertex-shader buffer `placement_slot`. Valid only during AddDraw (held draws copy it).
+    // Used only once that shader's matrices agreed with the probe.
+    const float* placements{};
+    uint32_t placement_count{};
+    uint32_t placement_slot{};
+    // A static draw that could carry a placement (not skinned, not an effect pipeline); counts
+    // the draws that fell back to the occurrence key.
+    bool placement_static{};
+    // Skinning without the matrix buffer of an instanced batch (its matrices are big enough to
+    // look like bones). A placed piece takes no palette at all (rt_placement.h PlacedInstance).
+    bool placement_skinned{};
+    // Model-space float3 positions (attribute location 0), to check the matrix against the
+    // probe: vertex v at positions + v * position_stride, v < position_vertices.
+    const uint8_t* positions{};
+    uint32_t position_stride{};
+    uint32_t position_vertices{};
 };
 
 struct Capacity {

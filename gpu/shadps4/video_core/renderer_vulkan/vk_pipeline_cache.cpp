@@ -811,6 +811,33 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     }
     sel.motion = false;
     sel.motion_store = false;
+    // BB_MOTION_SELECT_LOG=1: why a G-buffer draw cannot take the motion variant at all (it
+    // then stores no positions and the ray tracer never sees it), once per state.
+    static const bool possible_log = [] {
+        const char* value = std::getenv("BB_MOTION_SELECT_LOG");
+        return value && value[0] == '1';
+    }();
+    if (possible_log && bound_colors >= 5 && !motion_possible) {
+        static std::mutex log_mutex;
+        static std::unordered_set<u64> logged;
+        const u64 state = u64(Shader::MotionVectors::positions_address != 0) |
+                          u64(bool(regs.color_buffers[Shader::MotionVectors::Output])) << 1 |
+                          u64(regs.depth_buffer.DepthValid()) << 2 |
+                          u64(regs.depth_buffer.NumSamples()) << 3 |
+                          u64(regs.IsClipDisabled()) << 8 | u64(regs.stage_enable.raw) << 9 |
+                          u64(bound_mask) << 24 | u64(regs.num_instances.NumInstances() > 1) << 40;
+        std::scoped_lock lock{log_mutex};
+        if (logged.insert(state).second) {
+            std::printf("Motion select: not possible for a draw with %u colour targets (mask %x, "
+                        "%u instances, %u indices): positions buffer %d, motion output slot taken "
+                        "%d, depth valid %d, depth samples %u, clip disabled %d, stages %u\n",
+                        bound_colors, bound_mask, regs.num_instances.NumInstances(),
+                        regs.num_indices, int(Shader::MotionVectors::positions_address != 0),
+                        int(bool(regs.color_buffers[Shader::MotionVectors::Output])),
+                        int(regs.depth_buffer.DepthValid()), u32(regs.depth_buffer.NumSamples()),
+                        int(regs.IsClipDisabled()), u32(regs.stage_enable.raw));
+        }
+    }
 
     // First pass to fill render target information needed by shader recompiler
     for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {

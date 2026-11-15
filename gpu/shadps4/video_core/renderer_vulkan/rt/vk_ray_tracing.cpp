@@ -224,8 +224,10 @@ struct ExposurePush {
     std::array<float, 4> size_cfg; // width, height, phase, apply
     std::array<float, 4> params;   // key, max stops, rate, reset
     std::array<float, 4> tone;     // white level (stops above the key)
+    std::array<float, 4> proj;     // camera projection (as the fog pass), zero when no camera
+    std::array<float, 4> up;       // world up in view space, w = 1 when the dome test is on
 };
-static_assert(sizeof(ExposurePush) == 48);
+static_assert(sizeof(ExposurePush) == 80);
 constexpr u32 ExposureSlotBytes = 64;
 
 // rt_gi.comp RT_LIGHT_VIS push constants (VisPush).
@@ -247,7 +249,8 @@ struct SkyLayerPush {
     float moon_min;
     std::array<float, 4> moon_seed;
     u32 moon_reset;
-    u32 pad[3];
+    u32 fog_base;
+    u32 pad[2];
 };
 static_assert(sizeof(SkyLayerPush) == 48);
 
@@ -1259,7 +1262,14 @@ bool RayTracing::CreateResources() {
                             vk::PhysicalDeviceAccelerationStructurePropertiesKHR>()
             .get<vk::PhysicalDeviceAccelerationStructurePropertiesKHR>();
     scratch_alignment = std::max<u64>(as_props.minAccelerationStructureScratchOffsetAlignment, 256);
-    const u64 pool_default = (pool_basis * (compact_enabled ? 3 : 5) / 2 + (1u << 20)) >> 20;
+    // The pool holds the static world near the player, not one frame of draws: with a stable
+    // identity per piece, a full camera turn on the Central Yharnam bridge keeps 461 MiB of
+    // compacted BLAS (670 MiB uncompacted), and above 75 % the pool evicts what it was just
+    // shown (measured at the old 543 MiB: 13-21 pieces rebuilt every frame of a turn). An
+    // eighth of the video memory, 512 MiB to 2 GiB, never under the per-frame basis.
+    const u64 pool_frame = (pool_basis * (compact_enabled ? 3 : 5) / 2 + (1u << 20)) >> 20;
+    const u64 pool_world = std::clamp<u64>((instance.GetTotalMemoryBudget() >> 20) / 8, 512, 2048);
+    const u64 pool_default = std::max(pool_frame, pool_world);
     pool_buffer.size = EnvU64("BB_RT_BLAS_MB", pool_default, 16, 8192) << 20;
     tlas_buffer.size = Rt::PtlasHeaderBytes + tlas_sizes.accelerationStructureSize;
     scratch.size = std::max(blas_sizes.buildScratchSize, tlas_sizes.buildScratchSize) +
@@ -1411,6 +1421,7 @@ bool RayTracing::CreateFeatureRings(const Rt::LiveToggles& f) {
           !host_ring(fill_vis_ring, FillVisSlotBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) ||
           !host_ring(halo_ring, HaloSlotBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) ||
           !host_ring(moon_ring, MoonRingSlotBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT) ||
+          !host_ring(fog_light_ring, FogLightSlotBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT) ||
           !host_ring(exposure_ring, ExposureSlotBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT))) ||
         (f.reflect &&
          !host_ring(reflect_params_ring, ParamsSlotBytes,
@@ -1487,7 +1498,7 @@ void RayTracing::DestroyResources() {
                            &reflect_params_ring, &restir_remap_ring, &restir_gi_params_ring,
                            &ao_params_ring, &ao_stats_ring, &fog_params_ring, &pick_ring,
                            &smoke_ring, &fill_vis_ring, &halo_ring, &moon_ring,
-                           &exposure_ring}) {
+                           &fog_light_ring, &exposure_ring, &geo_ring}) {
         if (ring->buffer) {
             vmaDestroyBuffer(allocator, ring->buffer, ring->allocation);
             ring->buffer = vk::Buffer{};
@@ -1632,6 +1643,8 @@ void RayTracing::ReadLiveKnobs() {
     dir_dump = EnvU64("BB_RT_DIR_DUMP", 0, 0, 1) == 1;
     gi_world_set = !Rt::KnobIs("BB_RT_GI_WORLD_SET", '0');
     moon_from_sky = !Rt::KnobIs("BB_RT_MOON_FROM_SKY", '0');
+    moon_files = !Rt::KnobIs("BB_RT_MOON_FILES", '0');
+    patch_on = !Rt::KnobIs("BB_RT_PATCH_MESHES", '0');
     moon_min = EnvFloat("BB_RT_MOON_MIN", 0.2f, 0.0f, 100.0f);
     {
         const bool was = exposure_on;
@@ -1643,11 +1656,19 @@ void RayTracing::ReadLiveKnobs() {
     exposure_rate = EnvFloat("BB_RT_EXPOSURE_RATE", 0.03f, 0.001f, 1.0f);
     exposure_white = EnvFloat("BB_RT_EXPOSURE_WHITE", 3.0f, 0.5f, 12.0f);
     thin_transmit = EnvFloat("BB_RT_THIN_TRANSMIT", 0.4f, 0.0f, 1.0f);
+    moon_reach = EnvFloat("BB_RT_MOON_REACH", 0.0f, 0.0f, 10000.0f);
     const char* depth_draws_env = Rt::Knob("BB_RT_DEPTH_DRAWS");
     depth_only_draws = depth_draws_env && depth_draws_env[0] == '1';
     pick_enabled = Rt::ParsePick(Rt::Knob("BB_RT_PICK"), pick_at);
     pick_every = u32(EnvU64("BB_RT_PICK_EVERY", 60, 1, 600));
-    miss_log = Rt::KnobIs("BB_RT_MISS_LOG", '1');
+    {
+        // Turning the log on (live) starts its line budget again.
+        const bool was = miss_log;
+        miss_log = Rt::KnobIs("BB_RT_MISS_LOG", '1');
+        if (miss_log && !was) {
+            miss_log_lines = 0;
+        }
+    }
     gi_fog = !Rt::KnobIs("BB_RT_GI_FOG", '0');
     gi_at_composite = !Rt::KnobIs("BB_RT_GI_AT_COMPOSITE", '0');
     gi_denoise = u32(EnvU64("BB_RT_GI_DENOISE", 2, 0, 8));
@@ -1666,8 +1687,35 @@ void RayTracing::ReadLiveKnobs() {
     fog_alpha_distance = EnvFloat("BB_RT_FX_FOG_ALPHA_DIST", 5.0f, 0.0f, 10000.0f);
     fog_debug = u32(EnvU64("BB_RT_FX_FOG_DEBUG", 0, 0, 6));
     fog_stock = Rt::KnobIs("BB_RT_FOG_STOCK", '1');
+    fog_early = !Rt::KnobIs("BB_RT_FX_FOG_EARLY", '0');
     sky_debug = u32(EnvU64("BB_RT_SKY_DEBUG", 0, 0, 4));
     shelf_metres = EnvFloat("BB_RT_SHELF", 1.0f, 0.0f, 10000.0f);
+    {
+        // Live: turning it off erases the placed entries, turning it on the occurrence-keyed
+        // entries of trusted shaders, so a placement is never in the TLAS under both keys.
+        const bool was = placement_on;
+        placement_on = EnvU64("BB_RT_PLACEMENT", 1, 0, 1) != 0;
+        if (was != placement_on) {
+            placement_purge_placed = !placement_on;
+            placement_purge_trusted = placement_on;
+            Log("Ray tracing live: BB_RT_PLACEMENT %u -> %u\n", was ? 1u : 0u,
+                placement_on ? 1u : 0u);
+        }
+        // One BLAS per mesh shared by its placements (0: one BLAS per placement). Switching it
+        // erases the placed entries of the other kind.
+        const bool shared_was = placement_shared;
+        placement_shared = EnvU64("BB_RT_PLACEMENT_SHARED", 1, 0, 1) != 0;
+        if (shared_was != placement_shared) {
+            placement_purge_placed = true;
+            placed_records.clear();
+            Log("Ray tracing live: BB_RT_PLACEMENT_SHARED %u -> %u\n", shared_was ? 1u : 0u,
+                placement_shared ? 1u : 0u);
+        }
+        // Geometry cache (BB_RT_GEO_DIR): how far from the camera its pieces stand in as shadow
+        // casters (0 = off) and the smallest mesh worth an instance.
+        geo_radius = EnvFloat("BB_RT_GEO_RADIUS", 50.0f, 0.0f, 500.0f);
+        geo_min_triangles = u32(EnvU64("BB_RT_GEO_MIN_TRIS", 32, 1, 1000000));
+    }
     // Learn the screen's sky into the 512x512 sky image the mirrors read (BB_RT_SKY_IMAGE).
     sky_image = EnvFloat("BB_RT_SKY_IMAGE", 1.0f, 0.0f, 1.0f) > 0.5f;
     sky_u_offset = EnvFloat("BB_RT_SKY_U0", 0.313f, -4.0f, 4.0f);
@@ -1876,9 +1924,15 @@ void RayTracing::ReadLiveKnobs() {
     water_sheen_far = EnvFloat("BB_RT_WATER_SHEEN_FAR", 1.0f, 0.0f, 100.0f);
     water_ripple = EnvFloat("BB_RT_WATER_RIPPLE", 0.1f, 0.0f, 2.0f);
     water_sheet_f0 = EnvFloat("BB_RT_WATER_SHEET_F0", 0.5f, 0.0f, 1.0f);
+    // With the haze spheres (BB_RT_MIST_SHEETS on) 1 = each sphere as opaque through its centre
+    // as the game's card for the particle (2026-11-14, user-approved default).
     water_mist = EnvFloat("BB_RT_MIST", 0.0f, 0.0f, 100.0f);
     stock_haze = water_mist <= 0.0f && !Rt::KnobIs("BB_RT_FX_SHEETS", '0');
     haze_lit = !Rt::KnobIs("BB_RT_HAZE_LIT", '0');
+    // The stock haze sprites take the path-traced moon and sky light that reaches each puff
+    // (rt_gi.comp FogLight): dark in a cliff's shadow, stock colour in the open.
+    haze_rt = !Rt::KnobIs("BB_RT_HAZE_RT", '0');
+    haze_shade = EnvFloat("BB_RT_HAZE_SHADE", 0.8f, 0.0f, 1.0f);
     haze_floor = EnvFloat("BB_RT_HAZE_FLOOR", 0.3f, 0.0f, 1.0f);
     haze_gain = EnvFloat("BB_RT_HAZE_GAIN", 1.0f, 0.0f, 1000.0f);
     haze_tint = EnvFloat("BB_RT_HAZE_TINT", 0.5f, 0.0f, 1.0f);
@@ -1889,7 +1943,8 @@ void RayTracing::ReadLiveKnobs() {
     water_mist_glow = EnvFloat("BB_RT_MIST_GLOW", 0.25f, 0.0f, 100.0f);
     water_mist_glow_dark = EnvFloat("BB_RT_MIST_GLOW_DARK", 0.6f, 0.0f, 1.0f);
     mist_sheets = !Rt::KnobIs("BB_RT_MIST_SHEETS", '0');
-    water_mist_fog = EnvFloat("BB_RT_MIST_FOG", 5.0f, 0.0f, 1000.0f);
+    // Sky light scattered by the mist, 1 = physical (mean upper-hemisphere sky x 1/2).
+    water_mist_fog = EnvFloat("BB_RT_MIST_FOG", 0.25f, 0.0f, 1000.0f);
     mist_sheet_scale = EnvFloat("BB_RT_MIST_SHEET_SCALE", 0.5f, 0.05f, 100.0f);
     water_direct_keep = EnvU64("BB_RT_WATER_DIRECT_KEEP", 1, 0, 1) != 0;
     water_scatter = EnvFloat("BB_RT_WATER_SCATTER", 0.04f, 0.0f, 10.0f);
@@ -3272,7 +3327,8 @@ bool RayTracing::AllocateEntry(u32 triangles, bool updatable, bool omm, Rt::Cach
     out.refits = 0;
     out.uv_base = Rt::NoUv;
     out.uv_bytes = 0;
-    if (uv_buffer.buffer) {
+    // A BLAS of the geometry cache is a shadow caster only: no UVs to keep for it.
+    if (uv_buffer.buffer && !alloc_skip_uv) {
         const u64 uv_bytes = u64(triangles) * Rt::TriangleUvBytes;
         const u64 uv_offset = uv_pool.Alloc(uv_bytes);
         if (uv_offset != Rt::BlockPool::Fail) {
@@ -3315,7 +3371,22 @@ void RayTracing::BeginSlot() {
             float jump;
         };
         std::vector<Moved> moved;
+        // BB_RT_FAR_LOG=1 (live): every ~5 s, the draws whose probe sample lies over 250 m from
+        // the camera (the sky's meshes: clouds, moon, sun), to see how a map draws them.
+        static u64 far_log_next = 0;
+        const bool far_log = Rt::KnobIs("BB_RT_FAR_LOG", '1') && frame >= far_log_next;
+        if (far_log) {
+            far_log_next = frame + 300;
+        }
+        const std::array<float, 3> far_cam{frame_inv_view[3], frame_inv_view[7], frame_inv_view[11]};
         for (size_t i = 0; i < entries.size(); ++i) {
+            // A probe that compares nothing (kept instances, relocated placements, the geometry
+            // cache's pieces) wrote no result: not read back. The flags are in write-combined
+            // GPU memory, slow to read, and most instances are of this kind once every
+            // placement is kept (3.3 ms a frame for 2,400 instances before this).
+            if (i < modes.size() && modes[i] == 2) {
+                continue;
+            }
             const u32* words = flags + i * ProbeFlagWords;
             const u32 k = words[4];
             std::array<float, 3> at{};
@@ -3325,6 +3396,26 @@ void RayTracing::BeginSlot() {
                 std::memcpy(p, words + 1, sizeof(p));
                 at = Rt::Transform(views[i], {p[0], p[1], p[2]});
                 pe = cache.ById(entries[i]);
+                // A sky draw's place in the world, for skies that differ only by it.
+                if (moon_files && pe && entries[i] < entry_tags.size() &&
+                    u32(entry_tags[entries[i]].ps) == Rt::SkyLayerPs && std::isfinite(at[0]) &&
+                    std::isfinite(at[1]) && std::isfinite(at[2])) {
+                    ++moon_file_placed;
+                    sky_finder.Placed(frame, pe->triangles * 3, k, at);
+                }
+                if (far_log && pe && frame_camera_valid) {
+                    const float dist = std::sqrt(Rt::Distance2(at, far_cam));
+                    if (dist > 250.0f && std::isfinite(dist)) {
+                        const Rt::DrawTag tag =
+                            entries[i] < entry_tags.size() ? entry_tags[entries[i]] : Rt::DrawTag{};
+                        Log("RT far frame %llu: entry %u, %u triangles, ps %08x vs %08x, mode %u, "
+                            "%.0f m, direction %.3f %.3f %.3f, at (%.1f %.1f %.1f)\n",
+                            (unsigned long long)probe_frame, entries[i], pe->triangles, u32(tag.ps),
+                            u32(tag.vs), u32(modes[i]), dist, (at[0] - far_cam[0]) / dist,
+                            (at[1] - far_cam[1]) / dist, (at[2] - far_cam[2]) / dist, at[0], at[1],
+                            at[2]);
+                    }
+                }
                 if (pe && modes[i] == 0 && pe->built_frame == probe_frame) {
                     pe->anchor = at;
                     pe->anchor_k = k;
@@ -3346,7 +3437,7 @@ void RayTracing::BeginSlot() {
                 const float jump = pe && pe->anchor_k == k
                                        ? std::sqrt(Rt::Distance2(pe->anchor, at)) : 0.0f;
                 if (shelf_metres > 0.0f && home && pe && words[0] != 1u && modes[i] == 1 &&
-                    jump > shelf_metres && !pe->skinned && !pe->moving &&
+                    jump > shelf_metres && Rt::BlasCache::MayShelve(*home, *pe) &&
                     pe->built_frame <= probe_frame) {
                     moved.push_back({entries[i], *home, at, k, jump});
                     continue;
@@ -3411,21 +3502,37 @@ void RayTracing::BeginSlot() {
             }
         }
         masked_instances += last_masked;
+        ReadPlacementChecks(slot, flags);
     }
     slot_probe_entries[slot].clear();
+    slot_placement_checks[slot].clear();
     {
         CpuTimer timer{hitch_log, hitch.evict};
         ReclaimBlocks();
         cache.BeginFrame(frame);
+        ApplyPlacementPurges();
+        if (placement_on) {
+            FindPlacementMovers();
+        }
         const std::array<float, 3> evict_camera =
             frame_camera_valid ? Rt::Transform(frame_inv_view, {0.0f, 0.0f, 0.0f})
                                : std::array<float, 3>{};
         const bool kept_limits = off_switches.instances && off_switches.evict;
+        placed_frame_seen.clear();
         cache.EvictUnusedBy(
             [&](const Rt::CacheEntry& e) {
+                // A shared mesh a kept placement showed on the last frames is in use.
+                if (e.shared && e.placed_kept_frame + 2 >= frame) {
+                    return keep_rules.kept_unused_frames;
+                }
+                // A geometry cache BLAS that is not needed right now (its piece is drawn or
+                // out of reach) stays a while: pieces go in and out of the game's own draws.
+                if (e.placement == Rt::GeoMeshPlacement || e.placement == Rt::PatchMeshPlacement) {
+                    return u64(600);
+                }
                 return kept_limits && frame_camera_valid
                            ? Rt::UnusedLimit(e, evict_camera, keep_rules)
-                           : keep_rules.unused_frames;
+                           : Rt::UnsettledLimit(e, keep_rules.unused_frames);
             },
             [&](const Rt::CacheEntry& e) { ReleaseEntry(e); });
         while (pool.Used() - retired_bytes > pool.Size() / 4 * 3 &&
@@ -3445,6 +3552,8 @@ void RayTracing::BeginSlot() {
     pending.clear();
     instances.clear();
     probes.clear();
+    placement_checks.clear();
+    drawn_placements.Clear();
     frame_draws = 0;
     fx_blended_last = fx_frame_blended;
     fx_blended_draws += fx_frame_blended;
@@ -3454,6 +3563,137 @@ void RayTracing::BeginSlot() {
     slot_textures[slot].assign(1, {});
     last_add_accepted = false;
     omm_used = 0;
+}
+
+void RayTracing::ReadPlacementChecks(u32 slot, const u32* flags) {
+    const auto& views = slot_probe_views[slot];
+    const auto& modes = slot_probe_modes[slot];
+    const auto& entries = slot_probe_entries[slot];
+    static constexpr const char* names[] = {"pending", "trusted", "rejected"};
+    // Checks queued while on, read back after BB_RT_PLACEMENT went off: ignored.
+    if (!placement_on) {
+        return;
+    }
+    const u64 probe_frame = slot_probe_frames[slot];
+    Rt::PlacementFlips flips;
+    for (const Rt::PlacementCheck& c : slot_placement_checks[slot]) {
+        if (c.probe >= entries.size() || c.probe >= views.size() || c.probe >= modes.size() ||
+            modes[c.probe] == 2) {
+            continue;
+        }
+        const u32* words = flags + u64(c.probe) * ProbeFlagWords;
+        const u32 k = words[4];
+        if (k >= Rt::ProbeSamples || !((c.mask >> k) & 1u)) {
+            continue;
+        }
+        float p[3];
+        std::memcpy(p, words + 1, sizeof(p));
+        const std::array<float, 3> at = Rt::Transform(views[c.probe], {p[0], p[1], p[2]});
+        const float error = Rt::PlacementError(c, k, at);
+        const float tolerance = Rt::PlacementTolerance(std::sqrt(Rt::Distance2(at, c.camera)));
+        if (!Rt::RecordPlacementCheck(placement_trust, flips, placement_on, c, error, tolerance,
+                                      probe_frame)) {
+            continue;
+        }
+        const Rt::PlacementTrust& t = placement_trust[c.trust_key];
+        Rt::Affine m{};
+        std::copy(c.matrix.begin(), c.matrix.end(), m.begin());
+        const std::array<float, 3> placed = Rt::Transform(m, c.model[k]);
+        Log("Ray tracing: placement matrix of vs %016llx in buffer %u %s after %u checks (%u off "
+            "by more than %.3f m, worst %.3f m; last: matrix x model (%.2f %.2f %.2f), probe "
+            "(%.2f %.2f %.2f)) (BB_RT_PLACEMENT)\n",
+            (unsigned long long)c.vs, c.slot, names[u32(t.verdict)], t.passes + t.fails, t.fails,
+            tolerance, t.worst, placed[0], placed[1], placed[2], at[0], at[1], at[2]);
+    }
+    // The purges follow the net change of the readback (a flip through both runs neither).
+    flips.Collect(placement_trust);
+    placement_trusted_vs.insert(placement_trusted_vs.end(), flips.trusted.begin(),
+                                flips.trusted.end());
+    placement_rejected_vs.insert(placement_rejected_vs.end(), flips.rejected.begin(),
+                                 flips.rejected.end());
+}
+
+void RayTracing::ApplyPlacementPurges() {
+    const auto release = [&](const Rt::CacheEntry& e) { ReleaseEntry(e); };
+    if (placement_purge_placed) {
+        const size_t erased = cache.EraseIf(
+            [](const Rt::DrawKey& k, const Rt::CacheEntry&) { return k.placement != 0; }, release);
+        Log("Ray tracing: BB_RT_PLACEMENT off, %zu placed entries erased\n", erased);
+    }
+    if (!placement_on) {
+        // Off: no verdict asks for a purge (their checks are ignored, ReadPlacementChecks).
+        placement_trusted_vs.clear();
+        placement_rejected_vs.clear();
+        placement_purge_placed = placement_purge_trusted = false;
+        return;
+    }
+    // A shader just trusted: its draws now take placement keys, so the entries it built under
+    // occurrence keys go (left alone they would stay as kept copies of the same placements).
+    // Turned back on: the same for every trusted shader.
+    std::vector<u64> trusted = std::move(placement_trusted_vs);
+    placement_trusted_vs.clear();
+    if (placement_purge_trusted) {
+        for (const auto& [key, t] : placement_trust) {
+            if (t.verdict == Rt::PlacementVerdict::Trusted) {
+                trusted.push_back(t.vs);
+            }
+        }
+    }
+    placement_purge_placed = placement_purge_trusted = false;
+    for (const u64 vs : trusted) {
+        cache.EraseIf(
+            [&](const Rt::DrawKey& k, const Rt::CacheEntry&) {
+                return !k.placement && k.shader == vs;
+            },
+            release);
+    }
+    // A trusted shader that later failed: the placed entries its draws built go (placed keys
+    // carry no shader, the entry remembers it), its draws rebuild as before.
+    std::vector<u64> rejected = std::move(placement_rejected_vs);
+    placement_rejected_vs.clear();
+    for (const u64 vs : rejected) {
+        cache.EraseIf(
+            [&](const Rt::DrawKey& k, const Rt::CacheEntry& e) {
+                return k.placement && e.placed_vs == vs;
+            },
+            release);
+    }
+}
+
+void RayTracing::FindPlacementMovers() {
+    // Runs at the start of a frame: `frame - 1` is the frame that just ended.
+    if (!frame) {
+        return;
+    }
+    std::vector<u64> moved, released;
+    placement_movers.EndFrame(cache, frame - 1, moved, released);
+    const auto release = [&](const Rt::CacheEntry& e) { ReleaseEntry(e); };
+    for (const u64 route : moved) {
+        // Nothing of the mover stays kept: its rest placement would stand as a ghost.
+        const size_t erased = cache.EraseIf(
+            [&](const Rt::DrawKey& k, const Rt::CacheEntry&) {
+                return k.placement && Rt::PlacementRouteKey(k) == route;
+            },
+            release);
+        ++placement_movers_found;
+        if (mover_log_lines < 40) {
+            ++mover_log_lines;
+            Log("Ray tracing: frame %llu mesh %016llx moves (another placement on %u frames in a "
+                "row): keyed by occurrence for %llu frames, %zu placed entries erased "
+                "(BB_RT_PLACEMENT)\n",
+                (unsigned long long)frame, (unsigned long long)route, Rt::MoverStreak,
+                (unsigned long long)Rt::MoverRouteFrames, erased);
+        }
+    }
+    for (const u64 route : released) {
+        // Back to placement keys: its occurrence-keyed entries go, so none stays kept beside
+        // the placed draws of the same pieces.
+        cache.EraseIf(
+            [&](const Rt::DrawKey& k, const Rt::CacheEntry&) {
+                return !k.placement && Rt::PlacementRouteKey(k) == route;
+            },
+            release);
+    }
 }
 
 const std::vector<std::array<float, 3>>& RayTracing::RecentFlames() const {
@@ -3496,7 +3736,113 @@ void RayTracing::AddFlames(std::span<const Rt::FxParticle> world_particles) {
     }
 }
 
+namespace {
+// 2 m world cells for the read-back fog light field.
+constexpr float HazeCellSize = 2.0f;
+// Share of a new read-back taken per read-back (one every SkyLayerEvery frames): about 0.3 s to
+// settle at 50 fps, so a puff drifting into shadow dims instead of switching off.
+constexpr float HazeBlend = 0.25f;
+// Cells not refreshed for this many read-backs are dropped (the puffs left).
+constexpr u64 HazeCellDrop = 60;
+u64 HazeCell(int x, int y, int z) {
+    return (u64(u32(x) & 0x1FFFFFu) << 42) | (u64(u32(y) & 0x1FFFFFu) << 21) | u64(u32(z) & 0x1FFFFFu);
+}
+} // namespace
+
+void RayTracing::ReadFogLight() {
+    if (!haze_rt || !fog_light_ring.mapped) {
+        return;
+    }
+    int ready = -1;
+    for (u32 i = 0; i < Slots; ++i) {
+        if (fog_light_frame[i] != ~0ull && scheduler.IsFree(fog_light_tick[i]) &&
+            (ready < 0 || fog_light_frame[i] > fog_light_frame[u32(ready)])) {
+            ready = int(i);
+        }
+    }
+    if (ready < 0) {
+        return;
+    }
+    const auto& centres = fog_light_centres[u32(ready)];
+    const auto* v = reinterpret_cast<const float*>(fog_light_ring.mapped + u64(ready) * fog_light_ring.slot_bytes);
+    // This read-back's mean per cell, then blended into the kept field.
+    std::unordered_map<u64, std::array<float, 4>> fresh;
+    std::array<double, 3> sum{};
+    u32 n = 0;
+    for (size_t k = 0; k < centres.size(); ++k) {
+        const float* f = v + 4 * k;
+        if (!(f[3] > 0.5f)) {
+            continue;
+        }
+        const auto& c = centres[k];
+        auto& cell = fresh[HazeCell(int(std::floor(c[0] / HazeCellSize)), int(std::floor(c[1] / HazeCellSize)),
+                                    int(std::floor(c[2] / HazeCellSize)))];
+        for (u32 ch = 0; ch < 3; ++ch) {
+            cell[ch] += f[ch];
+            sum[ch] += f[ch];
+        }
+        cell[3] += 1.0f;
+        ++n;
+    }
+    if (n) {
+        for (u32 ch = 0; ch < 3; ++ch) {
+            const float m = float(sum[ch] / n);
+            haze_light_mean[ch] = haze_light_valid ? haze_light_mean[ch] + (m - haze_light_mean[ch]) * HazeBlend : m;
+        }
+    }
+    ++haze_reads;
+    for (const auto& [key, cell] : fresh) {
+        // A new cell starts from the mean, which is what it showed before it had a value.
+        auto [it, added] = haze_light.try_emplace(key, HazeCellLight{haze_light_mean, haze_reads});
+        for (u32 ch = 0; ch < 3; ++ch) {
+            it->second.factor[ch] += (cell[ch] / cell[3] - it->second.factor[ch]) * HazeBlend;
+        }
+        it->second.read = haze_reads;
+    }
+    std::erase_if(haze_light, [&](const auto& e) { return e.second.read + HazeCellDrop < haze_reads; });
+    haze_light_valid = n > 0;
+    static const bool log = Rt::KnobIs("BB_RT_HAZE_LOG", '1');
+    if (log && n && fog_light_frame[u32(ready)] % 120 < Rt::SkyLayerEvery) {
+        float lo = 1.0f, hi = 0.0f;
+        u32 lit = 0;
+        for (size_t k = 0; k < centres.size(); ++k) {
+            const float g = v[4 * k + 1];
+            lo = std::min(lo, g);
+            hi = std::max(hi, g);
+            lit += g > 0.5f ? 1u : 0u;
+        }
+        std::printf("RT haze light frame %llu: %u particles, green min %.3f mean %.3f max %.3f, %u over 0.5\n",
+                    (unsigned long long)fog_light_frame[u32(ready)], n, lo, haze_light_mean[1], hi, lit);
+    }
+    for (u32 i = 0; i < Slots; ++i) {
+        if (fog_light_frame[i] != ~0ull && fog_light_frame[i] <= fog_light_frame[u32(ready)] &&
+            scheduler.IsFree(fog_light_tick[i])) {
+            fog_light_frame[i] = ~0ull;
+        }
+    }
+}
+
 u32 RayTracing::HazeColor(const std::array<float, 3>& world, u32 rgba) const {
+    // The moon and sky light share at this particle (nearest read-back particle within a cell,
+    // else the mean of the last read-back so a new puff does not pop).
+    std::array<float, 3> rt_light{1.0f, 1.0f, 1.0f};
+    if (haze_rt && haze_light_valid) {
+        // Trilinear over the 8 cell centres around the puff; a missing cell counts as the mean.
+        const float gx = world[0] / HazeCellSize - 0.5f, gy = world[1] / HazeCellSize - 0.5f,
+                    gz = world[2] / HazeCellSize - 0.5f;
+        const int x0 = int(std::floor(gx)), y0 = int(std::floor(gy)), z0 = int(std::floor(gz));
+        const float tx = gx - float(x0), ty = gy - float(y0), tz = gz - float(z0);
+        rt_light = {0.0f, 0.0f, 0.0f};
+        for (int corner = 0; corner < 8; ++corner) {
+            const int dx = corner & 1, dy = (corner >> 1) & 1, dz = corner >> 2;
+            const float w = (dx ? tx : 1.0f - tx) * (dy ? ty : 1.0f - ty) * (dz ? tz : 1.0f - tz);
+            const auto it = haze_light.find(HazeCell(x0 + dx, y0 + dy, z0 + dz));
+            const auto& f = it != haze_light.end() ? it->second.factor : haze_light_mean;
+            for (u32 c = 0; c < 3; ++c) {
+                rt_light[c] += w * f[c];
+            }
+        }
+    }
     std::array<float, 3> sum{};
     for (const Rt::Light& l : direct_lights) {
         if (!l.has_world) {
@@ -3523,12 +3869,24 @@ u32 RayTracing::HazeColor(const std::array<float, 3>& world, u32 rgba) const {
         }
     }
     const float luma = (0.2126f * sum[0] + 0.7152f * sum[1] + 0.0722f * sum[2]) * haze_gain;
-    const float lit = std::clamp(haze_floor + luma, 0.0f, 1.0f);
+    // With traced light the colour carries the light and the puff keeps its stock density; the
+    // old alpha cut (BB_RT_HAZE_FLOOR) only stays for the untraced path.
+    const float lit = haze_rt && haze_light_valid ? 1.0f : std::clamp(haze_floor + luma, 0.0f, 1.0f);
     const float peak = std::max({sum[0], sum[1], sum[2]});
     u32 out = 0;
     for (u32 c = 0; c < 3; ++c) {
         const float tint = peak > 1e-6f ? 1.0f + (sum[c] / peak - 1.0f) * haze_tint * std::min(luma, 1.0f) : 1.0f;
-        out |= u32(std::clamp(float((rgba >> (8 * c)) & 0xFFu) * tint + 0.5f, 0.0f, 255.0f)) << (8 * c);
+        // Path-traced moon and sky share, plus the lamps (which reach shadowed puffs too).
+        const float lamp = std::min(luma, 1.0f) * (peak > 1e-6f ? sum[c] / peak : 1.0f);
+        // Light scattered inside the bank keeps a shadowed puff from going black: BB_RT_HAZE_SHADE
+        // is how much of the traced shadow is applied (1 = all).
+        const float shaded = 1.0f - haze_shade + haze_shade * rt_light[c];
+        const float light = std::clamp(shaded + lamp, 0.0f, 1.0f);
+        // The game's colour word is B, G, R, A in memory (an orange flame reads ff5018 with byte 2
+        // high): red is byte 2. Byte 0 taken as red put the warm fire tint on blue, so the
+        // smoke over every bonfire came out blue.
+        const u32 shift = 8 * (2 - c);
+        out |= u32(std::clamp(float((rgba >> shift) & 0xFFu) * tint * light + 0.5f, 0.0f, 255.0f)) << shift;
     }
     out |= u32(std::clamp(float(rgba >> 24) * lit + 0.5f, 0.0f, 255.0f)) << 24;
     return out;
@@ -3899,10 +4257,51 @@ void RayTracing::AddSmoke(std::span<const Rt::FxParticle> particles, const Rt::D
     }
 }
 
+void RayTracing::NoteNoPositions(u64 ps, u64 vs, u32 indices, u32 vertices, u32 draw_instances,
+                                 const char* why) {
+    ++no_positions_total;
+    const u64 window = frame / 600;
+    if (window != no_positions_window) {
+        no_positions_window = window;
+        no_positions_logged.clear();
+    }
+    if (no_positions_logged.size() < 12 &&
+        no_positions_logged.insert(ps ^ (u64(indices) << 40)).second) {
+        Log("Ray tracing: draw without captured positions (%s): ps %016llx vs %016llx, %u "
+            "indices, %u vertices x %u instances; not in the TLAS, casts no shadow; %llu such "
+            "draws so far\n",
+            why, (unsigned long long)ps, (unsigned long long)vs, indices, vertices,
+            draw_instances, (unsigned long long)no_positions_total);
+    }
+}
+
 void RayTracing::AddDraw(const Rt::DrawInput& draw) {
     last_add_accepted = false;
+    last_add_count = 1;
     if (u32(draw.tag.ps) == Rt::SkyLayerPs) {
         sky_key.Add(frame, draw.index_count, draw.vertex_count);
+        // The draw's own vertices name its sky (rt_sky_finder.h). A replayed draw has none.
+        std::array<std::array<float, 3>, Rt::ProbeSamples> model{};
+        if (moon_files && draw.positions && Rt::ReadProbeModel(draw, model) == 0xFu) {
+            ++moon_file_draws;
+            moon_file_known += sky_finder.Draw(frame, draw.index_count, model) ? 1u : 0u;
+        }
+    }
+    // BB_RT_SKY_LOG=1 (live): the sky's draws (cloud layer, moon, dome) with what the CPU can
+    // read of them: the model-space positions of the probe samples' vertices and the matrix.
+    if ((u32(draw.tag.ps) == Rt::SkyLayerPs || u32(draw.tag.ps) == Rt::SkyDomePs) &&
+        frame % 120 == 0 && Rt::KnobIs("BB_RT_SKY_LOG", '1')) {
+        std::array<std::array<float, 3>, Rt::ProbeSamples> model{};
+        const u32 mask = Rt::ReadProbeModel(draw, model);
+        const float* m = draw.placements;
+        Log("RT sky draw frame %llu: ps %08x vs %08x, %u indices, %u vertices, positions %s "
+            "stride %u, mask %x, samples (%.3f %.3f %.3f) (%.3f %.3f %.3f) (%.3f %.3f %.3f) "
+            "(%.3f %.3f %.3f), %u matrices, translation (%.3f %.3f %.3f)\n",
+            (unsigned long long)frame, u32(draw.tag.ps), u32(draw.tag.vs), draw.index_count,
+            draw.vertex_count, draw.positions ? "yes" : "no", draw.position_stride, mask,
+            model[0][0], model[0][1], model[0][2], model[1][0], model[1][1], model[1][2],
+            model[2][0], model[2][1], model[2][2], model[3][0], model[3][1], model[3][2],
+            draw.placement_count, m ? m[3] : 0.0f, m ? m[7] : 0.0f, m ? m[11] : 0.0f);
     }
     if (enabled && built_this_frame && draw.blended) {
         if (fx_held.size() >= fx_cap) {
@@ -3911,6 +4310,9 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
         }
         auto& held = fx_held.emplace_back();
         held.draw = draw;
+        held.draw.placements = nullptr;
+        held.draw.placement_count = 0;
+        held.draw.positions = nullptr;
         if (draw.indices && draw.index_count && draw.index_size) {
             const auto* bytes = static_cast<const u8*>(draw.indices);
             held.indices.assign(bytes, bytes + u64(draw.index_count) * draw.index_size);
@@ -3921,7 +4323,17 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
     }
     if (enabled && built_this_frame && late_mode && !(draw.depth_only && !depth_only_draws)) {
         if (late_held.size() < capacity.records) {
-            late_held.push_back({draw, frame_inv_view, frame_camera_valid});
+            late_held.push_back({draw, {}, frame_inv_view, frame_camera_valid});
+            LateDraw& held = late_held.back();
+            if (draw.placements && draw.placement_count) {
+                held.placements.assign(draw.placements, draw.placements + u64(draw.placement_count) *
+                                                                              Rt::PlacementFloats);
+            } else {
+                held.draw.placement_count = 0;
+            }
+            held.draw.placements = nullptr;
+            // No check from a replay: its vertex buffers may be gone by the next frame.
+            held.draw.positions = nullptr;
             // The sky draws after the TLAS build: keep the layer's texture for the replay.
             last_add_late = u32(draw.tag.ps) == Rt::SkyLayerPs;
         } else {
@@ -3937,6 +4349,120 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
         ++excluded_draws;
         return;
     }
+    alpha_offered += draw.alpha_test ? 1u : 0u;
+    if (draw.blended && fx_frame_blended >= fx_cap) {
+        ++fx_blended_capped;
+        return;
+    }
+    CpuTimer timer{hitch_log, hitch.add};
+    ++hitch.adds;
+    // Placement: a static draw whose shader's matrices passed the probe check is keyed by
+    // (mesh, placement), one entry per instance. Every other draw takes the occurrence key.
+    const bool placeable = placement_on && draw.placement_static && draw.placements &&
+                           draw.placement_count && !draw.blended && !draw.placement_skinned &&
+                           !draw.unreadable &&
+                           (draw.placement_count == 1 || draw.placement_count == draw.instances);
+    // Every draw whose matrices were read names its placements, trusted or not, so a kept
+    // placed entry never stands beside an occurrence-keyed draw of the same placement.
+    if (placement_on) {
+        drawn_placements.Add(draw);
+    }
+    // A mesh found moving (rt_placement.h PlacementMovers) is keyed by occurrence for a while.
+    const bool moving_mesh =
+        placeable && placement_movers.Routed(Rt::PlacementRouteKey(draw.key), frame);
+    placement_moving_draws += moving_mesh ? 1u : 0u;
+    const u64 trust_key = placeable ? Rt::PlacementTrustKey(draw.tag.vs, draw.placement_slot) : 0;
+    const auto trust = placeable ? placement_trust.find(trust_key) : placement_trust.end();
+    const Rt::PlacementVerdict verdict =
+        trust == placement_trust.end() ? Rt::PlacementVerdict::Pending : trust->second.verdict;
+    if (!placeable || moving_mesh || verdict != Rt::PlacementVerdict::Trusted) {
+        placement_fallbacks += draw.placement_static ? 1u : 0u;
+        const size_t probes_before = probes.size();
+        const size_t instances_before = instances.size();
+        AddOne(draw, draw_index);
+        // Which pieces of the geometry cache this draw is, by its own matrices: the cache's
+        // coarse copy of a piece drawn through an untrusted shader would stand in front of it.
+        if (!geo_maps.empty() && draw.placements && draw.placement_count &&
+            instances.size() > instances_before) {
+            Rt::CacheEntry* e = cache.ById(instances.back().entry_id);
+            if (e && e->geo_key_count == 0xFF) {
+                e->geo_key_count = 0;
+                for (u32 i = 0; i < draw.placement_count && e->geo_key_count < e->geo_keys.size();
+                     ++i) {
+                    const Rt::Affine matrix =
+                        Rt::PlacementAffine(draw.placements + size_t(i) * Rt::PlacementFloats);
+                    for (size_t m = 0; m < geo_maps.size(); ++m) {
+                        const s32 place = geo_maps[m].map.FindPlace(matrix);
+                        const s32 mesh = place < 0 ? -1
+                                                   : geo_maps[m].map.FindMesh(u32(place),
+                                                                              draw.key.index_count);
+                        if (mesh >= 0) {
+                            e->geo_keys[e->geo_key_count++] = GeoKey(m, u32(place), u32(mesh));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Only instance 0 is captured where the probe samples (ProbeSlots): check its matrix.
+        if (placeable && verdict == Rt::PlacementVerdict::Pending &&
+            probes.size() > probes_before) {
+            QueuePlacementCheck(draw, 0, trust_key);
+        }
+        return;
+    }
+    ++placement_draws;
+    const size_t instances_before = instances.size();
+    // alpha_offered counts draws: count this draw once, not once per instance.
+    const u64 alpha_before = alpha_accepted;
+    // One spot check a frame keeps watching a trusted shader, every instance in turn.
+    const u32 spot = u32(frame % draw.placement_count);
+    bool any_accepted = false;
+    for (u32 i = 0; i < draw.placement_count; ++i) {
+        const Rt::DrawInput one = Rt::PlacedInstance(draw, i);
+        const size_t probes_before = probes.size();
+        AddOne(one, draw_index);
+        any_accepted = any_accepted || last_add_accepted;
+        if (i == spot && probes.size() > probes_before && placement_checks.size() < 2) {
+            QueuePlacementCheck(one, 0, trust_key);
+        }
+    }
+    alpha_accepted = alpha_before + (alpha_accepted > alpha_before ? 1u : 0u);
+    last_add_accepted = any_accepted;
+    placement_instances += instances.size() - instances_before;
+    last_add_count = u32(std::max<size_t>(instances.size() - instances_before, 1));
+}
+
+void RayTracing::QueuePlacementCheck(const Rt::DrawInput& draw, u32 instance, u64 trust_key) {
+    // A few a frame: the verdict needs a handful of agreeing draws, not every one.
+    if (placement_checks.size() >= 8 || probes.empty() || instance >= draw.placement_count ||
+        !draw.placements || probes.back().mode == 2) {
+        return;
+    }
+    Rt::PlacementCheck c{};
+    c.mask = Rt::ReadProbeModel(draw, c.model);
+    if (!c.mask) {
+        return;
+    }
+    c.probe = u32(probes.size() - 1);
+    c.trust_key = trust_key;
+    c.vs = draw.tag.vs;
+    c.geometry = draw.key.geometry;
+    c.slot = draw.placement_slot;
+    // Compare another sample vertex each frame. Not on a fresh build of an occurrence-keyed
+    // draw: its reported sample becomes the shelving anchor (BeginSlot), which later probes
+    // compare at their first sample.
+    ProbeRecord& probe = probes.back();
+    if (probe.mode != 0 || draw.key.placement) {
+        probe.pad1 |= Rt::PlacementProbeRotation(frame);
+    }
+    std::copy_n(draw.placements + size_t(instance) * Rt::PlacementFloats, Rt::PlacementFloats,
+                c.matrix.begin());
+    placement_checks.push_back(c);
+}
+
+void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
+    last_add_accepted = false;
     const auto tag_instance = [&](u32 entry_id, u32 mode) {
         FrameInstance& fi = instances.back();
         fi.tag = draw.tag;
@@ -3952,13 +4478,6 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
         }
         entry_tags[entry_id] = fi.tag;
     };
-    alpha_offered += draw.alpha_test ? 1u : 0u;
-    if (draw.blended && fx_frame_blended >= fx_cap) {
-        ++fx_blended_capped;
-        return;
-    }
-    CpuTimer timer{hitch_log, hitch.add};
-    ++hitch.adds;
     if (!Rt::FrameGeometry::Valid(draw)) {
         ++geometry.stats.draws;
         ++geometry.stats.invalid;
@@ -3971,7 +4490,24 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
         return;
     }
     Rt::DrawKey key = draw.key;
+    // One BLAS per mesh: a placed draw is looked up under its mesh's key, and this placement is
+    // that BLAS relocated (rt_placement.h SharedMeshPlacement). Not with the partitioned TLAS,
+    // whose partitions take an instance's build view.
+    const bool shared = placement_shared && key.placement != 0 && draw.placements && !ptlas_on;
+    if (shared) {
+        key.placement = Rt::SharedMeshPlacement;
+        // The same placement of the same mesh again this frame (another pass): one instance.
+        if (!placed_frame_seen
+                 .insert(Rt::PlacementMix(u64(Rt::DrawKeyHash{}(key)), draw.key.placement))
+                 .second) {
+            return;
+        }
+    }
     auto lookup = cache.Find(key, draw.palette, draw.skinned, draw.unreadable, u32(count));
+    if (key.placement && lookup.reason == Rt::Rebuild::Miss) {
+        // Movers are told at the frame's end (FindPlacementMovers) from its placed misses.
+        placement_movers.NoteMiss(key);
+    }
     const Rt::Step step = Rt::PlanStep(lookup, u32(count), rebuild_budget, refit_budget);
     const bool draw_alpha = draw.alpha_test && (skin_alpha || !draw.skinned);
     u64 skin_key = 0;
@@ -3984,6 +4520,28 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
                 skin_watch.emplace(hashed, 1);
             }
         }
+    }
+    if (shared && lookup.entry && lookup.entry->shared && lookup.entry->valid &&
+        lookup.entry->built_frame == frame) {
+        // The mesh was built earlier this frame from another placement of it (an instanced
+        // batch of copies the camera sees for the first time): this one is that BLAS moved.
+        ++geometry.stats.draws;
+        ++geometry.stats.accepted;
+        instances.push_back({lookup.entry->id, Rt::IdentityAffine(), false, 0, draw_alpha,
+                             draw.alpha_ref});
+        instances.back().same_frame = true;
+        instances.back().relocated = true;
+        instances.back().relocate =
+            Rt::Relocation(Rt::PlacementAffine(draw.placements), lookup.entry->base_matrix);
+        tag_instance(lookup.entry->id, 1);
+        alpha_accepted += draw.alpha_test ? 1u : 0u;
+        last_add_accepted = true;
+        ProbeRecord probe{};
+        probe.entry = lookup.entry->id;
+        probe.mode = 2;
+        probes.push_back(probe);
+        NotePlaced(lookup.entry->id, key, draw.key, draw.placements);
+        return;
     }
     if (step == Rt::Step::Defer) {
         ++geometry.stats.draws;
@@ -4038,7 +4596,20 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
         probe.pad0 = probe_keep && (lookup.entry->updatable || lookup.entry->moving) ? 1u : 0u;
         // A static mesh that jumps metres is another placement of this draw: its BLAS still
         // stands where it was built, so the probe leaves it in the TLAS (BB_RT_SHELF).
-        probe.pad1 = !lookup.entry->skinned && !lookup.entry->moving ? 1u : 0u;
+        // A placed draw cannot be another placement: a mismatch hides and rebuilds it.
+        probe.pad1 = !lookup.entry->skinned && !lookup.entry->moving && !key.placement ? 1u : 0u;
+        if (shared) {
+            // Another placement than the one the BLAS was built from: the BLAS relocated. Its
+            // captured positions are this placement's, so the probe has nothing to compare.
+            FrameInstance& fi = instances.back();
+            fi.relocated = draw.key.placement != lookup.entry->base_placement;
+            if (fi.relocated) {
+                fi.relocate = Rt::Relocation(Rt::PlacementAffine(draw.placements),
+                                             lookup.entry->base_matrix);
+                probe.mode = 2;
+            }
+            NotePlaced(lookup.entry->id, key, draw.key, draw.placements);
+        }
         probes.push_back(probe);
         return;
     }
@@ -4120,24 +4691,27 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
                 int(lookup.entry && lookup.entry->moving), int(lookup.entry && lookup.entry->dirty),
                 int(lookup.refit), int(lookup.can_refit), int(lookup.limit));
         }
-        if (lookup.reason == Rt::Rebuild::Miss && miss_log && frame > 600 && miss_log_lines < 40) {
+        if (lookup.reason == Rt::Rebuild::Miss && miss_log && frame > 600 && miss_log_lines < 80) {
             Rt::DrawKey match{};
             const u32 kind = cache.ClassifyMiss(key, match);
             ++hitch.miss_kind[std::min<u32>(kind, 4)];
-            if (kind && miss_log_lines < 40) {
+            // Kind 0 too (nothing alike in the cache): a placed piece that comes back into view
+            // and misses has no near match to show.
+            if (miss_log_lines < 80) {
                 ++miss_log_lines;
                 Log("RT miss frame %llu kind %u (1 same buffers+shader, 2 same buffers other "
                     "shader, 3 same shader+indices other vertices, 4 same shader+counts other "
                     "buffers): new vs %016llx geo %016llx idx %016llx n %u inst %u fi %u fv %u "
-                    "vc %u occ %u | had vs %016llx geo %016llx idx %016llx n %u inst %u fi %u fv "
-                    "%u vc %u occ %u\n",
+                    "vc %u occ %u pl %016llx | had vs %016llx geo %016llx idx %016llx n %u inst "
+                    "%u fi %u fv %u vc %u occ %u pl %016llx\n",
                     (unsigned long long)frame, kind, (unsigned long long)key.shader,
                     (unsigned long long)key.geometry, (unsigned long long)key.indices,
                     key.index_count, draw.instances, key.first_instance, key.first_vertex,
-                    key.vertex_count, key.occurrence, (unsigned long long)match.shader,
-                    (unsigned long long)match.geometry, (unsigned long long)match.indices,
-                    match.index_count, match.instances, match.first_instance, match.first_vertex,
-                    match.vertex_count, match.occurrence);
+                    key.vertex_count, key.occurrence, (unsigned long long)key.placement,
+                    (unsigned long long)match.shader, (unsigned long long)match.geometry,
+                    (unsigned long long)match.indices, match.index_count, match.instances,
+                    match.first_instance, match.first_vertex, match.vertex_count,
+                    match.occurrence, (unsigned long long)match.placement);
             }
         }
         if (material.buffer && gi_enabled) {
@@ -4158,7 +4732,16 @@ void RayTracing::AddDraw(const Rt::DrawInput& draw) {
     if (!update) {
         entry.omm_ready = false;
     }
+    entry.placed_vs = key.placement ? draw.tag.vs : 0;
+    entry.shared = shared;
+    if (shared) {
+        entry.base_matrix = Rt::PlacementAffine(draw.placements);
+        entry.base_placement = draw.key.placement;
+    }
     cache.Insert(key, entry);
+    if (shared) {
+        NotePlaced(entry.id, key, draw.key, draw.placements);
+    }
     pending.push_back({entry.id, triangle_base, u32(count), scratch_bytes, update, entry.updatable,
                        entry.omm && !update, u32(instances.size()), omm_scratch_bytes,
                        geometry.Records() - 1, anchored});
@@ -4240,7 +4823,12 @@ bool RayTracing::Build(const SceneInputs& inputs) {
         hitch.anchor_turn = std::max(hitch.anchor_turn, turn);
         anchor_turn_max = std::max(anchor_turn_max, turn);
     }
-    if (triangles || smoke_triangles) {
+    // The geometry cache's BLAS of this frame join the pending builds (their triangles are in
+    // geo_ring, not in the soup).
+    soup_ring_used = 0;
+    const bool patch_queued = QueuePatchBuilds(slot);
+    const bool geo_builds = QueueGeoBuilds(slot) || patch_queued;
+    if (triangles || smoke_triangles || geo_builds) {
         const vk::DescriptorBufferInfo records_info{
             records_ring.buffer, u64(slot) * records_ring.slot_bytes, records_ring.slot_bytes};
         const vk::DescriptorBufferInfo indices_info{
@@ -4521,7 +5109,9 @@ bool RayTracing::Build(const SceneInputs& inputs) {
             }
             const auto input = Rt::BlasInputFor(build.triangles);
             geometries.push_back(SoupGeometry(
-                soup.address + u64(build.triangle_base) * Rt::TriangleBytes, input.max_vertex));
+                build.soup_address ? build.soup_address
+                                   : soup.address + u64(build.triangle_base) * Rt::TriangleBytes,
+                input.max_vertex));
             if (build.update && build.updatable && omm_index_buffer.buffer &&
                 build.entry_id < omm_handles.size() && omm_handles[build.entry_id]) {
                 const Rt::CacheEntry* e = cache.ById(build.entry_id);
@@ -4594,6 +5184,7 @@ bool RayTracing::Build(const SceneInputs& inputs) {
     if (kept_probe) {
         ReadKeptProbe();
         kept_snap[slot].assign(instances.size(), ~0u);
+        kept_snap_place[slot].assign(instances.size(), 0);
         kept_snap_frame[slot] = frame;
     }
     const auto upload_start = std::chrono::steady_clock::now();
@@ -4622,8 +5213,16 @@ bool RayTracing::Build(const SceneInputs& inputs) {
             probe.mode = 2;
             ++camera_masked;
         }
+        if (fi.same_frame) {
+            fi.inv_view = current_inv_view; // its mesh entry was built from this frame's capture
+        }
+        // A placement of a shared mesh: the BLAS stands where it was built (its build view to
+        // the world), then moves onto this placement, then into the current view.
         const Rt::Affine transform =
-            hidden ? Rt::IdentityAffine() : Rt::InstanceTransform(current_inv_view, fi.inv_view);
+            hidden ? Rt::IdentityAffine()
+                   : Rt::InstanceTransform(current_inv_view,
+                                           fi.relocated ? Rt::MultiplyAffine(fi.relocate, fi.inv_view)
+                                                        : fi.inv_view);
         VkAccelerationStructureInstanceKHR data{};
         std::memcpy(&data.transform.matrix[0][0], transform.data(), sizeof(float) * 12);
         data.instanceCustomIndex = fi.entry_id & 0xFFFFFF;
@@ -4633,7 +5232,7 @@ bool RayTracing::Build(const SceneInputs& inputs) {
             Rt::AlphaUnresolved(fi.alpha_test, fi.texture || fi.alpha_texture, entry && entry->uv_captured);
         unresolved_count += unresolved && !hidden ? 1u : 0u;
         data.mask = Rt::InstanceMask(hidden, fi.blended, unresolved, alpha_skip_unresolved,
-                                     fi.kept && !keep_gi,
+                                     (fi.kept && !keep_gi) || fi.shadow_only,
                                      PortalDraw(fi.tag.ps, entry ? entry->triangles : 0u),
                                      WaterSheet(fi.tag.ps));
         if (Rt::HashListed(sky_ps, fi.tag.ps, 0) ||
@@ -4663,8 +5262,17 @@ bool RayTracing::Build(const SceneInputs& inputs) {
                       Rt::PtlasPartition(dynamic, fi.kept, fi.inv_view, center));
         } else {
             instance_data[i] = data;
+            // A kept placement of a shared mesh is probed by its record, not its entry: hiding
+            // the entry would hide every placement of the mesh. (Until 2026-11-15 these were not
+            // probed at all, "it stands where the game's matrix puts it": so does the far
+            // low-detail twin of a block the game no longer draws up close, and it shaded the
+            // real walls black again.)
             if (kept_probe && fi.kept && !hidden && i < kept_snap[slot].size()) {
-                kept_snap[slot][i] = fi.entry_id;
+                if (entry && entry->shared) {
+                    kept_snap_place[slot][i] = fi.placed_record;
+                } else {
+                    kept_snap[slot][i] = fi.entry_id;
+                }
             }
         }
         NoteInstanceState(fi.entry_id, hidden ? 3u : std::min(fi.mode, 2u), fi.tag.ps,
@@ -4761,6 +5369,14 @@ bool RayTracing::Build(const SceneInputs& inputs) {
         skin_keys[i] = instances[i].skin_key;
     }
     slot_probe_frames[slot] = frame;
+    {
+        const std::array<float, 3> camera = Rt::Transform(current_inv_view, {0.0f, 0.0f, 0.0f});
+        for (Rt::PlacementCheck& c : placement_checks) {
+            c.camera = camera;
+        }
+        slot_placement_checks[slot] = std::move(placement_checks);
+        placement_checks.clear();
+    }
     WriteSurfaces(slot);
 
     const vk::DescriptorBufferInfo probes_info{
@@ -5163,6 +5779,9 @@ void RayTracing::OnCompositeBuffer(u32 index, VAddr address, u32 size) {
             Access::eTransferRead | Access::eTransferWrite);
     const vk::BufferCopy region{offset, u64(frame % Slots) * gi_fog_ring.slot_bytes, bytes};
     cmdbuf.copyBuffer(buffer->Handle(), gi_fog_ring.buffer, region);
+    fog_src_address = address;
+    fog_src_bytes = bytes;
+    fog_src_frame = frame;
     const bool fog_runs = fog_enabled && !fog_stock && static_cast<bool>(*fog_pipeline) &&
                           !instances.empty() && (!fog_surfaces || surfaces_ring.buffer) &&
                           shadow_spec_target >= 0 && u32(shadow_spec_target) < gbuffer_count &&
@@ -5178,6 +5797,33 @@ void RayTracing::OnCompositeBuffer(u32 index, VAddr address, u32 size) {
             Access::eShaderRead | Access::eUniformRead | Access::eTransferRead);
     gi_fog_frame = frame;
     gi_fog_bytes = bytes;
+}
+
+// The reflect pass runs at the light pass, before the composite, so it saw last frame's table with
+// this frame's per-pixel set ids: the traced-mist glow (BB_RT_MIST_FOG, the set's fog colour)
+// jumped between sets every frame (frame step 8.7 luma vs 0.4 with a constant colour, 2026-11-14).
+// The table sits at one address and is already written for this frame here, so copy it again.
+void RayTracing::CopyFogTableEarly() {
+    if (!gi_fog_ring.mapped || fog_src_address == 0 || gi_fog_frame == frame ||
+        fog_src_frame == ~0ull || frame - fog_src_frame > 1) {
+        return;
+    }
+    const auto [buffer, offset] = buffer_cache.ObtainBuffer(fog_src_address, fog_src_bytes, false, true);
+    if (!buffer) {
+        return;
+    }
+    using Stage = vk::PipelineStageFlagBits2;
+    using Access = vk::AccessFlagBits2;
+    scheduler.EndRendering();
+    const auto cmdbuf = scheduler.CommandBuffer();
+    Barrier(cmdbuf, Stage::eAllCommands, Access::eMemoryWrite, Stage::eTransfer,
+            Access::eTransferRead | Access::eTransferWrite);
+    const vk::BufferCopy region{offset, u64(frame % Slots) * gi_fog_ring.slot_bytes, fog_src_bytes};
+    cmdbuf.copyBuffer(buffer->Handle(), gi_fog_ring.buffer, region);
+    Barrier(cmdbuf, Stage::eTransfer, Access::eTransferWrite, Stage::eAllCommands,
+            Access::eShaderRead | Access::eUniformRead | Access::eTransferRead);
+    gi_fog_frame = frame;
+    gi_fog_bytes = fog_src_bytes;
 }
 
 void RayTracing::OnLightSetStorageWrite(VAddr address, u32 bytes, u64 pgm_hash, u32 stage) {
@@ -6185,8 +6831,74 @@ void RayTracing::RecordSkyLayer(vk::CommandBuffer cmdbuf,
     // 10-40 degrees off, so shadows swung. Held MoonSeedHold frames past the last layer draw so
     // an interior reached by a load does not keep the last map's moon.
     constexpr u64 MoonSeedHold = 1800;
-    const bool seed = sky_key.Recent(frame, MoonSeedHold) && frame_camera_valid &&
-                      moon_cache.DirFromDraws(sky_key.Draws(), cam, seed_dir);
+    bool seed = false;
+    // The moon of the sky the draws name, from the game's files: the light points at it from
+    // the first frame, whatever the search finds and whatever the cache holds. A camera jump
+    // (a warp, a load) is another map: nothing seen so far says anything about it.
+    bool file_moon = false;
+    if (moon_files && frame_camera_valid) {
+        if (moon_file_camera_valid && Rt::Distance2(moon_file_camera, cam) > 100.0f * 100.0f) {
+            sky_finder.Reset();
+        }
+        moon_file_camera = cam;
+        moon_file_camera_valid = true;
+        const int sky = sky_finder.Update(frame);
+        std::array<float, 3> spot{}, dir{};
+        file_moon = sky_key.Recent(frame, MoonSeedHold) && sky_finder.Moon(spot) &&
+                    Rt::MoonCache::DirTo(spot, cam, dir) && dir[1] > 0.02f;
+        if (file_moon) {
+            seed_dir = dir;
+            seed = true;
+        }
+        if (sky != moon_file_logged || file_moon != moon_file_on) {
+            Log("Ray tracing: moon from the game's files %s at frame %llu: sky %s%s%s (%u fit), "
+                "moon at (%.1f %.1f %.1f), camera %.1f %.1f %.1f, direction %.4f %.4f %.4f; %llu "
+                "sky draws read, %llu in the table, %llu placed\n",
+                file_moon ? "on" : "off", (unsigned long long)frame, sky_finder.Name(),
+                sky_finder.MoonPart()[0] ? ", its moon " : "", sky_finder.MoonPart(),
+                sky_finder.Ties(), spot[0], spot[1], spot[2], cam[0], cam[1], cam[2], dir[0],
+                dir[1], dir[2], (unsigned long long)moon_file_draws,
+                (unsigned long long)moon_file_known, (unsigned long long)moon_file_placed);
+            moon_file_logged = sky;
+            moon_file_on = file_moon;
+        }
+    } else if (!moon_files) {
+        moon_file_on = false;
+    }
+    // The moon cache only speaks for a sky the files do not know (another game version, a
+    // modded sky). A known sky with no moon or sun in its files keeps the game's own light
+    // until the search sees a disc; a cached moon there was another map's (the cache knows a
+    // sky by index counts, which maps share).
+    const bool cache_speaks = !MoonSkyKnown();
+    if (!file_moon && cache_speaks) {
+        seed = sky_key.Recent(frame, MoonSeedHold) && frame_camera_valid &&
+               moon_cache.DirFromDraws(sky_key.Draws(), cam, seed_dir);
+    }
+    {
+        // Which cached moon the seed points at, and the layer draws that chose it: logged when it
+        // changes (a load, a new map, a draw that joined the run).
+        std::array<float, 3> spot{};
+        const bool on = cache_speaks && sky_key.Recent(frame, MoonSeedHold) &&
+                        moon_cache.FindDraws(sky_key.Draws(), spot);
+        const float dx = spot[0] - moon_seed_logged[0], dy = spot[1] - moon_seed_logged[1],
+                    dz = spot[2] - moon_seed_logged[2];
+        if (on != moon_seed_on || (on && dx * dx + dy * dy + dz * dz > 4.0f)) {
+            std::string list;
+            char item[64];
+            for (const u64 d : sky_key.Draws()) {
+                std::snprintf(item, sizeof(item), " %llx", (unsigned long long)d);
+                list += item;
+            }
+            Log("Ray tracing: moon seed %s at frame %llu: (%.1f %.1f %.1f, %.0f finds), camera "
+                "%.1f %.1f %.1f, layer run %llu, last layer draw %llu frames ago, draws%s\n",
+                on ? "on" : "off", (unsigned long long)frame, spot[0], spot[1], spot[2],
+                moon_cache.Votes(sky_key.Draws()), cam[0], cam[1], cam[2],
+                (unsigned long long)sky_key.Generation(), (unsigned long long)sky_key.Age(frame),
+                list.c_str());
+            moon_seed_on = on;
+            moon_seed_logged = spot;
+        }
+    }
     const bool reset = sky_key.Generation() != moon_generation;
     moon_generation = sky_key.Generation();
     if (reset) {
@@ -6198,7 +6910,9 @@ void RayTracing::RecordSkyLayer(vk::CommandBuffer cmdbuf,
         .moon_slot = Rt::MoonDirSlot(capacity.records),
         .phase = 0u,
         .moon_min = moon_min,
-        .moon_seed = seed ? std::array<float, 4>{seed_dir[0], seed_dir[1], seed_dir[2], 1.0f}
+        // w 2: the file's moon, which the shader takes as it is; w 1: the cache's, a fallback.
+        .moon_seed = seed ? std::array<float, 4>{seed_dir[0], seed_dir[1], seed_dir[2],
+                                                 file_moon ? 2.0f : 1.0f}
                           : std::array<float, 4>{},
         .moon_reset = (reset ? 1u : 0u) | (moon_layer_find ? 2u : 0u),
     };
@@ -6221,6 +6935,27 @@ void RayTracing::RecordSkyLayer(vk::CommandBuffer cmdbuf,
     cmdbuf.pushConstants(*sky_layer_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
                          sizeof(push), &push);
     cmdbuf.dispatch(1, 1, 1);
+    const u32 fog_n = u32(std::min(fog_upload_centres.size(), Rt::FogMaxParticles));
+    const u32 fog_ring = u32(sky_layer_frames % Slots);
+    if (haze_rt && stock_haze && fog_n && fog_light_ring.mapped && fog_light_frame[fog_ring] == ~0ull) {
+        // Phase 2: the moon and sky light share of each fog particle, back to the CPU.
+        Barrier(cmdbuf, Stage::eComputeShader, Access::eShaderWrite, Stage::eComputeShader,
+                Access::eShaderRead | Access::eShaderWrite);
+        push.phase = 2u;
+        push.fog_base = Rt::FogLightSlot(capacity.records, 0);
+        cmdbuf.pushConstants(*sky_layer_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
+                             sizeof(push), &push);
+        cmdbuf.dispatch((fog_n + 63) / 64, 1, 1);
+        Barrier(cmdbuf, Stage::eComputeShader, Access::eShaderWrite, Stage::eTransfer,
+                Access::eTransferRead);
+        const vk::BufferCopy region{u64(push.fog_base) * 16, u64(fog_ring) * fog_light_ring.slot_bytes,
+                                    u64(fog_n) * 16};
+        cmdbuf.copyBuffer(material.buffer, fog_light_ring.buffer, region);
+        Barrier(cmdbuf, Stage::eTransfer, Access::eTransferWrite, Stage::eHost, Access::eHostRead);
+        fog_light_tick[fog_ring] = scheduler.CurrentTick();
+        fog_light_frame[fog_ring] = frame;
+        fog_light_centres[fog_ring].assign(fog_upload_centres.begin(), fog_upload_centres.begin() + fog_n);
+    }
     const u32 ring = u32(sky_layer_frames % Slots);
     if (moon_ring.mapped && moon_ring_frame[ring] == ~0ull) {
         // The moon slot and the search stats back to the CPU for the moon cache.
@@ -6464,7 +7199,7 @@ void RayTracing::ReadMoonRing() {
                                   iv[11] + dir[2] * v[8]};
                 // First confirmed find of this run: how far the cached moon (the seed) was off.
                 std::array<float, 3> cached{};
-                if (!moon_found_run &&
+                if (!moon_found_run && !MoonSkyKnown() &&
                     moon_cache.DirFromDraws(sky_key.Draws(), {iv[3], iv[7], iv[11]}, cached)) {
                     const float d = cached[0] * dir[0] + cached[1] * dir[1] + cached[2] * dir[2];
                     Log("Ray tracing: moon of sky %016llx found %.2f degrees from its cached "
@@ -6478,8 +7213,9 @@ void RayTracing::ReadMoonRing() {
             moon_last = dir;
             moon_last_found = true;
             // Each confirmed find once into the cache's running mean (rt_moon_cache.h).
+            // Not for a sky the files know: its moon, if it has one, is not the cache's to say.
             if (!confirmed || key == 0 || moon_ring_gen[i] != sky_key.Generation() ||
-                !moon_cache.PutDraws(sky_key.Draws(), moon_confirmed)) {
+                MoonSkyKnown() || !moon_cache.PutDraws(sky_key.Draws(), moon_confirmed)) {
                 continue;
             }
         } else {
@@ -7014,10 +7750,39 @@ void RayTracing::ReadKeptProbe() {
         ++kept_probe_reads;
         kept_probe_hits += count;
         const std::vector<u32>& snap = kept_snap[built];
+        const std::vector<u64>& snap_place = kept_snap_place[built];
         for (u32 k = 0; k < count; ++k) {
             u32 index = 0;
             std::memcpy(&index, words + (Rt::KeptProbeBase + 1 + k) * 4, 4);
             const u32 id = index < snap.size() ? snap[index] : ~0u;
+            // A kept placement of a shared mesh: its record is hidden until the game draws that
+            // placement again.
+            const u64 record = index < snap_place.size() ? snap_place[index] : 0;
+            if (const auto it = record ? placed_records.find(record) : placed_records.end();
+                it != placed_records.end()) {
+                PlacedRecord& r = it->second;
+                if (r.last_frame >= probed) {
+                    continue; // drawn again since the probe
+                }
+                if (r.probe_hidden <= r.last_frame) {
+                    ++kept_probe_hidden;
+                    ++kept_probe_hidden_placed;
+                    if (kept_probe_log_lines < 40) {
+                        ++kept_probe_log_lines;
+                        const Rt::CacheEntry* pe = cache.ById(r.entry_id);
+                        Log("RT kept probe frame %llu: kept placement of entry %u (%u triangles, "
+                            "at %.1f %.1f %.1f, last drawn %llu frames ago) lies in front of the "
+                            "drawn surface: not kept until drawn again (BB_RT_KEPT_PROBE); %llu "
+                            "so far\n",
+                            (unsigned long long)probed, r.entry_id, pe ? pe->triangles : 0u,
+                            r.matrix[3], r.matrix[7], r.matrix[11],
+                            (unsigned long long)(probed - r.last_frame),
+                            (unsigned long long)kept_probe_hidden);
+                    }
+                }
+                r.probe_hidden = probed;
+                continue;
+            }
             Rt::CacheEntry* e = id != ~0u ? cache.ById(id) : nullptr;
             if (!e || e->last_used >= probed) {
                 continue; // not an instance of that frame, or drawn again since the probe
@@ -7663,7 +8428,7 @@ void RayTracing::RecordDirect(const SceneInputs& inputs) {
         .restir = {restir_candidates, restir_history, restir_spatial, prev_light_count},
         .shadow_color = {shadow_color[0], shadow_color[1], shadow_color[2], moon_cone_cos},
         .fx = {fx_smoke_opacity, float(fx_debug), pick_px[0], pick_px[1]},
-        .far_fade = Rt::FarFadeParams(far_start, far_band),
+        .far_fade = Rt::FarFadeParams(far_start, far_band, moon_reach),
         .ambient_cut = {ambient_cool[0], ambient_cool[1], ambient_cool[2], ambient_cut},
         .ambient_spec_cut = {spec_cut_frame == frame ? 0.0f : ambient_spec_cut, ambient_keep_lo,
                              ambient_keep_hi, ambient_keep_lit},
@@ -8227,6 +8992,7 @@ void RayTracing::RecordReflect(const SceneInputs& inputs) {
             : vk::DescriptorBufferInfo{lights_bound ? gi_sets_ring.buffer : material.buffer,
                                        lights_bound ? u64(slot) * gi_sets_ring.slot_bytes : 0,
                                        lights_bound ? gi_sets_ring.slot_bytes : material.size};
+    CopyFogTableEarly();
     const bool fog_table = gi_fog_ring.buffer && gi_fog_bytes >= 192 &&
                            (gi_fog_frame == frame || gi_fog_frame + 1 == frame);
     const vk::DescriptorBufferInfo fog_table_info{
@@ -8361,6 +9127,13 @@ void RayTracing::OnAfterComposite(const SceneInputs& inputs) {
         gi_composite_frame = frame;
         last_gi_frame = frame;
     }
+    // The traced fog runs here, where GXLightComposite applied the stock fog, and the post trigger
+    // only catches frames this missed. At the post trigger the Nightmare Frontier sky stepped every
+    // frame (step 0.7-1.2 luma vs 0.05-0.09 here, flashes up to +50); BB_RT_FX_FOG_EARLY=0 (live)
+    // goes back to the post trigger.
+    if (fog_enabled && fog_early && fog_ran_frame != frame) {
+        RecordFog(inputs);
+    }
 }
 
 void RayTracing::OnDispatch(u64 cs_hash, const SceneInputs& inputs) {
@@ -8400,7 +9173,7 @@ void RayTracing::OnDispatch(u64 cs_hash, const SceneInputs& inputs) {
         CpuTimer timer{hitch_log, hitch.gi};
         RecordSky(inputs);
     }
-    if (fog_enabled) {
+    if (fog_enabled && fog_ran_frame != frame) {
         CpuTimer timer{hitch_log, hitch.gi};
         RecordFog(inputs);
     }
@@ -8605,6 +9378,16 @@ void RayTracing::RecordExposure(const SceneInputs& inputs, bool apply) {
         .params = {exposure_key, exposure_max, exposure_rate, exposure_reset && apply ? 1.0f : 0.0f},
         .tone = {exposure_white, 0.0f, 0.0f, 0.0f},
     };
+    // The game's sky dome is a mesh that writes depth (539-1480 m around the camera), so the
+    // shader's depth test alone let the boost reach it: the sky went from stock 119 to 158 luma,
+    // and to a clipped 237 under the traced fog, whose darker geometry raises the boost (Nightmare
+    // Frontier, 2026-11-14). The dome test needs the camera; without one only depth 1 counts.
+    if (inputs.camera_valid && inputs.projection[0] != 0.0f && inputs.projection[1] != 0.0f &&
+        inputs.projection[3] != 0.0f) {
+        const Rt::Affine view = Rt::InverseRigid(inputs.inv_view);
+        push.proj = inputs.projection;
+        push.up = {view[1], view[5], view[9], 1.0f};
+    }
     if (apply) {
         exposure_reset = false;
     }
@@ -9175,7 +9958,7 @@ bool RayTracing::RecordGi(const SceneInputs& inputs) {
                         float(gi_frames & 0xFFFFu)},
         .shadow_color = {shadow_color[0], shadow_color[1], shadow_color[2], moon_cone_cos},
         .sharc = {u32(sharc_grid.address), u32(sharc_grid.address >> 32), sharc_live ? 1u : 0u, 0u},
-        .far_fade = Rt::FarFadeParams(far_start, far_band),
+        .far_fade = Rt::FarFadeParams(far_start, far_band, moon_reach),
     };
     std::memcpy(params_ring.mapped + u64(slot) * params_ring.slot_bytes, &params, sizeof(params));
 
@@ -9911,6 +10694,10 @@ u32 RayTracing::WriteGiLights(u32 slot, const Rt::Affine& view) {
     const bool fresh = fog_frame == frame || fog_frame + 1 == frame;
     const size_t fog_count = fresh ? std::min(held.size(), Rt::FogMaxParticles) : 0;
     fog[0] = u32(fog_count);
+    fog_upload_centres.resize(fog_count);
+    for (size_t k = 0; k < fog_count; ++k) {
+        fog_upload_centres[k] = held[k].centre;
+    }
     for (size_t k = 0; k < fog_count; ++k) {
         const std::array<float, 3> v = Rt::Transform(view, held[k].centre);
         fog[4 + 4 * k] = (Rt::FloatWord(v[0]) & ~0xFFu) | (held[k].rgb & 0xFFu);
@@ -10091,6 +10878,49 @@ void RayTracing::PrintStats(u32 triangles) {
     const auto reason = [&](Rt::Rebuild r) {
         return (unsigned long long)c.reasons[size_t(r)];
     };
+    const auto placement_count = [&](Rt::PlacementVerdict v) {
+        u32 n = 0;
+        for (const auto& [key, t] : placement_trust) {
+            n += t.verdict == v ? 1u : 0u;
+        }
+        return n;
+    };
+    Log("Ray tracing: shared meshes (BB_RT_PLACEMENT_SHARED %u): %llu placed instances, %zu "
+        "placement records, %llu kept placements last frame, %llu moved objects dropped\n",
+        placement_shared ? 1u : 0u, (unsigned long long)placed_shared_instances,
+        placed_records.size(), (unsigned long long)placed_kept_last,
+        (unsigned long long)placed_ghosts);
+    if (!geo_maps.empty()) {
+        size_t active = 0;
+        for (const GeoMapState& state : geo_maps) {
+            const bool in_play = state.hit_frame && frame <= state.hit_frame + 600;
+            active += in_play ? 1u : 0u;
+            if (in_play) {
+                size_t shown = 0;
+                for (const u32 p : state.nearby) {
+                    shown += state.visible.Shows(state.map, state.map.places[p]) ? 1u : 0u;
+                }
+                Log("Ray tracing: geometry cache %s in play: %u of %zu collision group sets fit "
+                    "the %u placements the game drew lately (the best misses %u), %zu of %zu "
+                    "placements near the camera would be shown there\n",
+                    state.map.name.c_str(), state.visible.Fitting(), state.map.collisions.size(),
+                    state.visible.noted, state.visible.best_misses, shown, state.nearby.size());
+            }
+        }
+        Log("Ray tracing: geometry cache (BB_RT_GEO_RADIUS %.0f m): %zu maps, %zu in play, %llu "
+            "pieces in the TLAS last frame, %llu BLAS built (%llu triangles), %llu builds failed\n",
+            double(geo_radius), geo_maps.size(), active, (unsigned long long)geo_instances_last,
+            (unsigned long long)geo_builds, (unsigned long long)geo_build_triangles,
+            (unsigned long long)geo_build_failures);
+    }
+    if (patch_draws) {
+        Log("Ray tracing: tessellated meshes (BB_RT_PATCH_MESHES %d): %llu draws, %llu BLAS built "
+            "from their control meshes (%llu triangles), %llu failed, %llu instances in the TLAS "
+            "last frame, %zu placements known\n",
+            int(patch_on), (unsigned long long)patch_draws, (unsigned long long)patch_built,
+            (unsigned long long)patch_built_triangles, (unsigned long long)patch_failed,
+            (unsigned long long)patch_instances_last, patch_records.size());
+    }
     Log("Ray tracing: rebuild reasons %llu miss, %llu size, %llu dirty, %llu unreadable "
                 "bones, %llu skeleton changed, %llu palette changed; %llu refits (%llu anchored to "
                 "their build camera, up to %.1f deg turned), %llu space "
@@ -10098,7 +10928,13 @@ void RayTracing::PrintStats(u32 triangles) {
                 "%llu without camera; budget %llu deferred (new draws), %llu held stale; kept %llu "
                 "off-screen instances (last frame %llu: %llu triangles, %llu alpha-tested, %llu "
                 "sharing a drawn texture; %llu untextured, %llu dropped by the BB_RT_KEEP_TRIS %llu "
-                "/ BB_RT_KEEP_MAX_TRIS %u limits, %s), %u off-screen lights\n",
+                "/ BB_RT_KEEP_MAX_TRIS %u limits, %s), %u off-screen lights; placement ids "
+                "(BB_RT_PLACEMENT %u, %u shaders trusted, %u rejected, %u pending) %llu draws "
+                "(%llu instances), %llu static draws fell back, %llu kept skipped as the same "
+                "placement drawn, %llu movers found, %llu draws of moving meshes; cache %zu "
+                "entries (%zu ids free), last frame %u of %u TLAS records, since the last line "
+                "%llu draws failed for lack of ids or pool space and %llu over the record or "
+                "triangle capacity\n",
                 reason(Rt::Rebuild::Miss), reason(Rt::Rebuild::Size),
                 reason(Rt::Rebuild::Dirty), reason(Rt::Rebuild::Unreadable),
                 reason(Rt::Rebuild::Skeleton), reason(Rt::Rebuild::Palette),
@@ -10112,7 +10948,24 @@ void RayTracing::PrintStats(u32 triangles) {
                 (unsigned long long)kept_shared_tex_last, (unsigned long long)kept_untextured,
                 (unsigned long long)kept_dropped_total,
                 (unsigned long long)keep_rules.triangle_budget, keep_rules.max_triangles,
-                keep_gi ? "GI/AO see them" : "direct shadows only", direct_tracks.kept_offscreen);
+                keep_gi ? "GI/AO see them" : "direct shadows only", direct_tracks.kept_offscreen,
+                placement_on ? 1u : 0u, placement_count(Rt::PlacementVerdict::Trusted),
+                placement_count(Rt::PlacementVerdict::Rejected),
+                placement_count(Rt::PlacementVerdict::Pending),
+                (unsigned long long)placement_draws, (unsigned long long)placement_instances,
+                (unsigned long long)placement_fallbacks,
+                (unsigned long long)placement_kept_skipped,
+                (unsigned long long)placement_movers_found,
+                (unsigned long long)placement_moving_draws, cache.Size(), free_ids.size(),
+                last_instances, capacity.records,
+                (unsigned long long)(pool_full_draws - placement_pool_full_seen),
+                (unsigned long long)(s.capacity - placement_capacity_seen));
+    // Splitting a batch takes one cache id and one TLAS record per instance (capacity.records):
+    // the deltas above tell whether that cap is being hit.
+    placement_pool_full_seen = pool_full_draws;
+    placement_capacity_seen = s.capacity;
+    placement_draws = placement_instances = placement_fallbacks = placement_kept_skipped = 0;
+    placement_movers_found = placement_moving_draws = 0;
     Log("Ray tracing: alpha-tested surfaces %llu, %llu with the discard mask texture or channel, "
         "alpha-tested draws offered %llu accepted %llu (BB_RT_ALPHA_SOURCE %s, "
         "BB_RT_ALPHA_INHERIT %s); alpha-tested instances without a usable texture or UVs %llu "
@@ -10293,14 +11146,19 @@ void RayTracing::FinishFrame(const SceneInputs& inputs) {
         late_held.clear();
         for (const auto& h : held) {
             const size_t before = instances.size();
-            AddDraw(h.draw);
+            Rt::DrawInput replay = h.draw;
+            replay.placements = h.placements.empty() ? nullptr : h.placements.data();
+            AddDraw(replay);
             if (instances.size() > before) {
-                FrameInstance& fi = instances.back();
-                if (late_mode == 1 && fi.fresh && h.camera_valid) {
-                    fi.inv_view = h.inv_view;
-                    fi.anchored = true;
+                // A placed instanced draw comes back as one instance per placement.
+                for (size_t n = before; n < instances.size(); ++n) {
+                    FrameInstance& fi = instances[n];
+                    if (late_mode == 1 && fi.fresh && h.camera_valid) {
+                        fi.inv_view = h.inv_view;
+                        fi.anchored = true;
+                    }
+                    late_entries.insert(fi.entry_id);
                 }
-                late_entries.insert(fi.entry_id);
                 const VideoCore::Image* img =
                     h.albedo_view ? texture_cache.TryGetImage(h.albedo_image, 0) : nullptr;
                 if (img && img->image_uid == h.albedo_uid) {
@@ -10481,6 +11339,35 @@ void RayTracing::OnDrawBound(vk::ImageView albedo_view, VideoCore::ImageId image
         return;
     }
     last_add_accepted = false;
+    // A placed instanced draw appended one instance per placement: the textures bound below go
+    // on the last one, then to the others of the same draw.
+    const u32 spread = std::min<u32>(std::exchange(last_add_count, 1u), u32(instances.size()));
+    struct Spread {
+        std::vector<FrameInstance>& list;
+        u32 count;
+        ~Spread() {
+            if (count < 2 || list.size() < count) {
+                return;
+            }
+            const FrameInstance& last = list.back();
+            for (size_t n = list.size() - count; n + 1 < list.size(); ++n) {
+                FrameInstance& fi = list[n];
+                fi.alpha_texture = last.alpha_texture;
+                fi.alpha_channel = last.alpha_channel;
+                fi.alpha_view = last.alpha_view;
+                fi.alpha_image = last.alpha_image;
+                fi.alpha_uid = last.alpha_uid;
+                fi.view = last.view;
+                fi.image = last.image;
+                fi.uid = last.uid;
+                fi.texture = last.texture;
+                fi.normal_map = last.normal_map;
+                fi.normal_view = last.normal_view;
+                fi.normal_uid = last.normal_uid;
+                fi.normal_image = last.normal_image;
+            }
+        }
+    } spread_after{instances, spread};
     ++surface_draws;
     if (alpha_view && alpha_image && instances.back().alpha_test &&
         (alpha_view != albedo_view || alpha_channel != 3)) {
@@ -10705,9 +11592,20 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
     if (!frame_camera_valid || keep_rules.distance <= 0.0f) {
         return;
     }
+    // The placements drawn this frame (AddDraw: every draw whose matrices were read, placed or
+    // not): a kept placed entry of the same mesh, placement and vertex range (another detail
+    // level, or the same piece under the occurrence key) stays out, so one placement is in the
+    // TLAS once.
+    const bool check_placed = !drawn_placements.Empty();
     std::vector<Rt::CacheEntry*> candidates;
     cache.ForEachOrdered([&](Rt::CacheEntry& e) {
-        if (!e.blended && Rt::KeepInstance(e, frame, camera, keep_rules)) {
+        // A mesh entry shared by its placements is kept through them (CollectKeptPlacements).
+        if (!e.shared && !e.blended && Rt::KeepInstance(e, frame, camera, keep_rules)) {
+            const Rt::DrawKey* k = check_placed && e.placement ? cache.KeyOf(e.id) : nullptr;
+            if (k && drawn_placements.Contains(*k)) {
+                ++placement_kept_skipped;
+                return;
+            }
             candidates.push_back(&e);
         }
     });
@@ -10721,8 +11619,16 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
             fresh_textures.insert(fi.uid);
         }
     }
+    std::vector<KeptItem> kept_items;
+    kept_items.reserve(pick.picked.size());
     for (Rt::CacheEntry* kept_entry : pick.picked) {
-        Rt::CacheEntry& e = *kept_entry;
+        kept_items.push_back({kept_entry, false, Rt::IdentityAffine()});
+    }
+    CollectKeptPlacements(camera, kept_items);
+    CollectGeoInstances(camera, kept_items);
+    CollectPatchInstances(camera, kept_items);
+    for (const KeptItem& item : kept_items) {
+        Rt::CacheEntry& e = *item.entry;
         if (instances.size() >= capacity.records) {
             break;
         }
@@ -10733,14 +11639,54 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
         fi.kept = true;
         fi.entry_id = e.id;
         fi.inv_view = e.inv_view;
+        fi.relocated = item.relocated;
+        fi.relocate = item.relocate;
+        fi.shadow_only = item.shadow_only;
+        fi.placed_record = item.record;
         fi.alpha_test = e.alpha_test;
         fi.alpha_ref = e.alpha_ref;
         fi.view = e.tex_view;
         fi.uid = e.tex_uid;
         fi.image = e.tex_image;
         fi.mode = 2;
-        if (e.id < entry_tags.size()) {
+        // A piece of the geometry cache has no draw: its id's old tag is another entry's.
+        if (e.id < entry_tags.size() && !item.shadow_only) {
             fi.tag = entry_tags[e.id];
+        }
+        // The placements of one mesh share its entry and so its textures: resolved once a frame
+        // per entry (three texture lookups and holds for each of ~1,700 kept placements before).
+        if (e.id >= kept_memo.size()) {
+            kept_memo.resize(size_t(e.id) + 1);
+        }
+        KeptMemo& memo = kept_memo[e.id];
+        if (memo.frame == frame + 1) {
+            fi.texture = memo.texture;
+            fi.alpha_texture = memo.alpha_texture;
+            fi.normal_map = memo.normal_map;
+            kept_untextured += surface_enabled && fi.view && !fi.texture ? 1u : 0u;
+            if (fi.alpha_texture) {
+                fi.alpha_channel = e.alpha_channel;
+                fi.alpha_view = e.alpha_view;
+                fi.alpha_uid = e.alpha_uid;
+                fi.alpha_image = e.alpha_image;
+            }
+            if (fi.normal_map) {
+                fi.normal_view = e.normal_view;
+                fi.normal_uid = e.normal_uid;
+                fi.normal_image = e.normal_image;
+            }
+            if (!fi.texture) {
+                fi.view = 0;
+                fi.uid = 0;
+                fi.image = 0;
+            }
+            instances.push_back(fi);
+            ProbeRecord probe{};
+            probe.entry = e.id;
+            probe.mode = 2;
+            probes.push_back(probe);
+            ++last_kept;
+            continue;
         }
         if (surface_enabled && fi.view) {
             const VideoCore::Image* image =
@@ -10799,6 +11745,7 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
             fi.uid = 0;
             fi.image = 0;
         }
+        memo = {frame + 1, u32(fi.texture), u32(fi.alpha_texture), u32(fi.normal_map)};
         instances.push_back(fi);
         ProbeRecord probe{};
         probe.entry = e.id;
@@ -10807,6 +11754,525 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
         ++last_kept;
     }
     kept_instances += last_kept;
+}
+
+// A placement of a shared mesh seen this frame: its record, for when it is no longer drawn.
+void RayTracing::NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key,
+                            const Rt::DrawKey& placed_key, const float* matrix) {
+    const u64 mesh = u64(Rt::DrawKeyHash{}(shared_key));
+    auto [it, fresh] = placed_records.try_emplace(Rt::PlacementMix(mesh, placed_key.placement));
+    PlacedRecord& r = it->second;
+    if (fresh || r.mesh != mesh) {
+        r.first_frame = frame;
+        placed_new.push_back({entry_id, {matrix[3], matrix[7], matrix[11]}});
+    }
+    r.entry_id = entry_id;
+    r.mesh = mesh;
+    r.key = placed_key;
+    r.matrix = Rt::PlacementAffine(matrix);
+    r.last_frame = frame;
+    ++placed_shared_instances;
+}
+
+// The placements of shared meshes that are not drawn this frame and still belong in the TLAS:
+// seen on at least two frames (a mover's one-frame placements never are), their mesh entry still
+// built, seen from near this camera position (the same rule as kept entries), and not drawn
+// this frame at another detail level.
+void RayTracing::CollectKeptPlacements(const std::array<float, 3>& camera,
+                                       std::vector<KeptItem>& out) {
+    constexpr u64 UnsettledFrames = 4;
+    constexpr float MoverReach = 2.0f;
+    placed_kept_last = 0;
+    // The geometry cache: which of its pieces the game's own draws put in the TLAS this frame
+    // (drawn or kept), and which maps those draws belong to.
+    geo_live.clear();
+    for (GeoMapState& state : geo_maps) {
+        state.hits_now = 0;
+    }
+    if (!geo_maps.empty()) {
+        // Entries keyed by occurrence that are the cache's pieces: drawn this frame, or kept.
+        const auto mark_entry = [&](const Rt::CacheEntry* e) {
+            for (u8 k = 0; e && e->geo_key_count != 0xFF && k < e->geo_key_count; ++k) {
+                geo_live.insert(e->geo_keys[k]);
+            }
+        };
+        for (const FrameInstance& fi : instances) {
+            mark_entry(cache.ById(fi.entry_id));
+        }
+        for (const KeptItem& item : out) {
+            mark_entry(item.entry);
+        }
+    }
+    const auto geo_mark = [&](PlacedRecord& r, bool drawn) {
+        if (geo_maps.empty()) {
+            return;
+        }
+        if (r.geo_map == -2) {
+            r.geo_map = -1;
+            for (size_t m = 0; m < geo_maps.size(); ++m) {
+                const s32 place = geo_maps[m].map.FindPlace(r.matrix);
+                const s32 mesh =
+                    place < 0 ? -1 : geo_maps[m].map.FindMesh(u32(place), r.key.index_count);
+                if (mesh >= 0) {
+                    r.geo_map = s32(m);
+                    r.geo_place = u32(place);
+                    r.geo_mesh = u32(mesh);
+                    break;
+                }
+            }
+        }
+        if (r.geo_map >= 0) {
+            geo_live.insert(GeoKey(size_t(r.geo_map), r.geo_place, r.geo_mesh));
+            if (drawn) {
+                ++geo_maps[size_t(r.geo_map)].hits_now;
+                geo_maps[size_t(r.geo_map)].drawn_now.push_back(r.geo_place);
+            }
+        }
+    };
+    for (auto it = placed_records.begin(); it != placed_records.end();) {
+        PlacedRecord& r = it->second;
+        Rt::CacheEntry* e = cache.ById(r.entry_id);
+        const Rt::DrawKey* key = e ? cache.KeyOf(r.entry_id) : nullptr;
+        if (!e || !e->shared || !key || u64(Rt::DrawKeyHash{}(*key)) != r.mesh) {
+            it = placed_records.erase(it); // the mesh entry is gone (evicted, purged, id reused)
+            continue;
+        }
+        if (r.last_frame == frame) {
+            r.seen_camera = camera;
+            geo_mark(r, true);
+            ++it;
+            continue;
+        }
+        const bool settled = r.last_frame > r.first_frame;
+        if (!settled) {
+            it = frame > r.last_frame + UnsettledFrames ? placed_records.erase(it) : std::next(it);
+            continue;
+        }
+        if (frame > r.last_frame + keep_rules.kept_unused_frames) {
+            it = placed_records.erase(it);
+            continue;
+        }
+        // Drawn last frame, not now, and a new placement of the same mesh appeared next to it:
+        // the object moved (a door, a lift). Kept, it would stand as a ghost at its old place.
+        if (r.last_frame + 1 == frame) {
+            bool moved = false;
+            for (const auto& [entry_id, at] : placed_new) {
+                const std::array<float, 3> was{r.matrix[3], r.matrix[7], r.matrix[11]};
+                moved = moved || (entry_id == r.entry_id &&
+                                  Rt::Distance2(at, was) <= MoverReach * MoverReach);
+            }
+            if (moved) {
+                ++placed_ghosts;
+                it = placed_records.erase(it);
+                continue;
+            }
+        }
+        const bool near_seen = Rt::Distance2(r.seen_camera, camera) <=
+                               keep_rules.distance * keep_rules.distance;
+        // Found in front of the drawn surface by the kept probe since it was last drawn (the
+        // far twin of a block, up close): out until the game draws it again.
+        const bool probe_hidden = kept_probe && r.probe_hidden > r.last_frame;
+        if (e->valid && !e->dirty && !e->blended && near_seen && !probe_hidden) {
+            if (drawn_placements.Contains(r.key)) {
+                ++placement_kept_skipped;
+            } else {
+                e->placed_kept_frame = frame;
+                out.push_back({e, r.key.placement != e->base_placement,
+                               Rt::Relocation(r.matrix, e->base_matrix), false, it->first});
+                ++placed_kept_last;
+                geo_mark(r, false);
+            }
+        }
+        ++it;
+    }
+    placed_new.clear();
+    // A map is in play while the game draws a few of its placements. What it draws also tells
+    // which collision the player stands on (GeoVisible).
+    for (GeoMapState& state : geo_maps) {
+        if (state.hits_now >= 4) {
+            state.hit_frame = frame;
+        }
+        // BB_RT_GEO_LOG=1 (live): every ~10 s, the placements of this map the game drew this
+        // frame, to study its draw groups offline (tools/mapcache/study/groups_fit.py).
+        if (!state.drawn_now.empty() && frame % 600 == 0 && Rt::KnobIs("BB_RT_GEO_LOG", '1')) {
+            std::string list;
+            for (const u32 p : state.drawn_now) {
+                list += std::to_string(p);
+                list += ' ';
+            }
+            Log("RT geo drawn frame %llu %s: %s\n", (unsigned long long)frame,
+                state.map.name.c_str(), list.c_str());
+        }
+        for (const u32 p : state.drawn_now) {
+            state.visible.Note(p, frame);
+        }
+        if (frame % 15 == 0 || state.visible.Fitting() == 0) {
+            state.visible.Update(state.map, frame);
+        }
+        state.drawn_now.clear();
+    }
+}
+
+// BB_RT_GEO_DIR: every `<map>.bbgeo` in that folder (tools/mapcache/build_cache.py).
+void RayTracing::LoadGeoMaps() {
+    geo_loaded = true;
+    const char* dir = Rt::Knob("BB_RT_GEO_DIR");
+    if (!dir || !dir[0]) {
+        return;
+    }
+    std::error_code ec;
+    for (const auto& item : std::filesystem::directory_iterator(dir, ec)) {
+        if (item.path().extension() != ".bbgeo") {
+            continue;
+        }
+        GeoMapState state;
+        if (!state.map.Open(item.path().string())) {
+            Log("Ray tracing: geometry cache %s not read (another version, or damaged)\n",
+                item.path().string().c_str());
+            continue;
+        }
+        state.entry.assign(state.map.meshes.size(), ~0u);
+        state.visible.Begin(state.map);
+        Log("Ray tracing: geometry cache %s: %zu models, %zu meshes, %zu placements, %zu "
+            "collision group sets\n",
+            state.map.name.c_str(), state.map.models.size(), state.map.meshes.size(),
+            state.map.places.size(), state.map.collisions.size());
+        geo_maps.push_back(std::move(state));
+    }
+    if (geo_maps.empty()) {
+        return;
+    }
+    if (!EnsureSoupRing()) {
+        Log("Ray tracing: geometry cache off, no room for its build buffer\n");
+        geo_maps.clear();
+    }
+}
+
+// The buffer BLAS are built from when their triangles come from the CPU (the geometry cache's
+// file meshes, the control meshes of tessellated draws): made on first use.
+bool RayTracing::EnsureSoupRing() {
+    if (geo_ring.mapped) {
+        return true;
+    }
+    // 8 MiB of triangles a frame: 233,000 triangles, a few building pieces.
+    constexpr u32 SlotBytes = 8u << 20;
+    void* mapped = nullptr;
+    geo_ring.slot_bytes = SlotBytes;
+    if (!CreateRawBuffer(instance, u64(SlotBytes) * Slots,
+                         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, true,
+                         16, geo_ring.buffer, geo_ring.allocation, &mapped, geo_ring.address)) {
+        return false;
+    }
+    geo_ring.mapped = static_cast<u8*>(mapped);
+    return true;
+}
+
+// The BLAS of a tessellated mesh if it is still built (ids are reused: the key is checked).
+Rt::CacheEntry* RayTracing::PatchEntry(u64 geometry) {
+    const auto it = patch_entries.find(geometry);
+    if (it == patch_entries.end()) {
+        return nullptr;
+    }
+    Rt::CacheEntry* e = cache.ById(it->second);
+    const Rt::DrawKey* key = e ? cache.KeyOf(it->second) : nullptr;
+    if (!e || !key || key->placement != Rt::PatchMeshPlacement || key->geometry != geometry ||
+        !e->valid) {
+        patch_entries.erase(it);
+        return nullptr;
+    }
+    return e;
+}
+
+void RayTracing::AddPatchDraw(const PatchDraw& d) {
+    if (!enabled || !patch_on || ptlas_on || !d.positions || !d.indices || !d.matrices ||
+        !d.instances || d.index_count < 3 || d.position_stride < 12 ||
+        (d.index_size != 2 && d.index_size != 4)) {
+        return;
+    }
+    ++patch_draws;
+    const u32 triangles = d.index_count / 3;
+    if (triangles > capacity.triangles ||
+        u64(triangles) * Rt::TriangleBytes > (8u << 20)) {
+        ++patch_failed;
+        return;
+    }
+    const bool queued =
+        std::any_of(patch_builds.begin(), patch_builds.end(),
+                    [&](const PatchBuild& b) { return b.geometry == d.geometry; });
+    if (!queued && !PatchEntry(d.geometry) && patch_builds.size() < 32) {
+        // The control mesh as a triangle soup. The game's memory is read now: by the time the
+        // BLAS is built the buffers may hold something else.
+        PatchBuild build{d.geometry, triangles, {}};
+        build.soup.resize(size_t(triangles) * 9);
+        bool ok = true;
+        for (u32 i = 0; i < triangles * 3 && ok; ++i) {
+            const u32 index = d.index_size == 2 ? static_cast<const u16*>(d.indices)[i]
+                                                : static_cast<const u32*>(d.indices)[i];
+            const s64 v = s64(index) + d.base_vertex;
+            if (v < 0 || v >= s64(d.vertex_count)) {
+                ok = false;
+                break;
+            }
+            float* out = build.soup.data() + size_t(i) * 3;
+            std::memcpy(out, d.positions + size_t(v) * d.position_stride, 12);
+            ok = std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+        }
+        if (!ok) {
+            ++patch_failed;
+            return;
+        }
+        patch_builds.push_back(std::move(build));
+    }
+    for (u32 i = 0; i < d.instances; ++i) {
+        const float* m = d.matrices + size_t(i) * Rt::PlacementFloats;
+        PatchRecord& r = patch_records[Rt::PlacementMix(d.geometry, Rt::PlacementId(m))];
+        r.geometry = d.geometry;
+        r.matrix = Rt::PlacementAffine(m);
+        r.last_frame = frame;
+    }
+}
+
+// This frame's BLAS of tessellated meshes join the pending builds, their triangles in geo_ring.
+bool RayTracing::QueuePatchBuilds(u32 slot) {
+    if (patch_builds.empty() || !EnsureSoupRing()) {
+        return false;
+    }
+    u8* const ring = geo_ring.mapped + u64(slot) * geo_ring.slot_bytes;
+    u32 builds = 0;
+    size_t done = 0;
+    for (; done < patch_builds.size(); ++done) {
+        PatchBuild& b = patch_builds[done];
+        const u64 bytes = u64(b.triangles) * Rt::TriangleBytes;
+        if (soup_ring_used + bytes > geo_ring.slot_bytes) {
+            break; // the rest next frame
+        }
+        Rt::CacheEntry entry{};
+        u64 scratch_bytes = 0, omm_scratch_bytes = 0;
+        alloc_skip_uv = true;
+        const bool allocated =
+            AllocateEntry(b.triangles, false, false, entry, scratch_bytes, omm_scratch_bytes);
+        alloc_skip_uv = false;
+        if (!allocated) {
+            ++patch_failed;
+            break; // no id or no pool space this frame
+        }
+        std::memcpy(ring + soup_ring_used, b.soup.data(), bytes);
+        // Model space: the instance's "build view" is the placement matrix itself.
+        entry.inv_view = Rt::IdentityAffine();
+        entry.view_valid = true;
+        entry.valid = true;
+        entry.dirty = false;
+        entry.built_frame = frame;
+        entry.shared = true;
+        entry.placed_kept_frame = frame;
+        Rt::DrawKey key{};
+        key.geometry = b.geometry;
+        key.index_count = b.triangles * 3;
+        key.placement = Rt::PatchMeshPlacement;
+        cache.Insert(key, entry);
+        PendingBuild build{entry.id, 0, b.triangles, scratch_bytes, false, false, false, 0, 0, 0,
+                           false};
+        build.soup_address = geo_ring.address + u64(slot) * geo_ring.slot_bytes + soup_ring_used;
+        pending.push_back(build);
+        patch_entries[b.geometry] = entry.id;
+        soup_ring_used += u32(bytes);
+        ++builds;
+        ++patch_built;
+        patch_built_triangles += b.triangles;
+    }
+    patch_builds.erase(patch_builds.begin(), patch_builds.begin() + std::ptrdiff_t(done));
+    return builds != 0;
+}
+
+// The tessellated meshes that stand in the TLAS this frame: every instance the game drew, and,
+// like a kept placement, the ones it drew earlier from near this camera position (a tree
+// behind the camera still shades the ground in front of it).
+void RayTracing::CollectPatchInstances(const std::array<float, 3>& camera,
+                                       std::vector<KeptItem>& out) {
+    patch_instances_last = 0;
+    if (!patch_on || ptlas_on) {
+        patch_records.clear();
+        return;
+    }
+    for (auto it = patch_records.begin(); it != patch_records.end();) {
+        PatchRecord& r = it->second;
+        if (r.last_frame + 1 >= frame) {
+            r.seen_camera = camera;
+        } else if (frame > r.last_frame + keep_rules.kept_unused_frames ||
+                   Rt::Distance2(r.seen_camera, camera) >
+                       keep_rules.distance * keep_rules.distance) {
+            it = patch_records.erase(it);
+            continue;
+        }
+        if (Rt::CacheEntry* e = PatchEntry(r.geometry)) {
+            // In use: not evicted as unused, and not first in line under pool pressure.
+            e->placed_kept_frame = frame;
+            e->last_used = frame;
+            out.push_back({e, true, r.matrix, true});
+            ++patch_instances_last;
+        }
+        ++it;
+    }
+}
+
+// The BLAS of a cache mesh if it is still built (ids are reused: the key is checked).
+Rt::CacheEntry* RayTracing::GeoEntry(GeoMapState& state, size_t map, u32 mesh) {
+    const u32 id = state.entry[mesh];
+    if (id == ~0u) {
+        return nullptr;
+    }
+    Rt::CacheEntry* e = cache.ById(id);
+    const Rt::DrawKey* key = e ? cache.KeyOf(id) : nullptr;
+    if (!e || !key || key->placement != Rt::GeoMeshPlacement ||
+        key->geometry != GeoKey(map, 0, mesh) || !e->valid) {
+        state.entry[mesh] = ~0u;
+        return nullptr;
+    }
+    return e;
+}
+
+// Builds, a few a frame, the BLAS of the cache meshes that stand near the camera and are not in
+// the TLAS from the game's own draws. Returns true when it queued a build.
+bool RayTracing::QueueGeoBuilds(u32 slot) {
+    if (!geo_loaded) {
+        LoadGeoMaps();
+    }
+    if (geo_maps.empty() || !geo_ring.mapped || !(geo_radius > 0.0f) || !frame_camera_valid ||
+        !placement_on || !placement_shared || ptlas_on) {
+        return false;
+    }
+    constexpr u64 ActiveFrames = 600;
+    constexpr u32 MaxBuilds = 24;
+    constexpr float NearSlack = 4.0f;
+    const std::array<float, 3> camera = Rt::Transform(frame_inv_view, {0.0f, 0.0f, 0.0f});
+    u8* const ring = geo_ring.mapped + u64(slot) * geo_ring.slot_bytes;
+    u32 used = soup_ring_used, builds = 0;
+    bool stop = false;
+    for (size_t m = 0; m < geo_maps.size(); ++m) {
+        GeoMapState& state = geo_maps[m];
+        if (!state.hit_frame || frame > state.hit_frame + ActiveFrames) {
+            continue;
+        }
+        if (!state.near_valid || Rt::Distance2(state.near_at, camera) > NearSlack * NearSlack) {
+            state.nearby.clear();
+            for (u32 p = 0; p < state.map.places.size(); ++p) {
+                const Rt::GeoPlace& place = state.map.places[p];
+                if (Rt::GeoPlaceable(place) &&
+                    Rt::BoxDistance(place.box, camera) <= geo_radius + NearSlack) {
+                    state.nearby.push_back(p);
+                }
+            }
+            state.near_at = camera;
+            state.near_valid = true;
+        }
+        for (const u32 p : state.nearby) {
+            const Rt::GeoPlace& place = state.map.places[p];
+            if (Rt::BoxDistance(place.box, camera) > geo_radius ||
+                !state.visible.Shows(state.map, place)) {
+                continue;
+            }
+            const Rt::GeoModel& model = state.map.models[place.model];
+            for (u32 k = 0; k < model.mesh_count; ++k) {
+                const u32 mi = model.first_mesh + k;
+                const Rt::GeoMesh& mesh = state.map.meshes[mi];
+                if (!Rt::GeoCaster(mesh, geo_min_triangles) ||
+                    geo_live_prev.contains(GeoKey(m, p, mi))) {
+                    continue;
+                }
+                if (Rt::CacheEntry* e = GeoEntry(state, m, mi)) {
+                    // In use: not evicted as unused, and not first in line under pool pressure.
+                    e->placed_kept_frame = frame;
+                    e->last_used = frame;
+                    continue;
+                }
+                const u32 triangles = mesh.index_count / 3;
+                const u64 bytes = u64(triangles) * Rt::TriangleBytes;
+                if (stop || builds >= MaxBuilds || used + bytes > geo_ring.slot_bytes ||
+                    triangles > capacity.triangles) {
+                    continue;
+                }
+                geo_soup.resize(size_t(triangles) * 9);
+                if (!state.map.ReadSoup(mi, geo_soup.data(), geo_vertices, geo_indices)) {
+                    ++geo_build_failures;
+                    continue;
+                }
+                Rt::CacheEntry entry{};
+                u64 scratch_bytes = 0, omm_scratch_bytes = 0;
+                alloc_skip_uv = true;
+                const bool allocated =
+                    AllocateEntry(triangles, false, false, entry, scratch_bytes, omm_scratch_bytes);
+                alloc_skip_uv = false;
+                if (!allocated) {
+                    ++geo_build_failures;
+                    stop = true; // no id or no pool space this frame
+                    continue;
+                }
+                std::memcpy(ring + used, geo_soup.data(), bytes);
+                // Model space: the instance's "build view" is the placement matrix itself.
+                entry.inv_view = Rt::IdentityAffine();
+                entry.view_valid = true;
+                entry.valid = true;
+                entry.dirty = false;
+                entry.built_frame = frame;
+                entry.shared = true;
+                entry.placed_kept_frame = frame;
+                Rt::DrawKey key{};
+                key.geometry = GeoKey(m, 0, mi);
+                key.index_count = mesh.index_count;
+                key.placement = Rt::GeoMeshPlacement;
+                cache.Insert(key, entry);
+                PendingBuild build{entry.id, 0, triangles, scratch_bytes, false, false, false, 0, 0, 0,
+                                   false};
+                build.soup_address = geo_ring.address + u64(slot) * geo_ring.slot_bytes + used;
+                pending.push_back(build);
+                state.entry[mi] = entry.id;
+                used += u32(bytes);
+                ++builds;
+                ++geo_builds;
+                geo_build_triangles += triangles;
+            }
+        }
+    }
+    soup_ring_used = used;
+    return builds != 0;
+}
+
+// The cache pieces that stand in the TLAS this frame: near the camera, their BLAS built, and not
+// there from the game's own draws (drawn or kept).
+void RayTracing::CollectGeoInstances(const std::array<float, 3>& camera,
+                                     std::vector<KeptItem>& out) {
+    constexpr u64 ActiveFrames = 600;
+    geo_instances_last = 0;
+    if (!geo_maps.empty() && geo_radius > 0.0f && placement_on && placement_shared && !ptlas_on) {
+        for (size_t m = 0; m < geo_maps.size(); ++m) {
+            GeoMapState& state = geo_maps[m];
+            if (!state.hit_frame || frame > state.hit_frame + ActiveFrames || !state.near_valid) {
+                continue;
+            }
+            for (const u32 p : state.nearby) {
+                const Rt::GeoPlace& place = state.map.places[p];
+                if (Rt::BoxDistance(place.box, camera) > geo_radius ||
+                    !state.visible.Shows(state.map, place)) {
+                    continue;
+                }
+                const Rt::GeoModel& model = state.map.models[place.model];
+                for (u32 k = 0; k < model.mesh_count; ++k) {
+                    const u32 mi = model.first_mesh + k;
+                    if (!Rt::GeoCaster(state.map.meshes[mi], geo_min_triangles) ||
+                        geo_live.contains(GeoKey(m, p, mi))) {
+                        continue;
+                    }
+                    Rt::CacheEntry* e = GeoEntry(state, m, mi);
+                    if (!e) {
+                        continue;
+                    }
+                    out.push_back({e, true, Rt::PlacementAffine(place.m), true});
+                    ++geo_instances_last;
+                }
+            }
+        }
+    }
+    geo_live_prev = geo_live;
 }
 
 vk::DescriptorSet RayTracing::SurfaceSet(vk::CommandBuffer cmdbuf, u32 slot) {

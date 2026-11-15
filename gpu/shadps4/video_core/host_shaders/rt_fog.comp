@@ -169,6 +169,17 @@ float DepthAt(ivec2 pixel) {
     return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
 }
 
+// Depth for the history and upsample tests only: past 500 m every depth counts as the same.
+// The sky is the game's dome mesh (0.5-1.5 km, in patches) next to empty sky at 60 km, so a
+// relative depth test lost the history on every patch seam and the seams flickered as lines.
+float TestDepth(float z) {
+    return min(abs(z), 500.0);
+}
+
+float DepthDelta(float a, float b) {
+    return abs(TestDepth(a) - TestDepth(b)) / max(TestDepth(b), 1e-3);
+}
+
 uint Hash(uint x) {
     x ^= x >> 16u;
     x *= 0x7feb352du;
@@ -786,7 +797,7 @@ void main() {
             if (all(greaterThanEqual(pq, ivec2(0))) && all(lessThan(pq, qsize))) {
                 history_used = 0.75;
                 vec4 h = texelFetch(fog_prev, pq, 0);
-                float dz = abs(h.w - prev.z) / max(abs(prev.z), 1e-3);
+                float dz = DepthDelta(h.w, prev.z);
                 // The 4x4 sub-pixel phase moves this sample across depth edges (far branches)
                 // every frame: when the centre texel is the other side of the edge, take the
                 // best-matching neighbour instead of restarting from one noisy frame.
@@ -800,7 +811,7 @@ void main() {
                                 continue;
                             }
                             const vec4 n = texelFetch(fog_prev, t, 0);
-                            const float nz = abs(n.w - prev.z) / max(abs(prev.z), 1e-3);
+                            const float nz = DepthDelta(n.w, prev.z);
                             if (nz < best && all(not(isnan(n.xyz)))) {
                                 best = nz;
                                 h = n;
@@ -811,7 +822,7 @@ void main() {
                 }
                 if (dz < 0.1 && all(not(isnan(h.xyz)))) {
                     history_used = 1.0;
-                    result.xyz = mix(h.xyz, result.xyz, 0.1);
+                    result.xyz = mix(h.xyz, result.xyz, 0.05);
                 }
             }
         }
@@ -864,12 +875,16 @@ void main() {
     vec3 nearest = vec3(0.0);
     float nearest_dz = 1e9;
     float nearest_o = 0.0;
-    for (int j = 0; j < 2; ++j) {
-        for (int i = 0; i < 2; ++i) {
+    // 4x4 quarter-res taps with a tent of radius 2 texels (about 16 full-res pixels across):
+    // the in-scatter is low frequency, and each frame's march has one random moon, sky and lamp
+    // ray per step, so a 2x2 bilinear kept that per-pixel noise. The depth weight keeps edges.
+    for (int j = -1; j < 3; ++j) {
+        for (int i = -1; i < 3; ++i) {
             const ivec2 qc = clamp(q0 + ivec2(i, j), ivec2(0), qsize - 1);
             const vec4 s = texelFetch(fog_tex, qc, 0);
-            const float dz = abs(s.w - z) / max(abs(z), 1e-3);
-            const float wb = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+            const float dz = DepthDelta(s.w, z);
+            const float wb = max(1.0 - abs(float(i) - f.x) * 0.5, 0.0) *
+                             max(1.0 - abs(float(j) - f.y) * 0.5, 0.0);
             const float w = wb * exp(-dz * 40.0);
             const float o_s = have_set ? 1.0 - Transmittance(min(s.w * z_to_dist, 6.0e4), dist) : 0.0;
             sum += s.xyz * w;
@@ -898,7 +913,14 @@ void main() {
     const vec3 p = PixelToView(vec2(pixel), DepthAt(pixel));
     const float t = Transmittance(length(p), dist);
     const float amount = clamp(dist.x, 0.0, 1.0);
-    vec3 result = scene.xyz * (1.0 - amount * (1.0 - t)) + amount * scatter;
+    // Stock GXLightComposite fogs toward col * (1 + w * (luma(scene) - 1)): a share w of the fog
+    // colour follows the scene's own luma (0.46 in most sets), so clouds and silhouettes still
+    // show through dense fog. The traced in-scatter replaces only the flat (1 - w) share; with
+    // all of it traced, the dense-fog sky was a flat, noisy veil (Nightmare Frontier).
+    const float scene_luma = max(dot(scene.xyz, vec3(0.29891, 0.58661, 0.11448)), 0.0);
+    const float w1 = clamp(col.w, 0.0, 1.0);
+    vec3 result = scene.xyz * (1.0 - amount * (1.0 - t)) + amount * (1.0 - w1) * scatter +
+                  amount * (1.0 - t) * w1 * scene_luma * col.rgb;
     const vec3 o = WorldDir(p);
     const float a2 = clamp(height.x * clamp(height.z * (o.y + height.w - height.y), 0.0, 1.0), 0.0, 1.0);
     // Height fog: extinction plus in-scatter of the traced light (full path tracing plan item 4).
@@ -911,7 +933,8 @@ void main() {
     // was traced further along the ray.
     if (a2 > 0.0 && sample_opacity > 1e-3 && amount > 0.0) {
         const vec3 tint = clamp(hcol.rgb / max(col.rgb, vec3(1e-3)), vec3(0.0), vec3(8.0));
-        const vec3 h_light = scatter / sample_opacity * tint;
+        const float w2 = clamp(hcol.w, 0.0, 1.0);
+        const vec3 h_light = (1.0 - w2) * scatter / sample_opacity * tint + w2 * scene_luma * hcol.rgb;
         result = result * (1.0 - a2) + a2 * h_light;
     }
     if (any(isnan(result)) || any(isinf(result))) {

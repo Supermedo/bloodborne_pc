@@ -226,8 +226,10 @@ void TestEmissiveSky() {
     // Then the moon direction, the moon and cloud layer grid and its search stats.
     static_assert(MoonDirSlot(8192) == SkyImageSlot(8192, SkyImageCells));
     static_assert(SkyLayerSlot(8192, 0) == MoonDirSlot(8192) + 1);
+    // Then the 4 search stats and one light share per fog particle (BB_RT_HAZE_RT).
+    static_assert(FogLightSlot(8192, 0) == SkyLayerSlot(8192, SkyLayerCells) + 4);
     static_assert(MaterialSlots(8192) ==
-                  2 * 8192 + 8 + SkyProbeCells + SkyImageCells + SkyLayerCells);
+                  2 * 8192 + 8 + SkyProbeCells + SkyImageCells + SkyLayerCells + uint32_t(FogMaxParticles));
     static_assert(uint64_t(MaterialSlots(8192)) * 16u <= 64ull << 20);
     static_assert(BounceFlagEmissive != BounceFlagDirSets && BounceFlagEmissive > BounceFlagDirSets);
     const auto center = OctEncode({0.0f, 0.0f, 1.0f});
@@ -522,59 +524,65 @@ void TestSkyKeyAndMoonCache() {
     assert(key.Recent(14 + SkyKey::RestartFrames + 4, 2));
     assert(!key.Recent(14 + SkyKey::RestartFrames + 5, 2));
 
+    using Draws = std::vector<uint64_t>;
+    const Draws sky = key.Draws();
     MoonCache cache;
-    assert(!cache.Put(0, {0.0f, 1.0f, 0.0f}));
-    assert(!cache.Put(clouds, {0.0f, NAN, 0.0f}));
-    assert(cache.Put(clouds, {0.0f, 700.0f, 0.0f}));
-    assert(Near((*cache.Find(clouds))[1], 700.0f));
-    assert(!cache.Put(clouds, {3.0f, 700.0f, 0.0f})); // the mean moved 1.5 m: not saved
-    assert(Near((*cache.Find(clouds))[0], 1.5f));
+    assert(!cache.PutDraws({}, {0.0f, 1.0f, 0.0f}));
+    assert(!cache.PutDraws(sky, {0.0f, NAN, 0.0f}));
+    assert(cache.PutDraws(sky, {0.0f, 700.0f, 0.0f}));
+    std::array<float, 3> pos{};
+    assert(cache.FindDraws(sky, pos) && Near(pos[1], 700.0f));
+    assert(!cache.PutDraws(sky, {3.0f, 700.0f, 0.0f})); // the mean moved 1.5 m: not saved
+    assert(cache.FindDraws(sky, pos) && Near(pos[0], 1.5f));
     // Finds hopping between two grid cells 25 m apart settle on the middle.
     for (int i = 0; i < 200; ++i) {
-        cache.Put(clouds, {i % 2 ? 12.5f : -12.5f, 700.0f, 0.0f});
+        cache.PutDraws(sky, {i % 2 ? 12.5f : -12.5f, 700.0f, 0.0f});
     }
-    assert(std::fabs((*cache.Find(clouds))[0]) < 1.0f);
+    assert(cache.FindDraws(sky, pos) && std::fabs(pos[0]) < 1.0f);
     // From one spot every find lands 10 m off the same way: the mean of 202 finds barely moves.
     for (int i = 0; i < 50; ++i) {
-        cache.Put(clouds, {10.0f, 700.0f, 0.0f});
+        cache.PutDraws(sky, {10.0f, 700.0f, 0.0f});
     }
-    assert(std::fabs((*cache.Find(clouds))[0]) < 2.5f);
+    assert(cache.FindDraws(sky, pos) && std::fabs(pos[0]) < 2.5f);
     // Strays (52 m off from one spot, one at the horizon) never outvote the moon.
     for (int i = 0; i < 200; ++i) {
-        assert(!cache.Put(clouds, {52.0f, 700.0f, 0.0f}));
+        cache.PutDraws(sky, {52.0f, 700.0f, 0.0f});
     }
-    assert(!cache.Put(clouds, {1650.0f, 70.0f, -600.0f}));
-    assert(std::fabs((*cache.Find(clouds))[0]) < 2.5f);
-    assert(Near(cache.Votes(clouds), 252.0f));
+    cache.PutDraws(sky, {1650.0f, 70.0f, -600.0f});
+    assert(cache.FindDraws(sky, pos) && std::fabs(pos[0]) < 2.5f);
+    assert(Near(cache.Votes(sky), 252.0f));
     // A moon far from the cached one (a wrong spot voted in, or the game's moon of another area)
     // takes over after SwitchVotes finds, not after outnumbering the 252 old ones.
     int puts = 0;
-    bool moved = false;
-    for (; puts < 300 && !moved; ++puts) {
-        moved = cache.Put(clouds, {600.0f, 800.0f, 0.0f});
+    for (; puts < 300; ++puts) {
+        cache.PutDraws(sky, {600.0f, 800.0f, 0.0f});
+        if (cache.FindDraws(sky, pos) && Near(pos[0], 600.0f)) {
+            break;
+        }
     }
-    assert(moved && Near((*cache.Find(clouds))[0], 600.0f));
-    assert(puts == int(MoonCache::SwitchVotes));
+    assert(puts + 1 == int(MoonCache::SwitchVotes));
     // The light points from the camera at the moon, so its direction moves with the player.
     std::array<float, 3> dir{};
-    assert(cache.DirFrom(clouds, {0.0f, 0.0f, 0.0f}, dir));
+    assert(cache.DirFromDraws(sky, {0.0f, 0.0f, 0.0f}, dir));
     assert(Near(dir[0], 0.6f) && Near(dir[1], 0.8f) && Near(dir[2], 0.0f));
-    assert(cache.DirFrom(clouds, {600.0f, 0.0f, 0.0f}, dir));
+    assert(cache.DirFromDraws(sky, {600.0f, 0.0f, 0.0f}, dir));
     assert(Near(dir[0], 0.0f) && Near(dir[1], 1.0f));
-    assert(!cache.DirFrom(clouds, {600.0f, 800.0f, 0.0f}, dir)); // at the moon
-    assert(!cache.DirFrom(with_moon, {0.0f, 0.0f, 0.0f}, dir));
+    assert(!cache.DirFromDraws(sky, {600.0f, 800.0f, 0.0f}, dir)); // at the moon
+    assert(!cache.DirFromDraws({uint64_t(7)}, {0.0f, 0.0f, 0.0f}, dir));
     MoonCache back;
     back.Parse(cache.Text() + "junk line\n");
-    assert(back.Size() == 1);
-    assert(Near((*back.Find(clouds))[0], 600.0f) && Near((*back.Find(clouds))[1], 800.0f));
-    assert(Near(back.Votes(clouds), MoonCache::SwitchVotes)); // votes saved with the position
+    assert(back.Size() == cache.Size());
+    assert(back.FindDraws(sky, pos) && Near(pos[0], 600.0f) && Near(pos[1], 800.0f));
+    assert(Near(back.Votes(sky), MoonCache::SwitchVotes)); // votes saved with the position
+    // Old files (one "draw x y z [votes]" line per draw) merge into moons by position.
     MoonCache old;
-    old.Parse("00000000000000aa 1 2 3\n"); // a line without votes counts LoadedSamples
-    assert(Near(old.Votes(0xaa), MoonCache::LoadedSamples));
-    assert(!back.Find(with_moon));
+    old.Parse("00000000000000aa 1 2 3\n00000000000000bb 2 2 3 20\n00000000000000cc 900 2 3 5\n");
+    assert(old.Size() == 2);
+    assert(old.FindDraws({0xaa}, pos) && Near(pos[0], 1.0f + 20.0f / 28.0f));
+    assert(Near(old.Votes({0xbb}), 28.0f));
+    assert(old.FindDraws({0xcc}, pos) && Near(pos[0], 900.0f));
 
-    // Per draw: a run that saw other segments of the same sky still finds its moon, and a
-    // segment shared with another sky is outvoted.
+    // A run that saw other segments of the same sky still finds its moon.
     SkyKey run1;
     run1.Add(100, 576, 147);
     run1.Add(100, 216, 63);
@@ -582,25 +590,35 @@ void TestSkyKeyAndMoonCache() {
     assert(run1.Draws().size() == 3);
     MoonCache draws;
     assert(draws.PutDraws(run1.Draws(), {0.0f, 700.0f, 0.0f}));
-    for (int i = 0; i < 50; ++i) {
-        draws.Put(uint64_t(576) << 32 | 147, {0.0f, 700.0f, 0.0f}); // same sky, more finds
-    }
     SkyKey run2; // a later boot facing elsewhere: only one segment in common
     run2.Add(5, 300, 80);
     run2.Add(5, 999, 11);
-    std::array<float, 3> pos{};
     assert(draws.FindDraws(run2.Draws(), pos) && Near(pos[1], 700.0f));
-    // Another sky shares segment 576/147 at a different moon; its own segments outvote it.
-    MoonCache two;
-    two.PutDraws({uint64_t(576) << 32 | 147, uint64_t(216) << 32 | 63}, {0.0f, 700.0f, 0.0f});
-    two.PutDraws({uint64_t(400) << 32 | 1, uint64_t(401) << 32 | 2}, {700.0f, 0.0f, 0.0f});
-    two.Put(uint64_t(576) << 32 | 147, {700.0f, 0.0f, 0.0f}, 2000.0f); // shared, now wrong sky
-    assert(two.FindDraws({uint64_t(400) << 32 | 1, uint64_t(401) << 32 | 2,
-                          uint64_t(576) << 32 | 147},
-                         pos) &&
-           Near(pos[0], 700.0f));
-    assert(two.FindDraws({uint64_t(216) << 32 | 63, uint64_t(576) << 32 | 147, uint64_t(7)}, pos));
-    assert(!two.FindDraws({uint64_t(7), uint64_t(8)}, pos));
+    assert(!draws.FindDraws({uint64_t(7), uint64_t(8)}, pos));
+
+    // Two maps share cloud segments (Forbidden Woods and Cathedral Ward, 2026-11-14): a visit to
+    // one must not take the other's moon, however many finds each had.
+    const Draws woods = {0xd80000003full, 0x1e000000087ull, 0x2a000000081ull, 0x24000000093ull};
+    const Draws ward = {0x1e000000087ull, 0x2a000000081ull, 0x24000000093ull};
+    MoonCache maps;
+    for (int i = 0; i < 1000; ++i) {
+        maps.PutDraws(ward, {299.0f, 240.0f, -116.0f});
+    }
+    for (int i = 0; i < 40; ++i) {
+        maps.PutDraws(woods, {-36.0f, 93.0f, 200.0f});
+    }
+    assert(maps.FindDraws(ward, pos) && Near(pos[0], 299.0f));
+    assert(maps.FindDraws(woods, pos) && Near(pos[0], -36.0f));
+    for (int i = 0; i < 8; ++i) {
+        maps.PutDraws(ward, {299.0f, 240.0f, -116.0f});
+    }
+    assert(maps.FindDraws(woods, pos) && Near(pos[0], -36.0f));
+    MoonCache maps2;
+    maps2.Parse(maps.Text());
+    assert(maps2.FindDraws(ward, pos) && Near(pos[0], 299.0f));
+    assert(maps2.FindDraws(woods, pos) && Near(pos[0], -36.0f));
+    // The run has seen only the shared segments so far: it is the map they fully cover.
+    assert(maps2.FindDraws({0x1e000000087ull, 0x2a000000081ull}, pos) && Near(pos[0], 299.0f));
 }
 
 int main() {

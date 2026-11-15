@@ -18,6 +18,14 @@ inline std::array<float, 4> FarFadeParams(float start_m, float band_m) {
     return {start_m, start_m + band, inv_band, 1.0f};
 }
 
+// The direct and GI passes read .x as the moon shadow ray length (BB_RT_MOON_REACH, 0 = 10 km);
+// the far fade itself uses .yzw only.
+inline std::array<float, 4> FarFadeParams(float start_m, float band_m, float moon_reach_m) {
+    auto out = FarFadeParams(start_m, band_m);
+    out[0] = moon_reach_m > 0.0f ? moon_reach_m : 0.0f;
+    return out;
+}
+
 inline bool FarFadeOn(const std::array<float, 4>& f) {
     return f[3] > 0.0f;
 }

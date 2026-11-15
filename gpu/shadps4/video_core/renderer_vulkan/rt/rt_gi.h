@@ -413,8 +413,14 @@ constexpr uint32_t SkyLayerSlot(uint32_t records, uint32_t cell) {
 // Two slots after the grid: the moon search's peak score, ring mean score, peak cell x, y; then
 // the found disc's distance from the camera along its direction (0 without a hit); then the
 // brightest cell by luminance (rgba, then cell x, y, luminance).
+// RT-lit stock haze: per fog particle (the light grid's fog block order) the share of moon and
+// sky light that reaches it, rgb (rt_gi.comp FogLight, sky layer pass phase 2).
+constexpr uint32_t FogLightSlot(uint32_t records, uint32_t particle) {
+    return SkyLayerSlot(records, SkyLayerCells) + 4 + particle;
+}
+
 constexpr uint32_t MaterialSlots(uint32_t records) {
-    return SkyLayerSlot(records, SkyLayerCells) + 4;
+    return FogLightSlot(records, uint32_t(FogMaxParticles));
 }
 
 // Pixel shader of the game's sky dome draw; its image 0 is the dome panorama.

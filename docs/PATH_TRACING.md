@@ -365,8 +365,9 @@ Per frame (`AddDraw`):
 - No world camera this frame (`WorldCamera` invalid): cached instances are masked (fix 1), new ones use the identity transform and
   those are marked dirty, so the next frame with a camera rebuilds them.
 
-Memory is fixed at startup: the pool is `BB_RT_BLAS_MB` MiB (default 1.5 x the single-BLAS size
-of `BB_RT_TRIANGLES`, printed at startup), one `VkAccelerationStructureKHR` per entry on the pool
+Memory is fixed at startup: the pool is `BB_RT_BLAS_MB` MiB (default since 2026-11-15: the
+larger of 1.5 x the single-BLAS size of `BB_RT_TRIANGLES` and an eighth of the video memory
+clamped to 512 MiB..2 GiB; printed at startup), one `VkAccelerationStructureKHR` per entry on the pool
 buffer, at most 8192 entries, fingerprints 512 KiB, probe/flag rings per slot. Eviction at frame
 start: entries unused for 120 frames (loading screens, area changes), then least recently used
 entries until the pool is under 75 %. Freed blocks are reused only after the GPU passed the tick
@@ -3671,13 +3672,14 @@ reflection. Now (`BB_RT_WATER_SHEET`, default on with `BB_RT=1`):
   Defaults scale 0.5, density 0.05: at scale 1 the haze covered the whole view, at density
   0.08 it hid the dark arches stock shows, at 0.03 it was gone. The slab's
   `BB_RT_MIST_HEIGHT` default is 5 (was 1.5; stock's haze stands higher than that).
-- The traced mist is parked (2026-11-08): `BB_RT_MIST` defaults to 0, and with the mist at 0 the
+- The traced mist was parked 2026-11-08 and is on again since 2026-11-14 (`BB_RT_MIST` 1,
+  `BB_RT_MIST_FOG` 0.25, sky-lit glow; see "Traced mist on by default"). With the mist at 0 the
   stock haze (`71c96598`) draws (`BB_RT_FX_SHEETS=0` still hides it) and its particles are not
   captured. Stock's water mist sheet (`a28d2a7a`) stays hidden unless `BB_RT_FX_SHEETS=1`: over
   the RT water it is an opaque blue film (sewer water patch 6 6 7 without it, stock 4 7 11). Why: at an outdoor bridge stock's haze adds about +9 +12 +12 (8-bit)
   over the water, a grey-green that the traced mist could not reach at a fair cost. The particle
   colour now rides in the low 8 bits of the centre words (`FxParticle.rgb`, cap
-  `FogMaxParticles` 1024), and the glow is `BB_RT_MIST_FOG` (default 5) x the per-area height
+  `FogMaxParticles` 1024), and the glow is `BB_RT_MIST_FOG` (default 5 then; sky-lit at 0.25 since 2026-11-14) x the per-area height
   fog colour (`fog_sets[set * 6 + 4]`, bound to the reflect pass at binding 30) x particle colour,
   replacing `BB_RT_MIST_GLOW` when the fog table is there. The main fog colour (+1) was too blue
   (+2 +6 +9); the height fog colour at 5 matched the hue and level. Moon in-scatter (dir set
@@ -4775,7 +4777,7 @@ The darkness noted in the section above was mostly this (the light from the rock
 veiled sun behind the cliffs); from the game's direction the same map is lit. The `BB_RT_PICK`
 blockers on back faces were read with those lights and are not checked again.
 
-## Sky flicker under the fog pass, Nightmare Frontier: open (2026-11-13)
+## Sky flicker under the fog pass, Nightmare Frontier: fixed (2026-11-14)
 
 Not the moon code. `tools/live_vision.py measure` on the sky of one still view: flicker sd 12-16%,
 peak to peak ~50%, with RT; 0.1% stock; the same with `BB_RT_MOON_FROM_SKY=0` and with the shaders
@@ -4787,6 +4789,59 @@ sky part between 0.006 and 0.157. Why the 0.9 history does not even that out is 
 
 Until it is fixed the live `rt.cfg` carries `BB_RT_FOG_STOCK=1` (the user's choice): the game's
 own fog in every map.
+
+**Fix (2026-11-14): the traced fog runs right after `GXLightComposite`.** `OnAfterComposite`
+now records the fog after the GI (`RecordFog`), at the same point where the stock composite
+applies its fog; the post trigger only runs it on frames this missed (`fog_ran_frame`).
+`BB_RT_FX_FOG_EARLY=0` (live) goes back to the post trigger for A/B.
+
+How it was found (fork-v1.9.8.6, FSR 3.1, one still view of the Nightmare Frontier sky):
+
+- Per-frame luma of the sky: steady 124 with single-frame flashes to 174 on about 1 frame in 10;
+  stock a steady 100. `BB_RT_FX_FOG_DEBUG` views showed the fog opacity of those pixels at 0 in
+  those frames: the pixel's set (`G-buffer3.a * 255`) pointed at a blank set
+  (`1 0 0 0.01 | 0 0 0 0 | 1 0 0 0.01 | 1 0 0 1506 | 0 ...`, transmittance 1).
+- Not the cause: rounding the id (`+ 0.5`), the sky pixels' own id instead of the walk down,
+  the sky skipped, the zero-fill of the game's table (kept the table: still blank sets), a second
+  composite per frame (none logged), the dome flag, the 60 km sky clamp.
+- At the post trigger the transparents and particles have drawn after the composite, so the set
+  ids and the table no longer match what the composite used. Run at the composite, they do.
+
+Measured with `knob_ab`, interleaved, step = mean frame-to-frame change in luma:
+
+| Region | post trigger (old) | after composite (new) | stock |
+|---|---|---|---|
+| sky | 0.69-0.86 | 0.05-0.09 | 0.06-0.08 |
+| cliff | 0.37-0.45 | 0.06-0.13 | 0.07-0.09 |
+| mid | 0.96-1.21 | 0.07-0.10 | 0.10-0.13 |
+
+The flashes come and go between sessions (one session showed none at the post trigger); in 4
+sessions the new path never showed them. Noise (`pixel_noise.py`, per-pixel temporal sd p90):
+sky 0.32 new vs 0.70 stock, cliff 0.72-0.78 vs 0.73-0.75, ground 0.78-0.81 vs 0.65-0.69, with the
+4x4 tent upsample, history 0.05 and the 500 m depth test (`TestDepth`) kept from 2026-11-14.
+
+## Sky too bright under the traced fog: the eye adaptation boosted the dome (fixed 2026-11-14)
+
+The traced-fog sky read 237-243 luma (clipped) against stock 120. It was not the fog: with
+`BB_RT_EXPOSURE=0` the traced sky is 118 vs stock 119. `rt_exposure.comp` skipped "the sky" by
+depth 1 only, but the game's dome is a mesh that writes depth (539-1480 m, see rt_sky.comp), so the
+boost reached it in every mode (stock fog 158 vs stock 120). The traced fog leaves far geometry
+darker than the stock fog (away from the moon and in shadow, far cliff 33-35 vs 40-45), so the
+metered log2 luminance fell (-6.8 vs -6.0), the boost rose (+1.25 vs +0.49 EV) and the dome clipped.
+
+Fix: the exposure push carries the projection and the view-space up vector, and the boost skips a
+pixel at 30% of the dome's distance or more, the fog pass's `IsDome` rule (90% left the dome's flat
+facets as bright rectangles). The metering is unchanged, so `BB_RT_EXPOSURE_KEY` keeps its tuning.
+
+| Nightmare Frontier, same view | sky | ground | far cliff |
+|---|---|---|---|
+| stock (F9) | 122-123 | 69-71 | 53-61 |
+| RT, stock fog, before | 157-160 | 42-44 | 40-45 |
+| RT, traced fog, before | 237-243 | 54-57 | 33-35 |
+| RT, stock fog, after | 121 | 43-44 | 40-45 |
+| RT, traced fog, after | 120 | 59-60 | 33-35 |
+
+Tooling note: `knob_ab` sets separate knobs with `;`. A comma made the rest part of the first value.
 
 ## F9 off costs nothing again (2026-11-14, `vk_rasterizer.cpp`, `vk_ray_tracing.cpp`)
 
@@ -4808,3 +4863,416 @@ Unpausing brings the lighting back on the next frame; hitch log 0 hitch frames, 
 
 F9 does nothing when path tracing is off in the launcher (`BB_RT=0`): `Rt::ToggleEffects()`
 returns before touching the pause flag (`rt_toggle.h`).
+
+## Traced mist glow flicker: the reflect pass read last frame's fog table (fixed 2026-11-14)
+
+With `BB_RT_MIST_FOG` on, the traced mist over Nightmare Frontier flashed whole spheres in and
+out every frame. The mist itself was steady: with a constant glow colour in the shader the frame
+step fell from 8.7 to 0.5 luma. The glow colour is the pixel's fog set (`G-buffer3.a`) looked up
+in the game's fog sets table, and the reflect pass (where the mist is drawn) runs at the light
+pass, before the composite, so it read the table copied at the previous composite with this
+frame's set ids. The table sits at one address (`0x105017e330`, 21600 bytes) and the game has
+already written it for this frame at the light pass, so `CopyFogTableEarly` copies it again
+before the reflect pass. It still works with the traced fog on (`BB_RT_FX_FOG=1`, which zeroes
+the game's copy after the composite).
+
+The glow now takes only the set colour's luma, the colour comes from the haze particles: the set
+colour is cyan and made the mist bluer than stock (mist region blue minus red +24, stock +13,
+now +15).
+
+Nightmare Frontier start, `BB_RT_MIST=0.02`, frame-to-frame step in luma (`knob_ab`, interleaved):
+
+| Region | glow off | glow on, before | glow on, after | stock |
+|---|---|---|---|---|
+| far cliff mist | 0.17-0.37 | 8.7-15.1 | 0.29-0.34 | 0.29-0.38 |
+| mid mist | 0.22-0.36 | 6.7-13.5 | 0.32-0.39 | 0.27-0.38 |
+
+At the valley view past the stone gate this version overshot stock (valley luma: stock 107,
+`BB_RT_MIST=0` 101-102, traced mist glow off 127, `BB_RT_MIST_FOG=0.3` 150), while at the start
+view it sat below stock (0.85x): the mist's level followed the particle count and size.
+
+## Traced mist on by default: stock card opacity, sky-lit glow (2026-11-14, user-approved)
+
+The user reported the mist overbright and asked for the glow to come from real light. Two
+changes in `MistVolume` (`rt_gi.comp`):
+
+- **Opacity per sphere = the game's card.** Each haze sphere's density is now
+  `-ln(1 - min(alpha, 0.95)) x 15/16 / r`: through its centre the sphere is exactly as opaque as
+  the game's card for that particle (the chord integral of the falloff is 16/15 r). Before, the
+  density did not depend on the radius, so big far particles outweighed small near ones. With the
+  spheres (`BB_RT_MIST_SHEETS` on) `BB_RT_MIST` is now a multiplier on that opacity and 1 is
+  physical; it no longer suits the old slab mode (`BB_RT_MIST_SHEETS=0`).
+- **Glow = sky light scattered by the mist.** The glow is now the mean sky radiance over the
+  upper hemisphere (zenith plus four directions 27 degrees up, `SkyRadiance`) x 1/2 (isotropic
+  phase, sky only above) x albedo x `BB_RT_MIST_FOG`, instead of the fog set colour x a constant.
+  The fog set colour no longer drives the glow (the early fog table copy stays for the fog
+  lookups). `BB_RT_MIST_FOG=0` still falls back to the `BB_RT_MIST_GLOW` path.
+
+New defaults: `BB_RT_MIST` 0 -> 1, `BB_RT_MIST_FOG` 5 -> 0.25 (user approved "Turn it on").
+Luma, interleaved `knob_ab` (cold boot, built-in shaders, no mist knobs in rt.cfg):
+
+| View, region | stock | `BB_RT_MIST=0` | traced mist (new defaults) |
+|---|---|---|---|
+| valley past the stone gate, cloud | 76-107 | 101-102 | 94-104 (glow 0.2) to 102-112 (0.3) |
+| valley, lower | 60-77 | - | 69-87 (0.2) to 74-95 (0.3) |
+| hillside path, haze on the rock face | 75-93 | 81-97 | 82-91 |
+| same spot turned 180, moonlit far rock | 84-85 | 169-170 | 127-133 |
+
+The mist now sits at stock level. On the moonlit far rock the RT frame is brighter than stock
+from the moon itself, and the mist pulls it down, not up. No flicker: frame step 0.14-0.66 with
+the mist, 0.23-0.31 stock. Cost: FPS overlay 59 at the hillside view (about 58-61 with the mist
+off).
+
+### Mist, not a veil (2026-11-14)
+
+The user: the mist looked like a light veil, not a mist. At the hillside view the spheres covered
+the whole cliff in one smooth cyan wash and hid the game's light shaft, while stock shows
+separate soft puffs. Three changes in `rt_gi.comp`:
+
+- `MistRadius` 0.5: a sphere is half the captured radius. The game's card shows a soft puff
+  inside its quad, not a disc that fills it. At full radius neighbouring spheres merged into one
+  slab.
+- The noise is scaled to each sphere (`MistBlobCells` 2.5 cells per radius) at contrast 0.9
+  (`MistSheetNoise`, was 0.5). The fixed 2 m grain averaged out over a 30 m sphere.
+- Moonlight scattered by the mist: the pixel's moon set, one shadow ray from the mist's weighted
+  centre, Henyey-Greenstein g 0.5. Mist in the moon's shadow stays dark, and mist above the
+  cliff in the moon glows (checked with a temporary x10 boost).
+
+Hillside view, cliff region luma (interleaved): traced mist 98-100, `BB_RT_MIST=0` 106-128, stock
+121-133. The cliff texture shows through and the puffs rise beside the player. Frame step
+0.08-0.36, no boiling over 2 s.
+
+### Stock haze sprites lit by the path tracer (2026-11-14)
+
+The user still found the traced mist bad ("a white block, not a mist") and asked for the game's
+own sprites with volumetric light. The sphere mist is parked again and the stock haze sprites
+(pixel shader 0x71c96598) are drawn with traced light:
+
+- **Light per puff (`FogLight`, `rt_gi.comp`, sky layer phase 2).** Every 4 frames one thread per
+  captured haze particle traces the moon: 4 shadow rays from points 0.4 r around the centre,
+  weighted by the moon colour, plus the sky over 5 upward directions with a shadow ray each. The
+  result is divided by the unshadowed value (0..1 per channel), copied to a host ring and read
+  back a few frames later (`ReadFogLight`, 2 m cell hash, nearest particle, else the mean).
+- **Sprite colour.** `HazeColor` scales each particle's colour word by
+  `1 - BB_RT_HAZE_SHADE + BB_RT_HAZE_SHADE x light`, plus the nearby lamps. `BB_RT_HAZE_SHADE`
+  is the share of the traced shadow applied; the rest stands for light scattered inside the bank.
+- **Density stays stock.** With traced light the alpha is the game's own; the old alpha cut
+  (`BB_RT_HAZE_FLOOR`, 0.3) is only used when `BB_RT_HAZE_RT=0`. With both cuts the plume was
+  about 12% of stock and vanished.
+
+Hillside start view, read-back values: 194-220 particles, light 0 to 1, mean 0.12-0.16, about 11%
+over 0.5 (the plume sits in the cliff's shadow; its top catches the moon). Luma, interleaved
+`knob_ab`:
+
+| Region | old (`HAZE_RT=0`, floor 0.3) | traced light |
+|---|---|---|
+| plume | 72.0-72.3, flicker 3.7-4.2% | 79.1, flicker 2.1-2.4% |
+| plume base | 48.7-54.0 | 51.5-52.3 |
+
+`BB_RT_HAZE_SHADE` 1 turns shadowed puffs into dark smoke over the arch, 0.6 flattens the plume;
+0.8 keeps a moonlit top and a dim base. FPS overlay 65-67 at that view (traced mist was about 59).
+
+New defaults: `BB_RT_MIST` 1 -> 0 (the user asked for the stock sprites), `BB_RT_HAZE_RT` 1,
+`BB_RT_HAZE_SHADE` 0.8. `BB_RT_HAZE_LOG=1` prints the read-back range every 120 frames.
+
+## Light that changed with the camera: far casters seen once (2026-11-14, `BB_RT_MOON_REACH`)
+
+User report: "the light is changing when turning the camera". Hillside start, view A = camera
+recentred behind the player (R3). A fresh load shows view A lit (player luma ~115, ground ~68).
+After one look about 90 degrees left and back it is dark (player ~62, ground ~28) and stays dark.
+pt2.3 does the same.
+
+Ruled out (no effect on the switch): the traced haze light, the sky dome/probe path (never live
+here), the live screen sky lookup, exposure, and the moon direction (light 1 is the game's own
+`0.584 0.242 -0.775`, 14 degrees up, in both states; the sky moon slot stayed empty).
+
+`BB_RT_PICK` on the player, the ground and the wall in the dark state: moon visibility 0, the
+blocker a far rock mesh (ps `6b45aeff`) 74-85 m along the ray, mode "kept off-screen instance".
+The TLAS holds only what the game has drawn: the rocks join it when the camera looks at them and
+are then kept (`BB_RT_KEEP_UNUSED`), so the same view is lit before and shadowed after.
+
+`BB_RT_MOON_REACH` (live, metres, 0 = 10 km as before) caps the moon shadow ray in the direct
+pass (centre, cone, thin-card paths), GI bounce moon, the haze light and the traced mist. It
+rides in `far_fade.x` of the direct and GI params (the far fade reads `.yzw` only).
+
+| view A, same run | player | ground | left wall |
+|---|---|---|---|
+| fresh load | 113-118 | 68-69 | 108-110 |
+| after the look left, reach 0 | 61-67 | 27-29 | 65-67 |
+| after the look left, reach 60 | 113-116 | 68-69 | 106-109 |
+| reach 40 | 115.5 | 67.9 | 107.6 |
+
+Reach 60 held through 3 look-aways each way (player 111-117). Default still 0: a cap also drops
+real long shadows (a 20 m cliff under a 14 degree moon throws 80 m), so the default waits for the
+user and a second area.
+
+## Haze light as a blended field (2026-11-14)
+
+User report: the RT-lit stock mist flickers, "like our mist is slow frame". Each puff took the
+light of the nearest read-back puff (2 m cells). The read-back is a few frames old, refreshes
+every `SkyLayerEvery` (4) frames, and the per-puff values are near on/off (moon 4-tap
+transmittance), so puffs stepped between lit and shadowed behind their motion. Hillside, static
+camera, `vision_measure` low mist band: flicker sd 10.4-13.0% (p2p 38%) vs 3.4% with
+`BB_RT_HAZE_RT=0` and 3.2% stock.
+
+Now `ReadFogLight` averages each read-back per 2 m cell and blends it into a kept grid
+(`HazeBlend` 0.25 per read-back, new cells start from the mean, cells unrefreshed for 60
+read-backs drop); the mean blends the same way. `HazeColor` samples the grid trilinearly between
+the 8 cell centres, a missing cell counting as the mean.
+
+Hunter's Dream, static camera, `pixel_noise.py` per-pixel temporal sd (median), old and new exe
+interleaved at the same save:
+
+| region | old | new | stock |
+|---|---|---|---|
+| mist right | 1.4-2.2 | 0.9-2.4 (median 1.5) | 1.5 |
+| mist centre | 1.5-3.9 (2.6) | 1.2-2.3 (1.65) | 1.8 |
+| mist left | 2.6-3.4 (2.9) | 2.5-2.8 (2.65) | 2.8 |
+
+## Blue smoke: the particle colour word is B, G, R, A (2026-11-14)
+
+User report: "why all the smokes are blueish in any location". Forbidden Woods bonfires: the
+smoke over them blue in RT, warm grey in stock. Smoke region, Lab b of the brighter half: patched
+(`HAZE_LIT` on) -9.7 / -11.2, `BB_RT_HAZE_RT=0` -9.4 / -10.0, haze patch off (`BB_RT_HAZE_LIT=0`)
+-1.2. So the blue came from `HazeColor`'s lamp tint, not from the traced light.
+
+`BB_RT_FLAME_LOG=1` shows orange flames as `ff5018` (printed byte 2, 1, 0): red is byte 2, the
+word is B, G, R, A in memory. `HazeColor` took byte 0 as red, so the fire's warm tint (and the
+moon's) went onto blue. Fixed by mapping channel c to byte 2 - c.
+
+Also `FogLight` (rt_gi.comp) now writes one luma share for all three channels: per channel, a puff
+in moon shadow kept the blue sky's share and lost the warm moon's.
+
+After (mist ahead of the Forbidden Woods lamp, two pairs): patched b -3.35 / +3.18, unpatched
+-3.14 / +3.40 (hue now follows stock; before the patch moved b by about -9).
+
+`rt-gi-test` had failed since 92eb368 (MaterialSlots grew by the fog light slots); fixed.
+
+## Moon swung 50-60 degrees on the first look at the disc: one cache entry per moon (2026-11-14, `rt_moon_cache.h`)
+
+User report: "the moon light is changing". In Cathedral Ward the light pointed at Forbidden Woods'
+moon (`0.687 0.497 0.531`, exactly the direction from the camera to that moon's cached place) until
+the blood moon came on screen, then swung to it: "found 50.78 degrees from its cached position".
+Earlier the same run, Forbidden Woods: 59.71 degrees.
+
+Cause: the cache kept one moon per layer draw, and the two maps share cloud segments (Cathedral
+Ward draws `1e000000087 24000000093 2a000000081`, all also drawn in Forbidden Woods). Each visit's
+finds took the shared draws over (`SwitchVotes`, 8 finds), so the next visit to the other map was
+seeded with the first map's moon.
+
+Now each moon is one entry with the draws seen while it was found (`moon x y z votes order
+draws` lines; old per-draw lines merge by position on load). A run takes the moon whose draws best
+match its own (shared over the union), so a map whose draws are a subset of another's still gets
+its own; equal matches keep the old rules (within 150 m more finds win, farther the last one
+confirmed once it has 8). A new log line names the seeded moon and the draws that chose it
+("moon seed on/off").
+
+Live, Cathedral Ward, cold start with a crafted cache in the bad state (Forbidden Woods' moon on
+Cathedral Ward's three draws plus its own, 1000 finds, confirmed last): seeded Cathedral Ward's
+moon (`0.846 0.443 -0.296`) from the first frame; the disc, found after a camera turn, was 0.48
+degrees from it (was 50.78). The Forbidden Woods entry was left alone. Forbidden Woods itself is
+covered by `rt-gi-test` (both maps, both orders, a run that has seen only the shared draws); not
+run live (needs a lamp warp).
+
+## Light that changes after a look away: casters the camera has not seen yet (2026-11-14)
+
+User report after the cache fix above: "still not working". Not the moon: its direction stayed
+`0.846 0.443 -0.296` in the log the whole time. Test (`recenter`: view A = camera behind the
+player, measure, look 45 degrees away, recentre, measure), Cathedral Ward bridge, fresh launch
+each row, mean luma of the player / the ground:
+
+| Build and settings | A before | A after one look away |
+|---|---|---|
+| this branch, light at the sky's moon | 160 / 80 | 64 / 25 |
+| shipped pt2.3 exe, same launcher variables | 163 / 82 | 62 / 25 |
+| this branch, `BB_RT_SHELF=0` | 160 / 80 | 65 / 26 |
+| this branch, `BB_RT_MOON_FROM_SKY=0` (the game's light direction) | 156 / 91 | 81 / 25 |
+| the same with `BB_RT_OFF_INSTANCES=0` (no kept instances) | 157 / 93 | 152 / 88, then 152, 154 |
+
+So the change is geometry: buildings the game had not submitted yet (it frustum-culls map pieces)
+enter the TLAS during the look away and are then kept (`AppendKeptInstances`), and they block the
+moon. `BB_RT_PICK` names them: kept instances (mode 2), 13 m along the ray to the sky's moon, 32-34
+m along the ray to the game's light. It is in pt2.3 too, so not a regression of this branch.
+`BB_RT_MOON_REACH` does not help here (the casters are within 60 m).
+
+Tried and dropped the same day (user rule changed twice):
+
+- Light on the game's own direction by default plus the game's shadow mask for off-screen casters
+  (`min(traced without kept instances, smoothstep(0.2, 0.55, mask.z))`): player 49 / ground 27 from
+  the first frame and the far cathedral dark, against 157 / 93 traced; `BB_RT_MOON=mask` alone gave
+  27 / 14. The mask's `.z` is not "1 where lit" in this map (not looked into further). Reverted.
+- Moving the moon mesh to the game's light direction: dropped by the user; on this bridge the
+  game's light comes from behind the camera while the moon hangs over the cathedral.
+
+Decision (user): the light stays anchored to the sky's moon or sun, in every map, with no cache
+and no look at the sky; the game is to keep those meshes submitted outside the view. That needs a
+patch of the game's own culling (reverse engineering, in progress); the same kind of patch for map
+pieces would remove the caster pop above at its root.
+
+How the sky is drawn in Cathedral Ward (`BB_RT_FAR_LOG=1`, new, live: every ~5 s the probed draws
+over 250 m from the camera; `BB_LOG_PS=scene` / `gbuffer` toward and away from the moon):
+
+- Cloud band: 6 draws of ps `765450df` (88-224 triangles, 510-1290 m), submitted every frame.
+- Blood moon: a forward draw into the scene colour, ps `c31bd920` vs `c6cdba2b`, 360 indices,
+  alpha blended (src alpha, inv src alpha), depth test and write on; only while in view. Being
+  blended it is not a probed TLAS draw, so it is not in the far log.
+- Two 4-index quads (ps `898dabb3`, `e55e45eb`, additive) also only while the moon is in view.
+
+## The real fix for the light after a look away: placement identity (2026-11-15)
+
+Plan, measurements and status of every step: `GEOMETRY_CACHE_PLAN.md` (study:
+`GEOMETRY_CACHE_STUDY.md`). In short:
+
+- The light changed because a static piece was known only by its draw order (`occurrence`),
+  which changes with the view: 17.9 BLAS cache misses a frame on a turn, kept copies that
+  disagreed with what was drawn, and a BLAS pool at its eviction line. Now a piece is known by
+  its mesh and the game's own world matrix (`rt/rt_placement.h`, `BB_RT_PLACEMENT`), one BLAS
+  per mesh is shared by its placements (`BB_RT_PLACEMENT_SHARED`), and the pool default is an
+  eighth of the video memory (`BB_RT_BLAS_MB`). Misses 0.04-0.07 a frame; the look-away test
+  holds (player luma 31.7 -> 34.1, 32.8, 31.8).
+- Map pieces the game has not drawn, loaded from the game's files as shadow casters
+  (`BB_RT_GEO_DIR`, `BB_RT_GEO_RADIUS`, `BB_RT_GEO_MIN_TRIS`, `BB_RT_GEO_LOG`): built, correct,
+  and off by default. At the test bed they add no visible shadow in 11 views and cost 4 % of
+  the frames.
+
+New knobs (all live unless noted):
+
+| Knob | Default | What it does |
+|---|---|---|
+| `BB_RT_PLACEMENT` | `1` | A static draw is keyed by mesh and world matrix once its shader's matrices agreed with the GPU probe. `0`: draw order, as before. |
+| `BB_RT_PLACEMENT_SHARED` | `1` | One BLAS per mesh, placements as instances. Switching it drops what the camera has seen (used by the tests as a purge). |
+| `BB_RT_BLAS_MB` | VRAM / 8, 512..2048 | Load time. BLAS pool size. |
+| `BB_RT_GEO_DIR` | unset | Load time. Folder of `<map>.bbgeo` files (`tools/mapcache/build_cache.py`). Unset: the file pieces are off. |
+| `BB_RT_GEO_RADIUS` | `50` | Metres around the camera in which file pieces stand in. `0` off. |
+| `BB_RT_GEO_MIN_TRIS` | `32` | Load time. Smallest file mesh worth an instance. |
+| `BB_RT_MOON_FILES` | `1` | The moon or sun of the sky the game draws, from the game's files (next section). `0`: search and moon cache only. |
+| `BB_RT_SKY_LOG` | `0` | Every 120th frame, each sky draw with the vertices the CPU reads of it. |
+| `BB_RT_FAR_LOG`, `BB_RT_MISS_LOG`, `BB_RT_GEO_LOG` | `0` | Diagnostics: far draws, cache misses, the pieces the game draws per map. |
+
+## The moon and sun from the game's files (2026-11-15, `rt_sky_finder.h`, `BB_RT_MOON_FILES`)
+
+User rule: the light is anchored to the sky's moon or sun in every map, with no cache and no
+look at the sky. Until now the moon's place was only known after the screen search had seen the
+disc (kept in `rt_moon.txt` per set of cloud draws, which maps share).
+
+What the files hold (`tools/mapcache/sky_table.py`, survey in `tools/mapcache/SKY_SURVEY.md`):
+every sky is a map piece or object fixed in the world, and its moon or sun is a mesh of that
+model (or, in the Hunter's Dream and Yahar'gul under the blood moon, an object of its own that
+the same event enables). So the moon's world centre is known for 28 of the 45 sky parts; the
+other 17 have none (the Nightmare Frontier, the chalice dungeons, the Old Hunters' base skies).
+
+What the engine sees: the cloud draws (ps `765450df`) come with their model-space vertex buffer.
+Index counts do not name a sky (the night sky's 672/576/576/480/216 is in six maps, with moons
+hundreds of metres apart), but the vertices do: `rt_sky_table.h` (generated, 45 skies, 680 draws)
+holds, for every mesh and detail level, the index count and the four vertices the probe samples.
+`SkyFinder` (unit-tested) takes the sky most of the meshes drawn in the last 300 frames belong
+to; a tie keeps the sky already chosen, else is settled by where the probe finds the draw in
+the world (two maps place one model at different spots), else there is no answer. The light
+then points from the camera at the file's moon (seed `w = 2` in the sky layer pass, taken as it
+is). A sky without a moon of its own takes the moon part of its map whose draw was seen (the
+Old Hunters' moons). The moon cache now only speaks for a sky the table does not know.
+
+Measured (new install: empty moon cache, the disc never looked at; `tools/rt-test/moon_test.ps1`,
+`moon_ab.ps1`, `moon_look.ps1`):
+
+| Map (save) | Sky named | When | Check |
+|---|---|---|---|
+| Central Yharnam bridge, blood moon | `m24_01 m900030_0000` | at the first sky search (4 frames into play) | the light's direction lands on the drawn disc: predicted uv 0.370 0.772, disc centre at 0.369 0.774 |
+| Hunter's Dream | `m21_00 o210030`, moon object `o210020` | same | file moon (-204.4, 297.0, 614.6); the disc found by earlier sessions' search: (-203.9, 297.5, 614.7). From the spawn the disc is behind the workshop |
+| Old Yharnam | `m23_00 m009000` (a low sun, 14 degrees up) | same | the sunset glow sits in that direction; the disc is behind buildings from the spawn |
+| Upper Cathedral Ward (user's save, warp from the Dream) | `m24_02 m900030_0000` | 4 frames after arriving | the light lands on the drawn blood moon about 1 degree from its centre (predicted uv 0.745 0.249; the disc, half behind a statue, centred near 0.756 0.241, 5 degrees in radius) |
+| Forbidden Woods (user walking) | `m27_00 m009000_0000` | at the first sky search | sky named only; the disc was not looked at |
+
+| Central Yharnam bridge | Search and cache (`BB_RT_MOON_FILES=0`) | From the files |
+|---|---|---|
+| Light before any look at the sky | the game's own direction | the moon, from frame 4 |
+| Light after two full turns with the view raised | a stray find 12.3 degrees off the moon (0.901 0.253 -0.352), held | on the disc (0.835 0.453 -0.313), changing only with the camera's place (0.5 degrees over 5 m) |
+| Moon-facing pixels that change lit/shadowed against the file moon | 6.9 % | 0.02 % (the same state twice) |
+| Old Yharnam, the same comparison | 7.3 %, mean luma 40.7 | 0.02 %, mean luma 39.2 |
+
+The positions earlier sessions cached from the real disc agree with the files in four maps: the
+find is a point on the near side of the moon's sphere, the file gives its centre (Cathedral
+Ward 58 m apart = the radius, 0.4 degrees from the bridge; Forbidden Woods 19 m of a 21.6 m
+radius; map m26 104 m of 109 m; Hunter's Dream, a flat disc, 0.7 m).
+
+Not checked live: the maps not listed above; the tie rules
+(Central Yharnam's evening sky against Cathedral Ward's daytime sky share four of five cloud
+meshes and are told apart by the fifth; Yahar'gul's blood-moon sky is the Abandoned Workshop's
+model at another place) are covered by unit tests only. A sun below the horizon is not taken
+(the game's direction stays). `BB_RT_MOON_MIN_EL` still applies.
+
+## Tessellated meshes were never in the TLAS: the big trees cast no shadow (2026-11-15, `BB_RT_PATCH_MESHES`)
+
+User report, Forbidden Woods graveyard: "the tree doesnt casting shadow". `BB_RT_PICK` on the
+trunk: the G-buffer surface 6.6 m along the camera ray, the first TLAS hit 112 m behind it. The
+trunk was in no TLAS of any session, with placement identity on or off, also right after a
+purge.
+
+Cause (not from this branch: the rule is from 2026-09-30, so pt2.3 has it too): the trees are
+drawn with tessellation (stages `LsHs`, patches of three control points, vs `cc0f4e5a`, 9-18
+instances a batch, 5055 and 6762 indices). A draw reaches the ray tracer only through the
+motion-vector variant of its pipeline, which stores the vertex shader's positions, and that
+variant exists for plain vertex-shader pipelines only. Found with two new logs: `Ray tracing:
+draw without captured positions (...)` (always on, a few lines a window, names the shaders and
+the reason) and, with `BB_MOTION_SELECT_LOG=1`, `Motion select: not possible ...` (the state
+that rules the variant out).
+
+Fix: the control mesh on the CPU. For a tessellated G-buffer draw the rasterizer reads the
+model-space position stream, the index list and the world matrix of every instance (the game
+keeps a block of 208 bytes per instance in a vertex-shader buffer, the 3x4 matrix first;
+`rt_placement.h ReadPatchMatrices`, unit-tested) and hands them over (`AddPatchDraw`). One
+BLAS per mesh is built from that triangle soup (the build buffer of the geometry cache, now
+made on first use); each instance stands in the TLAS as a shadow caster (mask `MaskKept`, no
+material), and stays, like a kept placement, while the camera is near where it saw it.
+
+Measured at the graveyard, moon debug view, the same frame with `BB_RT_PATCH_MESHES` 0 and 1:
+2 BLAS (3,939 triangles), 68 tree instances; the tree in front of the moon now shades the
+ground and the player (0.52 % of the moon-facing pixels of that view go from lit to shadowed,
+none the other way; the same state twice: 0.00 %).
+
+Limits: shadow casters only (bounce light and reflections do not see these trunks); the BLAS
+is the control mesh, not the displaced surface (a trunk seen from its moonlit side was not
+checked for self-shadowing); only the 208-byte instance block is read, so a tessellated draw
+with another layout is still left out and shows up in the log above.
+
+| Knob | Default | What it does |
+|---|---|---|
+| `BB_RT_PATCH_MESHES` | `1` | Live. Tessellated draws as shadow casters from their control mesh. `0`: left out, as before. |
+| `BB_MOTION_SELECT_LOG` | `0` | Load time. Each G-buffer vertex shader's motion-variant choice, and why a draw cannot take it. |
+
+## Draws that never reached the ray tracer: a full vertex store and a 395-bone skeleton (2026-11-15)
+
+The log line added for the trees above (`draw without captured positions`) named two more
+causes while the user played, both older than this branch:
+
+**The vertex store was full in Central Yharnam.** Every G-buffer draw stores its positions in
+the object-motion store while the ray tracer captures (the TLAS is built from them). The store
+held 8,388,608 vertices a frame; near the bridge the frame used 8,388,591 of them and 28,800
+draws in 600 frames (48 a frame) found no room: no motion parameter, so no `AddDraw`, so
+never in the TLAS. Building pieces of 33,000-99,000 indices were among them. The store is
+sized at start now (`BB_OBJECT_MOTION_VERTICES`, millions): 16 M with ray tracing on a card
+with 11 GiB or more, 8 M otherwise (the three stores take 56 bytes a vertex: 448 MiB at 8 M,
+896 MiB at 16 M). The shader constant that bounds the store is set from it before any motion
+shader is compiled (those are built every session, never loaded from disk). The stats line
+`Object motion: ... capacity skips ... the most asked for in a frame` prints by itself once a
+draw is skipped.
+
+Measured so far: Central Yharnam near the bridge at 8 M: 28,800 draws skipped per 600 frames,
+8,388,591 of 8,388,608 vertices used. At 16 M, the same spot (camera -190.8 -27.2 71.1, the
+user standing there for 30 s): no draw skipped and none logged without positions; TLAS
+5,729,580 triangles in 941 instances. How many vertices that frame asks for is not known (the
+stats line prints it only when a draw is skipped).
+
+On a card under 11 GiB the store stays at 8 M and the skip line will show in heavy areas; the
+cure there is not to store placed static draws every frame (not built).
+
+**A skeleton of 395 bones.** `Motion::ClassifyBuffer` took any buffer over 16,384 bytes for
+"not a palette", so a four-part creature in Upper Cathedral Ward (vs `3deaa573`, palette of
+18,960 bytes, 15,140 triangles) got no motion variant and was in no TLAS. A buffer over that
+size that is a whole number of 48-byte bones, up to 64 KiB, is a skeleton now (unit-tested).
+Upper Cathedral Ward after the two fixes: 0 draws refused, TLAS 3,939,423 -> 3,954,593
+triangles (the creature's 15,140 and a few more).
+
+Tried and dropped: "every instanced G-buffer draw takes the motion variant" (the trees were
+tessellated, not this) and "two 864-byte buffers mean an 18-bone skeleton" (the selection log
+showed the 18,960-byte palette instead).

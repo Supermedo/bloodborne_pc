@@ -166,7 +166,7 @@ static void EmitVertexMotionSsbo(EmitContext& ctx) {
         const Id nonzero = ctx.OpINotEqual(bool_type, base, ctx.u32_zero_value);
         const Id bounded =
             ctx.OpULessThan(bool_type, ctx.OpIAdd(ctx.U64, wide(base), slot),
-                            ctx.Constant(ctx.U64, u64(MotionVectors::PositionSlots)));
+                            ctx.Constant(ctx.U64, u64(MotionVectors::PositionSlots())));
         return ctx.OpLogicalAnd(bool_type, ctx.OpLogicalAnd(bool_type, in_range, flag),
                                 ctx.OpLogicalAnd(bool_type, nonzero, bounded));
     };

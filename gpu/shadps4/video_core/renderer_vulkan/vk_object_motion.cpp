@@ -96,12 +96,29 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
     // for other older AMD devices; upscalers can still use camera-only motion there.
     const auto props = instance.GetPhysicalDevice().getProperties();
     const char* forced = std::getenv("BB_OBJECT_MOTION");
+    {
+        // The three stores (positions, UVs, normals) take 56 bytes a vertex: 448 MiB at 8 M,
+        // 896 MiB at 16 M.
+        u32 millions = RayTracing::Wanted() && (instance.GetTotalMemoryBudget() >> 30) >= 11 ? 16 : 8;
+        if (const char* text = std::getenv("BB_OBJECT_MOTION_VERTICES")) {
+            const unsigned long asked = std::strtoul(text, nullptr, 10);
+            if (asked >= 4 && asked <= 64) {
+                millions = u32(asked);
+            }
+        }
+        if (ssbo && props.limits.maxStorageBufferRange <
+                        vk::DeviceSize(millions << 20) * 16 + 16) {
+            millions = 8;
+        }
+        positions_per_frame = millions << 20;
+        history.SetCapacity(positions_per_frame);
+    }
     if (ssbo &&
         (props.limits.maxVertexOutputComponents < 128 ||
          props.limits.maxFragmentInputComponents < 128 ||
          props.limits.maxPerStageDescriptorStorageBuffers < 3 ||
          props.limits.maxBoundDescriptorSets < 2 ||
-         props.limits.maxStorageBufferRange < vk::DeviceSize(PositionsPerFrame) * 16 + 16)) {
+         props.limits.maxStorageBufferRange < vk::DeviceSize(positions_per_frame) * 16 + 16)) {
         BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Limits);
         std::puts("Object motion: SSBO limits unsupported, off");
         return;
@@ -134,7 +151,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
     u64 params_address = 0, positions_address = 0;
     if (!CreateBuffer(instance, vk::DeviceSize(1 + FrameSlots * ParamsPerFrame) * 32, true,
                       params_buffer, params_allocation, &mapped, params_address) ||
-        !CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 16, false,
+        !CreateBuffer(instance, vk::DeviceSize(1 + 2 * positions_per_frame) * 16, false,
                       positions_buffer, positions_allocation, nullptr, positions_address, ssbo)) {
         BbSettings::Get().object_motion_unavailable = MotionUi::Text(MotionUi::Buffers);
         std::printf("Object motion: buffer creation failed, off\n");
@@ -156,8 +173,8 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
             {.descriptorPool = *params_pool, .descriptorSetCount = 1, .pSetLayouts = &layout});
         ASSERT_MSG(allocated == vk::Result::eSuccess, "OMV parameter descriptor allocation failed");
         params_set = sets.front();
-        constexpr vk::DeviceSize half_bytes = vk::DeviceSize(PositionsPerFrame) * 16;
-        constexpr vk::DeviceSize half_range = half_bytes + 16;
+        const vk::DeviceSize half_bytes = vk::DeviceSize(positions_per_frame) * 16;
+        const vk::DeviceSize half_range = half_bytes + 16;
         ASSERT(half_bytes % props.limits.minStorageBufferOffsetAlignment == 0);
         ASSERT(half_range <= props.limits.maxStorageBufferRange);
         const std::array<vk::DescriptorBufferInfo, 3> buffers{
@@ -175,15 +192,15 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
         std::puts("Object motion: SSBO parameters/history; bindings 0/1/2, compact I/O 24/25");
     }
     static_assert(Shader::MotionVectors::ParamSlots == 1 + FrameSlots * ParamsPerFrame);
-    static_assert(Shader::MotionVectors::PositionsPerHalf == PositionsPerFrame);
+    Shader::MotionVectors::PositionsPerHalf = positions_per_frame;
     Shader::MotionVectors::storage_buffers = ssbo;
     Shader::MotionVectors::params_address = params_address;
     Shader::MotionVectors::positions_address = positions_address;
     if (RayTracing::Wanted()) {
-        if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 4, false,
+        if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * positions_per_frame) * 4, false,
                          uvs_buffer, uvs_allocation, nullptr, uvs_address)) {
             Shader::MotionVectors::uvs_address = uvs_address;
-            if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * PositionsPerFrame) * 8, false,
+            if (CreateBuffer(instance, vk::DeviceSize(1 + 2 * positions_per_frame) * 8, false,
                              normals_buffer, normals_allocation, nullptr, normals_address)) {
                 Shader::MotionVectors::normals_address = normals_address;
             } else {
@@ -200,7 +217,8 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_, boo
                 ssbo ? "SSBO" : "BDA");
     const char* cache_setting = std::getenv("BB_OBJECT_MOTION_CACHE");
     cache_enabled = cache_setting && std::strcmp(cache_setting, "1") == 0;
-    BbOut::Print("Object motion: on (%u vertices per frame)\n", PositionsPerFrame);
+    BbOut::Print("Object motion: on (%u vertices per frame, BB_OBJECT_MOTION_VERTICES)\n",
+                 positions_per_frame);
     BbOut::Print("Object motion: target cache %s (BB_OBJECT_MOTION_CACHE=0|1)\n",
                 cache_enabled ? "on" : "off");
 }
@@ -228,20 +246,29 @@ void ObjectMotion::OnFrameStart() {
         return;
     }
     CollectRetiredImages();
-    if (BbStats::enabled && (frame % 600) == 0 && history.stats.draws) {
+    // Also without the stats switch once a draw was skipped for lack of room: a skipped draw
+    // gets no motion parameter, so the ray tracer never sees it (a tree with no shadow).
+    if ((BbStats::enabled || history.stats.exhausted || param_skips) && (frame % 600) == 0 &&
+        history.stats.draws) {
         const auto& s = history.stats;
         BbOut::Print("Object motion: %llu draws, %llu stored, %llu with history, %llu unmatched, "
-                    "%llu capacity skips, %llu invalid, %llu still (600 frames); last frame %u/%u vertices; "
+                    "%llu capacity skips, %llu over the %u draws a frame, %llu invalid, %llu still "
+                    "(600 frames); last frame %u/%u vertices, the most asked for in a frame "
+                    "%llu; "
                     "index ranges %llu reused, %llu scanned (%llu found changed), %zu cached\n",
                     (unsigned long long)s.draws, (unsigned long long)s.stored,
                     (unsigned long long)s.loaded, (unsigned long long)s.unmatched,
-                    (unsigned long long)s.exhausted, (unsigned long long)s.invalid,
+                    (unsigned long long)s.exhausted, (unsigned long long)param_skips,
+                    ParamsPerFrame, (unsigned long long)s.invalid,
                     (unsigned long long)s.still,
-                    history.Used(), PositionsPerFrame, (unsigned long long)index_ranges.stats.hits,
+                    history.Used(), positions_per_frame,
+                    (unsigned long long)history.TakeWantedMax(),
+                    (unsigned long long)index_ranges.stats.hits,
                     (unsigned long long)index_ranges.stats.scans,
                     (unsigned long long)index_ranges.stats.stale, index_ranges.Size());
         index_ranges.stats = {};
         history.stats = {};
+        param_skips = 0;
     }
     history.NextFrame();
     ++frame;
@@ -282,7 +309,11 @@ void ObjectMotion::BindParameters(vk::PipelineLayout layout) {
 }
 
 u32 ObjectMotion::PrepareDraw(const DrawInfo& draw, u32 uv_select) {
-    if (!enabled || BbToggle::Disabled(1u << 29) || params_used >= ParamsPerFrame) {
+    if (!enabled || BbToggle::Disabled(1u << 29)) {
+        return 0;
+    }
+    if (params_used >= ParamsPerFrame) {
+        ++param_skips;
         return 0;
     }
     const auto allocation = history.Prepare(draw);

@@ -358,6 +358,18 @@ private:
     bool motion_draw = false;
     u64 motion_geometry{};    ///< vertex-stream identity of the current direct draw
     std::vector<u32> fx_strip_indices;
+    /// bbport (rt_placement.h): the current draw's model-space positions (attribute location 0,
+    /// float3 per vertex), to check a world matrix against the ray tracer's probe.
+    VAddr rt_position_address{};
+    u32 rt_position_stride{}, rt_position_vertices{};
+    /// The vertex-shader buffer that holds the draws' world matrices, per (shader, instanced),
+    /// and the current draw's matrices copied out of it.
+    std::unordered_map<u64, Rt::PlacementSlot> rt_placement_slots;
+    std::vector<float> rt_placements;
+    std::vector<float> rt_patch_matrices;
+    bool CapturePatchDraw(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
+                          u32 index_offset);
+    s32 ReadPlacements(const Shader::Info& vs, u32 instances);
     bool gbuffer_draw = false;
     bool side_gbuffer_draw = false;
     bool water_sheet_draw = false;

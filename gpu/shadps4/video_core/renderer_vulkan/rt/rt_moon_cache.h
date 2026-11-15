@@ -5,9 +5,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 // The moon's world position per sky model, so a load facing away from the moon still lights
@@ -15,9 +15,8 @@
 // while the moon is in view; the cloud segments of the same model draw every frame. The moon
 // mesh is fixed in the world about 750 m out (Hemwick graveyard), not at infinity, so its
 // direction moves with the player: a position is kept, and the light points from the camera at
-// it. The sky is keyed by the cloud segments (index and vertex counts of the layer draws present
-// in every frame since the layer appeared); the position found last is kept in a small text
-// file, one "key x y z" line per sky.
+// it. A sky is known by its layer draws (index and vertex counts); each moon keeps the draws seen
+// while it was found, in a small text file, one line per moon.
 namespace Vulkan::Rt {
 
 class SkyKey {
@@ -77,6 +76,11 @@ public:
         return frame != ~0ull && frame_now <= frame + frames;
     }
 
+    // Frames since the last layer draw (~0 before the first).
+    uint64_t Age(uint64_t frame_now) const {
+        return frame == ~0ull ? ~0ull : frame_now - frame;
+    }
+
     uint64_t Generation() const {
         return generation;
     }
@@ -105,92 +109,102 @@ private:
     bool have = false;
 };
 
+// One entry per moon, each with the layer draws seen while it was found. Maps share cloud
+// segments (Forbidden Woods and Cathedral Ward: two of Cathedral Ward's three), and one moon per
+// draw let each map's finds take the shared draws over (SwitchVotes): the next visit to the other
+// map lit from the first map's moon until the player looked at the disc, then the light swung
+// 50-60 degrees. A run now takes the moon whose draws best match its own (shared over all of
+// both), so a map whose draws are a subset of another's still gets its own.
 class MoonCache {
 public:
     // Two finds within this angle (radians, about 1 degree) confirm the disc.
     static constexpr float Same = 0.0175f;
-    // Each find lands up to ~25 m off the disc centre (the 512x128 layer grid is 0.7 x 0.9
-    // degrees a cell at 750 m), and taking the newest find made the light hop between two cells as
-    // the player walked: shadows crept. The position is a running mean of the finds (the last
-    // MaxSamples weigh most), so it settles on the centre. The file is rewritten once the mean
-    // moved Moved metres.
-    // A find farther than Gate from the mean is a stray: one spot in Hemwick kept finding a point
-    // 52 m off and the mean crept 4 degrees toward it while the player stood there; another find
-    // was 123 degrees off at the horizon and, taken as a new moon, lit the field from there. The
-    // other finds land within about 15 m. Strays gather in one candidate (a running mean of its
-    // own); every find votes for the moon or the candidate it lands near, and the candidate
-    // replaces the moon only once it has more votes. The true moon is found from everywhere, a
-    // stray from one spot, so the moon stays; a wrong first find is outvoted in two finds.
+    // Each find lands up to ~25 m off the disc centre, so the position is a running mean of the
+    // finds that land within Gate of it. A find farther off starts another moon: one spot in
+    // Hemwick kept finding a point 52 m off, another find was 123 degrees off at the horizon.
+    // The file is rewritten once a mean moved Moved metres.
     static constexpr float Gate = 30.0f;
     static constexpr float Moved = 2.0f;
-    // Weight cap of the running mean. 64 made it follow the player: from one spot every find lands
-    // ~10 m off the true centre the same way, and the mean walked there in 2 m steps (1 degree)
-    // while the player stood still. Capped at MaxVotes it is the plain mean of all finds.
+    // Weight cap of the running mean; capped at MaxVotes it is the plain mean of all finds.
     static constexpr float MaxSamples = 1000.0f;
     // A position read from a file line without votes counts as this many finds.
     static constexpr float LoadedSamples = 8.0f;
-    // Votes saved per moon are capped, so a candidate can still win in a long session.
+    // Votes saved per moon are capped, so a newer moon can still win in a long session.
     static constexpr float MaxVotes = 1000.0f;
-    // A candidate confirmed this many times takes over even when the moon has more votes. One
-    // session in Central Yharnam voted a wrong spot to 390, and the light kept pointing there
-    // while the player faced the moon, 87 degrees off (the finds would have needed 390 more
-    // sightings). The game also places its moon mesh per area, so a run's own finds must win
-    // fast: 8 confirmed finds are about 2 s of the disc in view. Only a candidate SwitchFar away
-    // (over ~10 degrees at 750 m) does: a near stray (52 m, 4 degrees, from one spot in Hemwick)
-    // still needs more votes than the moon.
+    // Two moons that match a run's draws equally well: within SwitchFar of each other (a stray
+    // 52 m off the moon, from one spot) the one with more finds wins; farther apart (the game
+    // places its moon per area; a wrong spot once had 390 votes in Central Yharnam, 87 degrees
+    // off) the one confirmed last wins once it has SwitchVotes finds.
     static constexpr float SwitchVotes = 8.0f;
     static constexpr float SwitchFar = 150.0f;
 
-    const std::array<float, 3>* Find(uint64_t key) const {
-        const auto it = moons.find(key);
-        return it == moons.end() ? nullptr : &it->second.moon.mean;
-    }
-
-    // Returns true when the position to save changed (the caller saves).
-    bool Put(uint64_t key, std::array<float, 3> pos, float samples = 1.0f) {
-        if (key == 0 || !std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
+    // A confirmed find while the run drew `draws`. Returns true when the file should be saved.
+    bool PutDraws(const std::vector<uint64_t>& draws, const std::array<float, 3>& pos,
+                  float samples = 1.0f) {
+        if (draws.empty() || !std::isfinite(pos[0]) || !std::isfinite(pos[1]) ||
             !std::isfinite(pos[2])) {
             return false;
         }
-        const auto it = moons.find(key);
-        if (it == moons.end()) {
-            moons[key] = {{pos, samples, samples}, {}, pos};
+        Moon* hit = nullptr;
+        float best = Gate * Gate;
+        for (Moon& m : moons) {
+            const float d = Dist2(m.mean, pos);
+            if (d <= best) {
+                best = d;
+                hit = &m;
+            }
+        }
+        if (!hit) {
+            Moon m;
+            m.mean = pos;
+            m.saved = pos;
+            m.n = std::min(samples, MaxSamples);
+            m.votes = std::min(samples, MaxVotes);
+            m.seq = ++seq_last;
+            m.draws = Sorted(draws);
+            moons.push_back(std::move(m));
             return true;
         }
-        Entry& e = it->second;
-        if (Dist2(e.moon.mean, pos) > Gate * Gate) {
-            if (e.cand.votes > 0.0f && Dist2(e.cand.mean, pos) <= Gate * Gate) {
-                e.cand.Add(pos, samples);
-            } else {
-                e.cand = {pos, samples, samples};
+        hit->Add(pos, samples);
+        hit->seq = ++seq_last;
+        bool changed = false;
+        for (const uint64_t d : draws) {
+            const auto at = std::lower_bound(hit->draws.begin(), hit->draws.end(), d);
+            if (at == hit->draws.end() || *at != d) {
+                hit->draws.insert(at, d);
+                changed = true;
             }
-            const bool distant = Dist2(e.cand.mean, e.moon.mean) > SwitchFar * SwitchFar;
-            if (e.cand.votes <= e.moon.votes && !(distant && e.cand.votes >= SwitchVotes)) {
-                return false;
-            }
-            std::swap(e.moon, e.cand);
-        } else {
-            e.moon.Add(pos, samples);
         }
-        if (Dist2(e.moon.mean, e.saved) < Moved * Moved) {
-            return false;
+        if (Dist2(hit->mean, hit->saved) >= Moved * Moved) {
+            hit->saved = hit->mean;
+            changed = true;
         }
-        e.saved = e.moon.mean;
-        return true;
+        return changed;
     }
 
-    // Finds counted for the moon of this sky (0 when there is none).
-    float Votes(uint64_t key) const {
-        const auto it = moons.find(key);
-        return it == moons.end() ? 0.0f : it->second.moon.votes;
+    // The moon of a run that drew `draws`: best share of draws in common (over the draws of both),
+    // ties as SwitchFar says. False when no moon shares a draw.
+    bool FindDraws(const std::vector<uint64_t>& draws, std::array<float, 3>& pos) const {
+        const Moon* m = Best(draws);
+        if (m) {
+            pos = m->mean;
+        }
+        return m != nullptr;
     }
 
-    // The unit direction from the camera to a cached moon, or false when there is none.
-    bool DirFrom(uint64_t key, const std::array<float, 3>& cam, std::array<float, 3>& dir) const {
-        const auto* pos = Find(key);
-        return pos && DirTo(*pos, cam, dir);
+    // Finds counted for the moon of these draws (0 when there is none).
+    float Votes(const std::vector<uint64_t>& draws) const {
+        const Moon* m = Best(draws);
+        return m ? m->votes : 0.0f;
     }
 
+    bool DirFromDraws(const std::vector<uint64_t>& draws, const std::array<float, 3>& cam,
+                      std::array<float, 3>& dir) const {
+        std::array<float, 3> pos{};
+        return FindDraws(draws, pos) && DirTo(pos, cam, dir);
+    }
+
+    // The unit direction from the camera to a moon, or false when the camera is at it.
     static bool DirTo(const std::array<float, 3>& pos, const std::array<float, 3>& cam,
                       std::array<float, 3>& dir) {
         dir = {pos[0] - cam[0], pos[1] - cam[1], pos[2] - cam[2]};
@@ -204,66 +218,27 @@ public:
         return true;
     }
 
-    // Per layer draw (SkyKey::Draws): every draw of the run keeps the moon found while it drew.
-    // The moon of a run is the position most of its draws agree on (within Gate); ties go to the
-    // one with more finds. A cloud segment shared by two skies is outvoted by the others.
-    bool FindDraws(const std::vector<uint64_t>& draws, std::array<float, 3>& pos) const {
-        int best_count = 0;
-        float best_votes = 0.0f;
-        for (const uint64_t a : draws) {
-            const auto ia = moons.find(a);
-            if (ia == moons.end()) {
-                continue;
-            }
-            const Cluster& ca = ia->second.moon;
-            int count = 0;
-            for (const uint64_t b : draws) {
-                const auto ib = moons.find(b);
-                count += ib != moons.end() && Dist2(ib->second.moon.mean, ca.mean) <= Gate * Gate;
-            }
-            if (count > best_count || (count == best_count && ca.votes > best_votes)) {
-                best_count = count;
-                best_votes = ca.votes;
-                pos = ca.mean;
-            }
-        }
-        return best_count > 0;
-    }
-
-    // Returns true when a position to save changed (the caller saves).
-    bool PutDraws(const std::vector<uint64_t>& draws, const std::array<float, 3>& pos) {
-        bool changed = false;
-        for (const uint64_t d : draws) {
-            changed |= Put(d, pos);
-        }
-        return changed;
-    }
-
-    bool DirFromDraws(const std::vector<uint64_t>& draws, const std::array<float, 3>& cam,
-                      std::array<float, 3>& dir) const {
-        std::array<float, 3> pos{};
-        return FindDraws(draws, pos) && DirTo(pos, cam, dir);
-    }
-
+    // One "moon x y z votes order draw,draw,..." line per moon (draws in hex).
     std::string Text() const {
-        std::vector<uint64_t> keys;
-        for (const auto& [k, e] : moons) {
-            keys.push_back(k);
-        }
-        std::sort(keys.begin(), keys.end());
         std::string out;
-        char line[128];
-        for (const uint64_t k : keys) {
-            const auto& m = moons.at(k).moon;
-            std::snprintf(line, sizeof(line), "%016llx %.2f %.2f %.2f %.0f\n",
-                          (unsigned long long)k, m.mean[0], m.mean[1], m.mean[2],
-                          std::min(m.votes, MaxVotes));
+        char line[160];
+        for (const Moon& m : moons) {
+            std::snprintf(line, sizeof(line), "moon %.2f %.2f %.2f %.0f %llu ", m.mean[0],
+                          m.mean[1], m.mean[2], std::min(m.votes, MaxVotes),
+                          (unsigned long long)m.seq);
             out += line;
+            for (size_t i = 0; i < m.draws.size(); ++i) {
+                std::snprintf(line, sizeof(line), i ? ",%llx" : "%llx",
+                              (unsigned long long)m.draws[i]);
+                out += line;
+            }
+            out += '\n';
         }
         return out;
     }
 
-    // Lines that do not parse are skipped; a line without votes counts LoadedSamples.
+    // Lines that do not parse are skipped. The old "draw x y z [votes]" lines (one moon per
+    // draw) merge into moons by position.
     void Parse(const std::string& text) {
         size_t at = 0;
         while (at < text.size()) {
@@ -272,18 +247,56 @@ public:
                 end = text.size();
             }
             const std::string line = text.substr(at, end - at);
-            unsigned long long k = 0;
+            at = end + 1;
             std::array<float, 3> d{};
             float votes = LoadedSamples;
+            if (line.rfind("moon ", 0) == 0) {
+                unsigned long long seq = 0;
+                int used = 0;
+                if (std::sscanf(line.c_str() + 5, "%f %f %f %f %llu %n", &d[0], &d[1], &d[2],
+                                &votes, &seq, &used) < 5 ||
+                    !Finite(d)) {
+                    continue;
+                }
+                std::vector<uint64_t> draws;
+                const char* p = line.c_str() + 5 + used;
+                while (*p) {
+                    char* next = nullptr;
+                    const unsigned long long k = std::strtoull(p, &next, 16);
+                    if (next == p) {
+                        break;
+                    }
+                    if (k != 0) {
+                        draws.push_back(k);
+                    }
+                    p = *next == ',' ? next + 1 : next;
+                }
+                if (draws.empty()) {
+                    continue;
+                }
+                Moon m;
+                m.mean = d;
+                m.saved = d;
+                m.votes = std::isfinite(votes) && votes >= 1.0f ? std::min(votes, MaxVotes)
+                                                                : LoadedSamples;
+                m.n = std::min(m.votes, MaxSamples);
+                m.seq = seq;
+                m.draws = Sorted(draws);
+                seq_last = std::max<uint64_t>(seq_last, seq);
+                moons.push_back(std::move(m));
+                continue;
+            }
+            unsigned long long k = 0;
             const int got =
                 std::sscanf(line.c_str(), "%llx %f %f %f %f", &k, &d[0], &d[1], &d[2], &votes);
-            if (got >= 4 && k != 0 && std::isfinite(d[0]) && std::isfinite(d[1]) &&
-                std::isfinite(d[2])) {
+            if (got >= 4 && k != 0 && Finite(d)) {
                 const float v = std::isfinite(votes) && votes >= 1.0f ? std::min(votes, MaxVotes)
                                                                       : LoadedSamples;
-                moons[k] = {{d, std::min(v, MaxSamples), v}, {}, d};
+                PutDraws({uint64_t(k)}, d, v);
             }
-            at = end + 1;
+        }
+        for (Moon& m : moons) {
+            m.saved = m.mean;
         }
     }
 
@@ -318,30 +331,82 @@ public:
     }
 
 private:
-    struct Cluster {
+    struct Moon {
         std::array<float, 3> mean{};
+        std::array<float, 3> saved{};
         float n{};     // weight of the running mean, up to MaxSamples
         float votes{}; // finds that landed within Gate
+        uint64_t seq{}; // order of the last find
+        std::vector<uint64_t> draws; // sorted
 
         void Add(const std::array<float, 3>& pos, float samples) {
-            votes += samples;
+            votes = std::min(votes + samples, MaxVotes);
             n = std::min(n + samples, MaxSamples);
             for (int i = 0; i < 3; ++i) {
                 mean[i] += (pos[i] - mean[i]) * (samples / n);
             }
         }
     };
-    struct Entry {
-        Cluster moon, cand;
-        std::array<float, 3> saved{};
-    };
+
+    // a over b for a run whose draws both match equally well.
+    static bool Wins(const Moon& a, const Moon& b) {
+        if (Dist2(a.mean, b.mean) <= SwitchFar * SwitchFar) {
+            return a.votes != b.votes ? a.votes > b.votes : a.seq > b.seq;
+        }
+        const bool ea = a.votes >= SwitchVotes, eb = b.votes >= SwitchVotes;
+        if (ea != eb) {
+            return ea;
+        }
+        return ea ? a.seq > b.seq : (a.votes != b.votes ? a.votes > b.votes : a.seq > b.seq);
+    }
+
+    const Moon* Best(const std::vector<uint64_t>& draws) const {
+        const std::vector<uint64_t> run = Sorted(draws);
+        const Moon* best = nullptr;
+        float best_score = 0.0f;
+        for (const Moon& m : moons) {
+            size_t shared = 0;
+            for (size_t i = 0, j = 0; i < run.size() && j < m.draws.size();) {
+                if (run[i] == m.draws[j]) {
+                    ++shared;
+                    ++i;
+                    ++j;
+                } else if (run[i] < m.draws[j]) {
+                    ++i;
+                } else {
+                    ++j;
+                }
+            }
+            if (shared == 0) {
+                continue;
+            }
+            const float score = float(shared) / float(run.size() + m.draws.size() - shared);
+            if (!best || score > best_score + 1e-6f ||
+                (score > best_score - 1e-6f && Wins(m, *best))) {
+                best = &m;
+                best_score = std::max(best_score, score);
+            }
+        }
+        return best;
+    }
+
+    static std::vector<uint64_t> Sorted(std::vector<uint64_t> v) {
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        return v;
+    }
+
+    static bool Finite(const std::array<float, 3>& p) {
+        return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]);
+    }
 
     static float Dist2(const std::array<float, 3>& a, const std::array<float, 3>& b) {
         const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
         return dx * dx + dy * dy + dz * dz;
     }
 
-    std::unordered_map<uint64_t, Entry> moons;
+    std::vector<Moon> moons;
+    uint64_t seq_last = 0;
 };
 
 } // namespace Vulkan::Rt

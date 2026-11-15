@@ -43,6 +43,18 @@ inline std::array<uint32_t, ProbeSamples> ProbeSlots(const DrawInput& in) {
     return slots;
 }
 
+// The vertex each probe sample of ProbeSlots reads, as its number in the draw's vertex buffer
+// (index + base_vertex), ~0 where that sample has none. The placement check reads the same
+// vertex's model-space position on the CPU.
+inline std::array<uint32_t, ProbeSamples> ProbeVertices(const DrawInput& in) {
+    std::array<uint32_t, ProbeSamples> out{};
+    const auto slots = ProbeSlots(in);
+    for (uint32_t k = 0; k < ProbeSamples; ++k) {
+        out[k] = slots[k] ? in.first_vertex + (slots[k] - in.store_base) : ~0u;
+    }
+    return out;
+}
+
 class BlockPool {
 public:
     static constexpr uint64_t Fail = ~0ull;
@@ -177,7 +189,35 @@ struct CacheEntry {
     // Frame a camera ray found this entry, kept, in front of the drawn surface (BB_RT_KEPT_PROBE):
     // the game draws something else there now, so it is not kept until the game draws it again.
     uint64_t probe_hidden{};
+    // The key's placement id (DrawKey::placement), 0 = keyed by occurrence. `settled`: drawn
+    // again on a later frame than its build. A moving object with a matrix (a lift, a door) gets
+    // a new placement every frame; its one-frame entries are never kept, so they leave no trail.
+    uint64_t placement{};
+    bool settled{};
+    // The vertex shader of the draw that built a placed entry: a placed key has no shader, and
+    // a shader whose matrices turn out wrong after it was trusted erases only its own entries.
+    uint64_t placed_vs{};
+    // A mesh entry shared by its placements (rt_placement.h SharedMeshPlacement): the matrix and
+    // id of the placement its BLAS was built from, and the last frame a kept placement used it
+    // (so it is not evicted as unused while only kept placements show it).
+    bool shared{};
+    Affine base_matrix{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    uint64_t base_placement{};
+    uint64_t placed_kept_frame{};
+    // An entry keyed by occurrence (its shader's matrices are not trusted) whose draw still
+    // named its placements: the pieces of the geometry cache it is (vk_ray_tracing.h GeoKey),
+    // so the cache's copy stays out while this entry stands in the TLAS. 0xFF = not looked up.
+    std::array<uint64_t, 4> geo_keys{};
+    uint8_t geo_key_count{0xFF};
 };
+
+// Unused frames before an unsettled placed entry goes (drawn on one frame only): a piece whose
+// matrix changes leaves a new one every frame, which must not pile up for 120 frames.
+constexpr uint64_t PlacementUnsettledFrames = 4;
+
+inline uint64_t UnsettledLimit(const CacheEntry& e, uint64_t limit) {
+    return e.placement && !e.settled ? std::min(limit, PlacementUnsettledFrames) : limit;
+}
 
 constexpr bool RememberSurface(bool texture_slot, bool alpha_slot) {
     return texture_slot || alpha_slot;
@@ -207,14 +247,21 @@ inline bool KeepNear(const CacheEntry& e, const std::array<float, 3>& camera, co
     return k.distance > 0.0f && e.seen && Distance2(e.seen_camera, camera) <= k.distance * k.distance;
 }
 
+// A placed entry is never short lived: its geometry is given by (mesh, matrix). Measured before
+// this rule: placed pieces took the batch's palette, 80,785 "palette changed" rebuilds in one
+// run made them updatable, and with one instance each they were kept only skinned_frames and
+// evicted after 120 unused frames, so whole pieces missed when they came back into view.
 inline bool KeepShortLived(const CacheEntry& e) {
-    return e.updatable && e.instances <= 1 && (e.skinned || e.palette || e.moving);
+    return !e.placement && e.updatable && e.instances <= 1 && (e.skinned || e.palette || e.moving);
 }
 
 inline bool KeepInstance(const CacheEntry& e, uint64_t frame, const std::array<float, 3>& camera,
                          const KeepRules& k) {
     if (!e.valid || e.dirty || e.last_used >= frame || !KeepNear(e, camera, k) ||
         (k.probe_hide && e.probe_hidden > e.last_used)) {
+        return false;
+    }
+    if (e.placement && !e.settled) {
         return false;
     }
     if (KeepShortLived(e)) {
@@ -250,8 +297,10 @@ inline KeptPick PickKept(std::vector<CacheEntry*> candidates, const std::array<f
 
 inline uint64_t UnusedLimit(const CacheEntry& e, const std::array<float, 3>& camera,
                             const KeepRules& k) {
-    return !KeepShortLived(e) && !e.dirty && KeepNear(e, camera, k) ? k.kept_unused_frames
-                                                                     : k.unused_frames;
+    const bool unsettled = e.placement && !e.settled;
+    return !KeepShortLived(e) && !e.dirty && !unsettled && KeepNear(e, camera, k)
+               ? k.kept_unused_frames
+               : UnsettledLimit(e, k.unused_frames);
 }
 
 inline bool CompactCandidate(const CacheEntry* e, uint64_t queried_frame, uint64_t compacted) {
@@ -352,11 +401,21 @@ public:
         const uint32_t instances = key.instances;
         key.instances = 0;
         key.occurrence = 0;
+        // A placed key counts too: it stays 0 unless the frame draws the very same placement of
+        // the same mesh twice (another pass), which keeps today's one entry per draw.
         key.occurrence = occurrences[key]++;
+        // A mesh entry shared by its placements is drawn many times a frame, once per placement:
+        // every one of them is the same entry.
+        if (key.placement == 1) {
+            key.occurrence = 0;
+        }
         const auto it = entries.find(key);
         CacheEntry* e = it == entries.end() ? nullptr : &it->second;
         if (e && e->moving && frame > e->moving_frame + moving_frames) {
             e->moving = false;
+        }
+        if (e && e->placement && frame > e->built_frame) {
+            e->settled = true;
         }
         const Rebuild reason = RebuildReason(e, palette, skinned, unreadable, triangles);
         if (!e) {
@@ -392,9 +451,21 @@ public:
 
     CacheEntry& Insert(const DrawKey& key, const CacheEntry& entry) {
         CacheEntry& e = entries[key];
+        // `fast` holds one pointer per entry, under the id the entry has now: an entry replaced
+        // under another id gives up the old one.
+        if (e.id != entry.id && e.id < fast.size() && fast[e.id] == &e) {
+            fast[e.id] = nullptr;
+        }
         e = entry;
         e.last_used = frame;
+        e.placement = key.placement;
+        e.settled = e.settled && key.placement;
+        e.placed_vs = key.placement ? e.placed_vs : 0;
         by_id[e.id] = key;
+        if (fast.size() <= e.id) {
+            fast.resize(size_t(e.id) + 1, nullptr);
+        }
+        fast[e.id] = &e;
         return e;
     }
 
@@ -419,13 +490,12 @@ public:
         return kind;
     }
 
+    // By the pointer table: the two map lookups (the second hashes the whole key) were paid
+    // several times per TLAS instance per frame, with 2,400 instances once every placement is
+    // kept. Map nodes do not move, so the pointers hold until Erase.
     CacheEntry* ById(uint32_t id) {
-        const auto it = by_id.find(id);
-        if (it == by_id.end()) {
-            return nullptr;
-        }
-        const auto e = entries.find(it->second);
-        return e == entries.end() ? nullptr : &e->second;
+        CacheEntry* e = id < fast.size() ? fast[id] : nullptr;
+        return e && e->id == id ? e : nullptr;
     }
 
     bool MarkDirty(uint32_t id, uint64_t probe_frame) {
@@ -455,9 +525,15 @@ public:
         return x == y;
     }
 
+    // Shelving is for draws keyed by occurrence only: a placed draw's key names its placement,
+    // so a jump of its probe sample is a changed mesh (rebuilt), never another placement.
+    static bool MayShelve(const DrawKey& home, const CacheEntry& e) {
+        return !home.placement && !(home.occurrence & ShelfBit) && !e.skinned && !e.moving;
+    }
+
     bool Rekey(uint32_t id, const DrawKey& to) {
         const auto it = by_id.find(id);
-        if (it == by_id.end() || entries.contains(to)) {
+        if (it == by_id.end() || entries.contains(to) || to.placement || it->second.placement) {
             return false;
         }
         auto node = entries.extract(it->second);
@@ -473,7 +549,7 @@ public:
     template <class Pred>
     CacheEntry* FindShelved(const DrawKey& home, Pred&& pred) {
         for (auto& [k, e] : entries) {
-            if ((k.occurrence & ShelfBit) && SameDraw(k, home) && pred(e)) {
+            if ((k.occurrence & ShelfBit) && !k.placement && SameDraw(k, home) && pred(e)) {
                 return &e;
             }
         }
@@ -495,10 +571,32 @@ public:
         const auto e = entries.find(it->second);
         if (e != entries.end()) {
             release(e->second);
+            if (e->second.id < fast.size() && fast[e->second.id] == &e->second) {
+                fast[e->second.id] = nullptr;
+            }
             entries.erase(e);
         }
         by_id.erase(it);
+        if (id < fast.size()) {
+            fast[id] = nullptr;
+        }
         ++stats.evicted;
+    }
+
+    // Erases every entry that matches pred(key, entry) (a placement verdict changed: its other
+    // keying goes).
+    template <class Pred, class Release>
+    size_t EraseIf(Pred&& pred, Release&& release) {
+        std::vector<uint32_t> victims;
+        for (const auto& [key, e] : entries) {
+            if (pred(key, e)) {
+                victims.push_back(e.id);
+            }
+        }
+        for (const uint32_t id : victims) {
+            Erase(id, release);
+        }
+        return victims.size();
     }
 
     template <class Release>
@@ -523,6 +621,13 @@ public:
     void ForEach(Fn&& fn) {
         for (auto& [key, e] : entries) {
             fn(e);
+        }
+    }
+
+    template <class Fn>
+    void ForEachKeyed(Fn&& fn) const {
+        for (const auto& [key, e] : entries) {
+            fn(key, e);
         }
     }
 
@@ -624,6 +729,7 @@ public:
         stats.evicted += entries.size();
         entries.clear();
         by_id.clear();
+        fast.clear();
     }
 
     size_t Size() const { return entries.size(); }
@@ -637,6 +743,7 @@ private:
     std::unordered_map<DrawKey, CacheEntry, DrawKeyHash> entries;
     std::unordered_map<DrawKey, uint32_t, DrawKeyHash> occurrences;
     std::unordered_map<uint32_t, DrawKey> by_id;
+    std::vector<CacheEntry*> fast; // entry by id (ById)
 };
 
 class RebuildBudget {

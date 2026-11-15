@@ -338,6 +338,8 @@ float FarWeight(vec3 p) {
     return far_fade.w > 0.0 ? clamp((far_fade.y - length(p)) * far_fade.z, 0.0, 1.0) : 1.0;
 }
 uint Bounces() { return bounce.x; }
+// BB_RT_MOON_REACH (far_fade.x, 0 = 10 km): the moon shadow ray length, as rt_direct.comp.
+float MoonReach() { return far_fade.x > 0.0 ? far_fade.x : 1.0e4; }
 uint BounceRays() { return bounce.y; }
 uint LightCount() { return bounce.z; }
 uint DirSetCount() { return bounce.w; }
@@ -1385,7 +1387,7 @@ vec3 DirectLit(vec3 p, vec3 n, uint set_id, vec3 v, vec3 albedo, vec4 material, 
         const float nl1 = clamp(dot(n, L1), 0.0, 1.0);
         float sun_vis = 1.0;
         if (nl1 > 0.0 && dot(c1, c1) > 0.0) {
-            sun_vis = Transmittance(origin, L1, 1.0e4);
+            sun_vis = Transmittance(origin, L1, MoonReach());
         }
         result += c1 * nl1 * sun_vis * (albedo + HitSpecular(material, n, v, L1));
     }
@@ -1676,6 +1678,7 @@ layout(push_constant) uniform SkyLayerPush {
     // from the cache.
     vec4 moon_seed;
     uint moon_reset; // 1 on the first search after a load: drop the last map's moon
+    uint fog_base;   // phase 2: material slot of fog particle 0's light (rt_gi.h FogLightSlot)
 };
 const uint MaskSky = 0x80u;     // rt_geometry.h MaskSky
 const uint LayerW = 512u;       // rt_gi.h SkyLayerWidth
@@ -2126,6 +2129,12 @@ void FindLayerMoon() {
             m.xyz = normalize(to);
         }
     }
+    // The moon's place from the game's own files (seed w 2, vk_ray_tracing.cpp RecordSkyLayer):
+    // the light points at it, whatever the search made of this sky. w = MoonOwn: a moon of this
+    // run, not a find (the CPU feeds finds into the moon cache).
+    if (moon_seed.w > 1.5 && seeded) {
+        m = vec4(normalize(moon_seed.xyz), MoonOwn);
+    }
     material[moon_slot] = m;
     material[own_pos] = vec4(pos.xyz, pos.w > 0.0 ? MoonCellTag : 0.0);
     material[own_cam] = vec4(s_cam.xyz, s_cam.w > 0.0 ? MoonCellTag : 0.0);
@@ -2144,9 +2153,71 @@ void FindLayerMoon() {
     }
 }
 
+// RT-lit stock haze (BB_RT_HAZE_RT): phase 2, one thread per particle of the light grid's fog
+// block. How much of the moon and the sky reach the puff, against the same puff unshadowed, as
+// an rgb factor in material[fog_base + k] (w 1). The CPU scales the game's particle colour by it
+// (RayTracing::HazeColor): puffs in a cliff's shadow go dark, puffs in the open keep stock.
+const uint FogLightMax = 1024u; // rt_gi.h FogMaxParticles
+void FogLight() {
+    const uint base = FlameFxBase + 4u + 4u * FlameFxMax;
+    const uint k = gl_LocalInvocationIndex + 64u * gl_WorkGroupID.x;
+    if (k >= min(light_grid[base], FogLightMax) || fog_base + k >= material.length()) {
+        return;
+    }
+    const uint wd = base + 4u + 4u * k;
+    const vec3 c = uintBitsToFloat(uvec3(light_grid[wd], light_grid[wd + 1u], light_grid[wd + 2u]) & ~0xFFu);
+    const float r = uintBitsToFloat(light_grid[wd + 3u] & ~0xFFu);
+    if (!Finite(c) || !(r > 0.0)) {
+        material[fog_base + k] = vec4(1.0, 1.0, 1.0, 1.0);
+        return;
+    }
+    vec3 lit = vec3(0.0);
+    vec3 full = vec3(0.0);
+    const vec3 ay = vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y);
+    const vec3 ax = vec3(view_rows[0].x, view_rows[1].x, view_rows[2].x);
+    const vec3 up = normalize(ay);
+    const vec3 e1 = normalize(ax - up * dot(ax, up));
+    const vec3 e2 = cross(up, e1);
+    // Four points across the puff: a puff half in shadow comes out half lit.
+    const vec3 taps[4] = vec3[4](e1, -e1, e2, -e2);
+    const uint mset = MoonSet(0xFFFFFFFFu);
+    if (mset < DirSetCount()) {
+        const vec3 d1 = sets[mset * 18u].xyz;
+        const vec3 c1 = max(sets[mset * 18u + 4u].xyz, vec3(0.0));
+        if (dot(d1, d1) > 0.0 && Finite(c1)) {
+            const vec3 L1 = normalize(vec3(dot(view_rows[0].xyz, d1), dot(view_rows[1].xyz, d1),
+                                           dot(view_rows[2].xyz, d1)));
+            float vis = 0.0;
+            for (uint t = 0u; t < 4u; ++t) {
+                vis += Transmittance(c + taps[t] * (0.4 * r), L1, MoonReach());
+            }
+            lit += c1 * (vis * 0.25);
+            full += c1;
+        }
+    }
+    // Sky: zenith and four directions 27 degrees up, as the mist glow (pi x mean radiance x 1/2).
+    const vec3 dirs[5] = vec3[5](up, normalize(up * 0.5 + e1), normalize(up * 0.5 - e1),
+                                 normalize(up * 0.5 + e2), normalize(up * 0.5 - e2));
+    for (uint t = 0u; t < 5u; ++t) {
+        vec3 s = SkyRadiance(dirs[t]);
+        s = Finite(s) ? max(s, vec3(0.0)) * (3.14159265 * 0.5 / 5.0) : vec3(0.0);
+        lit += s * Transmittance(c, dirs[t], 1.0e4);
+        full += s;
+    }
+    // One brightness share for all three channels: the stock puff colour keeps its hue. Per
+    // channel, a puff in moon shadow kept the blue sky's share and lost the warm moon's, so every
+    // shadowed puff (most of them) and the bonfire smoke turned blue.
+    const float f = Luma(lit) / max(Luma(full), 1e-6);
+    material[fog_base + k] = vec4(vec3(isnan(f) || isinf(f) ? 1.0 : clamp(f, 0.0, 1.0)), 1.0);
+}
+
 void main() {
     if (layer_phase == 1u) {
         FindLayerMoon();
+        return;
+    }
+    if (layer_phase == 2u) {
+        FogLight();
         return;
     }
     const uvec2 c = gl_GlobalInvocationID.xy;
@@ -2505,7 +2576,14 @@ vec3 MirrorHalos(vec3 o, vec3 l, float t_hit) {
     return Finite(sum) ? sum : vec3(0.0);
 }
 const uint MistSheetMax = 8u;
-const float MistSheetNoise = 0.5;
+// The haze noise contrast and its cells per sphere radius: the noise is scaled to each particle,
+// so a 30 m bank gets wisps of its own size instead of 2 m grain that averages out to a veil.
+const float MistSheetNoise = 0.9;
+const float MistBlobCells = 2.5;
+// Forward scattering of the moon by the mist (Henyey-Greenstein g): the bank toward the moon
+// glows like stock's backlit haze.
+const float MistMoonG = 0.5;
+const float MistRadius = 0.5;
 
 float MistBlob(vec3 q, vec4 c) {
     const vec3 d = q - c.xyz;
@@ -2562,7 +2640,7 @@ void MistVolume(vec3 p, bool sheet, vec3 sheet_p, ivec2 pixel, uint set_id, out 
             const uvec3 cw = uvec3(light_grid[wd], light_grid[wd + 1u], light_grid[wd + 2u]);
             const vec3 c = uintBitsToFloat(cw & ~0xFFu);
             const uint packed = light_grid[wd + 3u];
-            const float r = uintBitsToFloat(packed & ~0xFFu);
+            const float r = uintBitsToFloat(packed & ~0xFFu) * MistRadius;
             const float a = float(packed & 0xFFu) / 255.0;
             if (!(r > 0.0) || a <= 0.0) {
                 continue;
@@ -2587,7 +2665,10 @@ void MistVolume(vec3 p, bool sheet, vec3 sheet_p, ivec2 pixel, uint set_id, out 
                 }
             }
             fog_c[slot] = vec4(c, r);
-            fog_a[slot] = a;
+            // Through its centre a sphere is as opaque as the game's card for this particle
+            // (optical depth -ln(1 - alpha) over the chord, whose integral of the falloff is
+            // 16/15 r), so big far particles no longer outweigh small near ones.
+            fog_a[slot] = -log(1.0 - min(a, 0.95)) * (15.0 / 16.0) / r;
             fog_p[slot] = peak;
             fog_rgb[slot] = vec3(cw & 0xFFu) / 255.0;
         }
@@ -2657,14 +2738,18 @@ void MistVolume(vec3 p, bool sheet, vec3 sheet_p, ivec2 pixel, uint set_id, out 
         vec3 tint = vec3(1.0);
         if (fog) {
             float s = 0.0;
+            float sr = 0.0;
             vec3 sc = vec3(0.0);
             for (uint k = 0u; k < fog_n; ++k) {
                 const float b = fog_a[k] * MistBlob(q, fog_c[k]);
                 s += b;
+                sr += b * fog_c[k].w;
                 sc += b * fog_rgb[k];
             }
             tint = s > 1e-6 ? sc / s : vec3(1.0);
-            density = glass_push.mist * s * mix(1.0, MistNoise(w, time), MistSheetNoise);
+            const float rs = s > 1e-6 ? max(sr / s, 0.5) : 1.0;
+            const float cells = MistBlobCells / (rs * MistScale);
+            density = glass_push.mist * s * mix(1.0, MistNoise(w * cells, time), MistSheetNoise);
         } else {
             const float h = max(h0 + dh * t, 0.0);
             const float swell = MistValue(vec3(w.x, 0.0, w.z) * MistSwellScale + vec3(0.0, time * 0.05, 0.0));
@@ -2692,11 +2777,35 @@ void MistVolume(vec3 p, bool sheet, vec3 sheet_p, ivec2 pixel, uint set_id, out 
     }
     mist_in *= glass_push.mist_albedo / (4.0 * 3.14159265);
     const float wall = wsum.x + wsum.y;
-    const uint fog_base = set_id * 6u + 1u;
-    if (glass_push.mist_fog > 0.0 && fog_base + 3u < fog_sets.length()) {
-        const vec3 fog_col = fog_sets[fog_base + 3u].rgb;
-        if (Finite(fog_col)) {
-            mist_in += glow_c * glass_push.mist_fog * max(fog_col, vec3(0.0));
+    if (glass_push.mist_fog > 0.0 && wall > 1e-4) {
+        // Sky light the mist scatters: the mean sky radiance over the upper hemisphere (zenith and
+        // four directions 27 degrees up), times 1/2 for the isotropic phase with sky only above.
+        const vec3 up = normalize(ay);
+        const vec3 e1 = normalize(ax - up * dot(ax, up));
+        const vec3 e2 = cross(up, e1);
+        vec3 sky = SkyRadiance(up);
+        sky += SkyRadiance(normalize(up * 0.5 + e1));
+        sky += SkyRadiance(normalize(up * 0.5 - e1));
+        sky += SkyRadiance(normalize(up * 0.5 + e2));
+        sky += SkyRadiance(normalize(up * 0.5 - e2));
+        sky = Finite(sky) ? max(sky, vec3(0.0)) * 0.2 : vec3(0.0);
+        mist_in += glow_c * glass_push.mist_fog * glass_push.mist_albedo * 0.5 * sky;
+        // The moon scattered by the mist (the pixel's moon set, as the direct pass), one shadow
+        // ray from the mist's weighted centre, Henyey-Greenstein forward phase.
+        const uint mset = MoonSet(set_id);
+        if (mset < DirSetCount()) {
+            const vec3 d1 = sets[mset * 18u].xyz;
+            const vec3 c1 = max(sets[mset * 18u + 4u].xyz, vec3(0.0));
+            if (dot(d1, d1) > 0.0 && dot(c1, c1) > 0.0) {
+                const vec3 L1 = normalize(vec3(dot(view_rows[0].xyz, d1), dot(view_rows[1].xyz, d1),
+                                               dot(view_rows[2].xyz, d1)));
+                const vec3 cq = (near_q + far_q) / wall;
+                const float vis = Transmittance(cq, L1, MoonReach());
+                const float g = MistMoonG;
+                const float hg = (1.0 - g * g) /
+                                 (4.0 * 3.14159265 * pow(max(1.0 + g * g - 2.0 * g * dot(dir, L1), 1e-4), 1.5));
+                mist_in += glow_c * glass_push.mist_albedo * hg * vis * c1;
+            }
         }
     } else if (glass_push.mist_glow > 0.0 && wall > 1e-4) {
         const float lit = clamp(Luma(mist_in / wall) / glass_push.mist_glow, 0.0, 1.0);

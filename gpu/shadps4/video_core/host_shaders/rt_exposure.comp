@@ -28,7 +28,35 @@ layout(push_constant) uniform Push {
     vec4 size_cfg; // width, height, phase, apply (1) or measure only (0)
     vec4 params;   // key (log2 luminance), max boost (stops), rate per frame, reset (1)
     vec4 tone;     // white level (stops above the key) where the boost has faded out
+    vec4 proj;     // camera projection, as the fog pass
+    vec4 up;       // world up in view space; w > 0.5 turns the dome test on
 };
+
+// The game's sky dome is a mesh that writes depth: a squashed hemisphere around the camera
+// (horizon radius about 1480, top 539, see rt_sky.comp). Its flat facets sit well inside that
+// ellipsoid (90% left bright rectangles in the sky), so like the fog pass a pixel at 30% of the
+// dome's distance or more counts as the dome. Only the boost skips it; the metering keeps it, so
+// the key tuned on it stays the same.
+const float DomeRadius = 1480.0;
+const float DomeHeight = 539.0;
+
+bool IsDome(ivec2 pixel, float depth) {
+    if (up.w < 0.5) {
+        return false;
+    }
+    const vec2 uv = (vec2(pixel) + 0.5) / size_cfg.xy;
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = proj.w / min(depth - proj.z, -1e-8);
+    const vec3 p = vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+    const float d = length(p);
+    if (!(d > 0.0) || isinf(d)) {
+        return true;
+    }
+    const float y = dot(p / d, up.xyz);
+    const float c2 = max(1.0 - y * y, 0.0), s = max(y, 0.0);
+    const float dome = inversesqrt(c2 / (DomeRadius * DomeRadius) + s * s / (DomeHeight * DomeHeight));
+    return d >= 0.3 * dome;
+}
 
 const uint GridX = 64u;
 const uint GridY = 36u;
@@ -57,7 +85,7 @@ void main() {
         }
         // The sky keeps the game's look: boosting it with the geometry blew it to white.
         const float depth = texelFetch(depth_tex, pixel, 0).r;
-        if (!(depth < 1.0) || depth < 0.0) {
+        if (!(depth < 1.0) || depth < 0.0 || IsDome(pixel, depth)) {
             return;
         }
         const vec4 c = imageLoad(scene_img, pixel);

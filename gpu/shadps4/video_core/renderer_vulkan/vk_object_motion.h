@@ -89,8 +89,13 @@ private:
     static constexpr u32 FrameSlots = 4;
     static constexpr u32 ParamsPerFrame = 8192;
     // Positions (device local): two halves (current/previous frame) of vec4; element 0 is reserved.
-    static constexpr u32 PositionsPerFrame = 8u << 20;
-    Motion::History history{PositionsPerFrame};
+    // 8 M vertices by default. With ray tracing every G-buffer draw stores its positions (the
+    // TLAS is built from them), and Central Yharnam asks for more: the store ran full and
+    // about 48 draws a frame, building pieces among them, never reached the ray tracer. 16 M
+    // with ray tracing on a card with the memory for it; BB_OBJECT_MOTION_VERTICES (millions)
+    // overrides.
+    u32 positions_per_frame = 8u << 20;
+    Motion::History history{positions_per_frame};
     Motion::IndexRangeCache index_ranges;
     std::array<u64, FrameSlots> params_ticks{};
     vk::UniqueDescriptorSetLayout params_layout;
@@ -110,6 +115,7 @@ private:
 
     u64 frame = 0;
     u32 params_used = 0;
+    u64 param_skips = 0; // draws past ParamsPerFrame since the last stats line
     VideoCore::UniqueImage image;
     vk::UniqueImageView view;
     u32 image_width = 0, image_height = 0;

@@ -15,7 +15,8 @@ struct Probe {
 
 layout(binding = 0, std430) readonly buffer Probes { Probe probes[]; };
 layout(binding = 1, std430) buffer Fingerprints { vec4 fingerprints[]; };
-// Five words per probe: the mismatch word, then the first readable sample in the entry's build
+// Five words per probe: the mismatch word, then the first readable sample (counted from the
+// start sample in bits 8-9 of `placement`, normally 0) in the entry's build
 // view (x, y, z) and its sample index (~0 when none), so the CPU can place the draw in the world.
 layout(binding = 2, std430) writeonly buffer Flags { uint flags[]; };
 layout(binding = 3, std430) buffer Instances { uint instance_words[]; };
@@ -106,6 +107,10 @@ void main() {
     bool any_sample = false;
     uint point_k = 0xFFFFFFFFu;
     vec3 point = vec3(0.0);
+    // Bits 8-9 of `placement`: the sample reported first (the CPU's placement check rotates it
+    // by frame so a world matrix is compared at more than one vertex); 0 = the first readable.
+    const uint first_k = (p.placement >> 8u) & 3u;
+    uint point_order = 4u;
     for (uint k = 0u; k < 4u; ++k) {
         const vec4 c = positions.clip[p.slots[k]];
         const vec3 v = vec3(c.x / proj_scale.x, c.y / proj_scale.y, c.w);
@@ -115,7 +120,9 @@ void main() {
         const vec3 built = vec3(dot(p.rows[0].xyz, v) + p.rows[0].w,
                                 dot(p.rows[1].xyz, v) + p.rows[1].w,
                                 dot(p.rows[2].xyz, v) + p.rows[2].w);
-        if (point_k == 0xFFFFFFFFu && p.slots[k] != 0u && !(any(isnan(built)) || any(isinf(built)))) {
+        const uint order = (k - first_k) & 3u;
+        if (order < point_order && p.slots[k] != 0u && !(any(isnan(built)) || any(isinf(built)))) {
+            point_order = order;
             point_k = k;
             point = built;
         }
@@ -144,7 +151,7 @@ void main() {
     }
     // A static mesh off by more than BB_RT_SHELF metres is the same draw at another placement:
     // its BLAS is still right where it was built, so it stays (the CPU shelves it on readback).
-    const bool moved = p.placement != 0u && shelf_metres > 0.0 && worst > shelf_metres;
+    const bool moved = (p.placement & 1u) != 0u && shelf_metres > 0.0 && worst > shelf_metres;
     const bool hide = mismatch != 0u && p.keep == 0u && !moved;
     if (ptlas != 0u) {
         if (p.mode == 0u) {

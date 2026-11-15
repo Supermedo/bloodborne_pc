@@ -1118,6 +1118,9 @@ void Rasterizer::CaptureSmokePatch(const GraphicsPipeline* pipeline, const AmdGp
     const bool haze = ray_tracing->HazeLit(ps.pgm_hash);
     const bool fog = fog_sheet || haze;
     std::vector<std::pair<VAddr, u32>> haze_patch;
+    if (haze) {
+        ray_tracing->ReadFogLight();
+    }
     smoke_particles.clear();
     for (u32 i = 0; i < used; ++i) {
         u32 index = i;
@@ -1227,7 +1230,9 @@ void Rasterizer::CaptureSmokePatch(const GraphicsPipeline* pipeline, const AmdGp
         return;
     }
     if (fog) {
-        if (fog_sheet) {
+        // The stock haze's particles also go to the fog block: the sky layer pass lights them
+        // (BB_RT_HAZE_RT).
+        if (fog_sheet || haze) {
             ray_tracing->AddFog(smoke_particles);
         }
         return;
@@ -1244,6 +1249,95 @@ void Rasterizer::CaptureSmokePatch(const GraphicsPipeline* pipeline, const AmdGp
     tag.prim = u32(regs.primitive_type);
     tag.caster = u32(Rt::CasterAlpha::Blend);
     ray_tracing->AddSmoke(smoke_particles, tag);
+}
+
+// A tessellated G-buffer draw for the ray tracer (RayTracing::AddPatchDraw): the model-space
+// position stream, the index list and the world matrix of every instance, all read from the
+// game's memory. False when one of them is not there to read; the draw is then left out as
+// before.
+bool Rasterizer::CapturePatchDraw(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
+                                  u32 index_offset) {
+    const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+    const u32 instances = regs.num_instances.NumInstances();
+    const u32 index_size =
+        regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2u : 4u;
+    const VAddr index_address =
+        regs.index_base_address.Address<VAddr>() + u64(index_offset) * index_size;
+    const u64 index_bytes = u64(regs.num_indices) * index_size;
+    if (!instances || regs.num_indices < 3 || !index_address ||
+        !memory->IsValidGpuMapping(index_address, 0) ||
+        memory->ClampRangeSize(index_address, index_bytes) != index_bytes) {
+        return false;
+    }
+    const auto [base_vertex, first_instance] =
+        GetDrawOffsets(regs, vs, pipeline->GetFetchShader());
+    VertexInputs<vk::VertexInputAttributeDescription2EXT> attrs;
+    VertexInputs<vk::VertexInputBindingDescription2EXT> binds;
+    VertexInputs<vk::VertexInputBindingDivisorDescriptionEXT> divs;
+    VertexInputs<AmdGpu::Buffer> bufs;
+    pipeline->GetVertexInputs(attrs, binds, divs, bufs, regs.vgt_instance_step_rate_0,
+                              regs.vgt_instance_step_rate_1);
+    VAddr position_address = 0;
+    u32 position_stride = 0, position_vertices = 0;
+    for (size_t j = 0; j < attrs.size() && j < bufs.size() && j < binds.size(); ++j) {
+        if (attrs[j].location != 0) {
+            continue;
+        }
+        const auto& vb = bufs[j];
+        const u32 stride = vb.GetStride();
+        const bool float3 = attrs[j].format == vk::Format::eR32G32B32Sfloat ||
+                            attrs[j].format == vk::Format::eR32G32B32A32Sfloat;
+        if (float3 && binds[j].inputRate == vk::VertexInputRate::eVertex && vb.base_address &&
+            stride >= 12 && vb.GetSize() >= stride &&
+            memory->IsValidGpuMapping(vb.base_address, vb.GetSize()) &&
+            memory->ClampRangeSize(vb.base_address, vb.GetSize()) == vb.GetSize()) {
+            position_address = vb.base_address;
+            position_stride = stride;
+            position_vertices = u32(vb.GetSize() / stride);
+        }
+        break;
+    }
+    if (!position_address) {
+        return false;
+    }
+    rt_patch_matrices.clear();
+    for (const auto& resource : vs.buffers) {
+        if (resource.IsSpecial()) {
+            continue;
+        }
+        const auto buffer = resource.GetSharp(vs);
+        const u32 size = buffer.GetSize();
+        if (!buffer.Valid() || buffer.GetStride() != 16 || !buffer.base_address ||
+            !memory->IsValidGpuMapping(buffer.base_address, 0) ||
+            memory->ClampRangeSize(buffer.base_address, size) != size) {
+            continue;
+        }
+        if (Rt::ReadPatchMatrices(reinterpret_cast<const float*>(buffer.base_address), size,
+                                  first_instance, instances, rt_patch_matrices)) {
+            break;
+        }
+    }
+    if (rt_patch_matrices.empty()) {
+        return false;
+    }
+    const u64 identity[] = {position_address,       u64(position_stride) << 32 | position_vertices,
+                            index_address,          u64(index_size) << 32 | regs.num_indices,
+                            u64(u32(base_vertex))};
+    ray_tracing->AddPatchDraw({
+        .ps = pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash,
+        .vs = vs.pgm_hash,
+        .geometry = XXH3_64bits(identity, sizeof(identity)),
+        .positions = reinterpret_cast<const u8*>(position_address),
+        .position_stride = position_stride,
+        .vertex_count = position_vertices,
+        .indices = reinterpret_cast<const void*>(index_address),
+        .index_size = index_size,
+        .index_count = regs.num_indices,
+        .base_vertex = s32(base_vertex),
+        .matrices = rt_patch_matrices.data(),
+        .instances = instances,
+    });
+    return true;
 }
 
 void Rasterizer::CaptureGlow(const GraphicsPipeline* pipeline, const AmdGpu::Regs& regs,
@@ -1406,6 +1500,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     bind_prepared = used_prepared;
     motion_draw = pipeline->GetGraphicsKey().motion_vectors != 0;
     motion_geometry = 0;
+    rt_position_address = 0;
 
     PrepareRenderState(pipeline);
     LogSmokeSeen(pipeline, "draw");
@@ -1538,6 +1633,34 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         ray_tracing->GlowShader(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash)) {
         CaptureGlow(pipeline, regs, is_indexed, index_offset);
     }
+    // A G-buffer draw whose pipeline has no motion-vector variant (or no readable vertex
+    // streams) stores no positions, so the ray tracer never gets it.
+    // A tessellated draw goes to the ray tracer as its control mesh, read on the CPU.
+    const bool patch_captured =
+        !motion_draw && gbuffer_draw && is_indexed && ray_tracing->Capturing() &&
+        ray_tracing->PatchMeshes() && pipeline->HasStage(Shader::SwStage::Vertex) &&
+        pipeline->HasStage(Shader::SwStage::Fragment) &&
+        regs.stage_enable.raw == AmdGpu::ShaderStageEnable::VgtStages::LsHs &&
+        regs.primitive_type == AmdGpu::PrimitiveType::PatchPrimitive &&
+        regs.ls_hs_config.hs_input_control_points == 3 &&
+        CapturePatchDraw(pipeline, regs, index_offset);
+    if (!patch_captured && !(motion_draw && motion_geometry) && gbuffer_draw &&
+        ray_tracing->Capturing() && pipeline->HasStage(Shader::SwStage::Vertex) &&
+        pipeline->HasStage(Shader::SwStage::Fragment)) {
+        ray_tracing->NoteNoPositions(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash,
+                                     pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
+                                     regs.num_indices, 0, regs.num_instances.NumInstances(),
+                                     motion_draw ? "no vertex streams hashed for the draw"
+                                     : regs.stage_enable.raw ==
+                                               AmdGpu::ShaderStageEnable::VgtStages::LsHs
+                                         ? "tessellated, and its control mesh or instance "
+                                           "matrices were not readable"
+                                     : regs.stage_enable.raw !=
+                                               AmdGpu::ShaderStageEnable::VgtStages::Vs
+                                         ? "geometry-shader stages, no motion-vector variant"
+                                         : "a plain vertex shader whose pipeline has no "
+                                           "motion-vector variant");
+    }
     if (motion_draw && motion_geometry) {
         const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
         const auto [base_vertex, first_instance] =
@@ -1558,7 +1681,19 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         bool skinned = false;
         bool unreadable = false;
         u64 palette = 0;
-        for (const auto& resource : vs.buffers) {
+        // Placement identity (rt_placement.h): the draw's world matrices from one of its VS
+        // buffers. Effect pipelines (smoke, water, sky) keep today's keys.
+        const u32 draw_instances = regs.num_instances.NumInstances();
+        const bool placement_wanted = ray_tracing->Capturing() && ray_tracing->PlacementOn() &&
+                                      pipeline->GetGraphicsKey().motion_vectors != 2;
+        const s32 placement_slot = placement_wanted ? ReadPlacements(vs, draw_instances) : -1;
+        // Skinning without the matrix buffer of an instanced batch: its matrices are big enough
+        // to look like bones. A single draw's buffer is never exempt: a bone palette whose first
+        // bone is rigid passes the fit test, so a skinned single draw stays skinned.
+        bool placement_skinned = false;
+        for (u32 bi = 0; bi < vs.buffers.size(); ++bi) {
+            const auto& resource = vs.buffers[bi];
+            const bool matrix_buffer = s32(bi) == placement_slot && draw_instances > 1;
             if (resource.IsSpecial()) continue;
             const auto buffer = resource.GetSharp(vs);
             const u32 size = buffer.GetSize();
@@ -1568,6 +1703,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             if (role == Motion::BufferRole::Skeleton) {
                 gated = false;
                 skinned = true;
+                placement_skinned |= !matrix_buffer;
                 if (!rt_bones) break;
             }
             const VAddr address = buffer.base_address;
@@ -1776,6 +1912,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const bool sky_layer_draw =
                 fx_pipeline && pipeline->HasStage(Shader::SwStage::Fragment) &&
                 u32(pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash) == Rt::SkyLayerPs;
+            if (!push_data.motion_param && ray_tracing->Capturing() && range.count &&
+                !side_gbuffer_draw && !fx_pipeline &&
+                regs.primitive_type == AmdGpu::PrimitiveType::TriangleList) {
+                ray_tracing->NoteNoPositions(rt_tag.ps, rt_tag.vs, regs.num_indices, range.count,
+                                             regs.num_instances.NumInstances(),
+                                             "the object-motion vertex store was full, or the "
+                                             "draw past its count a frame");
+            }
             if (push_data.motion_param && ray_tracing->Capturing() && range.count && !side_gbuffer_draw &&
                 (!fx_pipeline || (blended_fx && uv_select != 0) || water_sheet_draw ||
                  sky_layer_draw) &&
@@ -1809,6 +1953,18 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                     .depth_only = Rt::DepthOnlyDraw(pipeline->GetGraphicsKey().mrt_mask),
                     .blended = blended_fx && uv_select != 0,
                     .tag = rt_tag,
+                    .placements = placement_slot >= 0 ? rt_placements.data() : nullptr,
+                    .placement_count =
+                        placement_slot >= 0 ? u32(rt_placements.size() / Rt::PlacementFloats) : 0u,
+                    .placement_slot = placement_slot >= 0 ? u32(placement_slot) : 0u,
+                    .placement_static = placement_wanted && !fx_pipeline && !fx_list &&
+                                        !placement_skinned && !unreadable,
+                    .placement_skinned = placement_skinned,
+                    .positions = rt_position_address
+                                     ? reinterpret_cast<const u8*>(rt_position_address)
+                                     : nullptr,
+                    .position_stride = rt_position_stride,
+                    .position_vertices = rt_position_vertices,
                 });
             }
         }
@@ -1967,6 +2123,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     // Indirect arguments may be GPU-written: leave these draws on camera fallback.
     motion_draw = false;
     motion_geometry = 0;
+    rt_position_address = 0;
     PrepareRenderState(pipeline);
     LogSmokeSeen(pipeline, "indirect");
     if (SkipOutputlessDraw(pipeline) || SkipShadowDraw()) {
@@ -2565,6 +2722,65 @@ void Rasterizer::EmitVertexBuffers() {
     });
 }
 
+// Finds the draw's world matrices (one 3x4 per instance) in its VS buffers and copies them to
+// rt_placements; returns the buffer index or -1. The buffer is chosen by structure, cached per
+// (shader, instanced), and checked again on every draw: the ray tracer trusts it only after
+// its matrices agreed with the GPU probe (rt_placement.h).
+s32 Rasterizer::ReadPlacements(const Shader::Info& vs, u32 instances) {
+    rt_placements.clear();
+    if (!instances) {
+        return -1;
+    }
+    const auto view = [&](u32 index) -> Rt::PlacementBuffer {
+        const auto& resource = vs.buffers[index];
+        if (resource.IsSpecial()) {
+            return {index, 0, nullptr};
+        }
+        const auto buffer = resource.GetSharp(vs);
+        const u32 size = buffer.GetSize();
+        const VAddr address = buffer.base_address;
+        // The bone classification of the skinning test: a single draw never takes a skeleton
+        // as its matrix buffer.
+        const bool skeleton = buffer.Valid() && buffer.GetStride() == 16 &&
+                              Motion::ClassifyBuffer(size) == Motion::BufferRole::Skeleton;
+        if (!buffer.Valid() || !address || size < Rt::PlacementBytes ||
+            !memory->IsValidGpuMapping(address, 0) ||
+            memory->ClampRangeSize(address, size) != size) {
+            return {index, size, nullptr, skeleton};
+        }
+        return {index, size, reinterpret_cast<const float*>(address), skeleton};
+    };
+    auto& cached = rt_placement_slots[Rt::PlacementSlotKey(vs.pgm_hash, instances > 1)];
+    if (cached.slot < 0) {
+        // Shaders with no fitting buffer are scanned on a few draws only.
+        if (cached.scans >= Rt::PlacementScanLimit) {
+            return -1;
+        }
+        ++cached.scans;
+        std::vector<Rt::PlacementBuffer> buffers;
+        buffers.reserve(vs.buffers.size());
+        for (u32 i = 0; i < vs.buffers.size(); ++i) {
+            buffers.push_back(view(i));
+        }
+        cached.slot = Rt::ChoosePlacementBuffer(buffers, instances);
+        if (cached.slot < 0) {
+            return -1;
+        }
+    }
+    if (u32(cached.slot) >= vs.buffers.size()) {
+        return -1;
+    }
+    // The plausibility test only chose the buffer: from then on any finite matrix gives an id,
+    // so one non-uniformly scaled part does not send its whole batch to the fallback.
+    const Rt::PlacementBuffer chosen = view(u32(cached.slot));
+    if (!Rt::PlacementBufferReadable(chosen, instances)) {
+        return -1;
+    }
+    const u32 count = instances > 1 ? instances : 1u;
+    rt_placements.assign(chosen.data, chosen.data + size_t(count) * Rt::PlacementFloats);
+    return cached.slot;
+}
+
 void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
                                       const PreparedDraw* prepared) {
     const auto& regs = Regs();
@@ -2616,6 +2832,33 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
         motion_geometry = ready ? ready->buffers_hash
                                 : XXH3_64bits(guest_buffers.data(),
                                               guest_buffers.size() * sizeof(AmdGpu::Buffer));
+        // The model-space position stream, for the ray tracer's placement check: attribute
+        // location 0 as float3 (or float4), one per vertex. Each attribute has its own V#,
+        // whose base already points at the attribute (GetVertexInputs: offset 0). Not looked
+        // for with BB_RT_PLACEMENT=0: the switch then costs nothing.
+        rt_position_address = 0;
+        const bool want_positions =
+            ray_tracing && ray_tracing->Capturing() && ray_tracing->PlacementOn();
+        for (size_t j = 0; want_positions && j < attributes.size() && j < guest_buffers.size() &&
+                           j < bindings.size();
+             ++j) {
+            if (attributes[j].location != 0) {
+                continue;
+            }
+            const auto& vb = guest_buffers[j];
+            const u32 stride = vb.GetStride();
+            const bool float3 = attributes[j].format == vk::Format::eR32G32B32Sfloat ||
+                                attributes[j].format == vk::Format::eR32G32B32A32Sfloat;
+            if (float3 && bindings[j].inputRate == vk::VertexInputRate::eVertex &&
+                vb.base_address && stride >= 12 && vb.GetSize() >= stride &&
+                memory->IsValidGpuMapping(vb.base_address, vb.GetSize()) &&
+                memory->ClampRangeSize(vb.base_address, vb.GetSize()) == vb.GetSize()) {
+                rt_position_address = vb.base_address;
+                rt_position_stride = stride;
+                rt_position_vertices = u32(vb.GetSize() / stride);
+            }
+            break;
+        }
     }
     // Object motion research: vertex streams of G-buffer draws.
     if (FrameCapture::Active() && gbuffer_draw) {
@@ -4744,7 +4987,18 @@ void Rasterizer::LogDrawResources(const GraphicsPipeline* pipeline) {
         std::fflush(stdout);
         return;
     }
-    if ((!want && !want_blend) || !pipeline->HasStage(Shader::SwStage::Fragment)) {
+    // BB_LOG_PS_INDICES=<n> (live): the draws with that index count, whatever their shader.
+    static u64 indices_generation = ~0ull;
+    static u32 want_indices = 0;
+    if (indices_generation != knob_generation) {
+        indices_generation = knob_generation;
+        const char* text = Rt::Knob("BB_LOG_PS_INDICES");
+        want_indices = text ? u32(std::strtoul(text, nullptr, 10)) : 0u;
+        if (want_indices) {
+            printed = 0;
+        }
+    }
+    if ((!want && !want_blend && !want_indices) || !pipeline->HasStage(Shader::SwStage::Fragment)) {
         return;
     }
     const auto& ps = pipeline->GetStage(Shader::SwStage::Fragment);
@@ -4762,7 +5016,8 @@ void Rasterizer::LogDrawResources(const GraphicsPipeline* pipeline) {
                     u32(ps.pgm_hash), st.src_factor, st.dst_factor, st.blend_func,
                     u32(st.depth_test), u32(st.depth_write), st.primitive, st.color_format);
     } else {
-        if (printed >= 8 || u32(ps.pgm_hash) != u32(want)) {
+        if (printed >= 8 || (want_indices ? regs.num_indices != want_indices
+                                          : u32(ps.pgm_hash) != u32(want))) {
             return;
         }
     }
@@ -4843,9 +5098,9 @@ void Rasterizer::LogDrawResources(const GraphicsPipeline* pipeline) {
                         stage_kind == Shader::SwStage::Vertex ? "vs" : "ps", i,
                         static_cast<unsigned long long>(b.base_address), b.GetSize(),
                         b.GetStride());
-            if (b.GetSize() <= 512 && b.GetSize() >= 16 && memory->IsValidGpuMapping(b.base_address, 0)) {
+            if (b.GetSize() >= 16 && memory->IsValidGpuMapping(b.base_address, std::min(b.GetSize(), 2048u))) {
                 const float* f = reinterpret_cast<const float*>(b.base_address);
-                for (u32 k = 0; k + 4 <= b.GetSize() / 4; k += 4) {
+                for (u32 k = 0; k + 4 <= std::min(b.GetSize(), 2048u) / 4; k += 4) {
                     std::printf("    [%2u] %9.4f %9.4f %9.4f %9.4f\n", k / 4, f[k], f[k + 1],
                                 f[k + 2], f[k + 3]);
                 }

@@ -218,6 +218,10 @@ float FarWeight(vec3 p) {
     return far_fade.w > 0.0 ? clamp((far_fade.y - length(p)) * far_fade.z, 0.0, 1.0) : 1.0;
 }
 uint DirSetCount() { return uint(bias_tmin_gap_sets.w); }
+// BB_RT_MOON_REACH: how far a moon shadow ray looks for a blocker (far_fade.x, 0 = 10 km). The
+// TLAS only holds what the game has drawn, so a far cliff casts its shadow only once the camera
+// has looked at it: the same view went dark after a look away.
+float MoonReach() { return far_fade.x > 0.0 ? far_fade.x : 1.0e4; }
 uint Candidates() { return restir.x; }
 uint MaxHistory() { return restir.y; }
 uint SpatialTaps() { return restir.z; }
@@ -885,12 +889,12 @@ float MoonTraceAt(vec3 origin, vec3 n, vec3 L1, vec2 u) {
         through_portal = false;
         const bool lit = dot(L1, n) > 0.0;
         const bool no_pane = lit && (Flags() & (FlagMoonHalf | FlagNoVis)) == FlagMoonHalf &&
-                             !PortalAhead(origin, L1, max(1.0e4 - EndGap(), TMin()));
-        const float centre = lit && !no_pane ? Visibility(origin, L1, 1.0e4) : 0.0;
+                             !PortalAhead(origin, L1, max(MoonReach() - EndGap(), TMin()));
+        const float centre = lit && !no_pane ? Visibility(origin, L1, MoonReach()) : 0.0;
         if (through_portal) {
             return centre;
         }
-        const float cone = Visibility(origin, dir, 1.0e4);
+        const float cone = Visibility(origin, dir, MoonReach());
         return through_portal ? 0.0 : cone;
     }
     return ThinMoonVisibility(origin, dir);
@@ -937,9 +941,9 @@ float ThinTransmit() { return prev_jitter.w; }
 const float ThinNear = 1.5;
 
 float ThinMoonVisibility(vec3 origin, vec3 dir) {
-    const float t_max = max(1.0e4 - EndGap(), TMin());
+    const float t_max = max(MoonReach() - EndGap(), TMin());
     if (!(ThinTransmit() > 0.0) || (Flags() & FlagNoVis) != 0u || t_max <= ThinNear) {
-        return Visibility(origin, dir, 1.0e4);
+        return Visibility(origin, dir, MoonReach());
     }
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoOpaqueEXT,
