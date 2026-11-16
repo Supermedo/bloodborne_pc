@@ -217,6 +217,11 @@ void TestBlockPool() {
     pool.Free(c, 256);
     pool.Free(0, 768);
     assert(pool.FreeBlocks() == 1 && pool.Used() == 0 && pool.Alloc(1024) == 0);
+    // Near full is past three quarters of live bytes; blocks retired but not yet freed do not
+    // count, or one eviction would trigger the next until nothing is left.
+    static_assert(!PoolNearFull(768, 0, 1024) && PoolNearFull(769, 0, 1024));
+    static_assert(!PoolNearFull(1000, 300, 1024) && PoolNearFull(1000, 200, 1024));
+    static_assert(!PoolNearFull(100, 200, 1024) && !PoolNearFull(1, 0, 0));
 }
 
 void TestBlasCache() {
@@ -1980,7 +1985,26 @@ static void TestPatchMatrices() {
     assert(!PlausiblePlacement(camera, 2.0f));
 }
 
+// Still / moving bits ride on top of the kind: every older ray mask sees the same instances.
+static void TestMotionMask() {
+    assert(MotionMask(MaskSolid, false) == (MaskSolid | MaskStill));
+    assert(MotionMask(MaskSolid, true) == (MaskSolid | MaskMoving));
+    assert(MotionMask(MaskKept, false) == (MaskKept | MaskStill));
+    assert(MotionMask(MaskKept, true) == (MaskKept | MaskMoving));
+    assert(MotionMask(MaskBlended, false) == (MaskBlended | MaskMoving));
+    assert(MotionMask(MaskPortal, false) == MaskPortal && MotionMask(MaskWater, true) == MaskWater);
+    assert(MotionMask(MaskSky, false) == MaskSky && MotionMask(0, true) == 0);
+    // The two halves together are what a shadow ray saw before (0x6F without the panes).
+    for (const uint32_t kind : {MaskSolid, MaskKept, MaskBlended}) {
+        for (const bool dynamic : {false, true}) {
+            assert((MotionMask(kind, dynamic) & (MaskStill | MaskMoving)) != 0);
+            assert((MotionMask(kind, dynamic) & 0x67u & ~(MaskStill | MaskMoving)) == kind);
+        }
+    }
+}
+
 int main() {
+    TestMotionMask();
     TestPatchMatrices();
     TestSkyFinder();
     TestGeoCache();

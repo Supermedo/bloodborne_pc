@@ -50,6 +50,14 @@ static void TestInterpolate() {
     assert(UvOffset(10, 2, 1) == (10 + 16 + 1) * 4);
     assert(TriangleUvBytes == 32 && TriangleNormalWord == 3 && TriangleVertexNormalWord == 4 &&
            TriangleTangentWord == 7);
+    // The UV pool follows the BLAS pool (the cache holds the world near the player), not one
+    // frame of triangles: 128 MiB filled up on a walk with the BLAS pool at 219 of 1783 MiB.
+    static_assert(UvPoolDefaultMb(128, 1783) == 594);
+    static_assert(UvPoolDefaultMb(128, 512) == 170);
+    static_assert(UvPoolDefaultMb(128, 256) == 128);  // never under the frame's
+    static_assert(UvPoolDefaultMb(128, 8192) == 1024); // 1 GiB at most from the BLAS pool
+    static_assert(UvPoolDefaultMb(2000, 8192) == 2000);
+    static_assert(UvPoolDefaultMb(0, 0) == 16);
     const auto packed = PackNormal({0.0f, -1.0f, 0.5f});
     const auto n = UnpackNormal(packed);
     assert(std::fabs(n[0]) < 1e-6f && std::fabs(n[1] + 1.0f) < 1e-6f && std::fabs(n[2] - 0.5f) < 0.01f);

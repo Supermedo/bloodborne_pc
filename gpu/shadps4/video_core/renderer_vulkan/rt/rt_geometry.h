@@ -85,6 +85,22 @@ constexpr uint32_t MaskWater = 0x10;
 // The game's moon and cloud layer (rt_gi.h SkyLayerPs): only the sky layer pass traces it.
 // Every other ray mask leaves this bit out (0x6F / 0x7F in the shaders).
 constexpr uint32_t MaskSky = 0x80;
+// Still / moving, set ON TOP of the bits above (2026-11-15). A solid or kept instance whose
+// mesh is neither skinned, deforming, moving nor new this frame is still: it stands where it
+// stood last frame, so what it shadows is the same as last frame. Everything else that can
+// block or dim a shadow ray (skinned and wind-blown meshes, movers, smoke) is moving. A ray
+// with mask MaskStill sees the still world only, one with MaskMoving the rest; every older
+// ray mask holds MaskSolid or MaskKept and sees both as before. No older mask may hold these
+// two bits without the bit of the kind it means (rt_gi.comp VisSkyTransmittance did).
+constexpr uint32_t MaskMoving = 0x20;
+constexpr uint32_t MaskStill = 0x40;
+
+constexpr uint32_t MotionMask(uint32_t mask, bool dynamic) {
+    if (mask == MaskSolid || mask == MaskKept) {
+        return mask | (dynamic ? MaskMoving : MaskStill);
+    }
+    return mask == MaskBlended ? mask | MaskMoving : mask;
+}
 
 struct DrawTag {
     uint64_t ps{}, vs{};

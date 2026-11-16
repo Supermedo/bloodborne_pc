@@ -120,6 +120,14 @@ private:
     std::map<uint64_t, uint64_t> free_blocks;
 };
 
+// A pool is near full when its live bytes (retired blocks still wait for the TLAS that uses
+// them) pass three quarters: the least recently used meshes go then, before a new one finds
+// no room. A block freed by an eviction comes back some frames later, so evicting at the
+// moment an allocation fails is too late.
+constexpr bool PoolNearFull(uint64_t used, uint64_t retired, uint64_t size) {
+    return size != 0 && used > retired && used - retired > size / 4 * 3;
+}
+
 enum class Rebuild : uint32_t { None, Miss, Size, Dirty, Unreadable, Skeleton, Palette, Count };
 
 constexpr uint32_t MaxRefits = 60;

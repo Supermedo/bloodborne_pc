@@ -99,6 +99,31 @@ static void TestClassify() {
     static_assert(OmmTriangleIndex(7, false, false) == 7);
 }
 
+// An unknown micro-triangle leans opaque as often as its samples pass the alpha test, so a
+// canopy traced with 2-state micromaps lets through what its texture does.
+// The micromap pools follow the BLAS pool: at a fixed 64 MiB the forest canopies got none.
+static void TestPoolSizes() {
+    static_assert(OmmPoolDefaultMb(1783) == 297 && OmmPoolDefaultMb(512) == 85);
+    static_assert(OmmPoolDefaultMb(128) == 64 && OmmPoolDefaultMb(8192) == 512);
+    static_assert(OmmIndexPoolDefaultMb(297) == 37 && OmmIndexPoolDefaultMb(64) == 32);
+}
+
+static void TestLean() {
+    for (uint32_t k = 0; k < 64; ++k) {
+        assert(OmmLean(5, k, 0, 16) == OmmState::UnknownTransparent);
+        assert(OmmLean(5, k, 16, 16) == OmmState::UnknownOpaque);
+        assert(OmmLean(5, k, 0, 0) == OmmState::UnknownTransparent);
+    }
+    uint32_t opaque = 0;
+    const uint32_t count = 64 * 400;
+    for (uint32_t t = 0; t < 400; ++t) {
+        for (uint32_t k = 0; k < 64; ++k) {
+            opaque += OmmLean(t, k, 4, 16) == OmmState::UnknownOpaque ? 1 : 0;
+        }
+    }
+    assert(opaque > count * 22 / 100 && opaque < count * 28 / 100);
+}
+
 static void TestBake() {
     uint32_t words[OmmDataWords(OmmMaxLevel)]{};
     uint32_t index = 0;
@@ -190,6 +215,8 @@ int main() {
     TestSizes();
     TestCurve();
     TestClassify();
+    TestLean();
+    TestPoolSizes();
     TestBake();
     TestBuildFlags();
     TestCompactDecision();

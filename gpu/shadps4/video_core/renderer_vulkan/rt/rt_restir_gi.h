@@ -110,6 +110,38 @@ inline bool GiJacobianOk(float j, float max_ratio) {
     return max_ratio <= 0.0f || j <= max_ratio;
 }
 
+// Weight of last frame's reservoir at this frame's receiver (rt_restir_gi.comp, temporal pass):
+// the sample was taken for the surface the history tap held (`held`), which is this receiver on
+// static ground but another point on swaying grass or an animated character. 0 = do not reuse.
+inline float GiTemporalJacobian(const Vec3& sample, const Vec3& sample_normal, const Vec3& held,
+                                const Vec3& receiver, float max_ratio) {
+    const float j = GiJacobian(sample, sample_normal, held, receiver);
+    return GiJacobianOk(j, max_ratio) ? j : 0.0f;
+}
+
+inline float GiReceiverCos(const Vec3& sample, const Vec3& p, const Vec3& n) {
+    const Vec3 d = Sub(sample, p);
+    const float len = std::sqrt(Dot(d, d));
+    return len > 1e-6f ? std::max(Dot(d, n) / len, 0.0f) : 0.0f;
+}
+
+// rt_restir_gi.comp ReuseOk: a sample drawn for the receiver (from, from_n) may be reused at
+// (to, to_n) only while its weight there is at most max_ratio times its weight where it was
+// drawn: (cos at to / cos at from) x Jacobian. Receivers that pass the similar-surface test can
+// have normals 25 degrees apart (grass blades, cloth folds), so a sample that grazed one counts
+// hundreds of times more on the next.
+inline bool GiReuseOk(const Vec3& sample, float jacobian, const Vec3& from, const Vec3& from_n,
+                      const Vec3& to, const Vec3& to_n, float max_ratio) {
+    if (!(jacobian > 0.0f)) {
+        return false;
+    }
+    if (!(max_ratio > 0.0f)) {
+        return true;
+    }
+    return jacobian <= max_ratio && GiReceiverCos(sample, to, to_n) * jacobian <=
+                                        max_ratio * GiReceiverCos(sample, from, from_n);
+}
+
 inline bool GiReservoirMerge(GiReservoir& r, const GiReservoir& in, float target_pdf, float u,
                              float m_clamp) {
     const float m = std::min(in.M, m_clamp);
@@ -148,11 +180,16 @@ inline Vec3 GiResolve(const GiReservoir& r, const Vec3& receiver, const Vec3& re
 constexpr uint32_t RestirGiSurfaceGlass = 1u << 28;
 constexpr uint32_t RestirGiMaskSolid = 0x01u;
 constexpr uint32_t RestirGiMaskPortal = 0x08u;
+// rt_restir_gi.comp BlockedSpan traces the still world only (rt_geometry.h MaskStill): a wall
+// blocks a reused sample, wind-blown foliage and characters do not.
+constexpr uint32_t RestirGiMaskStill = 0x40u;
+constexpr uint32_t RestirGiStillSolid = RestirGiMaskSolid | RestirGiMaskStill;
+constexpr uint32_t RestirGiMovingSolid = RestirGiMaskSolid | 0x20u;
 constexpr float RestirGiPortalWall = 1.5f;
 
 struct GiRayHit {
     float t = 0.0f;
-    uint32_t mask = RestirGiMaskSolid;
+    uint32_t mask = RestirGiStillSolid;
     uint32_t surface_flags = 0u;
     bool alpha_passes = true;
 };
@@ -160,7 +197,7 @@ struct GiRayHit {
 template <typename Hits>
 bool GiBlockedSpan(const Hits& hits, float t_min, float t_max) {
     for (const GiRayHit& h : hits) {
-        if ((h.mask & RestirGiMaskSolid) == 0u || h.t < t_min || h.t > t_max) {
+        if ((h.mask & RestirGiMaskStill) == 0u || h.t < t_min || h.t > t_max) {
             continue;
         }
         if ((h.surface_flags & RestirGiSurfaceGlass) != 0u) {
@@ -208,6 +245,22 @@ constexpr uint32_t RestirGiTemporalSet(uint32_t history) {
 
 constexpr uint32_t RestirGiFinalSet(uint32_t history, uint32_t spatial_passes) {
     return spatial_passes % 2 == 1 ? RestirGiInitSet(history) : RestirGiTemporalSet(history);
+}
+
+// The set the next frame reads as its history. With one spatial pass it is the TEMPORAL set,
+// not the pass's output (BB_RT_RESTIR_GI_FEEDBACK=0, default since 2026-11-15). The spatial pass
+// copies a pixel's reservoir into pixels up to 16 px away; as history, each copy was copied
+// again the next frame, so one rare bright sample (bounce light of a fire) filled the whole
+// disc and stayed for the reservoir's life: fire-coloured spots that came and went on rock,
+// trunks, ground and grass (Forbidden Woods bonfires). Shown but not kept, a copy lasts one
+// frame and the accumulation after the resolve flattens it. No pass at all removed the spots
+// too, but left each reservoir alone with its 1-in-4-frames samples: slow boiling noise on the
+// character ("frying"). The three sets still suffice: the old history becomes the next init
+// set and the spatial output the next temporal set. Two passes write over the temporal set,
+// so they keep the feedback.
+constexpr uint32_t RestirGiHistorySet(uint32_t history, uint32_t spatial_passes, bool feedback) {
+    return spatial_passes == 1 && !feedback ? RestirGiTemporalSet(history)
+                                            : RestirGiFinalSet(history, spatial_passes);
 }
 
 }

@@ -388,6 +388,12 @@ private:
         Rt::Affine relocate{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
         bool shadow_only{}; // from the geometry cache: TLAS mask MaskKept whatever BB_RT_KEEP_GI
         u64 placed_record{}; // a kept placement of a shared mesh: its key in placed_records
+        // A placement of a shared mesh, drawn or kept: PlacementMix(mesh, the game's placement
+        // key), the key of its record. The same every frame, unlike `relocate`'s floats.
+        u64 place_id{};
+        // The placement was first seen this frame: a prop the game moves every frame comes
+        // as a new placement each time (a lantern on a chain), and is not still.
+        bool place_fresh{};
     };
     struct SkinState {
         u32 entry{}, mode{}, step{}, mask{}, flags{}, slot{}, triangles{};
@@ -640,6 +646,10 @@ private:
     u64 hitch_frames = 0;
     std::vector<RetiredBlock> retired;
     std::vector<RetiredBlock> retired_uv;
+    u64 retired_uv_bytes = 0;   // bytes of retired_uv, still counted as used by uv_pool
+    u64 surface_uv_evicted = 0; // meshes evicted because the UV pool was near full
+    u64 retired_omm_bytes = 0;  // bytes of retired_omm, still counted as used by omm_pool
+    u64 omm_evicted = 0;        // meshes evicted because the micromap pool was near full
     Rt::BlockPool uv_pool;
     DeviceBuffer uv_buffer;
     HostRing surfaces_ring;
@@ -746,7 +756,8 @@ private:
     // adds no second instance.
     std::unordered_set<u64> placed_frame_seen;
     u64 placed_shared_instances = 0, placed_kept_last = 0, placed_ghosts = 0;
-    void NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key, const Rt::DrawKey& placed_key,
+    // True when the placement was already known before this frame.
+    bool NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key, const Rt::DrawKey& placed_key,
                     const float* matrix);
     struct KeptItem {
         Rt::CacheEntry* entry;
@@ -1063,6 +1074,8 @@ private:
     float gi_emissive_luma = 2.0f;
     u32 gi_sparse = Rt::GiSparseDefault;
     bool gi_last_bounce_cache = false;
+    bool gi_still_shadows = false; // BB_RT_GI_STILL_SHADOWS, Rt::BounceFlagStillShadows
+    u32 omm_fast = 0;              // BB_RT_OMM_FAST, Rt::OmmFastMax: rays with 2-state micromaps
     bool gi_sharc = false;
     bool sharc_cleared = false;
     bool sharc_failed = false;
@@ -1154,6 +1167,7 @@ private:
     u32 restir_gi_neighbours = Rt::RestirGiNeighboursDefault;
     float restir_gi_radius = Rt::RestirGiRadiusDefault;
     u32 restir_gi_history = 0;
+    bool restir_gi_feedback = false;
     std::array<std::array<OwnImage, 4>, Rt::RestirGiSets> restir_gi_sets;
     HostRing restir_gi_params_ring;
     vk::UniqueDescriptorSetLayout restir_gi_init_layout, restir_gi_resolve_layout,
@@ -1456,6 +1470,20 @@ private:
     bool portal_on = true;
     std::vector<u64> portal_ps;
     u32 portal_instances = 0;
+    // Still / moving split of each TLAS (Rt::MotionMask), by build slot: how many of each, and
+    // a hash of the still set (which mesh stands where). A pass that keeps something computed
+    // against the still world compares the hash with the one it computed against.
+    std::array<u64, Slots> still_hash{};
+    std::array<u32, Slots> still_count{}, moving_count{};
+    u64 still_hash_last = 0, still_changes = 0, still_frames = 0;
+    u32 still_last = 0, moving_last = 0;
+    // Alpha-tested instances traced without a micromap last frame (every ray through them runs
+    // the alpha test in a shader), and the largest of them.
+    struct NoOmmStat {
+        u32 instances = 0, kept = 0, entry = 0, entry_triangles = 0, flags = 0;
+        u64 triangles = 0;
+    } no_omm_last;
+    u64 still_ids_last = 0, still_id_changes = 0, still_count_changes = 0;
     // Water draws in this frame's TLAS (sheets, G-buffer puddle floors): each kind's per-pixel
     // probe ray runs only while some are drawn (forest: reflect 3.0 -> 1.7 ms without them).
     u32 water_sheets = 0;

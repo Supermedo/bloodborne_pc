@@ -906,6 +906,12 @@ void TestFireLightFromDump() {
 
 void TestMoonHalf() {
     assert(MoonHalfFlags(0, false, 0) == 0u);
+    // BB_RT_OMM_FAST >= 1: far moon rays with 2-state micromaps, never without micromaps.
+    static_assert(DirectOmmFastFlags(true, 0) == 0 && DirectOmmFastFlags(false, 3) == 0);
+    static_assert(DirectOmmFastFlags(true, 1) == DirectFlagMoonFarFast);
+    static_assert(DirectOmmFastFlags(true, 3) == DirectFlagMoonFarFast);
+    static_assert((DirectFlagMoonFarFast & (DirectFlagKeptProbe | DirectFlagObjectMotion |
+                                            DirectFlagMoonHistoryValid | DirectFlagMoonHistory)) == 0);
     assert(MoonHalfFlags(1, false, 0) == DirectFlagMoonHalf);
     assert(MoonHalfFlags(2, false, 0) == (DirectFlagMoonHalf | DirectFlagMoonHalfAlt));
     assert(MoonHalfFlags(1, true, 0) == 0u);

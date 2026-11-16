@@ -306,6 +306,16 @@ constexpr uint32_t SkySlot(uint32_t records) {
 constexpr uint32_t BounceFlagEmissive = 32;
 constexpr uint32_t BounceFlagPortals = 64; // rt_direct.h DirectFlagPortals
 constexpr uint32_t BounceFlagWater = 128;
+// rt_gi.comp: the light at a bounce point is shadowed by the still world only.
+constexpr uint32_t BounceFlagStillShadows = 256;
+// rt_gi.comp: micromaps forced to 2 states for the shadow rays at a bounce point
+// (BB_RT_OMM_FAST >= 2) and for the bounce rays (3). Only with micromaps in the TLAS.
+constexpr uint32_t BounceFlagOmmShadows = 512;
+constexpr uint32_t BounceFlagOmmBounce = 1024;
+constexpr uint32_t BounceOmmFastFlags(bool omm, uint32_t fast) {
+    return !omm ? 0
+                : (fast >= 2 ? BounceFlagOmmShadows : 0) | (fast >= 3 ? BounceFlagOmmBounce : 0);
+}
 constexpr size_t FlameMaxParticles = 512;
 constexpr size_t FlameMaxClusters = 32;
 constexpr uint32_t FlameBlockWords = 4 + 4 * FlameMaxClusters;

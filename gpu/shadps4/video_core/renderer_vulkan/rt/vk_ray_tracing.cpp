@@ -660,6 +660,7 @@ RayTracing::RayTracing(const Instance& instance_, Scheduler& scheduler_, Runtime
     restir_gi_neighbours = u32(EnvU64("BB_RT_RESTIR_GI_NEIGHBOURS", Rt::RestirGiNeighboursDefault, 1,
                                       Rt::RestirGiMaxNeighbours));
     restir_gi_radius = EnvFloat("BB_RT_RESTIR_GI_RADIUS", Rt::RestirGiRadiusDefault, 1.0f, 256.0f);
+    restir_gi_feedback = EnvU64("BB_RT_RESTIR_GI_FEEDBACK", 0, 0, 1) != 0;
     if (const char* hash = std::getenv("BB_UPSCALE_BEFORE_CS")) {
         trigger_hash = std::strtoull(hash, nullptr, 16);
     }
@@ -729,9 +730,14 @@ RayTracing::RayTracing(const Instance& instance_, Scheduler& scheduler_, Runtime
             "reuse M clamp %u (BB_RT_RESTIR_GI_M), sample age limit %u (BB_RT_RESTIR_GI_AGE), %u "
             "spatial pass(es) (BB_RT_RESTIR_GI_SPATIAL, 0-2) of %u neighbours "
             "(BB_RT_RESTIR_GI_NEIGHBOURS) within %g px (BB_RT_RESTIR_GI_RADIUS), one visibility "
-            "ray per reused sample\n",
+            "ray per reused sample, history = the %s (BB_RT_RESTIR_GI_FEEDBACK=%u)\n",
             restir_gi_m_clamp, restir_gi_max_age, restir_gi_spatial, restir_gi_neighbours,
-            restir_gi_radius);
+            restir_gi_radius,
+            Rt::RestirGiHistorySet(0, restir_gi_spatial, restir_gi_feedback) ==
+                    Rt::RestirGiFinalSet(0, restir_gi_spatial)
+                ? "last pass's output"
+                : "temporal reservoirs",
+            restir_gi_feedback ? 1u : 0u);
         Log("Ray tracing: ReSTIR GI traces 1 of %u pixels per frame (BB_RT_GI_SPARSE 1, 2 or 4; "
             "every pixel on camera cuts)\n",
             gi_sparse);
@@ -1291,7 +1297,8 @@ bool RayTracing::CreateResources() {
     }
     pool.Reset(pool_buffer.size, 256);
     if (omm_enabled) {
-        omm_pool_buffer.size = EnvU64("BB_RT_OMM_MB", 64, 4, 2048) << 20;
+        omm_pool_buffer.size =
+            EnvU64("BB_RT_OMM_MB", Rt::OmmPoolDefaultMb(pool_buffer.size >> 20), 4, 2048) << 20;
         omm_input_slot_bytes = Rt::AlignUp(
             Rt::OmmInputBytes(omm_budget, omm_level) + u64(capacity.records) * OmmAlign * 4,
             OmmAlign);
@@ -1311,7 +1318,10 @@ bool RayTracing::CreateResources() {
         } else {
             omm_pool.Reset(omm_pool_buffer.size, OmmAlign);
             omm_handles.resize(capacity.records);
-            omm_index_buffer.size = EnvU64("BB_RT_OMM_INDEX_MB", 32, 1, 1024) << 20;
+            omm_index_buffer.size =
+                EnvU64("BB_RT_OMM_INDEX_MB",
+                       Rt::OmmIndexPoolDefaultMb(omm_pool_buffer.size >> 20), 1, 1024)
+                << 20;
             if (CreateRawBuffer(instance, omm_index_buffer.size,
                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
@@ -1459,6 +1469,7 @@ void RayTracing::DestroyResources() {
     retired.clear();
     omm_handles.clear();
     retired_omm.clear();
+    retired_omm_bytes = 0;
     retired_omm_index.clear();
     tlas_frame = 0;
     tlas_tick = 0;
@@ -1605,6 +1616,8 @@ void RayTracing::ReadLiveKnobs() {
     gi_tmax_m = u32(EnvU64("BB_RT_GI_TMAX", 0, 0, Rt::GiTmaxMax));
     gi_sharc = EnvU64("BB_RT_SHARC", 0, 0, 1) != 0;
     gi_last_bounce_cache = EnvU64("BB_RT_GI_LAST_BOUNCE_CACHE", 1, 0, 1) != 0;
+    gi_still_shadows = EnvU64("BB_RT_GI_STILL_SHADOWS", 0, 0, 1) != 0;
+    omm_fast = u32(EnvU64("BB_RT_OMM_FAST", 0, 0, Rt::OmmFastMax));
     gi_bounces = u32(EnvU64("BB_RT_BOUNCES", 2, 0, Rt::MaxBounces));
     adaptive_ms = EnvFloat("BB_RT_ADAPTIVE_MS", 12.0f, 0.0f, float(Rt::AdaptiveBudgetMaxMs));
     far_start = EnvFloat("BB_RT_FAR_START", 0.0f, 0.0f, Rt::FarFadeMaxM);
@@ -3091,6 +3104,7 @@ void RayTracing::ReclaimBlocks() {
             return false;
         }
         uv_pool.Free(block.offset, block.bytes);
+        retired_uv_bytes -= std::min(retired_uv_bytes, block.bytes);
         return true;
     });
     std::erase_if(retired_omm, [&](RetiredBlock& block) {
@@ -3098,6 +3112,7 @@ void RayTracing::ReclaimBlocks() {
             return false;
         }
         omm_pool.Free(block.offset, block.bytes);
+        retired_omm_bytes -= std::min(retired_omm_bytes, block.bytes);
         return true;
     });
     std::erase_if(retired_omm_index, [&](RetiredBlock& block) {
@@ -3126,6 +3141,7 @@ void RayTracing::ReleaseEntry(const Rt::CacheEntry& entry) {
     retired_bytes += entry.bytes;
     if (entry.uv_base != Rt::NoUv) {
         retired_uv.push_back({u64(entry.uv_base) * Rt::UvBytes, entry.uv_bytes, scheduler.CurrentTick(), frame});
+        retired_uv_bytes += entry.uv_bytes;
     }
     if (entry.omm) {
         if (entry.id < omm_handles.size() && omm_handles[entry.id]) {
@@ -3134,6 +3150,7 @@ void RayTracing::ReleaseEntry(const Rt::CacheEntry& entry) {
             scheduler.DeferOperation([device, mm] { device.destroyMicromapEXT(mm); });
         }
         retired_omm.push_back({entry.omm_offset, entry.omm_bytes, scheduler.CurrentTick(), frame});
+        retired_omm_bytes += entry.omm_bytes;
         if (entry.omm_index_bytes) {
             retired_omm_index.push_back(
                 {entry.omm_index_offset, entry.omm_index_bytes, scheduler.CurrentTick(), frame});
@@ -3335,7 +3352,20 @@ bool RayTracing::AllocateEntry(u32 triangles, bool updatable, bool omm, Rt::Cach
             out.uv_base = u32(uv_offset / Rt::UvBytes);
             out.uv_bytes = uv_bytes;
         } else {
+            // No room: the mesh is built without UVs (AddDraw clears its UV flags, so it is
+            // never alpha-tested on a stray index) and without the micromap that needs them.
             ++surface_uv_full;
+            if (out.omm) {
+                omm_handles[id].reset();
+                omm_pool.Free(out.omm_offset, out.omm_bytes);
+                if (out.omm_index_bytes) {
+                    omm_index_pool.Free(out.omm_index_offset, out.omm_index_bytes);
+                }
+                out.omm = false;
+                out.omm_offset = out.omm_bytes = 0;
+                out.omm_index_offset = out.omm_index_bytes = 0;
+                omm_scratch_bytes = 0;
+            }
         }
     }
     scratch_bytes = (sizes.buildScratchSize + scratch_alignment - 1) / scratch_alignment *
@@ -3537,6 +3567,15 @@ void RayTracing::BeginSlot() {
             [&](const Rt::CacheEntry& e) { ReleaseEntry(e); });
         while (pool.Used() - retired_bytes > pool.Size() / 4 * 3 &&
                cache.EvictLeastRecent([&](const Rt::CacheEntry& e) { ReleaseEntry(e); })) {
+        }
+        // The UV pool fills before the BLAS pool does (Rt::UvPoolDefaultMb).
+        while (Rt::PoolNearFull(uv_pool.Used(), retired_uv_bytes, uv_pool.Size()) &&
+               cache.EvictLeastRecent([&](const Rt::CacheEntry& e) { ReleaseEntry(e); })) {
+            ++surface_uv_evicted;
+        }
+        while (Rt::PoolNearFull(omm_pool.Used(), retired_omm_bytes, omm_pool.Size()) &&
+               cache.EvictLeastRecent([&](const Rt::CacheEntry& e) { ReleaseEntry(e); })) {
+            ++omm_evicted;
         }
     }
     rebuild_budget.BeginFrame();
@@ -4531,6 +4570,9 @@ void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
                              draw.alpha_ref});
         instances.back().same_frame = true;
         instances.back().relocated = true;
+        instances.back().place_id =
+            Rt::PlacementMix(u64(Rt::DrawKeyHash{}(key)), draw.key.placement);
+        instances.back().place_fresh = true;
         instances.back().relocate =
             Rt::Relocation(Rt::PlacementAffine(draw.placements), lookup.entry->base_matrix);
         tag_instance(lookup.entry->id, 1);
@@ -4602,13 +4644,14 @@ void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
             // Another placement than the one the BLAS was built from: the BLAS relocated. Its
             // captured positions are this placement's, so the probe has nothing to compare.
             FrameInstance& fi = instances.back();
+            fi.place_id = Rt::PlacementMix(u64(Rt::DrawKeyHash{}(key)), draw.key.placement);
             fi.relocated = draw.key.placement != lookup.entry->base_placement;
             if (fi.relocated) {
                 fi.relocate = Rt::Relocation(Rt::PlacementAffine(draw.placements),
                                              lookup.entry->base_matrix);
                 probe.mode = 2;
             }
-            NotePlaced(lookup.entry->id, key, draw.key, draw.placements);
+            fi.place_fresh = !NotePlaced(lookup.entry->id, key, draw.key, draw.placements);
         }
         probes.push_back(probe);
         return;
@@ -4654,6 +4697,15 @@ void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
             return;
         }
         entry.moving = was_moving;
+    }
+    if (omm_log && omm_enabled && draw.alpha_test && !entry.omm && count > 5000) {
+        Log("OMM not made frame %llu: entry %u, %u triangles, step %u, update %u, updatable %u/%u, "
+            "draw UVs %u, entry uv %u, kind %u, room %u (%u used of %u), wanted %u, reuse %u, "
+            "skinned %u, ps %08x\n",
+            (unsigned long long)frame, entry.id, u32(count), u32(step), update ? 1u : 0u,
+            lookup.updatable ? 1u : 0u, entry.updatable ? 1u : 0u, draw.uv_captured ? 1u : 0u,
+            entry.uv_base, omm_kind ? 1u : 0u, omm_room ? 1u : 0u, omm_used, omm_budget,
+            omm_wanted ? 1u : 0u, reuse ? 1u : 0u, draw.skinned ? 1u : 0u, u32(draw.tag.ps));
     }
     if (entry.omm && !update) {
         omm_used += u32(count);
@@ -4727,8 +4779,12 @@ void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
     entry.dirty = true;
     entry.valid = true;
     entry.built_frame = frame;
-    entry.uv_captured = draw.uv_captured;
-    geometry.SetLastUvBase(entry.uv_base, draw.uv_captured, draw.normal_captured);
+    // No UVs kept for it (UV pool full): none are written, at index NoUv they would land in
+    // other meshes' UVs, and the instance counts as alpha-unresolved, not as alpha-tested.
+    const bool uv_kept = entry.uv_base != Rt::NoUv;
+    entry.uv_captured = draw.uv_captured && uv_kept;
+    geometry.SetLastUvBase(entry.uv_base, draw.uv_captured && uv_kept,
+                           draw.normal_captured && uv_kept);
     if (!update) {
         entry.omm_ready = false;
     }
@@ -5172,6 +5228,9 @@ bool RayTracing::Build(const SceneInputs& inputs) {
     auto* instance_data = reinterpret_cast<VkAccelerationStructureInstanceKHR*>(
         instances_ring.mapped + u64(slot) * instances_ring.slot_bytes);
     u64 unresolved_count = 0;
+    u64 still_set = 0, still_ids = 0;
+    u32 still_n = 0, moving_n = 0;
+    NoOmmStat no_omm{};
     flips_last = 0;
     portal_instances = 0;
     water_sheets = 0;
@@ -5243,12 +5302,46 @@ bool RayTracing::Build(const SceneInputs& inputs) {
         const bool alpha_instance = surface_enabled && fi.alpha_test && (fi.texture || fi.alpha_texture);
         const Rt::CacheEntry* omm_entry = alpha_instance ? entry : nullptr;
         const bool omm_instance = omm_entry && omm_entry->omm && omm_entry->omm_ready;
+        if (omm_enabled && alpha_instance && !omm_instance && !hidden && data.mask != 0) {
+            const u32 tris = entry ? entry->triangles : 0u;
+            ++no_omm.instances;
+            no_omm.kept += fi.kept ? 1u : 0u;
+            no_omm.triangles += tris;
+            if (tris >= no_omm.entry_triangles) {
+                no_omm.entry = fi.entry_id;
+                no_omm.entry_triangles = tris;
+                no_omm.flags = !entry ? 0x80u
+                                      : (entry->omm ? 1u : 0u) | (entry->omm_ready ? 2u : 0u) |
+                                            (entry->updatable ? 4u : 0u) | (fi.kept ? 8u : 0u) |
+                                            (entry->uv_captured ? 16u : 0u) |
+                                            (entry->compacted ? 32u : 0u) | (entry->shared ? 64u : 0u);
+            }
+        }
         // Glass panes go through the any-hit loops, which let rays pass them (rt_gi/rt_direct).
         const bool glass_instance =
             glass_pass && (fi.glass_mask || GlassDraw(fi.tag.ps, entry ? entry->triangles : 0u));
         portal_instances += !hidden && PortalDraw(fi.tag.ps, entry ? entry->triangles : 0u) ? 1u : 0u;
         water_sheets += !hidden && data.mask == Rt::MaskWater ? 1u : 0u;
         water_puddles += !hidden && data.mask != 0 && data.mask != Rt::MaskWater && WaterDraw(fi.tag.ps) ? 1u : 0u;
+        // Still or moving (Rt::MotionMask). The still set's hash takes the mesh and, for a
+        // placement of a shared mesh, the placement's key: the same bits every frame for a
+        // piece that does not change. (Not the build view, which an entry built this frame
+        // takes from the current camera, and not the relocation matrix, whose floats differ
+        // in the last bits from frame to frame: hashes over either changed every frame.)
+        const bool dynamic =
+            fi.fresh || fi.place_fresh || !entry || entry->updatable || entry->moving;
+        if (const u32 split = Rt::MotionMask(data.mask, dynamic); split != data.mask) {
+            data.mask = split;
+            if (split & Rt::MaskStill) {
+                u64 h = 0x9E3779B97F4A7C15ull * (u64(fi.entry_id) + 1);
+                still_ids += h ^ (h >> 29);
+                h = (h ^ fi.place_id) * 0x100000001B3ull;
+                still_set += h ^ (h >> 29);
+                ++still_n;
+            } else {
+                ++moving_n;
+            }
+        }
         data.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
                      (omm_instance && !glass_instance ? 0u
                       : alpha_instance || fi.blended || glass_instance ? u32(VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR)
@@ -5318,6 +5411,18 @@ bool RayTracing::Build(const SceneInputs& inputs) {
                                        .tag = fi.tag});
         }
     }
+    still_hash[slot] = still_set;
+    still_count[slot] = still_n;
+    moving_count[slot] = moving_n;
+    still_changes += still_set != still_hash_last ? 1u : 0u;
+    still_id_changes += still_ids != still_ids_last ? 1u : 0u;
+    still_count_changes += still_n != still_last ? 1u : 0u;
+    still_ids_last = still_ids;
+    still_hash_last = still_set;
+    still_last = still_n;
+    moving_last = moving_n;
+    no_omm_last = no_omm;
+    ++still_frames;
     if (ptlas_on) {
         ptlas.Plan(slot);
         tlas_writes_sum += ptlas.Writes();
@@ -7878,6 +7983,13 @@ void RayTracing::LogPick(const std::array<u32, 96>& w, std::span<const PickInsta
                 pi ? (unsigned long long)pi->tag.ps : 0ull, pi ? (unsigned long long)pi->tag.vs : 0ull,
                 pi ? pi->triangles : 0u, pi ? pi->mode : 0u, pi ? pi->mask : 0u,
                 pi && pi->alpha_test ? "yes" : "no", pi && pi->blended ? "yes" : "no");
+            if (const Rt::CacheEntry* be = cache.ById(w[93])) {
+                Log("RT pick   moon centre ray blocker entry: micromap %s (ready %u), updatable %u, "
+                    "skinned %u, UVs %u, compacted %u, %u refits, shared %u, moving %u\n",
+                    be->omm ? "yes" : "no", be->omm_ready ? 1u : 0u, be->updatable ? 1u : 0u,
+                    be->skinned ? 1u : 0u, be->uv_captured ? 1u : 0u, be->compacted ? 1u : 0u,
+                    be->refits, be->shared ? 1u : 0u, be->moving ? 1u : 0u);
+            }
         } else if (f(83) > 0.0f) {
             Log("RT pick   moon centre ray: no blocker (open sky)\n");
         }
@@ -8417,6 +8529,7 @@ void RayTracing::RecordDirect(const SceneInputs& inputs) {
                                  (moon_hist_valid ? Rt::DirectFlagMoonHistoryValid : 0u) |
                                  (object_valid ? Rt::DirectFlagObjectMotion : 0u) |
                                  (kept_probe_on ? Rt::DirectFlagKeptProbe : 0u) |
+                                 Rt::DirectOmmFastFlags(omm_enabled, omm_fast) |
                                  Rt::MoonHalfFlags(moon_half, mask_valid && moon_mask, direct_debug)},
         .cfg = {(normal_valid ? normal_source.mode : Rt::NormalFromDepth) |
                     normal_source.swizzle << 8 | normal_source.components << 16,
@@ -9883,7 +9996,9 @@ bool RayTracing::RecordGi(const SceneInputs& inputs) {
                        (albedo_valid ? Rt::BounceFlagAlbedo : 0u) |
                        (emissive_valid ? Rt::BounceFlagEmissive : 0u) |
                        (portal_instances ? Rt::BounceFlagPortals : 0u) |
-                       (water_on ? Rt::BounceFlagWater : 0u);
+                       (water_on ? Rt::BounceFlagWater : 0u) |
+                       (gi_still_shadows ? Rt::BounceFlagStillShadows : 0u) |
+                       Rt::BounceOmmFastFlags(omm_enabled, omm_fast);
     u32 light_count = 0;
     u32 set_count = 0;
     GpuSets gpu_sets{};
@@ -10374,7 +10489,7 @@ void RayTracing::RecordRestirGi(const SceneInputs& inputs, const Bound& depth, u
             own.written = true;
         }
     }
-    restir_gi_history = final_set;
+    restir_gi_history = Rt::RestirGiHistorySet(hist, restir_gi_spatial, restir_gi_feedback);
 }
 
 void RayTracing::RecordShadows(const SceneInputs& inputs) {
@@ -10885,6 +11000,32 @@ void RayTracing::PrintStats(u32 triangles) {
         }
         return n;
     };
+    Log("Ray tracing: still / moving split: %u still and %u moving instances last frame, still "
+        "set changed in %llu of %llu frames (its meshes in %llu, its count in %llu)\n",
+        still_last, moving_last,
+        (unsigned long long)still_changes, (unsigned long long)still_frames,
+        (unsigned long long)still_id_changes, (unsigned long long)still_count_changes);
+    still_changes = still_frames = still_id_changes = still_count_changes = 0;
+    Log("Ray tracing: UV pool %llu of %llu MiB (%llu MiB retired, %zu free blocks), %llu meshes "
+        "built without UVs for lack of room, %llu evicted to keep it under three quarters\n",
+        (unsigned long long)(uv_pool.Used() >> 20), (unsigned long long)(uv_pool.Size() >> 20),
+        (unsigned long long)(retired_uv_bytes >> 20), uv_pool.FreeBlocks(),
+        (unsigned long long)surface_uv_full, (unsigned long long)surface_uv_evicted);
+    Log("Ray tracing: micromap pool %llu of %llu MiB (%llu MiB retired, %zu free blocks), index "
+        "pool %llu of %llu MiB, %llu meshes built without a micromap for lack of room, %llu "
+        "evicted to keep it under three quarters\n",
+        (unsigned long long)(omm_pool.Used() >> 20), (unsigned long long)(omm_pool.Size() >> 20),
+        (unsigned long long)(retired_omm_bytes >> 20), omm_pool.FreeBlocks(),
+        (unsigned long long)(omm_index_pool.Used() >> 20),
+        (unsigned long long)(omm_index_pool.Size() >> 20), (unsigned long long)omm_over_budget,
+        (unsigned long long)omm_evicted);
+    Log("Ray tracing: alpha-tested instances without a micromap last frame: %u (%u kept), %llu "
+        "triangles; largest entry %u, %u triangles (micromap %u, ready %u, updatable %u, kept %u, "
+        "UVs %u, compacted %u, shared %u)\n",
+        no_omm_last.instances, no_omm_last.kept, (unsigned long long)no_omm_last.triangles,
+        no_omm_last.entry, no_omm_last.entry_triangles, no_omm_last.flags & 1u,
+        (no_omm_last.flags >> 1) & 1u, (no_omm_last.flags >> 2) & 1u, (no_omm_last.flags >> 3) & 1u,
+        (no_omm_last.flags >> 4) & 1u, (no_omm_last.flags >> 5) & 1u, (no_omm_last.flags >> 6) & 1u);
     Log("Ray tracing: shared meshes (BB_RT_PLACEMENT_SHARED %u): %llu placed instances, %zu "
         "placement records, %llu kept placements last frame, %llu moved objects dropped\n",
         placement_shared ? 1u : 0u, (unsigned long long)placed_shared_instances,
@@ -11182,10 +11323,9 @@ namespace Vulkan {
 
 bool RayTracing::CreateSurfaceResources() {
     const auto device = instance.GetDevice();
-    const u64 uv_default = (u64(capacity.triangles) * Rt::TriangleUvBytes) >> 20;
-    uv_buffer.size = surface_avail
-                         ? EnvU64("BB_RT_UV_MB", std::max<u64>(uv_default, 16), 4, 2048) << 20
-                         : 0;
+    const u64 uv_default = Rt::UvPoolDefaultMb(
+        (u64(capacity.triangles) * Rt::TriangleUvBytes) >> 20, pool_buffer.size >> 20);
+    uv_buffer.size = surface_avail ? EnvU64("BB_RT_UV_MB", uv_default, 4, 2048) << 20 : 0;
     if (uv_buffer.size &&
         !CreateRawBuffer(instance, uv_buffer.size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false, 16,
                          uv_buffer.buffer, uv_buffer.allocation, nullptr, uv_buffer.address)) {
@@ -11302,6 +11442,7 @@ void RayTracing::DestroySurfaceResources() {
     const auto allocator = instance.GetAllocator();
     surface_holds.ReleaseAll(scheduler.CurrentTick(), HoldFn());
     retired_uv.clear();
+    retired_uv_bytes = 0;
     surface_sampler.reset();
     surface_ring = {};
     surface_fallback.view.reset();
@@ -11643,6 +11784,7 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
         fi.relocate = item.relocate;
         fi.shadow_only = item.shadow_only;
         fi.placed_record = item.record;
+        fi.place_id = item.record;
         fi.alpha_test = e.alpha_test;
         fi.alpha_ref = e.alpha_ref;
         fi.view = e.tex_view;
@@ -11757,7 +11899,7 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
 }
 
 // A placement of a shared mesh seen this frame: its record, for when it is no longer drawn.
-void RayTracing::NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key,
+bool RayTracing::NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key,
                             const Rt::DrawKey& placed_key, const float* matrix) {
     const u64 mesh = u64(Rt::DrawKeyHash{}(shared_key));
     auto [it, fresh] = placed_records.try_emplace(Rt::PlacementMix(mesh, placed_key.placement));
@@ -11772,6 +11914,7 @@ void RayTracing::NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key,
     r.matrix = Rt::PlacementAffine(matrix);
     r.last_frame = frame;
     ++placed_shared_instances;
+    return r.first_frame < frame;
 }
 
 // The placements of shared meshes that are not drawn this frame and still belong in the TLAS:

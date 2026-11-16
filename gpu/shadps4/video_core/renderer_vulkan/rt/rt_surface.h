@@ -16,6 +16,18 @@ constexpr uint32_t TriangleNormalWord = 3;
 constexpr uint32_t TriangleVertexNormalWord = 4;
 constexpr uint32_t TriangleTangentWord = 7;
 constexpr uint32_t TriangleUvBytes = TriangleWords * UvBytes;
+
+// Size of the UV pool in MiB. Every cached BLAS keeps TriangleUvBytes per triangle there, and
+// the cache holds the world near the player, not one frame: sized for one frame of triangles
+// (128 MiB) the pool was full after a walk through the Forbidden Woods with the BLAS pool at
+// 219 of 1783 MiB. A mesh that found no room got no UVs: no micromap, and its alpha test ran in
+// the shaders on whatever the pool held at index NoUv. A third of the BLAS pool (measured:
+// UVs take about 0.6 of the compacted BLAS bytes), 1 GiB at most, never under the frame's.
+constexpr uint64_t UvPoolDefaultMb(uint64_t frame_mb, uint64_t blas_pool_mb) {
+    const uint64_t world = blas_pool_mb / 3 < 1024 ? blas_pool_mb / 3 : 1024;
+    const uint64_t mb = frame_mb > world ? frame_mb : world;
+    return mb < 16 ? 16 : mb;
+}
 constexpr uint32_t VertexNormalBytes = 8;
 constexpr uint32_t SurfaceNormalMapShift = 16;
 constexpr uint32_t NormalSelectAValid = 1u << 21;

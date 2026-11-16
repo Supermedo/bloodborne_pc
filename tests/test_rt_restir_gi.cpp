@@ -157,6 +157,43 @@ void TestJacobian() {
     assert(GiJacobian(sample, sample_normal, from, {0.0f, 0.0f, 1.0f}) == 0.0f);
 }
 
+// Forbidden Woods bonfires: a grass blade 3 cm from a lit blade took a sample of it; the next
+// frame the pixel shows a blade 30 cm away. Reused as it was, the sample counted 100 times too
+// much (blobs of bounce light that came and went on the grass).
+void TestTemporalReceiverMoved() {
+    const Vec3 sample{0.0f, 0.0f, 0.0f};
+    const Vec3 sample_normal{0.0f, 0.0f, 1.0f};
+    const Vec3 held{0.0f, 0.0f, 0.03f};
+    assert(Near(GiTemporalJacobian(sample, sample_normal, held, held, 10.0f), 1.0f));
+    const float away = GiTemporalJacobian(sample, sample_normal, held, {0.0f, 0.0f, 0.3f}, 10.0f);
+    assert(Near(away, 0.01f));
+    // The receiver came much closer to the sample: over the limit, the history is not reused.
+    assert(GiTemporalJacobian(sample, sample_normal, {0.0f, 0.0f, 0.3f}, held, 10.0f) == 0.0f);
+    // The receiver went behind the sample's surface.
+    assert(GiTemporalJacobian(sample, sample_normal, held, {0.0f, 0.0f, -0.3f}, 10.0f) == 0.0f);
+}
+
+// Two grass blades at the same place with normals 23 degrees apart (they pass the
+// similar-surface test). A sample that grazes the first (cos 0.01) meets the second at cos 0.4.
+void TestReuseAcrossTiltedReceivers() {
+    const Vec3 p{0.0f, 0.0f, 0.0f};
+    const Vec3 sample{1.0f, 0.0f, 0.01f};
+    const Vec3 flat{0.0f, 0.0f, 1.0f};
+    const Vec3 tilted{0.39f, 0.0f, 0.92f};
+    assert(GiReceiverCos(sample, p, flat) < 0.011f);
+    assert(GiReceiverCos(sample, p, tilted) > 0.39f);
+    // 40 times its own weight: not reused. The other way round it only loses weight: reused.
+    assert(!GiReuseOk(sample, 1.0f, p, flat, p, tilted, 10.0f));
+    assert(GiReuseOk(sample, 1.0f, p, tilted, p, flat, 10.0f));
+    // Same receiver, and a sample both receivers see well: reused.
+    assert(GiReuseOk(sample, 1.0f, p, flat, p, flat, 10.0f));
+    assert(GiReuseOk({0.3f, 0.0f, 1.0f}, 1.0f, p, flat, p, tilted, 10.0f));
+    // The Jacobian limit still holds on its own, and no limit means no test.
+    assert(!GiReuseOk({0.3f, 0.0f, 1.0f}, 10.5f, p, flat, p, flat, 10.0f));
+    assert(!GiReuseOk(sample, 0.0f, p, flat, p, flat, 10.0f));
+    assert(GiReuseOk(sample, 1.0f, p, flat, p, tilted, 0.0f));
+}
+
 void TestJacobianLimit() {
     assert(GiJacobianOk(1.0f, 10.0f));
     assert(GiJacobianOk(9.9f, 10.0f));
@@ -295,15 +332,15 @@ std::array<GiRayHit, 2> WindowHits(Window w, float t_max) {
     const float t_pane = 0.3f * t_max;
     switch (w) {
     case Window::Glass:
-        return {{{t_pane, RestirGiMaskSolid, RestirGiSurfaceGlass, true},
-                 {t_pane, RestirGiMaskSolid, RestirGiSurfaceGlass, true}}};
+        return {{{t_pane, RestirGiStillSolid, RestirGiSurfaceGlass, true},
+                 {t_pane, RestirGiStillSolid, RestirGiSurfaceGlass, true}}};
     case Window::Painted:
         return {{{t_pane, RestirGiMaskPortal, SurfacePortal, true},
-                 {t_pane + 0.5f * RestirGiPortalWall, RestirGiMaskSolid, 0u, true}}};
+                 {t_pane + 0.5f * RestirGiPortalWall, RestirGiStillSolid, 0u, true}}};
     case Window::Wall:
         break;
     }
-    return {{{t_pane, RestirGiMaskSolid, 0u, true}, {t_pane, RestirGiMaskSolid, 0u, true}}};
+    return {{{t_pane, RestirGiStillSolid, 0u, true}, {t_pane, RestirGiStillSolid, 0u, true}}};
 }
 
 Vec3 WindowSpatialEstimate(Window w, const Vec3& receiver, const Vec3& n,
@@ -380,36 +417,46 @@ void TestSpatialSeesThroughWindows() {
 }
 
 void TestBlockedGlassAndPortals() {
-    const std::array<GiRayHit, 1> glass{{{4.0f, RestirGiMaskSolid, RestirGiSurfaceGlass, true}}};
+    const std::array<GiRayHit, 1> glass{{{4.0f, RestirGiStillSolid, RestirGiSurfaceGlass, true}}};
     assert(!GiBlocked(glass, 20.0f));
-    const std::array<GiRayHit, 1> wall{{{4.0f, RestirGiMaskSolid, 0u, true}}};
+    const std::array<GiRayHit, 1> wall{{{4.0f, RestirGiStillSolid, 0u, true}}};
     assert(GiBlocked(wall, 20.0f));
     assert(!GiBlocked(wall, 3.0f));
-    const std::array<GiRayHit, 1> cutout{{{4.0f, RestirGiMaskSolid, 0u, false}}};
+    const std::array<GiRayHit, 1> cutout{{{4.0f, RestirGiStillSolid, 0u, false}}};
     assert(!GiBlocked(cutout, 20.0f));
     const std::array<GiRayHit, 1> pane_only{{{4.0f, RestirGiMaskPortal, SurfacePortal, true}}};
     assert(!GiBlocked(pane_only, 20.0f));
     const std::array<GiRayHit, 2> behind_pane{{{4.0f, RestirGiMaskPortal, SurfacePortal, true},
-                                               {5.0f, RestirGiMaskSolid, 0u, true}}};
+                                               {5.0f, RestirGiStillSolid, 0u, true}}};
     assert(!GiBlocked(behind_pane, 20.0f));
     assert(!GiBlocked(behind_pane, 5.2f));
     const std::array<GiRayHit, 2> past_wall{{{4.0f, RestirGiMaskPortal, SurfacePortal, true},
-                                             {6.0f, RestirGiMaskSolid, 0u, true}}};
+                                             {6.0f, RestirGiStillSolid, 0u, true}}};
     assert(GiBlocked(past_wall, 20.0f));
     assert(!GiBlocked(past_wall, 5.4f));
     const std::array<GiRayHit, 2> before_pane{{{4.0f, RestirGiMaskPortal, SurfacePortal, true},
-                                               {3.0f, RestirGiMaskSolid, 0u, true}}};
+                                               {3.0f, RestirGiStillSolid, 0u, true}}};
     assert(GiBlocked(before_pane, 20.0f));
     const std::array<GiRayHit, 3> two_panes{{{9.0f, RestirGiMaskPortal, SurfacePortal, true},
                                              {4.0f, RestirGiMaskPortal, SurfacePortal, true},
-                                             {5.0f, RestirGiMaskSolid, 0u, true}}};
+                                             {5.0f, RestirGiStillSolid, 0u, true}}};
     assert(!GiBlocked(two_panes, 20.0f));
     const std::array<GiRayHit, 2> far_pane{{{30.0f, RestirGiMaskPortal, SurfacePortal, true},
-                                            {5.0f, RestirGiMaskSolid, 0u, true}}};
+                                            {5.0f, RestirGiStillSolid, 0u, true}}};
     assert(GiBlocked(far_pane, 20.0f));
     static_assert(RestirGiSurfaceGlass == SurfaceGlass);
+    // Only the still world blocks a reused sample: a wind-blown bush or a character between
+    // the two points does not, a wall behind it still does.
+    const std::array<GiRayHit, 1> bush{{{4.0f, RestirGiMovingSolid, 0u, true}}};
+    assert(!GiBlocked(bush, 20.0f));
+    const std::array<GiRayHit, 2> bush_then_wall{{{4.0f, RestirGiMovingSolid, 0u, true},
+                                                  {6.0f, RestirGiStillSolid, 0u, true}}};
+    assert(GiBlocked(bush_then_wall, 20.0f));
     static_assert(RestirGiMaskSolid == MaskSolid);
     static_assert(RestirGiMaskPortal == MaskPortal);
+    static_assert(RestirGiMaskStill == MaskStill);
+    static_assert(RestirGiStillSolid == MotionMask(MaskSolid, false));
+    static_assert(RestirGiMovingSolid == MotionMask(MaskSolid, true));
 }
 
 void TestDefaults() {
@@ -422,6 +469,18 @@ void TestDefaults() {
     assert(RayReconstructionFromEnv("1") == 1);
     assert(RayReconstructionFromEnv("0") == 0);
     assert(GiSparseDefault == 4);
+    // One spatial pass, shown but not kept: the next history is the temporal set, and the
+    // three sets rotate without the next frame writing over what it still reads.
+    assert(RestirGiSpatialDefault == 1);
+    for (uint32_t h = 0; h < RestirGiSets; ++h) {
+        const uint32_t next = RestirGiHistorySet(h, 1, false);
+        assert(next == RestirGiTemporalSet(h) && next != RestirGiFinalSet(h, 1));
+        assert(RestirGiInitSet(next) != next && RestirGiTemporalSet(next) != next);
+        assert(RestirGiInitSet(next) != RestirGiTemporalSet(next));
+        assert(RestirGiHistorySet(h, 1, true) == RestirGiFinalSet(h, 1));
+        assert(RestirGiHistorySet(h, 0, false) == RestirGiTemporalSet(h));
+        assert(RestirGiHistorySet(h, 2, false) == RestirGiFinalSet(h, 2));
+    }
 }
 
 int main() {
@@ -434,6 +493,8 @@ int main() {
     TestMClamp();
     TestJacobian();
     TestJacobianLimit();
+    TestTemporalReceiverMoved();
+    TestReuseAcrossTiltedReceivers();
     TestSpatialReuseMatchesBruteForce();
     TestFinalizeAndSets();
     std::puts("rt-restir-gi-test: ok");

@@ -232,6 +232,16 @@ void TestEmissiveSky() {
                   2 * 8192 + 8 + SkyProbeCells + SkyImageCells + SkyLayerCells + uint32_t(FogMaxParticles));
     static_assert(uint64_t(MaterialSlots(8192)) * 16u <= 64ull << 20);
     static_assert(BounceFlagEmissive != BounceFlagDirSets && BounceFlagEmissive > BounceFlagDirSets);
+    // BB_RT_OMM_FAST: 2 = the shadow rays at a bounce point, 3 = the bounce rays too; never
+    // without micromaps in the TLAS (the ray flag is not valid there).
+    static_assert(BounceOmmFastFlags(true, 0) == 0 && BounceOmmFastFlags(true, 1) == 0);
+    static_assert(BounceOmmFastFlags(true, 2) == BounceFlagOmmShadows);
+    static_assert(BounceOmmFastFlags(true, 3) == (BounceFlagOmmShadows | BounceFlagOmmBounce));
+    static_assert(BounceOmmFastFlags(false, 3) == 0);
+    static_assert(((BounceFlagOmmShadows | BounceFlagOmmBounce) &
+                   (BounceFlagStillShadows | BounceFlagWater | BounceFlagPortals | BounceFlagEmissive |
+                    BounceFlagDirSets | BounceFlagLights | BounceFlagAlbedo | BounceFlagG1 |
+                    BounceFlagG3)) == 0);
     const auto center = OctEncode({0.0f, 0.0f, 1.0f});
     assert(Near(center[0], 0.5f) && Near(center[1], 0.5f));
     const auto px = OctEncode({1.0f, 0.0f, 0.0f});

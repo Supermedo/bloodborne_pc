@@ -204,6 +204,14 @@ vec3 PixelToView(vec2 pixel, float depth) {
     return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
 }
 
+// View position (last frame's view space) of a pixel of last frame at view depth z: the
+// inverse of ViewToPixel(p, prev_proj, PrevJitter()).
+vec3 PrevPixelToView(vec2 pixel, float z) {
+    const vec2 uv = (pixel + 0.5 - PrevJitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    return vec3(ndc.x * z / prev_proj.x, ndc.y * z / prev_proj.y, z);
+}
+
 vec2 ViewToPixel(vec3 p, vec4 projection, vec2 jitter) {
     const float z = max(p.z, 1e-4);
     const vec2 ndc = vec2(p.x * projection.x, p.y * projection.y) / z;
@@ -254,6 +262,24 @@ float Jacobian(vec3 sample_pos, vec3 sample_normal, vec3 from_receiver, vec3 to_
         return 0.0;
     }
     return (cos_r / cos_q) * (lq2 / lr2);
+}
+
+// May a sample taken for the receiver (from, from_n) be reused at (to, to_n)? Its weight there is
+// its weight at `from` times (cos at to / cos at from) times the Jacobian. Grass blades and
+// cloth folds pass SimilarSurface with normals up to 25 degrees apart: a sample that grazed one
+// blade (cos 0.001) lands on a blade tilted toward it (cos 0.4) and counts 400 times more than
+// it did where it was drawn, a blob of bounce light for as long as the reservoir lives. The
+// whole ratio is held to JacobianMax, like the Jacobian alone was.
+bool ReuseOk(vec3 sample_pos, float jacobian, vec3 from, vec3 from_n, vec3 to, vec3 to_n) {
+    if (!(jacobian > 0.0)) {
+        return false;
+    }
+    if (!(JacobianMax() > 0.0)) {
+        return true;
+    }
+    return jacobian <= JacobianMax() &&
+           ReceiverCos(sample_pos, to, to_n) * jacobian <=
+               JacobianMax() * ReceiverCos(sample_pos, from, from_n);
 }
 
 bool Merge(inout Reservoir r, Reservoir candidate, float target_pdf, float u) {
@@ -331,12 +357,22 @@ void Store(ivec2 pixel, Reservoir r, vec3 n, float z) {
 
 const uint MaskSolid = 0x01u;
 const uint MaskPortal = 0x08u;
+// rt_geometry.h MaskStill: solid instances that stand where they stood last frame (not skinned,
+// not wind-blown, not moving).
+const uint MaskStill = 0x40u;
 const float PortalWall = 1.5;
 
+// The ray that validates a reused neighbour sample sees the STILL world only (since
+// 2026-11-15). Its job is to keep light from being reused across a wall, a floor or a rock;
+// a grass card or a leaf between the two points matters little for it, and those cards were
+// nearly all of its cost: wind-blown foliage is alpha-tested, card after card, and in the
+// Forbidden Woods this one ray took up to 4.6 ms of a 12.7 ms GI pass (41.6 -> 50.9 FPS at the
+// bonfires with the still world alone, no difference in the picture beyond the frame-to-frame
+// noise). A character between the two points no longer blocks the reuse either.
 bool BlockedSpan(vec3 origin, vec3 dir, float t_min, float t_max) {
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy),
-                          gl_RayFlagsTerminateOnFirstHitEXT, MaskSolid, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
+                          gl_RayFlagsTerminateOnFirstHitEXT, MaskStill, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
             continue;
@@ -421,7 +457,7 @@ void main() {
         }
         const vec3 pq = PixelToView(vec2(q), q_depth);
         const float jacobian = Jacobian(rq.position, rq.normal, pq, p);
-        if (!(jacobian > 0.0) || (JacobianMax() > 0.0 && jacobian > JacobianMax())) {
+        if (!ReuseOk(rq.position, jacobian, pq, q_recv.xyz, p, n)) {
             continue;
         }
         const float target = TargetPdf(rq.radiance, rq.position, p, n) * jacobian;
@@ -479,7 +515,21 @@ void main() {
                         hist.position = Apply(unproject, hist.position);
                         hist.normal = Rotate(unproject, hist.normal);
                         hist.age += 1.0;
-                        Merge(r, hist, TargetPdf(hist.radiance, hist.position, p, n), Random(state));
+                        // The history sample was taken for the surface that sat under the tap
+                        // last frame. On static ground that is this same point; on swaying
+                        // grass or an animated character it is another point up to
+                        // DepthTolerance away, and a sample a few centimetres from a lit blade
+                        // was reused at full weight from much farther: blobs of bounce light
+                        // that came and went (Forbidden Woods bonfires). Same Jacobian and
+                        // limit as the spatial pass, from the receiver the tap really held.
+                        const vec3 held = Apply(unproject, PrevPixelToView(vec2(tap), stored.w));
+                        const float jacobian = Jacobian(hist.position, hist.normal, held, p);
+                        if (ReuseOk(hist.position, jacobian, held, Rotate(unproject, stored.xyz), p,
+                                    n)) {
+                            Merge(r, hist,
+                                  TargetPdf(hist.radiance, hist.position, p, n) * jacobian,
+                                  Random(state));
+                        }
                     }
                 }
             }

@@ -265,6 +265,20 @@ const uint BounceFlagLights = 8u;
 const uint BounceFlagDirSets = 16u;
 const uint BounceFlagPortals = 64u; // rt_gi.h BounceFlagPortals
 const uint BounceFlagWater = 128u;
+// rt_gi.h BounceFlagStillShadows (BB_RT_GI_STILL_SHADOWS): the shadow rays of the light AT A
+// BOUNCE POINT see the still world (rt_geometry.h MaskStill) and smoke only.
+const uint BounceFlagStillShadows = 256u;
+const uint MaskStill = 0x40u;
+uint g_shadow_mask = 0x03u;
+// rt_gi.h BounceFlagOmmShadows / BounceFlagOmmBounce (BB_RT_OMM_FAST 2 and 3): the shadow rays
+// at a bounce point / the bounce rays themselves take a leaf's micromap as it is
+// (gl_RayFlagsForceOpacityMicromap2StateEXT, as a number so the module needs no micromap
+// capability): a micro-triangle the bake left unknown counts as the state it leaned to and the
+// ray never runs the alpha test. Bounce light is too soft to show a leaf's exact outline.
+const uint BounceFlagOmmShadows = 512u;
+const uint BounceFlagOmmBounce = 1024u;
+const uint RayFlagOmm2State = 0x400u;
+uint g_shadow_flags = 0u;
 const uint SurfacePortalPane = 0x40000000u; // rt_surface.h SurfacePortal
 const uint SurfaceWater = 0x80000000u;
 const float WaterGiF0 = 0.5;
@@ -345,6 +359,16 @@ uint LightCount() { return bounce.z; }
 uint DirSetCount() { return bounce.w; }
 uint SkySlot() { return bounce_cfg.x; }
 uint BounceFlags() { return bounce_cfg.y; }
+// Solid + smoke (0x03) as before, or the still world + smoke.
+uint BounceShadowMask() {
+    return (BounceFlags() & BounceFlagStillShadows) != 0u ? (MaskStill | 0x02u) : 0x03u;
+}
+uint BounceShadowFlags() {
+    return (BounceFlags() & BounceFlagOmmShadows) != 0u ? RayFlagOmm2State : 0u;
+}
+uint BounceRayFlags() {
+    return (BounceFlags() & BounceFlagOmmBounce) != 0u ? RayFlagOmm2State : 0u;
+}
 // World set + 1 written by rt_world_set.comp, 0 = none (use the pixel's own set).
 uint WorldSet() { return sharc.w; }
 float EmissiveLuma() { return bounce_misc.x; }
@@ -658,7 +682,7 @@ float TraceSpan(vec3 origin, vec3 dir, float t_min, float t_max, uint mask, out 
     gi_payload.t = -1.0;
 #ifdef RT_GI_SER
     hitObjectNV hit;
-    hitObjectTraceRayNV(hit, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT,
+    hitObjectTraceRayNV(hit, accelerationStructureEXT(tlas_frame_flags.xy), BounceRayFlags(),
                         mask, 0, 1, 0, TlasPoint(tlas_frame_flags.xy, origin), t_min,
                         TlasDir(tlas_frame_flags.xy, dir), t_max, 0);
     rejected += gi_payload.rejected;
@@ -676,7 +700,7 @@ float TraceSpan(vec3 origin, vec3 dir, float t_min, float t_max, uint mask, out 
     rotation = TlasToView(tlas_frame_flags.xy, mat3(hitObjectGetObjectToWorldNV(hit)));
     return hitObjectGetRayTMaxNV(hit);
 #else
-    traceRayEXT(accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT, mask, 0, 1, 0,
+    traceRayEXT(accelerationStructureEXT(tlas_frame_flags.xy), BounceRayFlags(), mask, 0, 1, 0,
                 TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max, 0);
     rejected += gi_payload.rejected;
     if (gi_payload.t < 0.0) {
@@ -698,7 +722,7 @@ float TraceSpan(vec3 origin, vec3 dir, float t_min, float t_max, uint mask, out 
     barycentrics = vec2(0.0);
     rotation = mat3(1.0);
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), gl_RayFlagsNoneEXT,
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy), BounceRayFlags(),
                           mask, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
@@ -772,7 +796,7 @@ float WaterSpan(vec3 origin, vec3 dir, float t_hit, uint hit_id) {
 float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy),
-                          gl_RayFlagsTerminateOnFirstHitEXT, 0x03u, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
+                          gl_RayFlagsTerminateOnFirstHitEXT | g_shadow_flags, g_shadow_mask, TlasPoint(tlas_frame_flags.xy, origin), t_min, TlasDir(tlas_frame_flags.xy, dir), t_max);
     float t = 1.0;
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT) {
@@ -1370,7 +1394,11 @@ vec3 DirectLit(vec3 p, vec3 n, uint set_id, vec3 v, vec3 albedo, vec4 material, 
                 const vec3 ray = l.pos_inv_r2.xyz - origin;
                 const float ray_len = length(ray);
                 if (ray_len > 1e-3) {
+                    g_shadow_mask = BounceShadowMask();
+                    g_shadow_flags = BounceShadowFlags();
                     vis = Transmittance(origin, ray / ray_len, max(ray_len - BounceGap(), 1e-3));
+                    g_shadow_mask = 0x03u;
+                    g_shadow_flags = 0u;
                 }
             }
             result += c * vis;
@@ -1387,7 +1415,11 @@ vec3 DirectLit(vec3 p, vec3 n, uint set_id, vec3 v, vec3 albedo, vec4 material, 
         const float nl1 = clamp(dot(n, L1), 0.0, 1.0);
         float sun_vis = 1.0;
         if (nl1 > 0.0 && dot(c1, c1) > 0.0) {
+            g_shadow_mask = BounceShadowMask();
+            g_shadow_flags = BounceShadowFlags();
             sun_vis = Transmittance(origin, L1, MoonReach());
+            g_shadow_mask = 0x03u;
+            g_shadow_flags = 0u;
         }
         result += c1 * nl1 * sun_vis * (albedo + HitSpecular(material, n, v, L1));
     }
@@ -1479,7 +1511,7 @@ vec3 FibonacciDir(uint i, uint n) {
 float VisSkyTransmittance(vec3 origin, vec3 dir) {
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_frame_flags.xy),
-                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu & ~MaskSolid, TlasPoint(tlas_frame_flags.xy, origin), 0.0, TlasDir(tlas_frame_flags.xy, dir),
+                          gl_RayFlagsTerminateOnFirstHitEXT, 0x02u | MaskKept, TlasPoint(tlas_frame_flags.xy, origin), 0.0, TlasDir(tlas_frame_flags.xy, dir),
                           1e6);
     float t = 1.0;
     while (rayQueryProceedEXT(q)) {

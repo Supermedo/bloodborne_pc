@@ -44,6 +44,12 @@ constexpr uint32_t DirectFlagObjectMotion = 65536;     // binding 19 holds this 
 // rt_direct.comp KeptProbe: grid camera rays report what lies in front of the drawn surface in
 // pick ring word KeptProbeBase (count) and the KeptProbeMax words after it (TLAS indices).
 constexpr uint32_t DirectFlagKeptProbe = 131072;
+// rt_direct.comp ThinMoonVisibility: the part of a moon ray past MoonExactFar is traced with
+// the micromaps forced to 2 states. Only with micromaps in the TLAS (BB_RT_OMM_FAST >= 1).
+constexpr uint32_t DirectFlagMoonFarFast = 262144;
+constexpr uint32_t DirectOmmFastFlags(bool omm, uint32_t fast) {
+    return omm && fast >= 1 ? DirectFlagMoonFarFast : 0;
+}
 constexpr uint32_t KeptProbeBase = 128;
 constexpr uint32_t KeptProbeMax = 127;
 constexpr uint32_t KeptProbeBytes = (KeptProbeBase + 1 + KeptProbeMax) * 4;

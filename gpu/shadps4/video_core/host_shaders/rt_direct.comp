@@ -154,6 +154,7 @@ const uint FlagMoonHistory = 16384u;      // rt_direct.h DirectFlagMoonHistory: 
 const uint FlagMoonHistoryValid = 32768u; // last frame's history matches this camera
 const uint FlagObjectMotion = 65536u;     // rt_direct.h DirectFlagObjectMotion: binding 19 valid
 const uint FlagKeptProbe = 131072u;       // rt_direct.h DirectFlagKeptProbe: KeptProbe runs
+const uint FlagMoonFarFast = 262144u;     // rt_direct.h DirectFlagMoonFarFast (BB_RT_OMM_FAST)
 const uint SurfacePortalPane = 0x40000000u; // rt_surface.h SurfacePortal
 const uint MaskPortal = 0x08u; // rt_geometry.h MaskPortal
 // Painted windows are drawn a few cm in front of a solid wall (0.63 m measured at the tall
@@ -198,7 +199,8 @@ shared uint moon_job_src[256]; // local index of the pixel
 shared uint moon_jobs, moon_pen_jobs;
 #endif
 float moon_given = -1.0;
-float moon_lo = 1.0, moon_hi = 0.0; // MoonHalfShare: traced range in the 5x5 window
+float moon_lo = 1.0, moon_hi = 0.0; // MoonHalfShare: range of moon_given in the 5x5 pixels around
+float moon_support = 0.0;           // MoonHalfShare: rays behind moon_given (0 = one own ray)
 
 vec2 Size() { return size_jitter.xy; }
 vec2 Jitter() { return size_jitter.zw; }
@@ -429,11 +431,18 @@ vec3 BlockerDebug(vec3 origin, vec3 dir, float t_max) {
 // Glass panes (rt_surface.h SurfaceGlass, forced non-opaque) let the light through.
 const float GlassTransmit = 0.85;
 
+// gl_RayFlagsForceOpacityMicromap2StateEXT as a number: a micro-triangle the bake left unknown
+// counts as the state the bake leaned to, so the ray never comes back to the shader for the
+// alpha test of a leaf. Written as a number so the module carries no micromap capability and
+// loads on devices without micromaps; the flag is only passed when FlagMoonFarFast says the
+// TLAS has them.
+const uint RayFlagOmm2State = 0x400u;
+
 // Transmittance over [t_min, t_max], portal panes left out.
-float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
+float SegmentTransmittanceFlags(vec3 origin, vec3 dir, float t_min, float t_max, uint ray_flags) {
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
-                          gl_RayFlagsTerminateOnFirstHitEXT, 0x6Fu & ~MaskPortal, TlasPoint(tlas_count_flags.xy, origin), t_min, TlasDir(tlas_count_flags.xy, dir),
+                          gl_RayFlagsTerminateOnFirstHitEXT | ray_flags, 0x6Fu & ~MaskPortal, TlasPoint(tlas_count_flags.xy, origin), t_min, TlasDir(tlas_count_flags.xy, dir),
                           t_max);
     float t = 1.0;
     while (rayQueryProceedEXT(q)) {
@@ -457,6 +466,10 @@ float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
     return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT
                ? 0.0
                : t;
+}
+
+float SegmentTransmittance(vec3 origin, vec3 dir, float t_min, float t_max) {
+    return SegmentTransmittanceFlags(origin, dir, t_min, t_max, 0u);
 }
 
 // Painted windows (SurfacePortal, own mask bit MaskPortal): with portals in the frame a query
@@ -939,11 +952,27 @@ float ThinTransmit() { return prev_jitter.w; }
 // blocking it; past ThinNear (tree canopies, walls) every blocker is solid as before. The near
 // segment is traced with every geometry non-opaque so OMM-opaque petals reach the loop too.
 const float ThinNear = 1.5;
+// Past this a blocker's leaves are taken from the micromap alone (FlagMoonFarFast). At 8 m the
+// moon's penumbra is as wide as a micro-triangle of a 1 m leaf card, nearer the cut-out shows.
+const float MoonExactFar = 8.0;
 
 float ThinMoonVisibility(vec3 origin, vec3 dir) {
     const float t_max = max(MoonReach() - EndGap(), TMin());
     if (!(ThinTransmit() > 0.0) || (Flags() & FlagNoVis) != 0u || t_max <= ThinNear) {
         return Visibility(origin, dir, MoonReach());
+    }
+    // The far part first, with the leaves' micromaps as they are (FlagMoonFarFast): a canopy
+    // 8 m and more away is where a forest's moon rays end, and the alpha test of its leaves
+    // in this shader was half of the whole direct pass (Forbidden Woods: 11.5 -> 6 ms with the
+    // far part forced). A ray it blocks is done; the exact near part runs for the rest.
+    float far = 1.0;
+    float t_exact = t_max;
+    if ((Flags() & FlagMoonFarFast) != 0u && t_max > MoonExactFar) {
+        far = SegmentTransmittanceFlags(origin, dir, MoonExactFar, t_max, RayFlagOmm2State);
+        if (far <= 0.0) {
+            return 0.0;
+        }
+        t_exact = MoonExactFar;
     }
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy), gl_RayFlagsNoOpaqueEXT,
@@ -981,7 +1010,7 @@ float ThinMoonVisibility(vec3 origin, vec3 dir) {
     if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
         return 0.0;
     }
-    return t * SegmentTransmittance(origin, dir, ThinNear, t_max);
+    return t * far * SegmentTransmittance(origin, dir, ThinNear, t_exact);
 }
 
 // One answer per pixel: MoonHalfShare and DirectionalSets both ask.
@@ -1267,6 +1296,9 @@ ivec2 MoonJobPixel(uint src) {
     return ivec2(gl_WorkGroupID.xy) * 16 + ivec2(src & 15u, src >> 4u);
 }
 
+// The cosine of a cone no wider than a point (rt_direct.h MoonConeCos(0) is 1).
+const float MoonPointCos = 0.99999999;
+
 void MoonHalfShare(Surface s, vec4 g3, ivec2 pixel, bool surface) {
     const uint li = gl_LocalInvocationIndex;
     const ivec2 lp = ivec2(gl_LocalInvocationID.xy);
@@ -1347,11 +1379,8 @@ void MoonHalfShare(Surface s, vec4 g3, ivec2 pixel, bool surface) {
     moon_pv[li].w = own_n > 0.0 ? own_sum / own_n : -1.0;
     moon_w[li] = own_n;
     barrier();
-    if (!trace) {
-        return;
-    }
     float sum = 0.0, count = 0.0;
-    for (int k = 0; k < 25; ++k) {
+    for (int k = 0; trace && k < 25; ++k) {
         const ivec2 q = lp + ivec2(k % 5 - 2, k / 5 - 2);
         if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(16)))) {
             continue;
@@ -1365,16 +1394,56 @@ void MoonHalfShare(Surface s, vec4 g3, ivec2 pixel, bool surface) {
         sum += pv.w * moon_w[qi];
         count += moon_w[qi];
     }
-    moon_given = count > 0.0 ? sum / count : MoonVisibility(s, L1, pixel);
+    float given = trace ? (count > 0.0 ? sum / count : MoonVisibility(s, L1, pixel)) : -1.0;
+    // A point moon (BB_RT_MOON_ANGLE 0): a pixel's own ray is the exact answer, there is no
+    // cone to average. The window mean spread every patch of light over its 5x5 square, and
+    // sharp leaf shadows came out as squares ("why the shadows look like a square"). Pixels
+    // of mixed windows all trace a ray of their own; in a uniform window the mean is exact.
+    if (trace && MoonCosHalfAngle() >= MoonPointCos && moon_w[li] > 0.0) {
+        given = moon_pv[li].w;
+    }
+    // The range MoonHistory holds the old value to: the averaged answers of the pixels around,
+    // not the single rays (the job arrays are free here, their rays are traced).
+    moon_job_l[li] = given;
+    barrier();
+    if (!trace) {
+        return;
+    }
+    moon_given = given;
+    moon_support = count;
+    moon_lo = given;
+    moon_hi = given;
+    for (int k = 0; k < 25; ++k) {
+        const ivec2 q = lp + ivec2(k % 5 - 2, k / 5 - 2);
+        if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, ivec2(16)))) {
+            continue;
+        }
+        const float g = moon_job_l[uint(q.y) * 16u + uint(q.x)];
+        if (g >= 0.0) {
+            moon_lo = min(moon_lo, g);
+            moon_hi = max(moon_hi, g);
+        }
+    }
 }
 
 // Moon visibility over time (FlagMoonHistory): the frame-varying samples of MoonHalfShare
 // blend into last frame's value at this surface point (camera reprojection, view-z check).
-// Where the 5x5 window is uniform (fully lit or shadowed) the history is clamped to the new
-// value, so a moving shadow edge never trails into open ground; in a penumbra it may differ
-// by MoonHistorySpread at most. Only the moon visibility is kept, never the lighting.
+// Only the moon visibility is kept, never the lighting.
+//
+// The old value is held to the range of the new values of the 5x5 pixels around (moon_lo to
+// moon_hi, each of them already a window average). Open ground a shadow has left is all 1
+// there, so the old shadow is dropped at once and nothing trails; at an edge or under leaf
+// shadow the range is wide and the history stays.
+//
+// Until 2026-11-15 the test was on the single rays of the pixel's own window: all rays equal
+// meant "uniform", history dropped, else kept. Under leaf shadow (visibility 0.8 to 1 over the
+// whole surface) a window is all-lit by chance, so lit squares the size of a window, cut at
+// the 16-pixel tile borders, sat next to pixels that kept their history: bricks and a grid on
+// the coat that changed every frame ("the edges of the shadow is frying, like low res"). A
+// window with fewer than MoonSupportMin rays has too coarse a value to hold anything to; it
+// keeps the history as it is.
 const float MoonHistoryBlend = 0.1;
-const float MoonHistorySpread = 0.35;
+const float MoonSupportMin = 6.0;
 // View-z match for a pixel moved by object motion: the camera's prev.z ignores the object's
 // own motion, so the test is looser (5% of depth + 10 cm).
 const float MoonObjectZTol = 0.05;
@@ -1409,9 +1478,9 @@ void MoonHistory(ivec2 pixel, vec3 p, bool inside) {
             if (all(greaterThanEqual(pp, ivec2(0))) && all(lessThan(pp, ivec2(size)))) {
                 const vec2 h = moon_hist_in[uint(pp.y) * uint(size.x) + uint(pp.x)];
                 if (h.x >= 0.0 && abs(h.y - prev.z) < z_tol) {
-                    const float spread = moon_hi > moon_lo ? MoonHistorySpread : 0.0;
-
-                    vis = mix(clamp(h.x, vis - spread, vis + spread), vis, MoonHistoryBlend);
+                    const bool coarse = moon_support < MoonSupportMin;
+                    const float keep = clamp(h.x, coarse ? 0.0 : moon_lo, coarse ? 1.0 : moon_hi);
+                    vis = mix(keep, vis, MoonHistoryBlend);
                 }
             }
         }

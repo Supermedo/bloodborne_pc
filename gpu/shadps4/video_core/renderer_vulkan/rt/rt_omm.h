@@ -88,6 +88,38 @@ constexpr OmmState OmmClassify(bool any_opaque, bool any_transparent) {
     return OmmState::UnknownOpaque;
 }
 
+// rt_omm_bake.comp Lean: which way an unknown micro-triangle leans, drawn with the share of
+// its samples that pass the alpha test as the odds. Only rays traced with the micromap forced
+// to 2 states read it (BB_RT_OMM_FAST).
+constexpr OmmState OmmLean(uint32_t seed, uint32_t k, uint32_t pass, uint32_t total) {
+    uint32_t h = seed * 747796405u + k * 2891336453u + 12345u;
+    h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    h = (h >> 22u) ^ h;
+    return float(h & 0xFFFFu) * (1.0f / 65536.0f) * float(total ? total : 1u) < float(pass)
+               ? OmmState::UnknownOpaque
+               : OmmState::UnknownTransparent;
+}
+
+// Size of the micromap pool in MiB: 36 bytes per triangle at level 3 for every alpha-tested
+// mesh in the BLAS cache. At a fixed 64 MiB the Forbidden Woods' canopy meshes (2.9 MiB each)
+// found no block again and again and were traced with the alpha test in the shaders. A sixth
+// of the BLAS pool, 64 MiB to 512 MiB.
+constexpr uint64_t OmmPoolDefaultMb(uint64_t blas_pool_mb) {
+    const uint64_t mb = blas_pool_mb / 6;
+    return mb < 64 ? 64 : mb > 512 ? 512 : mb;
+}
+
+// The index pool of the skinned micromaps: 4 bytes per triangle against the pool's 36.
+constexpr uint64_t OmmIndexPoolDefaultMb(uint64_t omm_pool_mb) {
+    const uint64_t mb = omm_pool_mb / 8;
+    return mb < 32 ? 32 : mb;
+}
+
+// BB_RT_OMM_FAST: which rays take the micromaps as 2 states (no alpha test in a shader).
+// 1 the far part of the moon shadow rays, 2 also the shadow rays at a bounce point, 3 also the
+// bounce rays.
+constexpr uint32_t OmmFastMax = 3;
+
 constexpr uint32_t OmmTriangleIndex(uint32_t triangle, bool all_opaque, bool all_transparent) {
     if (all_opaque) {
         return OmmSpecialOpaque;

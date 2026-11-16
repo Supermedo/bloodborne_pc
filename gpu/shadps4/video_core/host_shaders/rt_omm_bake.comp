@@ -26,11 +26,19 @@ layout(push_constant) uniform Constants {
 
 // Each sample reads the mip whose texel spans the sample spacing, so it averages its whole patch
 // instead of one texel: a thin gap or bar between two point samples still shows. A micro-triangle
-// is solid or open only when every sample is clearly past alpha_ref (ClassMargin); anything near
+// is solid or open only when every sample is clearly past alpha_ref (see below); anything near
 // the edge stays unknown and the ray's any-hit runs the exact per-texel test. Point samples at mip
 // 0 marked whole micro-triangles of fences and branches solid or open, so their shadows came out
 // in staircase blocks.
-const float ClassMargin = 0.2;
+//
+// Clearly past means nearly 1 or nearly 0. A sample is the AVERAGE alpha of its patch, and a
+// leaf cluster with gaps averages 0.8 just like a solid leaf of alpha 0.8 would: with a margin
+// of 0.2 around alpha_ref (until 2026-11-15) whole micro-triangles of foliage, 25 cm across on
+// a 2 m card at level 3, came out solid or open, and the moon shadow of a tree fell on the
+// player's cape as pixelated blocks ("the shadow is low reso"). An average of SolidAlpha or more
+// leaves no room for a gap, one of OpenAlpha or less none for a twig.
+const float SolidAlpha = 0.98;
+const float OpenAlpha = 0.02;
 float BakeLod;
 
 float SampleAlpha(vec2 uv) {
@@ -39,10 +47,24 @@ float SampleAlpha(vec2 uv) {
 
 // 1 solid, 0 open, 2 near the edge (both bits set by the caller).
 uint Classify(float alpha) {
-    if (alpha >= min(alpha_ref + ClassMargin, 0.99)) {
+    if (alpha >= max(alpha_ref, SolidAlpha)) {
         return 1u;
     }
-    return alpha < max(alpha_ref - ClassMargin, 0.01) ? 0u : 2u;
+    return alpha < min(alpha_ref, OpenAlpha) ? 0u : 2u;
+}
+
+// Which way an unknown micro-triangle leans: 3 (unknown, opaque) or 2 (unknown, transparent).
+// A ray that tests alpha itself treats both the same. A ray traced with the micromap forced to
+// 2 states (BB_RT_OMM_FAST: far moon rays, bounce light) takes the lean as the answer, so the
+// lean is drawn at random with the share of the micro-triangle's samples that pass the alpha
+// test as its odds. A canopy then lets through the light its texture does, as a fixed
+// stipple of micro-triangles instead of the exact leaves. All-opaque (until 2026-11-15) made
+// every far leaf a full card.
+uint Lean(uint t, uint k, uint pass, uint total) {
+    uint h = (uv_base + t) * 747796405u + k * 2891336453u + 12345u;
+    h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    h = (h >> 22u) ^ h;
+    return float(h & 0xFFFFu) * (1.0 / 65536.0) * float(max(total, 1u)) < float(pass) ? 3u : 2u;
 }
 
 uint CurveIndex(float u, float v, uint lvl) {
@@ -118,13 +140,21 @@ void main() {
         BakeLod = max(0.0, log2(max(edge / float(n), 1.0)));
     }
     if (level <= 3u) {
+        uint pass[64], total[64];
+        for (uint k = 0u; k < 64u; ++k) {
+            pass[k] = 0u;
+            total[k] = 0u;
+        }
         for (uint j = 0u; j < n; ++j) {
             for (uint i = 0u; i + j < n; ++i) {
                 const float u = (float(i) + 0.5) / float(n);
                 const float v = (float(j) + 0.5) / float(n);
                 const vec2 uv = uv0 * (1.0 - u - v) + uv1 * u + uv2 * v;
-                const uint c = textured ? Classify(SampleAlpha(uv)) : 1u;
+                const float alpha = textured ? SampleAlpha(uv) : 1.0;
+                const uint c = textured ? Classify(alpha) : 1u;
                 const uint k = CurveIndex(u, v, level);
+                pass[k & 63u] += alpha >= alpha_ref ? 1u : 0u;
+                ++total[k & 63u];
                 const uint bit = 1u << (k & 31u);
                 if (c != 0u) {
                     if (k < 32u) opaque_lo |= bit; else opaque_hi |= bit;
@@ -139,7 +169,7 @@ void main() {
             const uint bit = 1u << (k & 31u);
             const bool o = ((k < 32u ? opaque_lo : opaque_hi) & bit) != 0u;
             const bool tr = ((k < 32u ? trans_lo : trans_hi) & bit) != 0u;
-            const uint state = (o && !tr) ? 1u : (tr && !o) ? 0u : 3u;
+            const uint state = (o && !tr) ? 1u : (tr && !o) ? 0u : Lean(t, k, pass[k], total[k]);
             all_opaque = all_opaque && state == 1u;
             all_transparent = all_transparent && state == 0u;
             state_words[k / 16u] |= state << ((k % 16u) * 2u);
@@ -154,7 +184,7 @@ void main() {
             uint word = 0u;
             for (uint s = 0u; s < 16u; ++s) {
                 const uint k = w * 16u + s;
-                uint o = 0u, tr = 0u;
+                uint o = 0u, tr = 0u, pass = 0u, total = 0u;
                 for (uint j = 0u; j < n; ++j) {
                     for (uint i = 0u; i + j < n; ++i) {
                         const float u = (float(i) + 0.5) / float(n);
@@ -163,12 +193,16 @@ void main() {
                             continue;
                         }
                         const vec2 uv = uv0 * (1.0 - u - v) + uv1 * u + uv2 * v;
-                        const uint c = textured ? Classify(SampleAlpha(uv)) : 1u;
+                        const float alpha = textured ? SampleAlpha(uv) : 1.0;
+                        const uint c = textured ? Classify(alpha) : 1u;
+                        pass += alpha >= alpha_ref ? 1u : 0u;
+                        ++total;
                         if (c != 0u) o = 1u;
                         if (c != 1u) tr = 1u;
                     }
                 }
-                const uint state = (o == 1u && tr == 0u) ? 1u : (tr == 1u && o == 0u) ? 0u : 3u;
+                const uint state = (o == 1u && tr == 0u) ? 1u : (tr == 1u && o == 0u) ? 0u
+                                                                : Lean(t, k, pass, total);
                 any_opaque = any_opaque || state != 0u;
                 any_transparent = any_transparent || state != 1u;
                 word |= state << (s * 2u);
