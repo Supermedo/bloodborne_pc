@@ -70,6 +70,14 @@ uses the NVIDIA SDK, compiled with MSVC 2022) and copies it with `nvngx_dlss.dll
 time (`vk_dlss.cpp`), adds the Vulkan extensions NGX asks for, and DLSS gets the same inputs as
 FSR 3 (scene color, depth, render-pixel motion vectors, jitter). `BB_DLSS=0` turns it off.
 
+`BB_DLSS_D3D12=1` (opt-in, bridge ABI 3) runs DLSS Super Resolution on a Direct3D 12 device of
+the same GPU instead of on Vulkan, for DirectX 12 add-ons that hook NVIDIA's D3D12 NGX calls
+(DLSS 5 / neural rendering add-ons loaded as a DLL next to `bb-probe.exe`). The renderer copies
+colour, motion vectors and depth into resources shared with that device, submits, and the next
+submission waits for DLSS on a shared fence: the same interop as FSR 4.1.1 on D3D12, also enabled
+on NVIDIA GPUs for this. Without the variable, on other GPUs, or when any step fails, DLSS runs on
+Vulkan as before.
+
 The launcher texts are written in English with the Russian beside them; the other languages
 are in `launcher/bbport_lang.py` (one list per language in the order of `KEYS`; a missing or
 empty text falls back to English). The FSR 4.1.1 controls/status texts are merged from

@@ -453,7 +453,9 @@ bool Instance::CreateDevice(bool presentation) {
     const bool native_requested = (native_setting && native_setting[0] == '1') ||
         (fsr411_backend && std::string_view{fsr411_backend} == "dx12");
     // Both DX12 versions share resources independently of their provider availability.
-    const auto dx12_interop = ProbeFsrDx12Interop(physical_device);
+    // bbport DLSS on D3D12 (vk_dlss.cpp) shares resources the same way on NVIDIA GPUs.
+    const auto dx12_interop =
+        ProbeFsrDx12Interop(physical_device, nullptr, GetVendorID() == 0x10DE);
     native_fsr411_async = dx12_interop.supported &&
         add_extension("VK_KHR_external_memory_win32") &&
         add_extension("VK_KHR_external_semaphore_win32");

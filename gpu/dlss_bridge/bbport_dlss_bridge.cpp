@@ -16,6 +16,10 @@
 
 #include "bbport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
 
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_vk.h>
 #include <nvsdk_ngx_helpers_vk.h>
@@ -458,10 +462,415 @@ void Shutdown() {
     }
 }
 
+// ---- ABI 3: DLSS Super Resolution on Direct3D 12 -------------------------------------------
+//
+// The renderer copies colour, motion and depth into resources shared with this D3D12 device,
+// signals input_fence, and waits for output_fence before it reads the output. DLSS runs here
+// through NVIDIA's D3D12 NGX entry points, on an ordinary D3D12 command list.
+
+template <class T> void SafeRelease(T*& p) {
+    if (p) {
+        p->Release();
+        p = nullptr;
+    }
+}
+
+void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
+                D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
+    if (before == after)
+        return;
+    D3D12_RESOURCE_BARRIER b{};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition.pResource = resource;
+    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore = before;
+    b.Transition.StateAfter = after;
+    list->ResourceBarrier(1, &b);
+}
+
+struct D3D12State {
+    IDXGIFactory4* factory{};
+    IDXGIAdapter1* adapter{};
+    ID3D12Device* device{};
+    ID3D12CommandQueue* queue{};
+    struct Slot {
+        ID3D12CommandAllocator* allocator{};
+        ID3D12GraphicsCommandList* list{};
+        uint64_t completed_at{};
+    };
+    std::array<Slot, 3> slots{};
+    unsigned slot{};
+    ID3D12Fence* fence{};       // output
+    ID3D12Fence* input_fence{}; // signalled by Vulkan
+    HANDLE event{}, fence_handle{}, input_handle{};
+    uint64_t fence_value{};
+    LUID luid{};
+    bool ngx{};
+    NVSDK_NGX_Parameter* capabilities{};
+    // The resources of one configuration.
+    BbDlss12Config config{};
+    ID3D12Resource* color{};
+    ID3D12Resource* motion{};
+    ID3D12Resource* output{};
+    ID3D12Resource* depth_buffer{};
+    ID3D12Resource* depth{}; // private: DLSS reads a texture
+    HANDLE color_handle{}, motion_handle{}, output_handle{}, depth_handle{};
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT depth_footprint{};
+    NVSDK_NGX_Parameter* parameters{};
+    NVSDK_NGX_Handle* feature{};
+    bool created{};
+} dx;
+
+bool HrCheck(const char* operation, HRESULT hr) {
+    if (FAILED(hr)) {
+        Log(1, "D3D12: %s failed: 0x%08lx", operation, static_cast<unsigned long>(hr));
+        return false;
+    }
+    return true;
+}
+
+bool WaitFence(uint64_t value) {
+    if (!value || !dx.fence || dx.fence->GetCompletedValue() >= value)
+        return true;
+    if (!HrCheck("fence event", dx.fence->SetEventOnCompletion(value, dx.event)))
+        return false;
+    if (WaitForSingleObject(dx.event, 10000) != WAIT_OBJECT_0) {
+        Log(1, "D3D12: GPU wait timed out (device status 0x%08lx)",
+            static_cast<unsigned long>(dx.device->GetDeviceRemovedReason()));
+        return false;
+    }
+    return true;
+}
+
+void ReleaseResources() {
+    WaitFence(dx.fence_value);
+    if (dx.feature) {
+        NVSDK_NGX_D3D12_ReleaseFeature(dx.feature);
+        dx.feature = nullptr;
+    }
+    if (dx.parameters) {
+        NVSDK_NGX_D3D12_DestroyParameters(dx.parameters);
+        dx.parameters = nullptr;
+    }
+    for (HANDLE* h : {&dx.color_handle, &dx.motion_handle, &dx.output_handle, &dx.depth_handle}) {
+        if (*h)
+            CloseHandle(*h);
+        *h = nullptr;
+    }
+    SafeRelease(dx.color);
+    SafeRelease(dx.motion);
+    SafeRelease(dx.output);
+    SafeRelease(dx.depth_buffer);
+    SafeRelease(dx.depth);
+    dx.created = false;
+}
+
+void D3D12Release() {
+    ReleaseResources();
+}
+
+void D3D12Shutdown() {
+    ReleaseResources();
+    if (dx.capabilities) {
+        NVSDK_NGX_D3D12_DestroyParameters(dx.capabilities);
+        dx.capabilities = nullptr;
+    }
+    if (dx.ngx) {
+        NVSDK_NGX_D3D12_Shutdown1(dx.device);
+        dx.ngx = false;
+    }
+    for (auto& s : dx.slots) {
+        SafeRelease(s.list);
+        SafeRelease(s.allocator);
+    }
+    for (HANDLE* h : {&dx.fence_handle, &dx.input_handle, &dx.event}) {
+        if (*h)
+            CloseHandle(*h);
+        *h = nullptr;
+    }
+    SafeRelease(dx.input_fence);
+    SafeRelease(dx.fence);
+    SafeRelease(dx.queue);
+    SafeRelease(dx.device);
+    SafeRelease(dx.adapter);
+    SafeRelease(dx.factory);
+    dx.fence_value = 0;
+}
+
+bool InitializeDevice(const uint8_t (&luid_bytes)[8]) {
+    LUID luid{};
+    std::memcpy(&luid, luid_bytes, sizeof(luid));
+    if (dx.device && luid.LowPart == dx.luid.LowPart && luid.HighPart == dx.luid.HighPart)
+        return true;
+    D3D12Shutdown();
+    dx.luid = luid;
+    if (!HrCheck("DXGI factory", CreateDXGIFactory1(IID_PPV_ARGS(&dx.factory))) ||
+        !HrCheck("adapter of the Vulkan device",
+                 dx.factory->EnumAdapterByLuid(luid, IID_PPV_ARGS(&dx.adapter))) ||
+        !HrCheck("device", D3D12CreateDevice(dx.adapter, D3D_FEATURE_LEVEL_12_0,
+                                             IID_PPV_ARGS(&dx.device))))
+        return false;
+    DXGI_ADAPTER_DESC1 adapter_desc{};
+    dx.adapter->GetDesc1(&adapter_desc);
+    Log(0, "D3D12: device on %ls", adapter_desc.Description);
+    D3D12_COMMAND_QUEUE_DESC q{};
+    q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    if (!HrCheck("queue", dx.device->CreateCommandQueue(&q, IID_PPV_ARGS(&dx.queue))))
+        return false;
+    for (unsigned i = 0; i < dx.slots.size(); ++i) {
+        auto& s = dx.slots[i];
+        if (!HrCheck("command allocator",
+                     dx.device->CreateCommandAllocator(q.Type, IID_PPV_ARGS(&s.allocator))) ||
+            !HrCheck("command list", dx.device->CreateCommandList(0, q.Type, s.allocator, nullptr,
+                                                                  IID_PPV_ARGS(&s.list))))
+            return false;
+        s.list->Close();
+    }
+    if (!HrCheck("output fence",
+                 dx.device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&dx.fence))) ||
+        !HrCheck("input fence", dx.device->CreateFence(0, D3D12_FENCE_FLAG_SHARED,
+                                                       IID_PPV_ARGS(&dx.input_fence))) ||
+        !HrCheck("output fence handle", dx.device->CreateSharedHandle(
+                                            dx.fence, nullptr, GENERIC_ALL, nullptr,
+                                            &dx.fence_handle)) ||
+        !HrCheck("input fence handle", dx.device->CreateSharedHandle(
+                                           dx.input_fence, nullptr, GENERIC_ALL, nullptr,
+                                           &dx.input_handle)))
+        return false;
+    dx.event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!dx.event)
+        return false;
+    if (!Check("NGX D3D12 initialization",
+               NVSDK_NGX_D3D12_Init_with_ProjectID(ProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM,
+                                                   EngineVersion, state.data_directory.c_str(),
+                                                   dx.device, &state.common)))
+        return false;
+    dx.ngx = true;
+    if (!Check("NGX D3D12 capability query",
+               NVSDK_NGX_D3D12_GetCapabilityParameters(&dx.capabilities)))
+        return false;
+    int available{};
+    NVSDK_NGX_Parameter_GetI(dx.capabilities, NVSDK_NGX_Parameter_SuperSampling_Available,
+                             &available);
+    if (!available) {
+        Log(1, "D3D12: DLSS Super Resolution is not available");
+        return false;
+    }
+    Log(0, "D3D12: NGX ready");
+    return true;
+}
+
+ID3D12GraphicsCommandList* BeginList() {
+    auto& s = dx.slots[dx.slot];
+    if (!WaitFence(s.completed_at) || FAILED(s.allocator->Reset()) ||
+        FAILED(s.list->Reset(s.allocator, nullptr)))
+        return nullptr;
+    return s.list;
+}
+
+bool SubmitList(ID3D12GraphicsCommandList* list, uint64_t input_value) {
+    if (!HrCheck("close command list", list->Close()))
+        return false;
+    if (input_value && !HrCheck("queue wait", dx.queue->Wait(dx.input_fence, input_value)))
+        return false;
+    ID3D12CommandList* lists[]{list};
+    dx.queue->ExecuteCommandLists(1, lists);
+    if (!HrCheck("queue signal", dx.queue->Signal(dx.fence, ++dx.fence_value)))
+        return false;
+    dx.slots[dx.slot].completed_at = dx.fence_value;
+    dx.slot = (dx.slot + 1) % dx.slots.size();
+    return true;
+}
+
+ID3D12Resource* SharedTexture(DXGI_FORMAT format, uint32_t width, uint32_t height, bool uav,
+                              HANDLE* handle) {
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Flags = uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
+    ID3D12Resource* resource{};
+    if (!HrCheck("shared texture",
+                 dx.device->CreateCommittedResource(
+                     &heap, handle ? D3D12_HEAP_FLAG_SHARED : D3D12_HEAP_FLAG_NONE, &desc,
+                     D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource))))
+        return nullptr;
+    if (handle && !HrCheck("shared texture handle",
+                           dx.device->CreateSharedHandle(resource, nullptr, GENERIC_ALL, nullptr,
+                                                         handle))) {
+        resource->Release();
+        return nullptr;
+    }
+    return resource;
+}
+
+int32_t D3D12Create(const BbDlss12Config* config, BbDlss12Shared* shared) {
+    if (!state.configured || !config || !shared)
+        return 0;
+    if (!InitializeDevice(config->adapter_luid))
+        return 0;
+    ReleaseResources();
+    dx.config = *config;
+    const auto color_format = static_cast<DXGI_FORMAT>(config->color_format);
+    const auto depth_format = static_cast<DXGI_FORMAT>(config->depth_format);
+    dx.color = SharedTexture(color_format, config->render_width, config->render_height, false,
+                             &dx.color_handle);
+    dx.motion = SharedTexture(DXGI_FORMAT_R16G16_FLOAT, config->render_width,
+                              config->render_height, false, &dx.motion_handle);
+    dx.output = SharedTexture(DXGI_FORMAT_R16G16B16A16_FLOAT, config->output_width,
+                              config->output_height, true, &dx.output_handle);
+    dx.depth = SharedTexture(depth_format, config->render_width, config->render_height, false,
+                             nullptr);
+    if (!dx.color || !dx.motion || !dx.output || !dx.depth)
+        return 0;
+    // Depth crosses as a buffer: Vulkan cannot copy a depth aspect into a colour image.
+    const D3D12_RESOURCE_DESC depth_desc = dx.depth->GetDesc();
+    UINT rows{};
+    UINT64 row_bytes{}, total{};
+    dx.device->GetCopyableFootprints(&depth_desc, 0, 1, 0, &dx.depth_footprint, &rows,
+                                     &row_bytes, &total);
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = total;
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = 1;
+    buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (!HrCheck("depth buffer", dx.device->CreateCommittedResource(
+                                     &heap, D3D12_HEAP_FLAG_SHARED, &buffer,
+                                     D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                     IID_PPV_ARGS(&dx.depth_buffer))) ||
+        !HrCheck("depth buffer handle",
+                 dx.device->CreateSharedHandle(dx.depth_buffer, nullptr, GENERIC_ALL, nullptr,
+                                               &dx.depth_handle)))
+        return 0;
+
+    // The DLSS feature, created on the D3D12 queue.
+    if (!Check("D3D12 parameter allocation", NVSDK_NGX_D3D12_AllocateParameters(&dx.parameters)))
+        return 0;
+    for (const char* key : {NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA,
+                            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
+                            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced,
+                            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
+                            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance,
+                            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality})
+        NVSDK_NGX_Parameter_SetUI(dx.parameters, key, config->preset);
+    static constexpr std::array qualities{
+        NVSDK_NGX_PerfQuality_Value_DLAA, NVSDK_NGX_PerfQuality_Value_MaxQuality,
+        NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf,
+        NVSDK_NGX_PerfQuality_Value_UltraPerformance};
+    NVSDK_NGX_DLSS_Create_Params settings{};
+    settings.Feature.InWidth = config->render_width;
+    settings.Feature.InHeight = config->render_height;
+    settings.Feature.InTargetWidth = config->output_width;
+    settings.Feature.InTargetHeight = config->output_height;
+    settings.Feature.InPerfQualityValue = qualities[std::clamp(config->quality, 0, 4)];
+    settings.InFeatureCreateFlags =
+        NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
+        (config->hdr ? NVSDK_NGX_DLSS_Feature_Flags_IsHDR | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure
+                     : 0);
+    ID3D12GraphicsCommandList* list = BeginList();
+    if (!list)
+        return 0;
+    const auto result =
+        NGX_D3D12_CREATE_DLSS_EXT(list, 1, 1, &dx.feature, dx.parameters, &settings);
+    if (!SubmitList(list, 0) || !WaitFence(dx.fence_value) ||
+        !Check("D3D12 DLSS feature creation", result) || !dx.feature) {
+        dx.feature = nullptr;
+        return 0;
+    }
+    *shared = {};
+    shared->color = dx.color_handle;
+    shared->motion = dx.motion_handle;
+    shared->output = dx.output_handle;
+    shared->depth_buffer = dx.depth_handle;
+    shared->depth_buffer_size = total;
+    shared->depth_row_pitch = dx.depth_footprint.Footprint.RowPitch;
+    shared->depth_texel_size = static_cast<uint32_t>(row_bytes / config->render_width);
+    shared->input_fence = dx.input_handle;
+    shared->output_fence = dx.fence_handle;
+    dx.created = true;
+    Log(0, "D3D12: DLSS %ux%u -> %ux%u, quality %d%s", config->render_width,
+        config->render_height, config->output_width, config->output_height, config->quality,
+        config->hdr ? ", HDR input" : "");
+    return 1;
+}
+
+int32_t D3D12Evaluate(const BbDlss12Frame* frame, uint64_t input_value, uint64_t* output_value) {
+    if (!dx.created || !frame || !output_value)
+        return 0;
+    ID3D12GraphicsCommandList* list = BeginList();
+    if (!list)
+        return 0;
+    constexpr auto read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    // Depth: buffer -> private texture.
+    Transition(list, dx.depth_buffer, D3D12_RESOURCE_STATE_COMMON,
+               D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Transition(list, dx.depth, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_TEXTURE_COPY_LOCATION dst{}, src{};
+    dst.pResource = dx.depth;
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.pResource = dx.depth_buffer;
+    src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    src.PlacedFootprint = dx.depth_footprint;
+    list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    Transition(list, dx.depth_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE,
+               D3D12_RESOURCE_STATE_COMMON);
+    Transition(list, dx.depth, D3D12_RESOURCE_STATE_COPY_DEST, read);
+    Transition(list, dx.color, D3D12_RESOURCE_STATE_COMMON, read);
+    Transition(list, dx.motion, D3D12_RESOURCE_STATE_COMMON, read);
+    Transition(list, dx.output, D3D12_RESOURCE_STATE_COMMON,
+               D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    NVSDK_NGX_D3D12_DLSS_Eval_Params parameters{};
+    parameters.Feature.pInColor = dx.color;
+    parameters.Feature.pInOutput = dx.output;
+    parameters.Feature.InSharpness = frame->sharpness;
+    parameters.pInDepth = dx.depth;
+    parameters.pInMotionVectors = dx.motion;
+    parameters.InRenderSubrectDimensions = {dx.config.render_width, dx.config.render_height};
+    parameters.InJitterOffsetX = frame->jitter_x;
+    parameters.InJitterOffsetY = frame->jitter_y;
+    parameters.InReset = frame->reset;
+    parameters.InMVScaleX = parameters.InMVScaleY = 1.0f;
+    parameters.InPreExposure = parameters.InExposureScale = 1.0f;
+    parameters.InFrameTimeDeltaInMsec = frame->frame_ms;
+    // DirectX 12 add-ons hooked on NGX record their own passes here, on this command list.
+    const bool ok = Check("D3D12 DLSS evaluation",
+                          NGX_D3D12_EVALUATE_DLSS_EXT(list, dx.feature, dx.parameters,
+                                                      &parameters));
+
+    // Everything goes back to COMMON for Vulkan.
+    Transition(list, dx.depth, read, D3D12_RESOURCE_STATE_COMMON);
+    Transition(list, dx.color, read, D3D12_RESOURCE_STATE_COMMON);
+    Transition(list, dx.motion, read, D3D12_RESOURCE_STATE_COMMON);
+    Transition(list, dx.output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+               D3D12_RESOURCE_STATE_COMMON);
+    // Submitted even when DLSS failed: Vulkan waits for the fence value.
+    if (!SubmitList(list, input_value))
+        return 0;
+    *output_value = dx.fence_value;
+    return ok ? 1 : 0;
+}
+
+void ShutdownAll() {
+    D3D12Shutdown();
+    Shutdown();
+}
+
 const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,        InstanceExtensions, DeviceExtensions,
                     Initialize,             CreateFeature,    Evaluate,           ReleaseFeature,
-                    Shutdown,               FrameGenMaxCount, FrameGenCreate,     FrameGenEvaluate,
-                    FrameGenRelease};
+                    ShutdownAll,            FrameGenMaxCount, FrameGenCreate,     FrameGenEvaluate,
+                    FrameGenRelease,        D3D12Create,      D3D12Evaluate,      D3D12Release};
 
 } // namespace
 

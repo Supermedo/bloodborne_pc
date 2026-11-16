@@ -19,6 +19,9 @@
 
 namespace Vulkan {
 
+class Instance;
+class Scheduler;
+
 class Dlss {
 public:
     /// The process-wide instance, or null when the DLLs are absent or BB_DLSS=0.
@@ -67,6 +70,16 @@ public:
     bool CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc);
     bool Evaluate(vk::CommandBuffer command, const Frame& frame);
     void ReleaseFeature();
+
+    /// DLSS on Direct3D 12 (bridge ABI 3, D3D12 interop of the device, BB_DLSS_D3D12=1).
+    [[nodiscard]] bool D3D12Usable(const Instance& instance) const;
+    /// Copies the inputs into the shared resources, submits `cmdbuf` (replaced by the next
+    /// command buffer), queues DLSS on the D3D12 queue and records the copy of its result into
+    /// frame.output, which the next submission waits for. The inputs and frame.output are in
+    /// the General layout. False: DLSS on D3D12 failed (the caller can fall back).
+    bool EvaluateD3D12(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer& cmdbuf,
+                       const FeatureDesc& desc, const Frame& frame);
+    void ReleaseD3D12(Scheduler& scheduler);
 
     // DLSS Frame Generation (nvngx_dlssg.dll, GeForce RTX 40 and newer).
 
