@@ -39,6 +39,8 @@ inline void FsrCheck(FsrSupportTrace* trace, const char* id, const char* state,
     if (trace) trace->push_back({id, state, std::move(detail)});
 }
 // Query the exact adapter/provider without creating an upscaler context or rendering.
-Fsr411Support ProbeFsrDx12Interop(VkPhysicalDevice device, FsrSupportTrace* trace = nullptr);
+// any_vendor: the shared-resource interop alone (DLSS on D3D12 uses it on NVIDIA GPUs).
+Fsr411Support ProbeFsrDx12Interop(VkPhysicalDevice device, FsrSupportTrace* trace = nullptr,
+                                  bool any_vendor = false);
 Fsr411Support ProbeFsr411Dx12(const uint8_t luid[8], FsrSupportTrace* trace = nullptr);
 Fsr411Support ProbeFsr412Dx12(const uint8_t luid[8], FsrSupportTrace* trace = nullptr);

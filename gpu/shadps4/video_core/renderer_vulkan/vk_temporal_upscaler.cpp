@@ -2478,12 +2478,40 @@ bool TemporalUpscaler::UseDlss() const {
            !dlss_failed;
 }
 
-bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
+bool TemporalUpscaler::RecordDlss(vk::CommandBuffer& cmdbuf, const Dlss::Resource& color,
                                   const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh,
                                   float frame_ms, bool hdr) {
     Dlss* dlss = Dlss::Get();
     const Dlss::FeatureDesc desc{w, h, ow, oh, Dlss::QualityForScale(float(ow) / float(w)), hdr};
     bool ok = true;
+    // DLSS on Direct3D 12 (bbport_dlss.dll ABI 3): the frame is submitted at this point and
+    // `cmdbuf` replaced; DirectX 12 add-ons hooked on NVIDIA's NGX run after DLSS there.
+    if (dlss->D3D12Usable(instance)) {
+        const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
+        const auto& settings = BbSettings::Get();
+        const bool done = dlss->EvaluateD3D12(
+            instance, scheduler, cmdbuf, desc,
+            {
+                .color = color,
+                .depth = depth,
+                .motion = {vk::Image(motion_image), *motion_view, vk::Format::eR16G16Sfloat,
+                           vk::ImageAspectFlagBits::eColor, w, h},
+                .output = {vk::Image(output_image), *output_view,
+                           vk::Format::eR16G16B16A16Sfloat, vk::ImageAspectFlagBits::eColor,
+                           ow, oh},
+                .jitter_x = sign * jitter[0],
+                .jitter_y = sign * jitter[1],
+                .reset = reset,
+                .frame_ms = frame_ms,
+                .sharpness =
+                    settings.sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
+            });
+        scheduler.GetDynamicState().Invalidate();
+        if (done)
+            return true;
+        // Falls through to DLSS on Vulkan, in the replacement command buffer.
+        reset = true;
+    }
     if (!dlss->HasFeature(desc)) {
         // The previous feature may still be in use by submitted work; `cmdbuf` stays open.
         scheduler.WaitSubmitted();

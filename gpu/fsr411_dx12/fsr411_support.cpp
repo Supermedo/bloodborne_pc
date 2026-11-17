@@ -11,7 +11,7 @@
 #include <filesystem>
 #include <vector>
 
-Fsr411Support ProbeFsrDx12Interop(VkPhysicalDevice device, FsrSupportTrace* trace) {
+Fsr411Support ProbeFsrDx12Interop(VkPhysicalDevice device, FsrSupportTrace* trace, bool any_vendor) {
     const char* stage = "gpu";
     const auto fail = [&](const char* reason, std::string detail = {}) {
         FsrCheck(trace, stage, "fail", detail);
@@ -20,7 +20,7 @@ Fsr411Support ProbeFsrDx12Interop(VkPhysicalDevice device, FsrSupportTrace* trac
     VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
     VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &id};
     vkGetPhysicalDeviceProperties2(device, &props);
-    if (props.properties.vendorID != 0x1002)
+    if (props.properties.vendorID != 0x1002 && !any_vendor)
         return fail("hardware", "AMD GPU required");
     FsrCheck(trace, "gpu", "pass", "AMD");
     stage = "adapter";

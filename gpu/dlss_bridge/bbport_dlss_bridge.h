@@ -15,7 +15,10 @@ extern "C" {
 #endif
 
 // 2: DLSS Frame Generation (the FrameGen* members; an ABI 1 bridge has DLSS only).
-#define BBPORT_DLSS_BRIDGE_ABI 2
+// 3: DLSS Super Resolution on Direct3D 12 (the D3D12* members): the renderer copies its inputs
+//    into textures shared with a D3D12 device and waits for the result on a shared fence, so
+//    DirectX 12 add-ons that hook NVIDIA's D3D12 NGX calls see a regular D3D12 DLSS game.
+#define BBPORT_DLSS_BRIDGE_ABI 3
 
 typedef void (*BbDlssLogFn)(int warning, const char* message);
 
@@ -84,6 +87,42 @@ typedef struct BbDlssgEvaluate {
     float prev_clip_to_clip[4][4];
 } BbDlssgEvaluate;
 
+// ABI 3: DLSS on a D3D12 device of the same adapter.
+typedef struct BbDlss12Config {
+    uint32_t render_width;
+    uint32_t render_height;
+    uint32_t output_width;
+    uint32_t output_height;
+    uint32_t color_format; // DXGI_FORMAT of the shared colour texture
+    uint32_t depth_format; // DXGI_FORMAT of the depth texels in the shared buffer (R32F or R16)
+    int32_t quality;       // as BbDlssFeature
+    uint32_t preset;
+    int32_t hdr;
+    uint8_t adapter_luid[8]; // VkPhysicalDeviceIDProperties::deviceLUID
+} BbDlss12Config;
+
+typedef struct BbDlss12Shared {
+    // NT handles (the bridge keeps them open until D3D12Release): import them in Vulkan as
+    // VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT / ..._SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT.
+    void* color;         // render size, color_format
+    void* motion;        // render size, R16G16_FLOAT
+    void* output;        // output size, R16G16B16A16_FLOAT
+    void* depth_buffer;  // buffer: render_height rows of depth_row_pitch bytes
+    uint64_t depth_buffer_size;
+    uint32_t depth_row_pitch;
+    uint32_t depth_texel_size;
+    void* input_fence;   // Vulkan signals it when the inputs are copied
+    void* output_fence;  // D3D12 signals it when the output is written
+} BbDlss12Shared;
+
+typedef struct BbDlss12Frame {
+    float jitter_x;
+    float jitter_y;
+    int32_t reset;
+    float frame_ms;
+    float sharpness;
+} BbDlss12Frame;
+
 typedef struct BbDlssApi {
     uint32_t abi;
     // UTF-16 paths: the directory with nvngx_dlss.dll, and a writable data directory.
@@ -110,6 +149,15 @@ typedef struct BbDlssApi {
     int32_t (*FrameGenEvaluate)(VkCommandBuffer command, const BbDlssgEvaluate* evaluate);
     // The caller must have waited for the GPU work that used the feature.
     void (*FrameGenRelease)(void);
+    // ABI 3. Creates the D3D12 device, the shared resources and the DLSS feature (again when
+    // the configuration changes). The caller must have waited for the GPU work that used the
+    // previous resources.
+    int32_t (*D3D12Create)(const BbDlss12Config* config, BbDlss12Shared* shared);
+    // Queues on the D3D12 queue: wait for input_fence >= input_value, evaluate DLSS, signal
+    // output_fence with *output_value. Returns at once.
+    int32_t (*D3D12Evaluate)(const BbDlss12Frame* frame, uint64_t input_value,
+                             uint64_t* output_value);
+    void (*D3D12Release)(void);
 } BbDlssApi;
 
 typedef const BbDlssApi* (*BbDlssGetApiFn)(void);
