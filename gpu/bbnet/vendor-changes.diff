@@ -56,13 +56,13 @@ index a78e1eb..f8588d9 100644
          return ORBIS_HTTP_ERROR_INVALID_URL;
      }
  
-+    // bbport: the region unlock patch (the only way to get the Chinese text out of the retail
-+    // builds) makes the game's region 5, which indexes one past its four-entry server URL table
-+    // and yields the empty string there. The game then asks for the server information with an
-+    // empty URL, so online play never starts ("Unable to obtain Bloodborne server information").
-+    // Every /bb-xx/ path on the server answers the same document, so fall back to the EU endpoint
-+    // of the game's own host: the host overrides written by run.py still redirect it to the
-+    // community server, and BB_SERVER_INFO_URL replaces the fallback (0 disables it).
++    // bbport: the region unlock patch sets the game's region to 5, the only value that unlocks
++    // the Chinese text (1 to 4 keep the language list as it is), and that same value indexes the
++    // server URL table (jp, us, eu, asia): it has no fifth entry, so this URL is always empty and
++    // online play never starts ("Unable to obtain Bloodborne server information"). Forcing the
++    // lookup to region 2 would take the language with it, so the substitution belongs here: the
++    // host overrides written by run.py still send the EU host to the community server, and
++    // BB_SERVER_INFO_URL replaces the fallback (0 disables it).
 +    std::string url_fallback;
 +    if (*url == '\0' || std::strstr(url, "://") == nullptr) {
 +        const char* configured = std::getenv("BB_SERVER_INFO_URL");
