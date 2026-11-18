@@ -709,12 +709,46 @@ def main():
         sys.path.insert(0,str(Path(__file__).resolve().parent))
         import crash_guards
         elf=(a.out/'eboot.elf').read_bytes()
+        pc_menu_end = max(
+            (old_address + len(old_data) for old_address, old_data in writes if old_address == 0x50D9B00),
+            default=None,
+        )
+
+        def check_guard_writes(label, candidate_writes):
+            """Ensure candidate writes have no self-overlaps, patch collisions, or PC Settings table collisions."""
+            for i, (address, data) in enumerate(candidate_writes):
+                for old_address, old_data in writes:
+                    if address < old_address + len(old_data) and old_address < address + len(data):
+                        raise ValueError(f'{label} collision at {address:#x} with {old_address:#x}')
+                if pc_menu_end is not None and address < pc_menu_end + 0x20 and pc_menu_end < address + len(data):
+                    raise ValueError(
+                        f'{label} collision at {address:#x} with PC Settings runtime table ({pc_menu_end:#x}..{pc_menu_end + 0x20:#x})'
+                    )
+                if address < 0x50D9C48 and 0x50D9C28 < address + len(data):
+                    raise ValueError(f'{label} touches reserved PC Settings runtime range at {address:#x}')
+                for other_address, other_data in candidate_writes[:i]:
+                    if address < other_address + len(other_data) and other_address < address + len(data):
+                        raise ValueError(f'{label} self-collision at {address:#x}')
+
         try:
             crash_guards.check_original(lambda start,end: eboot_bytes(elf,start,end))
-            writes+=crash_guards.code_writes()
+            base_guards = crash_guards.code_writes()
+            check_guard_writes('Crash guard', base_guards)
+            writes += base_guards
             names.append('Crash guards')
         except ValueError as error:
             print(f'Patches: {error}; crash guards skipped')
+        if 'Enable Screen Space Reflections (READ NOTE)' in names:
+            # Structural SSR guard: if mipmap allocation returns NULL at 0x21C2461, restore r15 = [rbp-0x118]
+            # and exit cleanly to 0x21C2937 before touching 0x21C24DC, 0x21C268B, or 0x21C2745.
+            try:
+                crash_guards.check_ssr_original(lambda start,end: eboot_bytes(elf,start,end))
+                ssr_guards = crash_guards.ssr_code_writes()
+                check_guard_writes('SSR guard', ssr_guards)
+                writes+=ssr_guards
+                names.extend(('SSR null guard', 'SSR loop-abort guard'))
+            except ValueError as error:
+                raise ValueError(f'SSR was requested but its null guard cannot be applied: {error}') from error
     if a.patches_dir and whole:
         # After the built-in ones: an external patch of the same bytes wins.
         selected=external_selection(external_patches(a.patches_dir,a.app_version,a.xml),a.patches_config)

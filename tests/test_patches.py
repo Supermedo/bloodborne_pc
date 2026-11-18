@@ -483,5 +483,119 @@ class GameVersionTests(unittest.TestCase):
             self.assertTrue(eboot_is_109(str(game / 'eboot.bin'), 2))
 
 
+class SsrCrashGuardPatchTests(unittest.TestCase):
+    @staticmethod
+    def _mock_eboot_bytes(overrides=None):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        import crash_guards
+        import pc_menu
+
+        chunks = {
+            crash_guards.EVENT_CASE: crash_guards.EVENT_CASE_BYTES,
+            crash_guards.TEX_QUERY_SITE: crash_guards.TEX_QUERY_ORIGINAL,
+            crash_guards.VISCERAL_SITE: crash_guards.VISCERAL_SITE_BYTES,
+            crash_guards.GNM_COPY_SITE: crash_guards.GNM_COPY_BYTES + bytes.fromhex('415641554154'),
+            0x21688A2: bytes.fromhex('410fb65e3b'),
+            crash_guards.GNM_COPY_CAVE: bytes(crash_guards.GNM_COPY_CAVE_END - crash_guards.GNM_COPY_CAVE),
+            0x21C2128: bytes.fromhex('4d85ff7445'),
+            0x21C23E0: bytes.fromhex('4c89bde8feffff'),
+            0x21C2430: bytes.fromhex('742f'),
+            0x21C2458: bytes.fromhex('7407'),
+            crash_guards.SSR_SITE: crash_guards.SSR_ORIGINAL,
+            0x21C24D5: bytes.fromhex('4c8bbde8feffff498b4748'),
+            0x21C26E3: bytes.fromhex('0f84e7010000'),
+            crash_guards.SSR_LOOP_EXIT: bytes.fromhex('4d85f67421'),
+            0x21C295D: bytes.fromhex('b3014d85ff7418'),
+        }
+        for addr, hexbytes in pc_menu.ORIGINAL.items():
+            chunks[addr] = bytes.fromhex(hexbytes)
+        if overrides:
+            chunks.update(overrides)
+
+        def reader(_elf, start, end):
+            if start in chunks and len(chunks[start]) == end - start:
+                return chunks[start]
+            raise ValueError(f'mock eboot mismatch at {start:#x}')
+
+        return reader
+
+    @staticmethod
+    def _parse_writes(blob):
+        sig, base, count = struct.unpack_from('<8sQQ', blob)
+        assert sig == b'BBPATCH2' and base == EBOOT_BASE
+        pos = 24
+        out = []
+        for _ in range(count):
+            at, length = struct.unpack_from('<QQ', blob, pos)
+            pos += 16
+            out.append((at, blob[pos:pos + length]))
+            pos += length
+        assert pos == len(blob)
+        return out
+
+    def _compile(self, ssr_on, overrides=None):
+        import contextlib
+        import io
+        import patches
+        import crash_guards
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'out'
+            out.mkdir()
+            (out / 'eboot.elf').write_bytes(elf_image(b'\0' * 16))
+            settings = Path(tmp) / 'bbport.ini'
+            settings.write_text(
+                f'output_res=1920x1080\nupscaler=off\npreset=0\neffect_ssr={int(ssr_on)}\n'
+                'quit_to_desktop=0\nrebirth=0\npc_menu=1\nsteady_cloth=0\n',
+                encoding='utf-8',
+            )
+            argv = [
+                'patches.py', '--out', str(out), '--xml', str(XML), '--game-dir', tmp,
+                '--settings', str(settings), '--fps', '60', '--output-res', '1920x1080',
+            ]
+            reader = self._mock_eboot_bytes(overrides)
+            env = {k: v for k, v in os.environ.items() if k not in ('BB_FORCE_PATCHES', 'BB_CRASH_GUARDS')}
+            env.update({
+                'BB_ONLINE': '1',
+                'BB_QUIT_TO_DESKTOP': '0',
+                'BB_REBIRTH': '0',
+                'BB_CLOTH_TIME': '0',
+                'BB_FOLIAGE_TIME': '0',
+                'BB_AIR_DRAG': '0',
+                'BB_EFFECT_TIME': '0',
+            })
+            buf = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch('patches.game_app_version', return_value='01.09'), \
+                 mock.patch('patches.matching_groups', return_value=set(PATCH_GROUPS)), \
+                 mock.patch('patches.eboot_segments', return_value=SEGMENTS), \
+                 mock.patch('patches.eboot_bytes', side_effect=reader), \
+                 mock.patch.object(sys, 'argv', argv), \
+                 contextlib.redirect_stdout(buf):
+                patches.main()
+            return self._parse_writes((out / 'patches.bin').read_bytes()), buf.getvalue(), crash_guards
+
+    def test_ssr_enabled_adds_loop_abort_guards_and_respects_pc_settings_runtime_table(self):
+        writes, out, cg = self._compile(True)
+        self.assertIn("'Crash guards'", out)
+        self.assertIn("'SSR null guard'", out)
+        self.assertIn("'SSR loop-abort guard'", out)
+        for item in cg.code_writes() + cg.ssr_code_writes():
+            self.assertIn(item, writes)
+
+    def test_ssr_disabled_omits_ssr_loop_abort_guards(self):
+        writes, out, cg = self._compile(False)
+        self.assertIn("'Crash guards'", out)
+        self.assertNotIn("'SSR null guard'", out)
+        for item in cg.code_writes():
+            self.assertIn(item, writes)
+        for item in cg.ssr_code_writes():
+            self.assertNotIn(item, writes)
+
+    def test_ssr_enabled_fails_closed_when_ssr_site_differs(self):
+        with self.assertRaises(ValueError):
+            self._compile(True, overrides={0x21C2461: b'\x90' * 12})
+
+
 if __name__ == '__main__':
     unittest.main()
