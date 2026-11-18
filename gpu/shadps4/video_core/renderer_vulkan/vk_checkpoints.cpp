@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include "video_core/renderer_vulkan/vk_address_log.h"
 #include "video_core/renderer_vulkan/vk_checkpoints.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 
@@ -23,6 +24,13 @@ constexpr u32 RingSize = 8192;
 struct Entry {
     std::atomic<u32> id{0};
     char text[120]{};
+    /// What it reads and writes (NoteBindings): image views, buffer ranges.
+    u8 num_views{};
+    u8 num_buffers{};
+    u64 views[12]{};
+    struct {
+        u64 buffer, offset, range;
+    } buffers[8]{};
 };
 Entry ring[RingSize];
 
@@ -96,6 +104,29 @@ u32 Note(const char* what, u64 a, u64 b, u64 c) {
     return id;
 }
 
+void NoteBindings(u32 id, std::span<const vk::DescriptorImageInfo> images,
+                  std::span<const vk::DescriptorBufferInfo> buffers) {
+    if (id == 0) {
+        return;
+    }
+    Entry& entry = ring[id % RingSize];
+    entry.num_views = 0;
+    for (const auto& image : images) {
+        if (image.imageView && entry.num_views < std::size(entry.views)) {
+            entry.views[entry.num_views++] =
+                reinterpret_cast<u64>(static_cast<VkImageView>(image.imageView));
+        }
+    }
+    entry.num_buffers = 0;
+    for (const auto& buffer : buffers) {
+        if (buffer.buffer && entry.num_buffers < std::size(entry.buffers)) {
+            entry.buffers[entry.num_buffers++] = {
+                reinterpret_cast<u64>(static_cast<VkBuffer>(buffer.buffer)), buffer.offset,
+                buffer.range};
+        }
+    }
+}
+
 void Start(vk::CommandBuffer cmdbuf, u32 id) {
     if (id == 0) {
         return;
@@ -125,6 +156,10 @@ void NextFrame() {
     if (every_600_frames && mode != Mode::Off && now % 600 == 0) {
         Dump(queue_for_checks);
     }
+}
+
+u32 Frame() {
+    return frame.load(std::memory_order_relaxed);
 }
 
 void Dump(vk::Queue queue) {
@@ -169,6 +204,23 @@ void Dump(vk::Queue queue) {
         }
         const char* state = id <= finished ? "done   " : id <= started + 1 ? "RUNNING" : "queued ";
         std::printf("GPU checkpoints: %s #%u %s\n", state, id, entry.text);
+        if (id <= finished || id > started + 1) {
+            continue;
+        }
+        // bbport: what the running work reads, and where the fault address lies from it.
+        for (u32 i = 0; i < entry.num_views; ++i) {
+            std::printf("GPU checkpoints:     view %#llx %s\n",
+                        static_cast<unsigned long long>(entry.views[i]),
+                        AddressLog::DescribeView(entry.views[i]).c_str());
+        }
+        for (u32 i = 0; i < entry.num_buffers; ++i) {
+            const auto& buffer = entry.buffers[i];
+            const u64 range = buffer.range == VK_WHOLE_SIZE ? 0 : buffer.range;
+            std::printf("GPU checkpoints:     buffer +%#llx (%#llx bytes) %s\n",
+                        static_cast<unsigned long long>(buffer.offset),
+                        static_cast<unsigned long long>(buffer.range),
+                        AddressLog::Describe(buffer.buffer, buffer.offset, range).c_str());
+        }
     }
     std::fflush(stdout);
 }

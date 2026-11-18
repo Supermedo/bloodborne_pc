@@ -9,6 +9,7 @@
 #include "common/logging/log.h"
 #include "common/string_literal.h"
 #include "common/types.h"
+#include "video_core/renderer_vulkan/vk_address_log.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Frontend {
@@ -41,6 +42,8 @@ void SetObjectName(vk::Device device, const HandleType& handle, std::string_view
     if (result != vk::Result::eSuccess) {
         LOG_DEBUG(Render_Vulkan, "Could not set object debug name: {}", vk::to_string(result));
     }
+    // bbport: the name in a device-loss report of the GPU address it faulted on (vk_address_log).
+    AddressLog::NoteName(name_info.objectType, name_info.objectHandle, debug_name);
 }
 
 template <VulkanHandleType HandleType, typename... Args>

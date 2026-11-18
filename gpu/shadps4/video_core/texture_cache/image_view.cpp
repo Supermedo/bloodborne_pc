@@ -165,14 +165,18 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(view_result));
     image_view = std::move(view);
+    // bbport: the image behind a bound view in a device-loss report (vk_address_log.cpp).
+    Vulkan::AddressLog::NoteView(reinterpret_cast<u64>(static_cast<VkImageView>(*image_view)),
+                                 reinterpret_cast<u64>(static_cast<VkImage>(image.GetImage())));
 
     const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
                              : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
                                                                           : "Color";
     Vulkan::SetObjectName(
-        instance.GetDevice(), *image_view, "ImageView {}x{}x{} {:#x}:{:#x} {}:{} {}:{} ({})",
+        instance.GetDevice(), *image_view, "ImageView {}x{}x{} {} {:#x}:{:#x} {}:{} {}:{} ({})",
         image.info.size.width, image.info.size.height, image.info.size.depth,
-        image.info.guest_address, image.info.guest_size, info.range.base.level,
+        vk::to_string(image_view_ci.format), image.info.guest_address, image.info.guest_size,
+        info.range.base.level,
         info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
         info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
