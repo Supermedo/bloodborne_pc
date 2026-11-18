@@ -11,6 +11,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_address_log.h"
 #include "video_core/renderer_vulkan/vk_checkpoints.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -135,6 +136,10 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
     if (enable_validation) {
         debug_callback = CreateDebugCallback(*instance);
     }
+    // bbport: before the device, so that the reports cover everything it binds.
+    if (AddressLog::Wanted()) {
+        address_callback = AddressLog::Start(*instance);
+    }
     const std::size_t num_physical_devices = static_cast<u16>(physical_devices.size());
     ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
     LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
@@ -250,6 +255,14 @@ void Instance::ReportDeviceLost(const char* where) const {
                     static_cast<unsigned long long>(address.reportedAddress),
                     static_cast<unsigned long long>(address.addressPrecision));
     }
+    // bbport: what the addresses the GPU could not read or write belonged to (vk_address_log.cpp).
+    for (const auto& address : addresses) {
+        if (address.addressType == vk::DeviceFaultAddressTypeEXT::eReadInvalid ||
+            address.addressType == vk::DeviceFaultAddressTypeEXT::eWriteInvalid ||
+            address.addressType == vk::DeviceFaultAddressTypeEXT::eExecuteInvalid) {
+            AddressLog::Dump(address.reportedAddress, address.addressPrecision);
+        }
+    }
     for (const auto& item : vendor) {
         std::printf("GPU: fault vendor info: %s (code %#llx, data %#llx)\n", item.description.data(),
                     static_cast<unsigned long long>(item.vendorFaultCode),
@@ -297,7 +310,8 @@ bool Instance::CreateDevice(bool presentation) {
         vk::PhysicalDeviceShaderFloat8FeaturesEXT,
 #endif
         vk::PhysicalDeviceFaultFeaturesEXT, vk::PhysicalDevicePresentIdFeaturesKHR,
-        vk::PhysicalDeviceAntiLagFeaturesAMD, vk::PhysicalDeviceFragmentShadingRateFeaturesKHR>();
+        vk::PhysicalDeviceAntiLagFeaturesAMD, vk::PhysicalDeviceFragmentShadingRateFeaturesKHR,
+        vk::PhysicalDeviceAddressBindingReportFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -521,6 +535,12 @@ bool Instance::CreateDevice(bool presentation) {
     if (Checkpoints::Wanted()) {
         nv_checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
         amd_buffer_marker = !nv_checkpoints && add_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
+        // What a faulting address belonged to (vk_address_log.cpp).
+        address_binding_report =
+            address_callback &&
+            feature_chain.get<vk::PhysicalDeviceAddressBindingReportFeaturesEXT>()
+                .reportAddressBinding &&
+            add_extension(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
     }
     const bool calibrated_timestamps =
         TRACY_GPU_ENABLED ? add_extension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) : false;
@@ -836,6 +856,9 @@ bool Instance::CreateDevice(bool presentation) {
         vk::PhysicalDeviceFragmentShadingRateFeaturesKHR{
             .pipelineFragmentShadingRate = true,
         },
+        vk::PhysicalDeviceAddressBindingReportFeaturesEXT{
+            .reportAddressBinding = true,
+        },
     };
 
 #ifdef _WIN32
@@ -916,6 +939,9 @@ bool Instance::CreateDevice(bool presentation) {
     if (!pipeline_shading_rate) {
         device_chain.unlink<vk::PhysicalDeviceFragmentShadingRateFeaturesKHR>();
     }
+    if (!address_binding_report) {
+        device_chain.unlink<vk::PhysicalDeviceAddressBindingReportFeaturesEXT>();
+    }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
     if (device_result != vk::Result::eSuccess && enabled_extensions.size() > renderer_extension_count) {
@@ -984,6 +1010,7 @@ bool Instance::CreateDevice(bool presentation) {
 
     CreateAllocator();
     Checkpoints::Init(*this); // AMD's markers need the allocator
+    AddressLog::Init(address_binding_report);
     return true;
 }
 

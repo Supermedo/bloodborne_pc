@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <span>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -30,12 +31,20 @@ void Init(const Instance& instance);
 /// (shader hashes, counts) for its description; 0 when checkpoints are off.
 u32 Note(const char* what, u64 a = 0, u64 b = 0, u64 c = 0);
 
+/// What the work `Note` returned `id` for reads and writes through its descriptors (named with
+/// it after a device loss when it was running, with vk_address_log's ranges).
+void NoteBindings(u32 id, std::span<const vk::DescriptorImageInfo> images,
+                  std::span<const vk::DescriptorBufferInfo> buffers);
+
 /// In the command buffer, before and after the work `Note` returned `id` for.
 void Start(vk::CommandBuffer cmdbuf, u32 id);
 void Finish(vk::CommandBuffer cmdbuf, u32 id);
 
 /// A frame went to the display (the descriptions carry its number).
 void NextFrame();
+
+/// The number of frames that went to the display.
+u32 Frame();
 
 /// After a device loss: the last markers the GPU started and finished, and the work around them.
 void Dump(vk::Queue queue);

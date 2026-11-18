@@ -1154,6 +1154,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const auto* marked_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
     const u32 checkpoint = Checkpoints::Note("draw vs/ps/indices", vs_info.pgm_hash,
                                        marked_ps ? marked_ps->pgm_hash : 0, num_indices);
+    Checkpoints::NoteBindings(checkpoint, image_infos, buffer_infos);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
@@ -1295,6 +1296,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u32 checkpoint = Checkpoints::Note("draw indirect vs/ps/count",
                                        pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
                                        marked_ps ? marked_ps->pgm_hash : 0, max_count);
+    Checkpoints::NoteBindings(checkpoint, image_infos, buffer_infos);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
@@ -1380,6 +1382,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         FrameCapture::Dispatch(cs.pgm_hash, dim_x, dim_y, dim_z);
     }
     const u32 checkpoint = Checkpoints::Note("dispatch cs/groups", cs.pgm_hash, 0, u64(dim_x) * dim_y * dim_z);
+    Checkpoints::NoteBindings(checkpoint, image_infos, buffer_infos);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
         Checkpoints::Start(cmdbuf, checkpoint);
@@ -1435,6 +1438,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const u64 args_offset = base;
     const u32 checkpoint = Checkpoints::Note("dispatch indirect cs",
                                        pipeline->GetStage(Shader::SwStage::Compute).pgm_hash);
+    Checkpoints::NoteBindings(checkpoint, image_infos, buffer_infos);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
         Checkpoints::Start(cmdbuf, checkpoint);

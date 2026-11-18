@@ -611,6 +611,8 @@ private:
     vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR compute_shader_derivatives_features;
     vk::DriverIdKHR driver_id;
     vk::UniqueDebugUtilsMessengerEXT debug_callback{};
+    /// bbport: the driver's address binding reports (vk_address_log.cpp, BB_GPU_CHECKPOINTS).
+    vk::UniqueDebugUtilsMessengerEXT address_callback{};
     std::string vendor_name;
     VmaAllocator allocator{};
     vk::Queue present_queue;
@@ -653,6 +655,7 @@ private:
     bool amd_anti_lag{};
     bool nv_checkpoints{};
     bool amd_buffer_marker{};
+    bool address_binding_report{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool fsr4vk{};
