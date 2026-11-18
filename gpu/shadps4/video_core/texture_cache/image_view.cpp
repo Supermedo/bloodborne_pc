@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include "common/logging/log.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -11,6 +14,21 @@
 #include <magic_enum/magic_enum.hpp>
 
 namespace VideoCore {
+
+static bool IsDepthStencilFormat(vk::Format format) {
+    switch (format) {
+    case vk::Format::eD16Unorm:
+    case vk::Format::eX8D24UnormPack32:
+    case vk::Format::eD32Sfloat:
+    case vk::Format::eS8Uint:
+    case vk::Format::eD16UnormS8Uint:
+    case vk::Format::eD24UnormS8Uint:
+    case vk::Format::eD32SfloatS8Uint:
+        return true;
+    default:
+        return false;
+    }
+}
 
 vk::ImageViewType ConvertImageViewType(AmdGpu::ImageType type) {
     switch (type) {
@@ -115,6 +133,36 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         Vulkan::LiverpoolToVK::IsFormatStencilCompatible(format)) {
         format = image.info.pixel_format;
         aspect = vk::ImageAspectFlagBits::eStencil;
+    }
+    // bbport: Vulkan views a depth or stencil image only in its own format. A T# in another
+    // format at a depth buffer's address (ResolveDepthOverlap leaves it to the view) made a
+    // colour view of the depth image: NVIDIA builds it anyway, with the colour format's texels
+    // over the depth image's memory, and the game's post-processing passes read past the image's
+    // end (device lost, "ReadInvalid" just past a 2560x1440 D32S8 depth buffer after the Research
+    // Hall elevator, RTX 5090). Such a view reads the depth (or stencil) instead.
+    // BB_DEPTH_VIEW_FIX=0: as before.
+    if (aspect == image.aspect_mask &&
+        (aspect & (vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil)) &&
+        !IsDepthStencilFormat(format)) {
+        static const bool fix = [] {
+            const char* env = std::getenv("BB_DEPTH_VIEW_FIX");
+            return !env || env[0] != '0';
+        }();
+        static std::atomic<u32> reported{0};
+        if (reported.fetch_add(1, std::memory_order_relaxed) < 8) {
+            std::printf("Texture cache: a %s view of the depth image %ux%u %s %#llx%s\n",
+                        vk::to_string(format).c_str(), image.info.size.width,
+                        image.info.size.height, vk::to_string(image.info.pixel_format).c_str(),
+                        static_cast<unsigned long long>(image.info.guest_address),
+                        fix ? ": it reads the depth instead (BB_DEPTH_VIEW_FIX=0: as before)"
+                            : " (invalid: BB_DEPTH_VIEW_FIX=0)");
+            std::fflush(stdout);
+        }
+        if (fix) {
+            format = image.info.pixel_format;
+            aspect = aspect & vk::ImageAspectFlagBits::eDepth ? vk::ImageAspectFlagBits::eDepth
+                                                              : vk::ImageAspectFlagBits::eStencil;
+        }
     }
 
     // bbport: storage writes never convert to sRGB and sRGB formats cannot be storage images
