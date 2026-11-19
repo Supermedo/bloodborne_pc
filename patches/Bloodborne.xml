@@ -1274,6 +1274,44 @@
             <Line Type="bytes32" Address="0x0593E888" Value="0x00000001"/>
         </PatchList>
     </Metadata>
+    <!-- Half Damage Taken (image offsets; the addresses below are these + 0x400000):
+         0x1A0D470 is the game's shared "set HP" routine for a character's HP block (rdi: [+0] owner ChrIns,
+         [+8] HP, [+0xC] max HP; esi: the new HP). Hits (the damage at [hit+0x22C], 0x1A2BFA3), poison /
+         frenzy and other HP-changing special effects (0x1A2FB68, 0x1A2FC04) and further damage paths
+         (0x1A35E34, 0x18D5B6F) all store the new HP through it, and their death checks read HP back from
+         memory afterwards. Its first two instructions (mov r8d,[rdi+8]; test esi,esi) now jump to the code
+         below, which runs them and, when the HP goes down and the owner is the local player
+         (WorldChrMan [0x553E878] +0x60, the same test as the "Player No Dead" debug flag's), gives half of the
+         lost HP back: the player loses ceil(lost / 2), so a 1-point hit still costs 1. Healing, enemies and
+         other players are unchanged; the rally bar follows the HP really lost.
+
+         The code lives at 0x1A0D5E0..0x1A0D617, an out-of-line copy of the game's AddHp that nothing calls
+         (no call, jump, relocation or rip-relative reference): it is inlined everywhere it is used.
+
+           1A0D5E0  448B4708        mov  r8d, [rdi+8]       ; old HP (replaced instruction)
+           1A0D5E4  4439C6          cmp  esi, r8d
+           1A0D5E7  7D26            jge  done               ; not a loss of HP
+           1A0D5E9  488B07          mov  rax, [rdi]         ; owner ChrIns
+           1A0D5EC  4885C0          test rax, rax
+           1A0D5EF  741E            jz   done
+           1A0D5F1  4C8B0D8012B303  mov  r9, [0x553E878]    ; WorldChrMan
+           1A0D5F8  4D85C9          test r9, r9
+           1A0D5FB  7412            jz   done
+           1A0D5FD  493B4160        cmp  rax, [r9+0x60]     ; local player?
+           1A0D601  750C            jne  done
+           1A0D603  4589C1          mov  r9d, r8d
+           1A0D606  4129F1          sub  r9d, esi           ; HP lost
+           1A0D609  41D1E9          shr  r9d, 1
+           1A0D60C  4401CE          add  esi, r9d           ; half of it back
+           1A0D60F  85F6            test esi, esi           ; done: (replaced instruction)
+           1A0D611  E960FEFFFF      jmp  0x1A0D476          ; js 0x1A0D482 ...
+         Only rax and r9 are used: the routine overwrites both itself and takes no arguments in them. -->
+    <Metadata Title="Bloodborne" Name="Half Damage Taken" Note="The player loses half as much HP from every hit, poison, frenzy and other damage. Enemies and other players are unchanged." Author="r41d" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x01E0D5E0" Value="448B47084439C67D26488B074885C0741E4C8B0D8012B3034D85C97412493B4160750C4589C14129F141D1E94401CE85F6E960FEFFFF"/>
+            <Line Type="bytes" Address="0x01E0D470" Value="E96B01000090"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Player Stealth (Read note)" Note="Enemies do not see or react to you (unless attacked)" Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
         <PatchList>
             <Line Type="bytes" Address="0x0593E88E" Value="01"/>

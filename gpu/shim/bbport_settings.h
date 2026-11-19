@@ -52,6 +52,7 @@ inline constexpr Effect Effects[] = {
     {"debug_camera", "Free camera (Cross + L3)", false},
     {"debug_menu", "Debug menu (requires font files)", false},
     {"cheat_no_death", "Cheat: never die (minimum 1 HP)", false},
+    {"cheat_half_damage", "Cheat: employed mode (50% damage taken)", false},
     {"cheat_stealth", "Cheat: enemies cannot see you", false},
     {"cheat_silent", "Cheat: enemies cannot hear you", false},
     {"cheat_rally_no_decay", "Cheat: Rally never decays", false},
