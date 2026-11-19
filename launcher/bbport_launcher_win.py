@@ -375,6 +375,7 @@ EXTRAS = [
 # Cheats and gameplay tweaks: game patches for 1.09 (patches.py EFFECTS), off by default.
 CHEATS = [
     ('cheat_no_death', ('Never die (health stops at 1 HP)', 'Бессмертие (здоровье не ниже 1 HP)'), False),
+    ('cheat_half_damage', ('Employed mode (only take 50% damage)', 'Режим «работяги» (только 50% урона)'), False),
     ('cheat_stealth', ('Enemies do not see you (unless attacked)', 'Враги не видят вас (пока не атакованы)'), False),
     ('cheat_silent', ('Enemies do not hear you', 'Враги не слышат вас'), False),
     ('cheat_rally_no_decay', ('Rally never fades', 'Rally не угасает'), False),

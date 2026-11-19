@@ -78,6 +78,7 @@ WORDS = {
     'skip_intro': 'intro logos video uberspringen skip',
     'mute_unfocused': 'ton stumm sound mute hintergrund lautstarke volume audio',
     'cheat_no_death': 'unsterblich unverwundbar nie sterben god mode godmode immortal invincible',
+    'cheat_half_damage': 'halber schaden half damage weniger schaden easy leicht employed berufstatig',
     'button:shortcut': 'desktop verknupfung verknuepfung shortcut icon symbol',
     'button:steam': 'steam bibliothek library non-steam deck',
     'button:seamless_shortcut': 'seamless coop co-op desktop verknupfung verknuepfung shortcut icon symbol',

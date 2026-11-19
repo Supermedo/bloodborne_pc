@@ -54,6 +54,7 @@ EFFECTS={
     'debug_menu':(None,'Restore Debug Menu (READ NOTES)'),
     # Cheats and gameplay tweaks (launcher "Cheats" page).
     'cheat_no_death':(None,'Player No Dead (Read note)'),
+    'cheat_half_damage':(None,'Half Damage Taken'),
     'cheat_stealth':(None,'Player Stealth (Read note)'),
     'cheat_silent':(None,'Player Silent (Read note)'),
     'cheat_rally_no_decay':(None,'No Rally Decay'),
@@ -124,7 +125,7 @@ def validate_patch_requirements(names, game):
 # script: the launcher's Play, Steam and shortcut starts, the in-game "Apply and restart" (it keeps BB_ONLINE) and
 # BBSC's own scripts. Players went online with them on (2026-11-02). Comfort and view tweaks stay allowed.
 OFFLINE_ONLY=('Player No Dead (Read note)','Player Stealth (Read note)','Player Silent (Read note)','No Rally Decay',
-              'Enemy Control','Restore Debug Camera',DEBUG_MENU)
+              'Enemy Control','Restore Debug Camera',DEBUG_MENU,'Half Damage Taken')
 
 
 def online():
