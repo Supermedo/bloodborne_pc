@@ -69,6 +69,17 @@ Object motion vectors: off
   roots, and the fallback gives Windows the whole chain the server sent. More detail comes with
   `BB_GPU_LOG=info` in Extra variables.
 
+## Seamless co-op stays at "Reaching the co-op server..." in 1.9.8.6
+
+With the Asian The Old Hunters Edition (CUSA03023, app version 01.09), the game can sign in
+and the launcher can list both party members, but the in-game team screen stays at
+"Reaching the co-op server..." and does not accept a team code.
+
+Check `seamless/user/log/console.txt`. If it shows `Co-op: CUSA03023` and
+`Server link: the server took this game's hello` but no `Co-op team lobby: signing in as`,
+the 1.9.8.6 seamless engine has skipped the team initialization. Its title check only
+allows CUSA03173. Use a CUSA03173 01.09 dump for Seamless co-op with this release.
+
 ## Launcher settings get overwritten
 
 The launcher writes `%APPDATA%\bbport-launcher\settings.json` and `bbport.ini` from its own
