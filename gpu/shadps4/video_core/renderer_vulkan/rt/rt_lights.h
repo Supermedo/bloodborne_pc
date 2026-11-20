@@ -1000,8 +1000,13 @@ inline bool PaleParticle(uint32_t rgb) {
     return hi > 0 && float(lo) >= PaleParticleMin * float(hi);
 }
 
+// A flame is orange to yellow: green 0.39 (the burning house) to 0.7 of red. A deep red light
+// (green 0.15 of red, the Hemwick hit/effect light on the player: 0.120 0.018 0.022) is blood or
+// magic, not fire; as an emitter it was matched 12x and flooded the scene red (2026-11-20).
+constexpr float FlameGreenMin = 0.3f;
 inline bool FlameColour(const Light& l) {
-    return l.color[0] > 0.0f && l.color[1] <= FlameGreenMax * l.color[0];
+    return l.color[0] > 0.0f && l.color[1] <= FlameGreenMax * l.color[0] &&
+           l.color[1] >= FlameGreenMin * l.color[0];
 }
 
 inline bool WarmEmitter(const Light& l, float lamp_blue = WarmLampBlue) {
@@ -1157,12 +1162,30 @@ inline std::array<float, 3> FlameSway(uint64_t id, double t, float amp) {
 // source shrinks to the flame, so the light falls as 1/d2 from a hot spot instead of a soft blob
 // metres wide (the 2.7 m source of a hand torch read as a generic glow).
 // range_mul <= 1 leaves the light unchanged.
+// The source fraction s / r at which the shifted curve s2/(d2+s2) - s2/(R2+s2), R = r * range_mul,
+// equals the game's (1 - d/r)^2 at d = r/2 (0.25): each fire then lights its own radius like the
+// game does, whatever its reach (0.34 at R = 1.26 r, 0.29 at 3.8 r). A fixed 0.2 gave half the
+// game's light at r/2 (Central Yharnam effigy plaza ground 25 against stock 40, 2026-11-20).
+inline float MatchedSourceFrac(float range_mul) {
+    const float b = range_mul * range_mul;
+    float lo = 0.01f, hi = 3.0f;
+    for (int i = 0; i < 40; ++i) {
+        const float x = 0.5f * (lo + hi), x2 = x * x;
+        const float v = x2 / (0.25f + x2) - x2 / (b + x2);
+        (v < 0.25f ? lo : hi) = x;
+    }
+    return 0.5f * (lo + hi);
+}
+
 inline bool EmitterFalloff(Light& l, float range_mul, float source_frac = 0.25f,
                            float lift = 0.0f, float peak = 1.0f, float flame = 0.0f) {
     if (range_mul <= 1.0f || !l.legacy || l.kind != LightKind::Point || !(l.radius > 0.0f)) {
         return false;
     }
     peak = std::clamp(peak, 0.01f, 1.0f);
+    if (source_frac < 0.0f) {
+        source_frac = MatchedSourceFrac(range_mul) * -source_frac; // -k: matched x k
+    }
     l.source = std::max(source_frac, 0.01f) * l.radius / std::sqrt(peak);
     float gain = peak;
     if (flame > 0.0f && flame < l.source) {

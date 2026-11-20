@@ -52,7 +52,15 @@ layout(binding = 2) uniform texture2D normal_tex;
 layout(binding = 3) uniform texture2D history_tex;
 layout(binding = 4) uniform texture2D history_z_tex;
 layout(binding = 5, rgba16f) uniform writeonly image2D history_out;
+#ifdef RT_REFLECT
+// The reflection pass writes no GI history: binding 6 carries the direct pass's moon history
+// (z = sky openness, -1 none) so the stock specular cut keeps the game's sheen under open sky.
+layout(binding = 6, std430) readonly buffer SkyOpenHist {
+    vec4 sky_open_hist[];
+};
+#else
 layout(binding = 6, r32f) uniform writeonly image2D history_z_out;
+#endif
 layout(binding = 7, rgba16f) uniform writeonly image2D raw_out;
 
 layout(binding = 9, std430)
@@ -152,6 +160,7 @@ layout(push_constant) uniform GlassPush {
     float sheen_far;
     float puddle_edge;
     float puddle_wet;
+    float sky_keep; // BB_RT_AMBIENT_SKY when binding 6 holds this frame size's openness, else 0
 } glass_push;
 layout(binding = 30, std430) readonly buffer FogSets {
     vec4 fog_sets[];
@@ -1140,8 +1149,22 @@ vec3 FillSky(vec3 dir) {
 
 vec3 SkyLookup(vec3 dir);
 
+// BB_RT_GI_SKY_TINT (strength_bias.z, GI only; the reflection pass uses .z for its max
+// roughness and mirrors keep the real sky): the painted dome's colour on GI misses is pulled
+// toward the game's own sky light colour (FillSky, else grey), luminance kept. Central Yharnam's
+// magenta clouds lit the hunter's coat and the street lavender (Lab a +5 b -10, stock a 0 b -5).
 vec3 SkyRadiance(vec3 dir) {
-    return SkyLookup(dir) + FillSky(dir);
+    vec3 sky = SkyLookup(dir);
+    const vec3 fill = FillSky(dir);
+#ifndef RT_REFLECT
+    const float tint = clamp(strength_bias.z, 0.0, 1.0);
+    if (tint > 0.0) {
+        const float lf = Luma(fill);
+        const vec3 hue = lf > 1e-6 ? fill / lf : vec3(1.0);
+        sky = mix(sky, Luma(sky) * hue, tint);
+    }
+#endif
+    return sky + fill;
 }
 
 vec3 SkyLookup(vec3 dir) {
@@ -2306,11 +2329,22 @@ void ReflectStore(ivec2 pixel, vec3 spec, float hit_distance) {
     imageStore(reflect_hit_out, pixel, vec4(hit_distance, 0.0, 0.0, 0.0));
 }
 
+// Share of the game's baked specular kept: base_cut removes it (traced reflections replace it),
+// except under open sky, where the game's sky cubemap sheen on wet cobbles is the real sky
+// reflection the rough surfaces cannot trace (Central Yharnam street: L 22 cut vs stock 42).
+float BaseKeep(ivec2 pixel) {
+    float cut = clamp(glass_push.base_cut, 0.0, 1.0);
+    if (glass_push.sky_keep > 0.0 && cut > 0.0) {
+        const float open = sky_open_hist[uint(pixel.y) * uint(Size().x) + uint(pixel.x)].z;
+        cut *= 1.0 - clamp(max(open, 0.0) * glass_push.sky_keep, 0.0, 1.0);
+    }
+    return 1.0 - cut;
+}
+
 void ReflectKeep(ivec2 pixel) {
     imageStore(reflect_hit_out, pixel, vec4(0.0));
     if (glass_push.base_cut > 0.0) {
-        imageStore(reflect_spec_out, pixel,
-                   vec4(ReflectTarget(pixel) * (1.0 - clamp(glass_push.base_cut, 0.0, 1.0)), 1.0));
+        imageStore(reflect_spec_out, pixel, vec4(ReflectTarget(pixel) * BaseKeep(pixel), 1.0));
     }
 }
 
@@ -3016,7 +3050,7 @@ void MistBase(ivec2 pixel, bool fogged, float mist_t, vec3 mist_in) {
         return;
     }
     imageStore(reflect_hit_out, pixel, vec4(0.0));
-    const vec3 base = ReflectTarget(pixel) * (1.0 - clamp(glass_push.base_cut, 0.0, 1.0));
+    const vec3 base = ReflectTarget(pixel) * BaseKeep(pixel);
     imageStore(reflect_spec_out, pixel, vec4(clamp(base * mist_t + mist_in, vec3(0.0), vec3(ReflectMaxOutput)), 1.0));
     MistKeep(pixel, mist_t);
 }
@@ -3238,7 +3272,7 @@ void main() {
         ao = before <= 1e-4 ? 1.0 : clamp(after / before, 0.0, 1.0);
         base = Finite(spec_before) ? max(spec_before, vec3(0.0)) : vec3(0.0);
     }
-    base *= 1.0 - clamp(glass_push.base_cut, 0.0, 1.0);
+    base *= BaseKeep(pixel);
     // The silvering takes the light the mirror reflects: only the rest shows the stock smudges.
     if (mirror) {
         base *= 1.0 - MirrorF0;

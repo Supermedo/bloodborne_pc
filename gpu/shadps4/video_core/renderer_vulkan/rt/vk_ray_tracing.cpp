@@ -283,8 +283,9 @@ struct GlassPush {
     float sheen_far;
     float puddle_edge;
     float puddle_wet;
+    float sky_keep;
 };
-static_assert(sizeof(GlassPush) == 104);
+static_assert(sizeof(GlassPush) == 108);
 constexpr u32 GlassOn = 1, GlassDebugMask = 2, GlassDebugCandidates = 4, GlassIrr = 8,
               GlassAlbedo = 16, GlassKeep = 32, WaterOn = 64, WaterDebugMask = 128, WaterAtFloor = 256,
               ReflectSkyDome = 512, WaterSheets = 1024, WaterPuddles = 2048;
@@ -1568,7 +1569,7 @@ void RayTracing::DestroyReservoirs() {
 
 bool RayTracing::CreateMoonHistory(u32 width, u32 height) {
     DestroyMoonHistory();
-    const u64 bytes = u64(width) * height * 8u;
+    const u64 bytes = u64(width) * height * 16u; // vec4: moon vis, view z, sky openness, -
     for (DeviceBuffer& buffer : moon_hist) {
         buffer.size = bytes;
         if (!CreateRawBuffer(instance, bytes,
@@ -1603,7 +1604,7 @@ void RayTracing::DestroyMoonHistory() {
 
 void RayTracing::ReadLiveKnobs() {
     reflect_max_rough = EnvFloat("BB_RT_REFLECT_MAX_ROUGH", Rt::ReflectMaxRoughDefault, 0.0f, 1.0f);
-    direct_debug = u32(EnvU64("BB_RT_DIRECT_DEBUG", 0, 0, 12));
+    direct_debug = u32(EnvU64("BB_RT_DIRECT_DEBUG", 0, 0, 13));
     // Live: instance opacity is set every frame, so cut-outs of skinned draws can be A/B'd.
     skin_alpha = EnvU64("BB_RT_SKIN_ALPHA", 1, 0, 1) != 0;
     direct_light_log = EnvFloat("BB_RT_DIRECT_LIGHT_LOG", 0.0f, 0.0f, 1000.0f);
@@ -1673,6 +1674,7 @@ void RayTracing::ReadLiveKnobs() {
     exposure_max = EnvFloat("BB_RT_EXPOSURE_MAX", 1.5f, 0.0f, 6.0f);
     exposure_rate = EnvFloat("BB_RT_EXPOSURE_RATE", 0.03f, 0.001f, 1.0f);
     exposure_white = EnvFloat("BB_RT_EXPOSURE_WHITE", 3.0f, 0.5f, 12.0f);
+    night_shift = EnvFloat("BB_RT_NIGHT_SHIFT", 0.5f, 0.0f, 1.0f);
     thin_transmit = EnvFloat("BB_RT_THIN_TRANSMIT", 0.4f, 0.0f, 1.0f);
     moon_reach = EnvFloat("BB_RT_MOON_REACH", 0.0f, 0.0f, 10000.0f);
     const char* depth_draws_env = Rt::Knob("BB_RT_DEPTH_DRAWS");
@@ -1781,6 +1783,14 @@ void RayTracing::ReadLiveKnobs() {
     // house's fires (12.8) stopped at 9.5 m like a lantern and left the garden moon-blue.
     // 0 = off. Lamps and candles keep their own reach.
     emitter_bright = EnvFloat("BB_RT_EMITTER_BRIGHT", 2.0f, 0.0f, 100.0f);
+    // Fires (not lamps or candles): source size solved per light so its light at half the game
+    // radius equals the game's (rt_lights.h MatchedSourceFrac), x this; 0 = BB_RT_EMITTER_SOURCE.
+    emitter_match = EnvFloat("BB_RT_EMITTER_MATCH", 1.0f, 0.0f, 3.0f);
+    // A bright fire's reach grows with grow^this (grow = sqrt(colour / BB_RT_EMITTER_BRIGHT)).
+    // 0.25 since 2026-11-20 with BB_RT_EMITTER_MATCH: at 1 the matched (larger) source carried
+    // the burning house warm over the whole garden (stairs Lab b +16, stock +2); 0.25 keeps the
+    // old look (+8-10) and 0 lost the warmth the house was given on purpose.
+    emitter_grow_reach = EnvFloat("BB_RT_EMITTER_GROW_REACH", 0.25f, 0.0f, 2.0f);
     // A big fire flickers harder: the steady-flame flicker of such an emitter is
     // BB_RT_EMITTER_STEADY_FLICKER x grow^this (grow = sqrt(colour / BB_RT_EMITTER_BRIGHT)).
     // The burning house's lights are constant in the game; at x1 their light on the garden
@@ -1837,7 +1847,7 @@ void RayTracing::ReadLiveKnobs() {
     // (statue crop luma 9.8 -> 15.5, stock 14.3) but four r 2 candles reaching 10 m cost direct
     // 3.2 -> 7.5 ms (35 FPS); 0.85 / 2.5 lights the statues the same for 3.8 ms (41 FPS).
     // Torches and wall lamps keep the emitter values.
-    candle_source = EnvFloat("BB_RT_CANDLE_SOURCE", 0.85f, 0.01f, 1.0f);
+    candle_source = EnvFloat("BB_RT_CANDLE_SOURCE", 0.3f, 0.01f, 1.0f);
     candle_range = EnvFloat("BB_RT_CANDLE_RANGE", 2.5f, 0.0f, 16.0f);
     // Lamp halo: fixed flames light the air around them (Rt::BuildHalos, rt_gi_apply.comp), with
     // the light's own flickered colour. Strength (0 = off), Gaussian width (m), hot core size (m).
@@ -1854,8 +1864,9 @@ void RayTracing::ReadLiveKnobs() {
     // own source size and reach, so their light carries across a room and through a glass door
     // without making candles reach further. Candles, the torch and small lights stay on the
     // BB_RT_EMITTER_* values. Same peak at the fixture; the
-    // far field grows with BB_RT_LAMP_SOURCE squared. 0.6 / 6 tuned by eye at the glass door (hot103).
-    lamp_source = EnvFloat("BB_RT_LAMP_SOURCE", 0.6f, 0.01f, 1.0f);
+    // far field grows with BB_RT_LAMP_SOURCE squared. 0.6 / 6 tuned by eye at the glass door (hot103);
+    // 0.2 since 2026-11-20: 0.6 flooded Central Yharnam statues and the clinic arch gold (2.5x stock).
+    lamp_source = EnvFloat("BB_RT_LAMP_SOURCE", 0.2f, 0.01f, 1.0f);
     lamp_range = EnvFloat("BB_RT_LAMP_RANGE", 3.8f, 0.0f, 16.0f);
     lamp_rmin = EnvFloat("BB_RT_LAMP_RMIN", 1.0f, 0.0f, 100.0f);
     lamp_rmax = EnvFloat("BB_RT_LAMP_RMAX", 6.0f, 0.0f, 100.0f);
@@ -1868,6 +1879,11 @@ void RayTracing::ReadLiveKnobs() {
     // fire pit, play182).
     fire_lift = EnvFloat("BB_RT_FIRE_LIFT", 0.5f, 0.0f, 3.0f);
     ambient_cut = EnvFloat("BB_RT_AMBIENT_CUT", 1.0f, 0.0f, 1.0f);
+    // Under open sky the baked ambient is the sky light: the cut keeps it x the pixel's sky
+    // openness (rt_direct.comp SkyOpen, cosine rays averaged in the moon history) x this.
+    // Sewers and interiors (openness 0) stay fully cut. 0 = the old full cut.
+    ambient_sky = EnvFloat("BB_RT_AMBIENT_SKY", 1.0f, 0.0f, 1.0f);
+    ambient_sky_reach = EnvFloat("BB_RT_AMBIENT_SKY_REACH", 60.0f, 0.5f, 500.0f);
     ambient_spec_cut = EnvFloat("BB_RT_AMBIENT_SPEC_CUT", 1.0f, 0.0f, 1.0f);
     ambient_keep_lo = EnvFloat("BB_RT_AMBIENT_KEEP_LO", 0.1f, 0.0f, 1.0f);
     ambient_keep_hi = EnvFloat("BB_RT_AMBIENT_KEEP_HI", 0.3f, 0.0f, 1.0f);
@@ -2095,6 +2111,8 @@ void RayTracing::ReadLiveKnobs() {
     debug_mode = u32(EnvU64("BB_RT_DEBUG", 0, 0, 4));
     gi_strength = EnvFloat("BB_RT_GI_STRENGTH", 1.0f, 0.0f, 100.0f);
     gi_fill_sky = EnvFloat("BB_RT_GI_FILL_SKY", 1.0f, 0.0f, 10.0f);
+    // GI sky misses take the game's sky light colour (rt_gi.comp SkyRadiance), luminance kept.
+    gi_sky_tint = EnvFloat("BB_RT_GI_SKY_TINT", 0.5f, 0.0f, 1.0f);
     gi_sky = EnvFloat("BB_RT_SKY", 0.0f, 0.0f, 100.0f);
     gi_clamp = EnvFloat("BB_RT_GI_CLAMP", 4.0f, 0.01f, 1e4f);
     gi_bias = EnvFloat("BB_RT_GI_BIAS", 0.02f, 0.0f, 10.0f);
@@ -2128,6 +2146,8 @@ void RayTracing::ReadLiveKnobs() {
     gpu_line_frames = Rt::GpuLineFrames(Rt::Knob("BB_RT_GPU_LINE_FRAMES"));
 }
 
+extern "C" uint32_t bbgpu_player_block(void);
+
 void RayTracing::PollHot() {
     if (frame % 30 != 0) {
         return;
@@ -2143,6 +2163,21 @@ void RayTracing::PollHot() {
             (unsigned long long)frame, cfg.Values().size(), keys.c_str());
         ApplyToggles(Rt::ReadToggles(Rt::Knob, instance.GetVendorID()));
         LogLiveState();
+    }
+    // Per-map knobs (`mAA_BB:KEY=value` in rt.cfg, built-in Rt::MapKnobDefaults): re-read when
+    // the player enters another map.
+    {
+        const u32 block = bbgpu_player_block();
+        if (block != 0xFFFFFFFFu) {
+            char map[16];
+            std::snprintf(map, sizeof(map), "m%02u_%02u", (block >> 24) & 0xFFu, (block >> 16) & 0xFFu);
+            if (cfg.SetMap(map)) {
+                ReadLiveKnobs();
+                ApplyToggles(Rt::ReadToggles(Rt::Knob, instance.GetVendorID()));
+                Log("Ray tracing: map %s at frame %llu, %zu per-map knobs\n", map,
+                    (unsigned long long)frame, cfg.MapOverrides());
+            }
+        }
     }
     if (shader_dir.empty()) {
         return;
@@ -2704,6 +2739,8 @@ bool RayTracing::CreatePipelines(const Rt::LiveToggles& f) {
     // Diffuse keep factor (1, or the decal cover on glass) for the GI apply pass.
     reflect_bindings[29] = binding(29, Type::eStorageImage);
     reflect_bindings[30] = binding(30, Type::eStorageBuffer);
+    // Binding 6 (GI history z, unused here): the moon history buffer, z = sky openness.
+    reflect_bindings[6] = binding(6, Type::eStorageBuffer);
     // The sky dome panorama, so mirror rays that miss show the sky image.
     reflect_bindings[31] = binding(31, Type::eCombinedImageSampler);
     std::array<vk::DescriptorSetLayoutBinding, 27> restir_init_bindings{};
@@ -6689,10 +6726,12 @@ void RayTracing::EndLightFrame() {
                 l.world[1] += fire_lift;
                 ++fire_lift_last;
             }
-            const float range = (lamp ? lamp_range : candle ? candle_range : emitter_range) * grow;
+            const float range = (lamp ? lamp_range : candle ? candle_range : emitter_range) *
+                                (lamp || candle ? grow : std::pow(grow, emitter_grow_reach));
             l.wide = grow > 1.0f;
             if (Rt::EmitterFalloff(l, range,
-                                   lamp ? lamp_source : candle ? candle_source : emitter_source,
+                                   lamp ? lamp_source : candle ? candle_source
+                                   : emitter_match > 0.0f ? -emitter_match : emitter_source,
                                    emitter_lift, emitter_peak, emitter_flame)) {
                 ++emitter_falloff_last;
                 lamp_falloff_last += lamp ? 1u : 0u;
@@ -6889,7 +6928,10 @@ void RayTracing::ApplyFillVis() {
         if (fill_vis_flicker > 0.0f && !e.pulse) {
             constexpr u32 FillFlickerTurns = 6;
             const float lum = l.color[0] + l.color[1] + l.color[2];
-            if (l.radius != e.flicker_radius) {
+            // A new light in this cell resets the count; a radius the game animates does not (the
+            // Central Yharnam effigy pyre's flame light pulses 8.4-8.6 m every frame, so it never
+            // latched, was cut as a designer fill and the ground around the pyre went dark).
+            if (std::fabs(l.radius - e.flicker_radius) > 0.2f * std::max(l.radius, e.flicker_radius)) {
                 e.flicker_radius = l.radius;
                 e.flicker_last = -1.0f;
                 e.flicker_sign = 0;
@@ -8810,6 +8852,7 @@ void RayTracing::RecordDirect(const SceneInputs& inputs) {
         .ambient_cut = {ambient_cool[0], ambient_cool[1], ambient_cool[2], ambient_cut},
         .ambient_spec_cut = {spec_cut_frame == frame ? 0.0f : ambient_spec_cut, ambient_keep_lo,
                              ambient_keep_hi, ambient_keep_lit},
+        .ambient_sky = {ambient_sky, ambient_sky_reach, 0.0f, 0.0f},
     };
     std::memcpy(direct_params_ring.mapped + u64(slot) * direct_params_ring.slot_bytes, &params,
                 sizeof(params));
@@ -9381,6 +9424,13 @@ void RayTracing::RecordReflect(const SceneInputs& inputs) {
         .sampler = *surface_sampler,
         .imageView = dome_valid ? sky_dome_view : depth.view,
         .imageLayout = dome_valid ? vk::ImageLayout::eShaderReadOnlyOptimal : vk::ImageLayout::eGeneral};
+    // Sky openness from last frame's direct pass (moon history z), same size: the base spec cut
+    // keeps the game's sheen under open sky (BB_RT_AMBIENT_SKY).
+    const DeviceBuffer& sky_hist = moon_hist[moon_hist_index];
+    const bool sky_hist_ok = ambient_sky > 0.0f && sky_hist.buffer && moon_hist_width == depth.width &&
+                             moon_hist_height == depth.height && moon_hist_frame + 1 == frame;
+    const vk::DescriptorBufferInfo sky_hist_info{sky_hist_ok ? sky_hist.buffer : material.buffer, 0,
+                                                 sky_hist_ok ? sky_hist.size : material.size};
     const std::array<vk::WriteDescriptorSet, 32> writes = {{
         write(0, Type::eSampledImage, &depth_info, nullptr),
         write(1, Type::eSampledImage, &depth_info, nullptr),
@@ -9388,7 +9438,7 @@ void RayTracing::RecordReflect(const SceneInputs& inputs) {
         write(3, Type::eSampledImage, &history_info, nullptr),
         write(4, Type::eSampledImage, &history_z_info, nullptr),
         write(5, Type::eStorageImage, &raw_info, nullptr),
-        write(6, Type::eStorageImage, &raw_info, nullptr),
+        write(6, Type::eStorageBuffer, nullptr, &sky_hist_info),
         write(7, Type::eStorageImage, &raw_info, nullptr),
         write(8, Type::eUniformBuffer, nullptr, &params_info),
         write(9, Type::eStorageBuffer, nullptr, &material_info),
@@ -9456,6 +9506,7 @@ void RayTracing::RecordReflect(const SceneInputs& inputs) {
         .sheen_far = water_sheen_far,
         .puddle_edge = water_puddle_edge,
         .puddle_wet = water_puddle_wet,
+        .sky_keep = sky_hist_ok ? ambient_sky : 0.0f,
     };
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *reflect_pipeline);
     cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eCompute, *reflect_pipeline_layout, 1,
@@ -9754,7 +9805,7 @@ void RayTracing::RecordExposure(const SceneInputs& inputs, bool apply) {
     ExposurePush push{
         .size_cfg = {float(color.width), float(color.height), 0.0f, apply ? 1.0f : 0.0f},
         .params = {exposure_key, exposure_max, exposure_rate, exposure_reset && apply ? 1.0f : 0.0f},
-        .tone = {exposure_white, 0.0f, 0.0f, 0.0f},
+        .tone = {exposure_white, night_shift, 0.0f, 0.0f},
     };
     // The game's sky dome is a mesh that writes depth (539-1480 m around the camera), so the
     // shader's depth test alone let the boost reach it: the sky went from stock 119 to 158 luma,
@@ -10328,7 +10379,7 @@ bool RayTracing::RecordGi(const SceneInputs& inputs) {
                 (normal_valid ? normal_source.mode : Rt::NormalFromDepth) |
                     normal_source.swizzle << 8 | normal_source.components << 16,
                 gi_debug},
-        .strength_bias = {gi_strength, gi_bias, 0.0f, gi_fill_sky},
+        .strength_bias = {gi_strength, gi_bias, gi_sky_tint, gi_fill_sky},
         .bounce = {gi_bounces_used, gi_bounce_rays, light_count, set_count},
         .bounce_cfg = {Rt::SkySlot(capacity.records), bounce_flags,
                        fog_bound ? gi_fog_bytes / 16u : 0u, 0u},

@@ -1414,6 +1414,10 @@ void TestFlameColour() {
     }
     l.color = {0.315f, 0.543f, 0.8f};
     assert(!FlameColour(l));
+    l.color = {0.120f, 0.018f, 0.022f}; // Hemwick hit effect on the player: blood red, not fire
+    assert(!FlameColour(l));
+    l.color = {12.8f, 5.039f, 0.806f}; // burning house, the reddest real flame
+    assert(FlameColour(l));
 }
 
 // Glow lamps: steady + warm pass; too new, drifting (flying FX) or white (item glow) do not.

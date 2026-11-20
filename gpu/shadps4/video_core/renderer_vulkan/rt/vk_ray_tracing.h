@@ -942,7 +942,7 @@ private:
     vk::UniquePipelineLayout moon_dir_pipeline_layout;
     vk::UniquePipeline moon_dir_pipeline;
     // rt_exposure.comp: eye adaptation of the traced image (BB_RT_EXPOSURE).
-    static constexpr float ExposureKeyDefault = -5.5f;
+    static constexpr float ExposureKeyDefault = -6.5f; // -5.5 until 2026-11-20 (see "Central Yharnam pass 2")
     vk::UniqueDescriptorSetLayout exposure_layout;
     vk::UniquePipelineLayout exposure_pipeline_layout;
     vk::UniquePipeline exposure_pipeline;
@@ -950,9 +950,10 @@ private:
     bool exposure_on = true;
     bool exposure_reset = true;
     float exposure_key = ExposureKeyDefault;
-    float exposure_max = 1.5f;
+    float exposure_max = 1.5f; // BB_RT_EXPOSURE_MAX
     float exposure_rate = 0.03f;
     float exposure_white = 3.0f;
+    float night_shift = 0.5f; // BB_RT_NIGHT_SHIFT, LOOK_GUIDE rule 5
     float thin_transmit = 0.4f; // BB_RT_THIN_TRANSMIT: moonlight through thin cards
     float moon_reach = 0.0f;    // BB_RT_MOON_REACH: moon shadow ray metres, 0 = 10 km
     u64 exposure_frames = 0;
@@ -1070,6 +1071,7 @@ private:
     float gi_debug_threshold = 0.0f;
     float gi_strength = 1.0f;
     float gi_fill_sky = 1.0f;
+    float gi_sky_tint = 0.5f; // BB_RT_GI_SKY_TINT
     float gi_sky = 0.0f;
     float gi_clamp = 4.0f;
     float gi_bias = 0.02f;
@@ -1328,7 +1330,7 @@ private:
     float emitter_steady_dev = 0.05f;
     float fixed_sway = 0.015f;
     float candle_rmax = 3.0f;
-    float candle_source = 0.85f;
+    float candle_source = 0.3f; // 0.85 until 2026-11-20 (CY statues 2.5x stock)
     float glow_flame = 1.0f;
     float glow_range = 1.8f;
     float candle_range = 2.5f;
@@ -1382,12 +1384,15 @@ private:
     }
     std::unordered_map<u64, HarvestLight> harvest;
     u64 harvest_dump{};
-    float lamp_source = 0.6f, lamp_range = 6.0f, lamp_rmin = 1.0f, lamp_rmax = 6.0f;
+    float lamp_source = 0.2f, lamp_range = 6.0f, lamp_rmin = 1.0f, lamp_rmax = 6.0f;
     float lamp_enclosed = 0.4f;
     float lamp_up = 0.5f;
     float fire_lift = 0.5f;
     u32 fire_lift_last = 0;
     float ambient_cut = 1.0f;
+    float emitter_match = 1.0f, emitter_grow_reach = 0.25f; // BB_RT_EMITTER_MATCH / _GROW_REACH
+    float ambient_sky_reach = 60.0f; // BB_RT_AMBIENT_SKY_REACH: openness ray length (m)
+    float ambient_sky = 1.0f; // BB_RT_AMBIENT_SKY: baked ambient kept x sky openness
     float ambient_spec_cut = 1.0f;
     u64 spec_cut_frame = ~0ull;
     float ambient_keep_lo = 0.1f, ambient_keep_hi = 0.3f, ambient_keep_lit = 0.25f;

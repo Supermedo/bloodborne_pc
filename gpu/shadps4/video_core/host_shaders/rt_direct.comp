@@ -64,6 +64,7 @@ layout(binding = 6, std140) uniform Params {
     vec4 far_fade;
     vec4 ambient_cut;
     vec4 ambient_spec_cut;
+    vec4 ambient_sky; // x: BB_RT_AMBIENT_SKY, y: BB_RT_AMBIENT_SKY_REACH (m)
 };
 
 layout(binding = 7, std430) readonly buffer Lights {
@@ -124,12 +125,13 @@ layout(binding = 15, std430) buffer Pick {
     uint pick[256]; // 0..95 pick, 96..112 rt_fog.comp, 128..255 KeptProbe
 };
 
-// Moon visibility history (FlagMoonHistory): x = visibility (-1 none), y = view z.
+// Moon visibility history (FlagMoonHistory): x = visibility (-1 none), y = view z,
+// z = sky openness (-1 none).
 layout(binding = 17, std430) readonly buffer MoonHistIn {
-    vec2 moon_hist_in[];
+    vec4 moon_hist_in[];
 };
 layout(binding = 18, std430) writeonly buffer MoonHistOut {
-    vec2 moon_hist_out[];
+    vec4 moon_hist_out[];
 };
 // The game's object motion (FlagObjectMotion, vk_object_motion): rg pixels previous - current
 // (unjittered), b = valid, a = the depth it was written with.
@@ -1119,6 +1121,9 @@ bool MoonTerms(inout Surface s, vec4 g3, out vec3 L1, out vec3 dd1, out vec3 ds1
 
 // Our diffuse before visibility (lamps + moon) for CutAmbient, -1 when the caller did not track it.
 float g_open_diffuse = -1.0;
+// Sky openness of this pixel (MoonHistory SkyOpenSample); 0 = cut fully.
+float g_sky_open = 0.0;
+float AmbientSky() { return clamp(ambient_sky.x, 0.0, 1.0); }
 
 // BB_RT_DIRECT_DEBUG=9: the moon visibility this pixel used (-1 = no moon term).
 float debug_moon = -1.0;
@@ -1239,9 +1244,10 @@ void WriteResult(ivec2 pixel, vec3 diffuse, vec3 specular) {
         }
         const vec3 base_d = imageLoad(diffuse_img, pixel).rgb;
         const vec3 base_s = imageLoad(spec_img, pixel).rgb;
-        const vec3 lit = diffuse + CutAmbient(Finite(base_d) ? max(base_d, vec3(0.0)) : vec3(0.0), ambient_cut.w, diffuse);
+        const float cut = ambient_cut.w * (1.0 - clamp(g_sky_open * AmbientSky(), 0.0, 1.0));
+        const vec3 lit = diffuse + CutAmbient(Finite(base_d) ? max(base_d, vec3(0.0)) : vec3(0.0), cut, diffuse);
         diffuse = clamp(lit * under, vec3(0.0), vec3(FormatMax));
-        specular = clamp(specular * under + (Finite(base_s) ? max(base_s, vec3(0.0)) : vec3(0.0)) * (1.0 - clamp(ambient_spec_cut.x, 0.0, 1.0)) +
+        specular = clamp(specular * under + (Finite(base_s) ? max(base_s, vec3(0.0)) : vec3(0.0)) * (1.0 - clamp(ambient_spec_cut.x, 0.0, 1.0) * (1.0 - clamp(g_sky_open * AmbientSky(), 0.0, 1.0))) +
                          (Finite(base_d) ? max(base_d, vec3(0.0)) : vec3(0.0)) * (scatter * (1.0 - under)), vec3(0.0), vec3(FormatMax));
     }
     imageStore(diffuse_img, pixel, vec4(diffuse, 1.0));
@@ -1461,13 +1467,45 @@ const float MoonSupportMin = 6.0;
 // own motion, so the test is looser (5% of depth + 10 cm).
 const float MoonObjectZTol = 0.05;
 
-void MoonHistory(ivec2 pixel, vec3 p, bool inside) {
+// Sky openness (BB_RT_AMBIENT_SKY, LOOK_GUIDE rule 4): the share of the cosine-weighted
+// hemisphere around the normal with no geometry within SkyOpenReach, SkyOpenRays a frame,
+// averaged over time in the moon history (z). The baked ambient the cut removes is the game's
+// sky light under open sky (a Central Yharnam alley wall read 8 against stock 31) and a fake
+// fill in a sewer; CutAmbient keeps it x openness, so the sewer stays cut.
+const uint SkyOpenRays = 2u;
+const float SkyOpenBlend = 0.06;
+
+float SkyOpenSample(Surface s, ivec2 pixel) {
+    uint state = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + Frame() * 26699u + 104729u;
+    // Cosine lobe around world up (an alley wall looks up at the sky past the building
+    // across; around its normal it saw mostly that building, 0.3), each ray mirrored into
+    // the surface's own hemisphere.
+    const vec3 up = normalize(vec3(view_rows[0].y, view_rows[1].y, view_rows[2].y));
+    const vec3 helper = abs(up.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    const vec3 t = normalize(cross(helper, up));
+    const vec3 b = cross(up, t);
+    float open = 0.0;
+    for (uint i = 0u; i < SkyOpenRays; ++i) {
+        const float u = Rand(state), phi = TwoPi * Rand(state);
+        const float r = sqrt(u);
+        vec3 dir = normalize((t * cos(phi) + b * sin(phi)) * r + up * sqrt(max(1.0 - u, 0.0)));
+        const float dn = dot(dir, s.n);
+        if (dn < 0.0) {
+            dir = normalize(dir - 2.0 * dn * s.n);
+        }
+        open += Visibility(s.origin, dir, max(ambient_sky.y, 0.5));
+    }
+    return open / float(SkyOpenRays);
+}
+
+void MoonHistory(ivec2 pixel, vec3 p, bool inside, Surface s, bool surface) {
     if ((Flags() & FlagMoonHistory) == 0u || !inside) {
         return;
     }
     const vec2 size = Size();
     float vis = moon_given;
-    if (vis >= 0.0 && (Flags() & FlagMoonHistoryValid) != 0u) {
+    float sky = surface && AmbientSky() > 0.0 ? SkyOpenSample(s, pixel) : -1.0;
+    if ((vis >= 0.0 || sky >= 0.0) && (Flags() & FlagMoonHistoryValid) != 0u) {
         const vec3 prev = vec3(dot(reproject[0], vec4(p, 1.0)), dot(reproject[1], vec4(p, 1.0)),
                                dot(reproject[2], vec4(p, 1.0)));
         if (abs(prev.z) > 1e-4) {
@@ -1489,11 +1527,15 @@ void MoonHistory(ivec2 pixel, vec3 p, bool inside) {
             const float z_tol = object ? MoonObjectZTol * abs(prev.z) + 0.1
                                        : 0.02 * abs(prev.z) + 0.05;
             if (all(greaterThanEqual(pp, ivec2(0))) && all(lessThan(pp, ivec2(size)))) {
-                const vec2 h = moon_hist_in[uint(pp.y) * uint(size.x) + uint(pp.x)];
-                if (h.x >= 0.0 && abs(h.y - prev.z) < z_tol) {
+                const vec4 h = moon_hist_in[uint(pp.y) * uint(size.x) + uint(pp.x)];
+                const bool same = abs(h.y - prev.z) < z_tol;
+                if (vis >= 0.0 && h.x >= 0.0 && same) {
                     const bool coarse = moon_support < MoonSupportMin;
                     const float keep = clamp(h.x, coarse ? 0.0 : moon_lo, coarse ? 1.0 : moon_hi);
                     vis = mix(keep, vis, MoonHistoryBlend);
+                }
+                if (sky >= 0.0 && h.z >= 0.0 && same) {
+                    sky = mix(h.z, sky, SkyOpenBlend);
                 }
             }
         }
@@ -1501,7 +1543,9 @@ void MoonHistory(ivec2 pixel, vec3 p, bool inside) {
     if (vis >= 0.0) {
         moon_given = vis;
     }
-    moon_hist_out[uint(pixel.y) * uint(size.x) + uint(pixel.x)] = vec2(vis >= 0.0 ? vis : -1.0, p.z);
+    g_sky_open = max(sky, 0.0);
+    moon_hist_out[uint(pixel.y) * uint(size.x) + uint(pixel.x)] =
+        vec4(vis >= 0.0 ? vis : -1.0, p.z, sky >= 0.0 ? sky : -1.0, 0.0);
 }
 
 bool PickPixel(ivec2 pixel) {
@@ -1992,7 +2036,7 @@ void main() {
     if (MoonHalfOn()) {
         MoonHalfShare(s, g3, pixel, surface);
     }
-    MoonHistory(pixel, p, inside);
+    MoonHistory(pixel, p, inside, s, surface);
     if (!surface) {
         return;
     }
@@ -2086,6 +2130,12 @@ void main() {
                 (0.25 + 0.75 * w_best / max(w_total, 1e-6));
         }
         imageStore(diffuse_img, pixel, vec4(c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 13u) {
+        // Sky openness (SkyOpenSample, time-averaged): white = open, black = enclosed.
+        imageStore(diffuse_img, pixel, vec4(vec3(g_sky_open), 1.0));
         imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }

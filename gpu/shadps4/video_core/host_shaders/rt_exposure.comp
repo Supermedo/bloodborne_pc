@@ -27,7 +27,7 @@ layout(binding = 2, std430) buffer State {
 layout(push_constant) uniform Push {
     vec4 size_cfg; // width, height, phase, apply (1) or measure only (0)
     vec4 params;   // key (log2 luminance), max boost (stops), rate per frame, reset (1)
-    vec4 tone;     // white level (stops above the key) where the boost has faded out
+    vec4 tone;     // x: white level (stops above the key) where the boost has faded out; y: night shift
     vec4 proj;     // camera projection, as the fog pass
     vec4 up;       // world up in view space; w > 0.5 turns the dome test on
 };
@@ -79,9 +79,9 @@ void main() {
         if (pixel.y >= size.y) {
             return;
         }
-        const float gain = state[0].w;
+        float gain = state[0].w;
         if (!(gain > 1.0) || isinf(gain)) {
-            return;
+            gain = 1.0; // no boost, but the night shift still runs
         }
         // The sky keeps the game's look: boosting it with the geometry blew it to white.
         const float depth = texelFetch(depth_tex, pixel, 0).r;
@@ -101,7 +101,25 @@ void main() {
             return;
         }
         const float k = gain / (1.0 + (gain - 1.0) * lum / white);
-        imageStore(scene_img, pixel, vec4(c.rgb * k, c.a));
+        vec3 o = c.rgb * k;
+        // Night shift (LOOK_GUIDE rule 5, BB_RT_NIGHT_SHIFT = tone.y): darks lose chroma and lean
+        // cool, lit midtones and fire keep the stock colour. w is 0 at the key's mid grey and rises
+        // to the strength at 1/16 of it. Warm bounce in shadow read brown/orange against stock's
+        // cool shade (Central Yharnam street, Hunter's Dream flowers, 2026-11-20).
+        const float NightCool = 0.15;
+        const float mid = exp2(params.x);
+        const float lo = lum * k;
+        const float w = clamp(tone.y, 0.0, 1.0) * (1.0 - smoothstep(mid / 16.0, mid, lo));
+        if (w > 0.0) {
+            vec3 m = mix(o, vec3(lo), w);
+            m *= vec3(1.0 - NightCool * w, 1.0, 1.0 + 2.0 * NightCool * w);
+            const float ml = dot(m, vec3(0.2126, 0.7152, 0.0722));
+            o = ml > 0.0 ? m * (lo / ml) : m;
+        }
+        if (k == 1.0 && w <= 0.0) {
+            return;
+        }
+        imageStore(scene_img, pixel, vec4(o, c.a));
         return;
     }
     const uint t = gl_LocalInvocationIndex;

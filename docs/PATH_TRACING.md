@@ -1770,7 +1770,9 @@ GI dispatch for four:
    `BB_RT_RESTIR_GI_M` (30), merged with `w = p_hat * W * M`, target `p_hat = luma(L) *
    max(cos at the receiver, 0)`. `FlagReset` (camera cut, history invalid, resolution change,
    F9) skips the history.
-3. `rt_restir_gi_spatial` (`RT_RESTIR_SPATIAL`), `BB_RT_RESTIR_GI_SPATIAL` passes (1, 0-2) of
+3. `rt_restir_gi_spatial` (`RT_RESTIR_SPATIAL`), `BB_RT_RESTIR_GI_SPATIAL` passes (1, 0-2; since
+   2026-11-15 the output of one pass is shown but is not the next history, see the Forbidden
+   Woods bonfires section) of
    `BB_RT_RESTIR_GI_NEIGHBOURS` (3) taps in a `BB_RT_RESTIR_GI_RADIUS` (16 px) disc, same
    depth/normal similarity. Neighbour samples are reweighted with the solid-angle Jacobian
    `J = (cos phi_r / cos phi_q) * (d_q^2 / d_r^2)` (angles at the sample point), `w = p_hat_r
@@ -4365,7 +4367,7 @@ trigger, on the HDR scene colour before the game's bloom and tonemap.
 | Knob | Default | Meaning |
 |---|---|---|
 | `BB_RT_EXPOSURE` | `1` | Live. `0` turns the eye adaptation off (resets it). |
-| `BB_RT_EXPOSURE_KEY` | `-5.5` | Live. Target log2 luminance of the lit geometry (stock's measure). |
+| `BB_RT_EXPOSURE_KEY` | `-6.5` | Live. Target log2 luminance of the lit geometry (stock's measure). -5.5 until 2026-11-20, see "Central Yharnam pass 2". |
 | `BB_RT_EXPOSURE_MAX` | `1.5` | Live. Largest boost in stops. |
 | `BB_RT_EXPOSURE_RATE` | `0.03` | Live. Share of the gap closed per frame. |
 | `BB_RT_EXPOSURE_WHITE` | `3` | Live. Stops above the key where the boost has faded out. |
@@ -5425,7 +5427,394 @@ Tried and dropped: "every instanced G-buffer draw takes the motion variant" (the
 tessellated, not this) and "two 864-byte buffers mean an 18-bone skeleton" (the selection log
 showed the 18,960-byte palette instead).
 
-## Orbs in the air near lamps: light-ray sprites became halo spots (2026-11-19)
+## Forbidden Woods bonfires: twinkling grass, grainy shadow, dark blocks on near branches (2026-11-15)
+
+User report at the bonfires: "the grass is twinkling and the shadow on the char is granulating".
+The twinkling grass is fixed (next section); the grain on the character and the dark blocks are
+open. What was known before the cause was found:
+
+- **Not from the 2026-11-15 work.** The user saw the same with the shipped pt2.3 engine and DLSS
+  at that spot. Switching the tessellated casters, the shared meshes or `BB_RT_MOON_REACH=60`
+  on and off live changes neither the per-pixel noise (`tools/pixel_noise.py`) nor the pass
+  times.
+- **The dev build ran FSR 3.1 all day.** `bbport_dlss.dll` and the `nvngx_dlss*.dll` files were
+  not next to the dev `bb-probe.exe`, so it logged `DLSS unavailable ... falling back to FSR
+  3.1`. Every live test and number of 2026-11-15 before this section was taken with FSR 3.1,
+  not with the DLSS the user plays with. The files are copied in now.
+- Where the noise sits (new build, FSR 3.1, player still, 40 frames): with `BB_RT_MOON_ANGLE=0`
+  the 90th-percentile noise on the character drops by about a third (14 -> 9.5): the soft moon
+  shadow is part of the grain. Without bounce light (`BB_RT_GI=0`) it halves together with the
+  brightness. Stock (`BB_RT_PAUSE=1`) is calmer on the ground (2.2 against about 7).
+- **Dark blocky shapes on the branches right in front of the camera**, seen once the new build ran
+  with DLSS: the game blurs those near branches (depth of field; stock shows a pale blur), and
+  with path tracing they come out as dark shapes with stair-stepped edges. The pt2.3 engine
+  does the same at the same saved camera position, and they stay with `BB_RT_PATCH_MESHES=0`.
+- DLSS Ray Reconstruction (`BB_RT_DLSS_RR=1` in the live settings file at start; the env alone is
+  overridden by the file) ran, 47 -> 41 FPS, with no clear drop in the measured noise. The view
+  was a poor one for it (the camera stood inside a bush whose branches sway), so this says
+  little.
+
+### Twinkling grass: bounce-light history reused for another surface (fixed)
+
+With DLSS, the player still and a clean view of the tall grass the user pointed at:
+
+- The twinkle is **blotches of bounce light, orange from the fires and white from the moon,
+  that come and go on single tufts**. `BB_RT_GI_DEBUG=1` (raw bounce light) shows them as
+  glowing blobs on the grass and nowhere on the ground.
+- Not the moon shadow: `BB_RT_MOON_ANGLE=0`, `BB_RT_MOON_HALF=0`, `BB_RT_SHADOW_TMIN=0.3`,
+  `BB_RT_THIN_TRANSMIT=0`, `BB_RT_DIRECT_NOVIS=1`, `BB_RT_REFLECT=0` and `BB_RT_AO=0` leave
+  them. A change to the moon history (keep it on pixels whose 5x5 window holds few rays) was
+  tried first and dropped: no gain that the wind did not hide.
+- They stay with `BB_RT_BOUNCES=0` and `=1` and with `BB_RT_GI_LAST_BOUNCE_CACHE=0`, and **go
+  with `BB_RT_RESTIR_GI=0`**: the reservoir reuse makes them.
+- Cause, `rt_restir_gi.comp` temporal pass: last frame's reservoir was merged with the target
+  of this frame's receiver and no Jacobian, as if the same surface point sat under the pixel.
+  On static ground it does. On swaying grass (and with the 10 % depth tolerance of
+  `SimilarSurface`) the pixel shows another blade: a sample taken 3 cm from a lit blade, reused
+  from 30 cm, counts 100 times too much. The spatial pass always had the Jacobian and its
+  limit.
+- Fix: the temporal pass rebuilds the receiver the history tap held (tap pixel, stored view
+  depth, last frame's projection and jitter, moved to this frame's view space) and applies the
+  same Jacobian and `BB_RT_RESTIR_GI_JACOBIAN` limit as the spatial pass; a history sample over
+  the limit, or facing away, is not reused. On static ground the Jacobian is 1 and nothing
+  changes. C++ mirror `Rt::GiTemporalJacobian`, test `TestTemporalReceiverMoved`
+  (`rt-restir-gi-test`).
+
+Measured by swapping the shader in the running game, old and new in turn (share of the grass
+pixels whose warm colour, blurred 9x9, rises more than N levels over its median in 16 frames):
+
+| | rise > 10 | rise > 25 |
+|---|---|---|
+| old shader (4 runs) | 11.8-16.8 %, mean 13.9 | 0.46-1.21 %, mean 0.86 |
+| new shader (4 runs) | 4.1-11.1 %, mean 8.4 | 0.16-0.69 %, mean 0.48 |
+| `BB_RT_RESTIR_GI=0`, old shader (2 runs) | 8.9-10.0 % | 0.47-0.61 % |
+| stock | 4.5 % | 0.16 % |
+
+Crops of the final image: three of three with the old shader show the blotches, none of three
+with the new one. Mean brightness of the ground, a rock and the character does not change; the
+grass is about 5 % darker (the false glow). What is left over stock is the bounce light of the
+flickering fires itself, the same with reservoir reuse off.
+
+Two things learned about measuring here: the wind moves `tools/pixel_noise.py` by a factor of
+two between runs of the same build on this grass, so it cannot judge a change there; and a
+shader swap must wait for the game's `shader ... reloaded` log line before measuring (a fixed
+sleep measured the previous shader).
+
+### The user still saw it: the spatial pass spreads bright samples (off by default now)
+
+After the fix above the user said "the grass twinkling still there", then "it is everywhere",
+and sent a snip of a rock: fire-coloured spots that pop on static rock, trunks and ground too.
+
+- Second cause found on the way, also fixed: receivers that pass `SimilarSurface` can have
+  normals 25 degrees apart (grass blades, cloth folds). A sample that grazed one (cos 0.001)
+  counted 400 times more on a neighbour tilted toward it. `ReuseOk` in `rt_restir_gi.comp`
+  (both passes) holds the whole ratio, (cos at the new receiver / cos at the old) x Jacobian, to
+  `BB_RT_RESTIR_GI_JACOBIAN`; C++ mirror `Rt::GiReuseOk`, test `TestReuseAcrossTiltedReceivers`.
+  Grass: blobs in 3 of 8 crops before, 0 of 12 after.
+- The spots on the rock stayed (5 of 6 crops) with both fixes and with the reservoir memory
+  cut from 30 to 8 frames, and went (0 of 12) once pixels stopped taking their neighbours'
+  reservoirs. The spatial pass copies one pixel's reservoir into pixels up to 16 px away, and
+  its output is the next frame's history: one rare bright sample (a hit next to a fire, 80
+  times the usual radiance even after `BB_RT_GI_CLAMP`) is copied again every frame until the
+  whole disc holds it, and stays for the reservoir's life. Without the pass the same sample is
+  one pixel's, and the accumulation and the filter after the resolve flatten it.
+- **`BB_RT_RESTIR_GI_SPATIAL` default 1 -> 0** (`Rt::RestirGiSpatialDefault`). The user looked
+  at the running game with the neighbours switched off and answered "Gone". Measured, shader
+  swapped in the running game, 3 rounds each:
+
+| | spatial pass on | off |
+|---|---|---|
+| GI pass | 7.5 ms | 5.3 ms |
+| still view, rock and ground: fast flicker (mean / p90 levels) | 0.12 / 0.29 | 0.11 / 0.30 |
+| after a 0.7 s camera turn: mean difference to the converged frame | 5.35, 4.64, 4.63 | 5.78, 4.49, 3.76 |
+| fire-coloured spots on the rock | 5 of 6 crops | 0 of 12 |
+
+  So the pass bought nothing that could be measured here and cost 2.2 ms. `=1` brings it back.
+  Not tried: keeping the pass for the picture only, with the temporal reservoirs as history
+  (no feedback); it needs a fourth set or a C++ change of which set is the history.
+
+How it was found, for the next time: the engine views (`BB_RT_GI_DEBUG=1`) and crops of the
+exact spot the user snipped, grabbed several times two seconds apart, counted by eye. Three
+hours went into per-pixel noise statistics first; they were ruled by the wind, and by a stock
+capture that runs eight times faster than the path-traced one (same frame count = an eighth
+of the time), and proved nothing. The user's eyes on a live toggle (direct light off, fire
+shadows off, stock moon shadow) split the problem in three questions.
+
+The "grainy shadow on the character" of the first report was the same spots: asked with the
+spatial pass off, the user answered "Fine now". (A shadow-only view of the cape shows the hard
+moon shadow of the swaying grass and branches crossing it, which stock does not cast there;
+the user does not mind it.)
+
+### "In the char seems like frying": the spatial pass is needed, its feedback is not
+
+With `BB_RT_RESTIR_GI_SPATIAL=0` in the rebuilt exe (GI pass 3.9 ms) the user reported "in the
+char seems like frying" at a lamp-lit hut. `BB_RT_GI_DEBUG=1`/`2` on the character: the raw
+resolve is coarse streaks and the accumulated image is mottled, while `BB_RT_RESTIR_GI=0` is
+clean. Each reservoir gets a new sample only every fourth frame (`BB_RT_GI_SPARSE`), so alone
+it changes slowly and the 16-frame accumulation cannot average it: slow boiling. The spatial
+pass was what mixed three other reservoirs in, different ones every frame. The still-view and
+camera-turn numbers above did not see this (they measure frame-to-frame noise, not boiling).
+
+So the pass is back (default 1) and what made the spots is removed instead: **the history of
+the next frame is the temporal set, not the spatial pass's output**
+(`Rt::RestirGiHistorySet`, `BB_RT_RESTIR_GI_FEEDBACK=0`; `=1` is the old loop). A copied sample
+lasts one frame instead of being copied again. The three sets still rotate (the old history
+becomes the next init set, the spatial output the next temporal set); two spatial passes write
+over the temporal set and keep the feedback. Test: `TestDefaults` in `rt-restir-gi-test`.
+
+Live in the rebuilt exe (startup log: `1 spatial pass(es) ... history = the temporal
+reservoirs`): the character's raw and accumulated bounce light are smooth again, as clean as
+with ReSTIR GI off; 12 frames of the hut wall and ground two seconds apart show no spot. GI
+pass 6.3 ms there (4.2 with no pass, 4.3 with ReSTIR GI off). Re-checked later the same day
+at the rock of the bonfires where the spots showed in 5 of 6 frames (reached by teleport):
+12 frames two seconds apart, no spot; what moves there is the fire's own embers and flicker.
+
+### "The shadow has low reso"
+
+Seen by the user on the cape and on a fire-lit rock. Three causes, two addressed:
+
+- **Leaf cards as blocks (fixed).** With `BB_RT_MOON_ANGLE=0` the moon shadow of a tree on
+  the cape was pixelated blocks. `rt_omm_bake.comp` called a micro-triangle solid or open when
+  the AVERAGE alpha of its samples was 0.2 past `alpha_ref`; a leaf cluster with gaps averages
+  0.8 like a solid leaf would, so 25 cm blocks of foliage (2 m card, level 3) came out solid or
+  open. Now solid needs an average of 0.98, open 0.02; everything else stays unknown and the
+  any-hit runs the exact test. After a restart (the bake only runs for new builds) the same
+  shadow has smooth edges. Direct pass at that spot 6.0 ms before, 5.8 after.
+- **Moon disc.** The live settings file had `BB_RT_MOON_ANGLE=5` (0.5 degrees half angle;
+  the code default is 15). The real moon is 0.26. Set to 3 in the live file: the user called
+  the result "Better, still low-res". The code default is not changed yet (the user decides).
+- **Open: fire and lamp lights are points.** `LightVisibility` traces one ray to the light's
+  centre, so a fire throws razor-hard shadows of the low-poly rocks and roots next to it
+  (spiky triangles on a trunk). A fade of the light by the triangle's own cosine was tried
+  and dropped: it darkened whole rocks and left the spikes. What it needs is the flame's size
+  as an area light.
+- **The moon history's clamp stamped the ray pattern into soft edges (fixed).** User: "the
+  edges of the shadow is frying on the char, like low res". A shadow-only view (the moon
+  visibility written over the direct light) settled it in single frames: the value before the
+  history is a smooth ramp, the value after it a ramp made of 2-pixel bricks, and so is the
+  cape in the final image. History off: smooth. History without its clamp: smooth. The clamp
+  held the history to 0.35 of the new value inside a penumbra. On flat ground the new value is
+  the mean of ~37 rays and the limit never bites; on the weave of a coat the 5x5 window keeps
+  a handful of rays, the value is coarse and follows the cone cell each pixel was dealt, and
+  the limit copied that pattern into the picture each frame. Now (`MoonHistory`,
+  `rt_direct.comp`): inside a penumbra the history is taken as it is; it is dropped for the
+  new value only where every ray of the window agrees (the range now counts the penumbra rays
+  too, a dozen primary rays agree by chance inside a penumbra) and the window holds at least
+  `MoonSupportMin` (6) rays. A trail can then only live within 2 pixels of the edge as it is
+  now: filmed while the player rolled away and back, the ground shadow leaves nothing behind.
+  Final image, cape edge, shader swapped live: stair-step blocks before, a smooth edge after;
+  frame-to-frame change 0.59-0.71 before, 0.44-0.45 after (one round spoiled by the player
+  moving). Same rays, direct pass unchanged.
+  Ruled out on the way, each with the shadow-only view: the nearest-pixel history read
+  (4 taps look the same), the jitter terms of the reprojection, the window judged by the depth
+  normal, own rays only at edges (grainier), cone cells that rotate over 16 frames.
+- **That fix did not hold under leaf shadow (fixed the same day, second try).** With the user
+  at the Forbidden Woods bonfires ("is frying worst"): the lit shoulder of the coat, under
+  wind-blown leaf shadow, showed bricks with the old clamp and a grid of dark lines with the
+  fix above, new every frame. Views written over the direct light, on the user's own frame:
+  the history is accepted on the coat (object motion path), the window holds its full ~37
+  rays, yet the value after the history is as blocky as before it. The cause is the keep/drop
+  test itself. It asked whether the single rays of the pixel's own window all agree. Under
+  leaf shadow the true visibility is 0.8 to 1 everywhere, so a window is all-lit by chance:
+  those pixels dropped their history and showed 1, their neighbours kept theirs and showed
+  0.85. The lit squares have the size of a window and are cut at the 16-pixel tile borders,
+  hence bricks and a grid. Now the old value is held to the range of the new window averages
+  of the 5x5 pixels around (one more shared array pass in `MoonHalfShare`, no extra rays):
+  open ground a shadow has left is all 1 and drops the history at once, an edge or leaf
+  shadow has a wide range and keeps it. Three frames of the coat after the live swap: no
+  brick, no grid, a soft leaf shadow.
+- **Open: the moon shadow is traced for half the pixels and averaged over 5x5.** Not changed.
+
+Still open: the dark blocks on near branches.
+
+## Still / moving split of the scene (2026-11-15)
+
+User goal: "optimize the path tracing based in our new things for static mesh".
+
+**What the engine knows now.** Every instance a ray can be blocked by carries one more mask
+bit (`rt_geometry.h` `MotionMask`): `MaskStill` (0x40) for a solid or kept instance whose mesh
+is not skinned, deforming, moving or new this frame, `MaskMoving` (0x20) for the rest (skinned
+and wind-blown meshes, movers, smoke). The bits ride on top of the old ones, so every older ray
+mask sees what it saw (one mask in `rt_gi.comp` held both bits by accident and was made
+explicit). A placement first seen this frame is moving: a prop the game moves every frame
+(a lantern on a chain) comes as a new placement each time. The log line `still / moving
+split` gives the counts and how often the still set changed, by a hash of mesh + placement key
+(not of matrices: the build view and the relocation floats differ in their last bits from
+frame to frame). Forbidden Woods, hut: 316 still, 127 moving, 0 changes in 600 frames.
+Central Yharnam, street lamp: 628 still, 223 moving, 0 changes.
+
+**Where the time is** (GPU ms, hot-swapped shaders, same view):
+
+| shadow rays of the direct pass see | Forbidden Woods (hut) | Central Yharnam (street) |
+|---|---|---|
+| everything (as shipped) | 6.8 | 3.3 |
+| the still world only | 3.5-4.3 | 2.8 |
+| the moving rest only | 6.4-7.2 | 2.7 |
+| nothing (`BB_RT_DIRECT_NOVIS=1`) | 2.1 | 1.9 |
+| still first, moving only if that passes | 8.1 (bonfires: 7.9-8.2 before) | 3.7 |
+
+So the plan that looked obvious, a cache of the still world's moon shadow with fresh rays only
+for moving things, is NOT built: in the forest the moving half (wind-blown, alpha-tested
+foliage) is nearly the whole cost of a shadow ray, and in town all shadow rays together cost
+1.4 ms. Tracing the still world first and the rest only when it passes is slower in both.
+
+**What pays: the validation ray of the reservoir reuse sees the still world only.**
+`rt_restir_gi.comp` `BlockedSpan`, mask `MaskStill` (was `MaskSolid`). That ray keeps light
+from being reused across a wall; grass cards between two neighbouring pixels matter little for
+it and were nearly all of its cost. Measured by swapping the shader in the running game:
+
+| Forbidden Woods bonfires, wide view, 3 rounds | before | after |
+|---|---|---|
+| GI pass | 12.65-12.71 ms | 8.13-8.22 ms |
+| frame rate (capture) | 38 fps | 46 fps |
+| frame mean luma | 46.4-46.7 | 46.8-47.2 |
+| close view at the same spot | 5.97-6.13 ms | 5.16-5.27 ms |
+| Central Yharnam street | 4.36-4.45 ms | 4.20-4.24 ms |
+
+A blurred signed difference of the two pictures matches the difference of two frames of the
+same shader (0.29 against 0.23 levels): no leak to see. Known cost: a character or a bush
+between two points no longer blocks the reuse (walls, floors, rocks and trunks still do).
+C++ mirror `RestirGiMaskStill`, tests in `TestBlockedGlassAndPortals` and `TestMotionMask`.
+
+**Option, off: `BB_RT_GI_STILL_SHADOWS=1`** (live). The shadow rays of the light at a bounce
+point (`rt_gi.comp` `DirectAtHit`: lamps and the moon as seen from where a bounce ray landed)
+see the still world and smoke only (`BounceFlagStillShadows`). Forbidden Woods bonfires,
+switched live, 3 rounds: GI 5.33-5.35 -> 4.72-4.75 ms, 52 -> 53.5 fps, but the frame gets
+about 3 % brighter (mean 43.3 -> 44.4): wind-blown foliage no longer shadows bounce light.
+A look change, so the default stays 0 until the user has seen it. Reflections keep the full
+shadows either way. The user tried it at the bonfires (2026-11-15): GI 9.0 -> 7.5 ms there,
+no frame rate they could see; left off.
+
+## Leaves without the alpha test: `BB_RT_OMM_FAST` (2026-11-15)
+
+User, at the Forbidden Woods bonfires: "the fps still same". Split of the direct pass at
+their spot (33 fps, direct 11 ms), each part switched live:
+
+| direct pass | ms |
+|---|---|
+| as it was | 10.7-11.8 |
+| all shadow rays off (`BB_RT_DIRECT_NOVIS=1`) | 2.4 |
+| moon rays off (shader variant) | 4.1 |
+| 2 fire-light rays a pixel instead of 32 | 10.6-10.9 |
+| no penumbra ray on pixels that have a primary ray | 10.3-10.7 |
+| thin-card step off (`BB_RT_THIN_TRANSMIT=0`) | 9.5-10.0 |
+| far part of the moon ray with 2-state micromaps | 5.9-6.2 |
+
+The moon rays are 7 ms and it is not their count: it is the alpha test of the canopy's
+leaves, run in this shader for every micro-triangle the bake left unknown (the bake keeps
+everything between alpha 0.02 and 0.98 unknown since the same day, see "The shadow has low
+reso"). A ray with `gl_RayFlagsForceOpacityMicromap2StateEXT` never comes back to the shader
+for a leaf: an unknown micro-triangle counts as the state the bake leaned to.
+
+- **Bake** (`rt_omm_bake.comp` `Lean`, mirror `OmmLean`): an unknown micro-triangle used to
+  be "unknown, opaque" always, which as 2 states makes every leaf a full card (the coat lost
+  its moonlight in the first live try). Now the lean is drawn at random, with the share of
+  the micro-triangle's samples that pass the alpha test as the odds: a canopy lets through
+  what its texture does, as a fixed stipple. Rays that test alpha read both leans the same.
+- **Moon rays** (`rt_direct.comp` `ThinMoonVisibility`, `FlagMoonFarFast`): the part past
+  `MoonExactFar` (8 m, where the moon's penumbra is as wide as a micro-triangle of a 1 m
+  card) is traced first with 2 states; a ray it blocks is done, the exact near part runs
+  for the rest. 1.5 m instead of 8 m gave only 0.3 ms more and was not kept.
+- **Bounce light** (`rt_gi.comp`): level 2 the shadow rays at a bounce point
+  (`BounceFlagOmmShadows`), level 3 the bounce rays too (`BounceFlagOmmBounce`). Reflections
+  and the fire-light shadows of the direct pass keep the exact test.
+- The flag is passed as the number 0x400, so the shader modules carry no micromap capability;
+  C++ sets the bits only with micromaps on (`DirectOmmFastFlags`, `BounceOmmFastFlags`).
+
+`BB_RT_OMM_FAST` 0-3, live, default 0 until the user decides (levels above). Interleaved,
+2 rounds each, test switches on, same view per place:
+
+| place | level 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| bonfires, direct ms | 9.0-9.8 | 7.5-8.0 | 7.4-8.0 | 7.5-7.9 |
+| bonfires, GI ms | 5.7-6.3 | 5.8-6.1 | 5.1-5.5 | 4.4-4.6 |
+| bonfires, frame rate | 39.3 | | | 44.1 |
+| hut gate (open sky), direct / GI | 3.4 / 4.3 | 3.6-3.9 / 4.2-4.8 | 3.4-4.0 / 4.0-4.7 | 3.4-3.9 / 3.6-4.1 |
+| Central Yharnam lamp, direct / GI | 3.7 / 4.6-4.8 | | | 3.6-3.7 / 4.2-4.4 |
+
+Picture at level 0 against level 3, same view: the coat and the fire-lit ground at the
+bonfires show no difference beyond the flames' own flicker; Central Yharnam looks the same.
+Not looked at: the moon shadow of an iron fence more than 8 m from where it falls (a fence
+card's micro-triangles are wider than its bars).
+
+## Sharp moon shadows: a point moon uses each pixel's own ray (2026-11-15)
+
+User: "theres any way to make they sharp instead of blurry?", then, with the moon as a point
+(`BB_RT_MOON_ANGLE=0` in the live settings, it was 3): "why the shadows look like a square
+shadows". With the disc, a leaf shadow from the canopy reaches the coat as one soft blob; as
+a point it is leaf-shaped, and the direct pass is faster (40 -> 47 fps at the spot: uniform
+windows trace no penumbra rays). But `MoonHalfShare` gave every pixel the mean of the rays
+of its 5x5 window, so each patch of light was spread over that square: square corners on the
+coat and on a trunk, with the micromaps as 2 states or not (`BB_RT_OMM_FAST` 0 and 3 look
+the same). For a point moon there is no cone to average: the pixel's own ray is the exact
+answer, and in a mixed window every pixel traces one. Now `given` is the pixel's own value
+when the cone is a point (`MoonPointCos`) and it has a ray; the window mean stays for a
+disc and for pixels of uniform windows. Same view, shader swapped live: leaf-shaped patches
+on the coat, no square corner, 43 fps. The live setting is the user's; the code default of
+the angle is unchanged.
+
+Hot-swapping `rt_direct_comp` in a long session froze the game for 22 s (pipeline compile).
+
+## The frame rate fell as the session went on: full UV and micromap pools (2026-11-15)
+
+User, half an hour into a Forbidden Woods session: "this area without rt runs 120 fps, with rt
+runs 30". At their spot the ray tracing passes took 27 ms (direct 12-13, GI 8, reflections
+4.2). A fresh start at the same spot and view: 13 ms, 47 fps. The scene costs more the longer
+one plays.
+
+A view that counts, per pixel, how often the far moon ray comes back to the shader (written
+over the direct light) was solid red on every moon-lit surface, and every one of those
+returns came from one instance: the canopy mesh, 87,492 triangles, alpha-tested, without a
+micromap. Two pools had run out, silently:
+
+- **UV pool.** Every cached BLAS keeps 32 bytes of UVs per triangle. The pool was sized for
+  one frame of triangles (128 MiB, 4.2 M triangles), the BLAS cache holds the world near the
+  player (it was at 219 of 1783 MiB when the UV pool was already full). A mesh that found no
+  room was built with `uv_base = NoUv` but still flagged as having UVs: its micromap bake was
+  dropped at every rebuild (`OMM dropped ... uv 4294967295`, every 21 frames), its alpha test
+  ran in the shaders on whatever the pool holds at that index, and the gather pass wrote its
+  UVs there, into other meshes' UVs.
+- **Micromap pool.** Fixed at 64 MiB. A canopy mesh needs 2.9 MiB in one block; with the
+  retired blocks of rebuilt meshes still held, the allocation failed for the same mesh again
+  and again (`OMM not made ... room 1, wanted 1` in the micromap log).
+
+Now:
+
+- `UvPoolDefaultMb`: a third of the BLAS pool, at most 1 GiB, never under the frame's
+  (594 MiB with a 1783 MiB BLAS pool). `OmmPoolDefaultMb`: a sixth of the BLAS pool, 64 to
+  512 MiB (297 MiB); its index pool an eighth of that. `BB_RT_UV_MB`, `BB_RT_OMM_MB` and
+  `BB_RT_OMM_INDEX_MB` still override.
+- Both pools evict the least recently used meshes when their live bytes pass three quarters
+  (`PoolNearFull`, as the BLAS pool does): a freed block only comes back some frames later,
+  so evicting when an allocation fails is too late.
+- A mesh that still finds no UV room is built without UV flags and without a micromap: it is
+  an alpha-unresolved instance, never one tested on a stray index.
+- Two log lines with the pools' state and failures, and one with the alpha-tested instances
+  traced without a micromap (count, triangles, the largest and why). `BB_RT_OMM_LOG=1` also
+  logs each micromap that was wanted and not made. The pick's blocker line names the blocker
+  entry's micromap state.
+
+Same tour each time (five spots around the bonfires, the camera turned at each, back to the
+path spot, same view), test switches on:
+
+| at the path spot | RT passes | alpha instances without micromap |
+|---|---|---|
+| fresh start, before | 13.0-13.8 ms | 0 |
+| after the tour, before | 17.1 ms | 4, 160,019 triangles |
+| the user's 30 minute session, before | 25-27 ms, 30 fps | the canopy mesh at least |
+| after the tour, fixed, UV pool forced to the old 128 MiB | 14.1-15.0 ms | 0 (1750 evictions) |
+| after the tour, fixed | 12.6 ms, 48 fps | 0, pools at 99 of 594 and 34 of 297 MiB |
+| after Central Yharnam and back, fixed | 15.8 ms (the enemies are back) | 0 |
+
+Not covered: a static mesh built in a frame whose micromap budget was already spent keeps no
+micromap until it is rebuilt (seen: one of 2,134 and one of 9,450 triangles). The half hour
+of walking itself was not replayed, only the tour.
+
+What did not help, measured at the user's spot before the cause was known: a quarter of the
+moon rays a frame instead of half (direct 11.8 -> 10.3 ms, not kept), lone pixels reusing
+last frame's value (no change), a shorter moon ray (`BB_RT_MOON_REACH`, no change).
+
+### Orbs in the air near lamps: light-ray sprites became halo spots (2026-11-19)
 
 Central Yharnam, at the lamp by the stairs (-25.2 40.6 250.3): three warm orbs blinked over the
 dark stairs, about 9 frames on, 43 off. `BB_RT_HALO=0` removed them. `BB_RT_HALO_LOG=1` (live)
@@ -5439,3 +5828,197 @@ vertices, or 3 when the count is not a multiple of 4) wider than `BB_RT_GLOW_MAX
 before clustering. A quad that wide could never give a centred spot anyway (`JoinRadius` 0.6).
 Checked live at that spot: 0 spots, 0 halos, no orbs in 40 frames. A depth test per halo (no halo when
 the surface at the lamp's pixel is in front of it) did not change these orbs and was not kept.
+
+### Hunter's Dream look pass under the drama tie-break (2026-11-20)
+
+User rule: between matching stock and a little more dramatic/expressive, the dramatic one wins
+(render-look skill). Burning Dream by the workshop stairs, then Central Yharnam street and
+Iosefka's Clinic as second areas. Nothing became a default:
+
+- `BB_RT_EXPOSURE_KEY` -5.0 matched stock brightness; rejected (brightening to stock), -5.5 kept.
+- Moon gain x1.6 in `DirectionalSets` (temporary shader constant): Dream flowers 61 -> 70-92 luma,
+  but Central Yharnam's coat, already near white at x1.0, clipped. Rejected.
+- `BB_RT_FX_FOG_STRENGTH` 0.6: p90/p20 3.1 -> 2.3 (flatter). Rejected.
+- `BB_RT_THIN_TRANSMIT` 0.8, `BB_RT_GI_FILL_SKY` 0.5, `BB_RT_EXPOSURE_WHITE` 9/12: no gain.
+- `BB_RT_EMITTER_RANGE` 0.8 made the shrine candles white and gave ~+4 fps, but any value <= 1
+  turns the emitter conversion off (legacy curve), so it also drops the fire reach of
+  `BB_RT_EMITTER_BRIGHT` the user asked for. Trap, not a tuning value. Rejected.
+- `BB_RT_DIRECT_DEBUG=11` on the flower field: almost all blue (petals face away from the moon).
+  The darker-than-stock field is physical and fits the tie-break; its orange is the house fire.
+
+### Central Yharnam: live white level back to the default 3 (2026-11-20)
+
+The street by the lamp is mostly deep shadow under a strong sunset key, so the meter measured
+log2 -6.93 (stock -5.86) and boosted +1.49 EV, at the 1.5 cap. The live `rt.cfg` had
+`BB_RT_EXPOSURE_WHITE=6` (LOOK_GUIDE, 2026-11-09), which keeps the full boost on highlights: the
+sunlit white coat read 171-182 luma (stock 104) with a glow, and lit stone 112-119. A/B at the
+same spot (luma: coat / lit street / lit facade / shadow):
+
+| set | coat | street | facade | shadow |
+|---|---|---|---|---|
+| white 6 | 175 | 110 | 119 | 36 |
+| white 3 (code default) | 131 | 88 | 83 | 29 |
+| white 2 | 117 | 66 | 71 | 31 |
+| key -6.0 | 147 | 84 | 86 | 30 |
+| max 1.0 EV | 157 | 93 | 93 | 34 |
+| stock | 104 | 97 | 56 | 32 |
+
+White 3 puts the coat in the 115-135 band, keeps the stock shadow floor and stays darker than
+stock: more dramatic, no glow. Hunter's Dream: no change (its highlights sit under the roll-off).
+Iosefka's Clinic: the lamp hot spot over the arch 130 -> 100, floor 65 -> 54, warm pools kept.
+The override is gone from `rt.cfg`, so the code default 3 applies; no code change.
+
+### Night shift: darks desaturate and lean cool (2026-11-20, `BB_RT_NIGHT_SHIFT`)
+
+LOOK_GUIDE rule 5. Warm bounce light read brown/orange in shade where stock is cool grey: the
+Central Yharnam street under the sunset key, the Hunter's Dream path and flowers next to the
+burning house. `rt_exposure.comp` phase 1 (after the boost, geometry only, skipped while paused)
+now mixes each pixel toward its own luminance by w and tilts it cool (r x (1 - 0.15 w),
+b x (1 + 0.3 w), luminance kept). w = `BB_RT_NIGHT_SHIFT` (default 0.5, live, 0 = off) x
+(1 - smoothstep(mid / 16, mid, L)), mid = exp2(key): 0 at mid grey and above, so lit midtones,
+fire and lamps keep their colour. Phase 1 now also runs with no boost (gain 1).
+
+Lab of the darkest 20% / the 40-80% band (C ratio), off -> on at 0.5, same view:
+
+| area | dark b | dark C / mid C |
+|---|---|---|
+| Central Yharnam street | -2.3 -> -2.9 | 0.41 -> 0.39 |
+| Hunter's Dream (burning) | +4.1 -> +1.8 | 0.61 -> 0.54 |
+| Forbidden Woods bonfires | -2.2 -> -4.0 | 0.48 -> 0.50 |
+
+0.7 greyed the Dream's mids too (mid C 7.8 -> 6.8), so 0.5. Near-black C stays under 6.
+
+### Lamp and candle source 0.6 / 0.85 -> 0.2 / 0.3 (2026-11-20)
+
+Central Yharnam beyond the street: lamp and candle light flooded stone gold where stock is cool
+blue-grey with small lamp pools (exposure boost 0 at the gate, so the light itself). `lights`
+at the Great Bridge gate: lamp lights game 5.7-9.6 -> RT 52-106. `BB_RT_LAMP_RANGE` 2.5 /
+`CANDLE_RANGE` 1.5 trimmed only ~15 %; GI, `SHADOW_STRENGTH`, `LAMP_WARM` 0 changed little.
+The far field grows with the source squared, so the source is the lever. Lab L / b per region,
+RT vs stock (F9):
+
+| Spot | Region | old (0.6 / 0.85) | new (0.2 / 0.3) | stock |
+|---|---|---|---|---|
+| Tomb of Oedon (2412953) | ground | 17.4 / +4.1 | 10.9-12.9 / -0.4..+0.2 | 8.0 / -1.9 |
+| Tomb of Oedon | statue by lamp | 20.0 / +6.7 | 14.5 / +3.1 | 12.0 / -2.9 |
+| Great Bridge gate (2412952) | statues L | 27.5 / +8.3 (lum 118) | 21.9 / +3.6 | 16.7 / +0.2 |
+| Iosefka's Clinic (2412950) | arch | 35.3 / +19.4 | 15.2 / +5.0 | 13.4 / +0.9 |
+
+Hunter's Dream (fires, moon) and the Woods lamp: no change past fire flicker. The CY street is
+sun-lit, unchanged. The clinic floor by the messenger lantern stays orange-bright: that is the
+exposure boost (+1.5 EV) on red wood, `EXPOSURE=0` gives stock (L 20.5 vs 20). The stairs at
+Oedon stay darker than stock (7 vs 11.5): kept under the drama tie-break.
+
+### Central Yharnam fires and open-sky ambient (2026-11-20)
+
+**Pyre flame light cut as a fill.** At the effigy plaza the game lights the ground around the
+pyre with a flame-height light (`LegacyDPointLight3/4`, r 8.4, warm 2.5/1.4/0.6, 2.7 m above
+the pile). The game animates its radius every frame (8.43-8.57), and the fill-vis flicker latch
+(`BB_RT_FILL_FLICKER`) reset its turn count on any radius change, so it never latched, was
+judged a designer fill and cut to 0. The pile's own light (r 10, colour 14-17) sits at ground
+level 0.19 m inside the logs and lit nothing around it. The reset now needs a radius jump over
+20% (a different light in the cell). Pyre ground (Lab L / b): 25 / +4 -> 35-41 / +11-16, stock
+39-44 / +16-20.
+
+**Fire falloff matched per light** (`BB_RT_EMITTER_MATCH` 1, rt_lights.h `MatchedSourceFrac`):
+fires (not lamps or candles) get the source size at which s2/(d2+s2) - s2/(R2+s2) equals the
+game's (1 - d/r)^2 at d = r/2 (0.34 r at R = 1.26 r, 0.29 r at 3.8 r); the fixed
+`BB_RT_EMITTER_SOURCE` 0.2 gave half the game's light at r/2. 0 = the old fixed source.
+`BB_RT_EMITTER_GROW_REACH` (default 0.25, was 1 implicitly): a bright fire's reach grows with
+grow^this. With the matched source, 1 carried the Dream's burning house warm over the whole
+garden (stairs b +16, stock +2); 0.25 keeps the old Dream look (+8-10), 0 lost the warmth the
+house was given on purpose. Plaza (original view): ground 31 -> 40 (stock 51), right 18 -> 21
+(stock 26). Woods unchanged (its fire pits are r 2.5 candle-path lights).
+
+**Baked ambient kept under open sky** (`BB_RT_AMBIENT_SKY` 1, `BB_RT_AMBIENT_SKY_REACH` 60 m):
+`CutAmbient` strength and the direct pass's spec cut are scaled by 1 - openness. Openness =
+2 rays a frame in a cosine lobe around world up, mirrored into the surface's hemisphere, time-
+averaged in the moon history buffer (now vec4, z), debug view `BB_RT_DIRECT_DEBUG=13`. A lobe
+around the normal read 0.3 on an open alley wall (it saw the building across). Open street:
+already at stock either way. Clinic interior: no change (stays cut). Covered archway (the
+"alley" spot -202.6,-36.2,27.9 is under a stone arch): wall 5.0 -> 5.8, stock 11.6, cut off 13;
+kept darker as a covered passage. The reflection pass applies its own spec cut
+(`GlassPush.base_cut`, `spec_cut_frame`) and is not gated yet.
+
+### Central Yharnam pass 2: wet sheen, sky tint, exposure key (2026-11-20)
+
+- **Reflection sky gate.** The reflection pass cut the stock specular everywhere (`base_cut`), so
+  the wet street lost its sheen under open sky. The reflect variant of `rt_gi.comp` now reads
+  the direct pass's moon history (binding 6 reused: the reflect pass writes no GI history, and
+  the push-descriptor set is full at 32) and scales the cut by `1 - open * ambient_sky`
+  (`BaseKeep`). Foreground cobbles at `post_lamps_off`: L 16 -> 30 (stock 45).
+- **`BB_RT_GI_SKY_TINT` (default 0.5, was 0).** Sky radiance in the GI pass takes the hue of the
+  fill sky by this fraction. The magenta CY clouds lit the coat lavender (Lab a/b +5.4/-9.9,
+  stock -0.1/-4.7); 0.5 gives +3/-5, street b -6 (stock -5.5). The Dream is within noise.
+- **Exposure key -5.5 -> -6.5 (`BB_RT_EXPOSURE_MAX` stays 1.5).** The fixed key pulled every view
+  to -5.5, but stock's own metered level differs per area (log2: Dream -4.7, chapel -5.7, Woods
+  -5.9, Central Yharnam -6.45, Cathedral Ward stairs facing the moon -6.34). With -5.5 Central
+  Yharnam came out 1 EV over stock. A cap of 0.5 fixed that but left the backlit Cathedral Ward
+  view 1.1 EV under stock (player and balustrade black). Key -6.5 with the 1.5 cap: CY -6.53
+  (stock -6.47), CW backlit -6.42 (stock -6.34), Woods about -6.6 (stock -5.9), the Dream gets no
+  boost. Every area ends at or under stock, darker ones more so.
+- **Open, left as is:** the arch-plaza wall facing the game's warm set-0 directional is lit in
+  RT (moon visibility 1, n.L 0.93) while stock keeps it shaded; no occluder found in the TLAS.
+  The stairs under the hanging lantern (#20, game r 5, reach 19) are 2x stock and warmer;
+  lamp range/warm knobs barely move it. Both read as drama, so they stay.
+
+### Cathedral Ward pass (2026-11-20)
+
+- Grand Cathedral and Oedon Chapel: close to stock, darker altar and back wall. The chapel's back
+  wall and the lamp's cool pulse (#88, no emitter) are designer fills in stock; left out (no fake
+  ambient light).
+- Outdoor stairs below the Grand Cathedral (mark `cw_stairs`): the wall above the shrine is lit by
+  the moon found in the sky (`BB_RT_MOON_FROM_SKY`); the game's own light direction gives stock's
+  layout (wall 32 vs stock 29, left stairs lit). Kept as drama. The moonlit stairs are warm
+  (b +10) because the game's set-0 light is warm (0.80 0.52 0.43); stock looks neutral only from
+  its blue fill (light 2), so LOOK_GUIDE rule 4c applies: left as is.
+- Shrine candle #91 (game colour 4.76) passes the big-fire threshold (`BB_RT_EMITTER_BRIGHT` 2):
+  `BIG_GAIN` 1 / `BRIGHT` 5 lower the shrine 7-10 L only; not changed.
+
+## Per-map look (2026-11-20)
+
+`mAA_BB:KEY=value` lines in rt.cfg override a knob on one map; built-in per-map defaults live in
+`Rt::MapKnobDefaults` (rt_hot.h). Lookup order: rt.cfg, environment, per-map default, code
+default. The map comes from the player's block (`bbgpu_player_block()`) and is re-read on every
+map change ("Ray tracing: map mXX_YY at frame N" in the log).
+
+Survey: 16 maps, 4-5 spots each (start lamp + spread spots 15-60 m away), RT and F9 stock
+frames of the game window, metrics p5/p50, p90/p20, share under 5, Lab a/b of the top 10%
+and mid band, dark/mid chroma, Laplacian detail.
+
+| Map | Exposure key | Other | Why |
+|---|---|---|---|
+| m21_00 Hunter's Dream | -5.5 | | stock -4.7 |
+| m21_01 Workshop | -5.5 | | one spot |
+| m22_00 Hemwick | -7.0 | | at -6.5 the median spot was +0.5 EV over stock |
+| m23_00 Old Yharnam | -5.5 | | 1.5-stop cap binds first |
+| m24_00 Cathedral Ward | -6.2 | | |
+| m24_01 Central Yharnam | -6.5 | | |
+| m24_02 Upper Cathedral Ward | -5.5 | | cap binds |
+| m25_00 Cainhurst | -5.3 | | at -6.5 -0.9 EV |
+| m26_00 Mensis | -6.3 | | |
+| m27_00 Forbidden Woods | -6.1 | | |
+| m28_00 Yahar'gul | -6.9 | `GI_SKY_TINT=0` | GI misses keep the purple dome: mid b -1.6 -> -2.4 (stock -2.9) |
+| m32_00 Byrgenwerth | -5.5 | `FX_FOG=0` | traced fog black under canopy: mid b -2.7 -> -8.3 (stock -6.7) |
+| m33_00 Nightmare Frontier | -4.8 | `FX_FOG=0` | under 5: 69% -> 0.3% (stock 12%) |
+| m34_00 Hunter's Nightmare | -4.8 | `FX_FOG=0` | under 5: 7.2% -> 3.7% (stock 4.6%) |
+| m35_00 Research Hall | -5.5 | | cap binds |
+| m36_00 Fishing Hamlet | -5.5 | `FX_FOG=0` | the sea mist comes back (p50 8 -> 19, stock 15) |
+
+Keys: the key that leaves the median spot just under stock (-0.2 EV). `FX_FOG=0` keeps the
+game's own fog: the traced fog's single scatter gets no sky or moon under canopy and cliffs, so
+the stock pale mist went black (LOOK: fog stays the stock pale mist colour). On the other maps
+it was neutral (within 1-2 points on every metric) and stays on.
+
+Tried and dropped:
+- Exposure soft knee + `BB_RT_EXPOSURE_MAX` 2.5-3.5: over all 77 spots it added more spots over
+  stock (10 -> 13-18) than it rescued from black (10 -> 4-9). Dark interiors are dark because
+  their stock light is designer fill; max stays 1.5.
+- `GI_SKY_TINT=1` / `GI_FILL_SKY` 2-3 against the warm cast: no change after adaptation.
+- Torch carriers warming the cloak: stock does the same.
+- Warm moonlit ground under Yahar'gul's blood moon: the game's own moon colour; kept as drama.
+
+Fix: deep red lights are not flames (`Rt::FlameColour`, green >= 0.3 x red). The Hemwick hit
+effect on the player (game colour 0.120 0.018 0.022, LegacyDPointLightShadowed1) was taken as
+an emitter, matched 12x (track 1.49) and flooded the scene red. Real flames sit at green 0.39
+(burning house) to 0.7 of red.

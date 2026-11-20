@@ -739,6 +739,7 @@ int main(int argc, char **argv) {
     bbgpu_hang_set_image(image, size);
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     bbgpu_frame_rate_patch(image, size); /* after the frame rate patches */
+    bbgpu_player_map_set_image(image);
     bbgpu_pc_menu_prepare(image);
 #ifdef _WIN32
     /* Offline Chalice Glyphs (src/local_chalice.cpp, docs/LOCAL_CHALICE.md): checks the 1.09 code it

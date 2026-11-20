@@ -361,8 +361,9 @@ struct DirectParams {
     std::array<float, 4> far_fade;
     std::array<float, 4> ambient_cut;
     std::array<float, 4> ambient_spec_cut;
+    std::array<float, 4> ambient_sky; // x: BB_RT_AMBIENT_SKY
 };
-static_assert(sizeof(DirectParams) == 304);
+static_assert(sizeof(DirectParams) == 320);
 
 struct FogParams {
     std::array<float, 4> proj;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <filesystem>
 #include <string_view>
@@ -129,9 +130,35 @@ public:
         ++generation_;
         return true;
     }
+    // Per-map keys: a line `m24_01:BB_RT_X=v` wins over `BB_RT_X=v` while the player stands in
+    // map m24_01 (Central Yharnam). Returns true when the map changed (the knobs need a re-read).
+    bool SetMap(const std::string& map) {
+        if (map == map_) {
+            return false;
+        }
+        map_ = map;
+        return true;
+    }
+    const std::string& Map() const {
+        return map_;
+    }
+    size_t MapOverrides() const {
+        size_t n = 0;
+        const std::string prefix = map_ + ":";
+        for (const auto& kv : values_) {
+            n += !map_.empty() && kv.first.compare(0, prefix.size(), prefix) == 0 ? 1u : 0u;
+        }
+        return n;
+    }
     const char* Get(const char* name) const {
         if (values_.empty()) {
             return nullptr;
+        }
+        if (!map_.empty()) {
+            const auto mit = values_.find(map_ + ":" + name);
+            if (mit != values_.end()) {
+                return mit->second.c_str();
+            }
         }
         const auto it = values_.find(name);
         return it == values_.end() ? nullptr : it->second.c_str();
@@ -147,6 +174,7 @@ private:
     std::string path_;
     FileStamp stamp_{};
     uint64_t generation_ = 0;
+    std::string map_;
     std::unordered_map<std::string, std::string> values_;
 };
 
@@ -155,11 +183,61 @@ inline LiveConfig& LiveKnobs() {
     return config;
 }
 
+// Built-in per-map look (docs/PATH_TRACING.md "Per-map look"): used when neither rt.cfg nor the
+// environment sets the knob. Stock's own exposure differs per map, so one key cannot match all.
+struct MapKnobDefault {
+    const char* map;
+    const char* name;
+    const char* value;
+};
+// Keys from a 4-5 spot RT/stock survey per map (2026-11-20): the key that leaves the median spot
+// just under stock (-0.2 EV, more dramatic). -5.5 where the 1.5-stop boost cap binds first.
+inline constexpr MapKnobDefault MapKnobDefaults[] = {
+    {"m21_00", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Hunter's Dream (stock -4.7)
+    {"m21_01", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Hunter's Dream workshop
+    {"m22_00", "BB_RT_EXPOSURE_KEY", "-7.0"}, // Hemwick (at -6.5 +0.5 EV over stock)
+    {"m23_00", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Old Yharnam (cap binds)
+    {"m24_00", "BB_RT_EXPOSURE_KEY", "-6.2"}, // Cathedral Ward (stock -5.7 .. -6.3)
+    {"m24_01", "BB_RT_EXPOSURE_KEY", "-6.5"}, // Central Yharnam (stock -6.47)
+    {"m24_02", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Upper Cathedral Ward (cap binds)
+    {"m25_00", "BB_RT_EXPOSURE_KEY", "-5.3"}, // Cainhurst (at -6.5 -0.9 EV)
+    {"m26_00", "BB_RT_EXPOSURE_KEY", "-6.3"}, // Nightmare of Mensis
+    {"m27_00", "BB_RT_EXPOSURE_KEY", "-6.1"}, // Forbidden Woods (stock -5.9)
+    {"m28_00", "BB_RT_EXPOSURE_KEY", "-6.9"}, // Yahar'gul (at -6.5 +0.1 EV)
+    {"m32_00", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Byrgenwerth (cap binds)
+    {"m33_00", "BB_RT_EXPOSURE_KEY", "-4.8"}, // Nightmare Frontier (at -6.5 -1.0 EV)
+    {"m34_00", "BB_RT_EXPOSURE_KEY", "-4.8"}, // Hunter's Nightmare (at -6.5 -0.9 EV)
+    {"m35_00", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Research Hall (cap binds)
+    {"m36_00", "BB_RT_EXPOSURE_KEY", "-5.5"}, // Fishing Hamlet (cap binds)
+    // Mist maps: the traced fog's single scatter gets no sky or moon under canopy and cliffs,
+    // so the stock pale mist went black (Frontier 65% of pixels under 5 vs stock 14%,
+    // Byrgenwerth mid b -2.7 vs stock -8.3). The game's own fog keeps the mist (LOOK: fog
+    // stays the stock pale mist colour).
+    {"m32_00", "BB_RT_FX_FOG", "0"}, // Byrgenwerth
+    {"m33_00", "BB_RT_FX_FOG", "0"}, // Nightmare Frontier
+    {"m34_00", "BB_RT_FX_FOG", "0"}, // Hunter's Nightmare
+    {"m36_00", "BB_RT_FX_FOG", "0"}, // Fishing Hamlet
+    // Yahar'gul: GI sky misses keep the painted purple dome (mid b -1.6 -> -2.4, stock -2.9).
+    {"m28_00", "BB_RT_GI_SKY_TINT", "0"},
+};
+
+inline const char* MapKnobDefault(const std::string& map, const char* name) {
+    for (const auto& d : MapKnobDefaults) {
+        if (map == d.map && std::strcmp(name, d.name) == 0) {
+            return d.value;
+        }
+    }
+    return nullptr;
+}
+
 inline const char* Knob(const char* name) {
     if (const char* value = LiveKnobs().Get(name)) {
         return value;
     }
-    return std::getenv(name);
+    if (const char* value = std::getenv(name)) {
+        return value;
+    }
+    return MapKnobDefault(LiveKnobs().Map(), name);
 }
 
 inline bool KnobIs(const char* name, char on) {
