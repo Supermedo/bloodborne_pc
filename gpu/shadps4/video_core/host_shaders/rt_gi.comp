@@ -348,8 +348,11 @@ uint NormalComponents() { return (cfg.z >> 16u) & 0xFu; }
 uint Flags() { return tlas_frame_flags.w; }
 uint Frame() { return tlas_frame_flags.z; }
 float Bias() { return strength_bias.y; }
+// GI keeps tracing past BB_RT_FAR_START (only lamp and moon shadow rays fall back there): the
+// lamp halos are bounced light, and cutting GI at 30-40 m made them pop in when walking closer
+// (user, 2026-11-19: "the lamps from far away, when move front, it goes pop the halo").
 float FarWeight(vec3 p) {
-    return far_fade.w > 0.0 ? clamp((far_fade.y - length(p)) * far_fade.z, 0.0, 1.0) : 1.0;
+    return 1.0;
 }
 uint Bounces() { return bounce.x; }
 // BB_RT_MOON_REACH (far_fade.x, 0 = 10 km): the moon shadow ray length, as rt_direct.comp.

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -217,6 +219,57 @@ struct CacheEntry {
     // so the cache's copy stays out while this entry stands in the TLAS. 0xFF = not looked up.
     std::array<uint64_t, 4> geo_keys{};
     uint8_t geo_key_count{0xFF};
+    // An animated mesh seen standing in one place for a while (HomeTable): kept off screen like
+    // a static one. world/world_at: id and translation of the draw's world matrix when known.
+    bool stays_home{};
+    uint64_t world{};
+    std::array<float, 3> world_at{};
+};
+
+inline float Distance2(const std::array<float, 3>& a, const std::array<float, 3>& b) {
+    const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+// A swaying tree is skinned like a character, but it stays where it stands. Measured
+// 2026-11-19 (Central Yharnam bridge): the trees' shadows went 0.5 s after a look up, because
+// skinned meshes were kept off screen only BB_RT_KEEP_SKINNED (30) frames. Per entry tracking
+// failed there: two copies of the tree share one draw key (the entry flips between them) and
+// the entry is rebuilt under a new id about every 30 frames. So the memory is by place:
+// (palette, triangles, 2 m world cell) of the probe sample, kept across entries. A cell sampled
+// HomeSamples times over at least HomeFrames frames stays home.
+struct HomeTable {
+    static constexpr float Cell = 2.0f;
+    static constexpr uint32_t HomeSamples = 8;
+    static constexpr uint64_t HomeFrames = 300;
+    struct Record {
+        uint64_t first{}, last{};
+        uint32_t samples{};
+    };
+    std::unordered_map<uint64_t, Record> records;
+
+    static uint64_t Key(uint64_t palette, uint32_t triangles, const std::array<float, 3>& at) {
+        uint64_t h = palette * 0x9E3779B97F4A7C15ull ^ triangles;
+        for (const float v : at) {
+            h = (h ^ uint64_t(int64_t(std::floor(v / Cell)))) * 0x100000001B3ull;
+        }
+        return h;
+    }
+
+    // Returns whether the mesh at `at` has stayed home.
+    bool Sample(uint64_t palette, uint32_t triangles, const std::array<float, 3>& at,
+                uint64_t frame) {
+        if (records.size() > 65536) {
+            records.clear();
+        }
+        Record& r = records[Key(palette, triangles, at)];
+        if (!r.samples || frame - r.last > 3600) {
+            r = {frame, frame, 0};
+        }
+        r.last = frame;
+        r.samples += r.samples < HomeSamples ? 1 : 0;
+        return r.samples >= HomeSamples && r.last - r.first >= HomeFrames;
+    }
 };
 
 // Unused frames before an unsettled placed entry goes (drawn on one frame only): a piece whose
@@ -246,11 +299,6 @@ struct KeptPick {
     uint64_t triangles{}, over_budget{}, too_big{};
 };
 
-inline float Distance2(const std::array<float, 3>& a, const std::array<float, 3>& b) {
-    const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
-    return dx * dx + dy * dy + dz * dz;
-}
-
 inline bool KeepNear(const CacheEntry& e, const std::array<float, 3>& camera, const KeepRules& k) {
     return k.distance > 0.0f && e.seen && Distance2(e.seen_camera, camera) <= k.distance * k.distance;
 }
@@ -260,7 +308,8 @@ inline bool KeepNear(const CacheEntry& e, const std::array<float, 3>& camera, co
 // run made them updatable, and with one instance each they were kept only skinned_frames and
 // evicted after 120 unused frames, so whole pieces missed when they came back into view.
 inline bool KeepShortLived(const CacheEntry& e) {
-    return !e.placement && e.updatable && e.instances <= 1 && (e.skinned || e.palette || e.moving);
+    return !e.placement && e.updatable && e.instances <= 1 && (e.skinned || e.palette || e.moving) &&
+           !e.stays_home;
 }
 
 inline bool KeepInstance(const CacheEntry& e, uint64_t frame, const std::array<float, 3>& camera,
@@ -526,6 +575,29 @@ public:
     // sit under their key with ShelfBit in the occurrence, which no draw ever asks for, so they
     // stay in the TLAS as kept instances and can be taken back when the draw returns to them.
     static constexpr uint32_t ShelfBit = 0x40000000u;
+    // An animated mesh that stays home, put aside when its occurrence key went to another copy
+    // of it (two trees drawn under one key): the occurrence is this bit and its world matrix id.
+    static constexpr uint32_t StashBit = 0x20000000u;
+    static DrawKey StashKey(DrawKey k, uint64_t world) {
+        k.occurrence = StashBit | uint32_t((world ^ world >> 29 ^ world >> 58) & 0x1FFFFFFFu);
+        return k;
+    }
+
+    // The key Find will give this draw next (instances cleared, this frame's occurrence).
+    DrawKey NextKey(DrawKey k) const {
+        k.instances = 0;
+        k.occurrence = 0;
+        if (k.placement != 1) {
+            const auto it = occurrences.find(k);
+            k.occurrence = it == occurrences.end() ? 0u : it->second;
+        }
+        return k;
+    }
+
+    CacheEntry* Peek(const DrawKey& k) {
+        const auto it = entries.find(k);
+        return it == entries.end() ? nullptr : &it->second;
+    }
 
     static bool SameDraw(const DrawKey& a, const DrawKey& b) {
         DrawKey x = a, y = b;
@@ -651,6 +723,53 @@ public:
         for (CacheEntry* e : list) {
             fn(*e);
         }
+    }
+
+    // Frees up to `count` ids when they run short: entries not used on the last frame, the ones
+    // last seen farthest from the camera first (never seen counts as farthest), then the oldest.
+    // Least recent first would pick the kept off-screen casters around the camera (kept because
+    // they are near, so their last use is old), and their shadows went with them.
+    template <class Kept, class Release>
+    size_t EvictFarthest(size_t count, const std::array<float, 3>& camera, Kept&& kept,
+                         Release&& release) {
+        struct Pick {
+            float d2;
+            uint64_t last_used;
+            uint32_t id;
+            bool kept;
+            uint32_t triangles;
+        };
+        std::vector<Pick> picks;
+        for (const auto& [key, e] : entries) {
+            if (e.last_used + 1 >= frame) {
+                continue;
+            }
+            // Distance in 10 m bands: a camera a few metres off is the same place.
+            const float band = e.seen ? std::floor(std::sqrt(Distance2(e.seen_camera, camera)) /
+                                                   10.0f)
+                                      : std::numeric_limits<float>::infinity();
+            picks.push_back({band, e.last_used, e.id, kept(e), e.triangles});
+        }
+        count = std::min(count, picks.size());
+        // An entry not in the TLAS goes before any kept one, then the farthest band, then the
+        // smallest mesh. Ranked by exact distance, a tree last seen from a camera 3 m off went
+        // before hundreds of small pieces seen from right here, and its moon shadow went with
+        // it (2026-11-19).
+        std::partial_sort(picks.begin(), picks.begin() + count, picks.end(),
+                          [](const Pick& a, const Pick& b) {
+                              if (a.kept != b.kept) {
+                                  return !a.kept;
+                              }
+                              if (a.d2 != b.d2) {
+                                  return a.d2 > b.d2;
+                              }
+                              return a.triangles != b.triangles ? a.triangles < b.triangles
+                                                                : a.last_used < b.last_used;
+                          });
+        for (size_t i = 0; i < count; ++i) {
+            Erase(picks[i].id, release);
+        }
+        return count;
     }
 
     template <class Release>

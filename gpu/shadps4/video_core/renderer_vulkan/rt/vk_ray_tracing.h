@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <deque>
 #include <cstdio>
 #include <functional>
 #include <span>
@@ -150,7 +151,7 @@ public:
     [[nodiscard]] bool GlowShader(u64 ps) const {
         return enabled && !glow_ps.empty() && Rt::HashListed(glow_ps, ps, 0);
     }
-    void AddGlows(std::span<const std::array<float, 6>> vertices);
+    void AddGlows(std::span<const std::array<float, 6>> vertices, u64 ps_hash = 0);
     void OnDrawBound(vk::ImageView albedo_view, VideoCore::ImageId image, u64 uid,
                      vk::ImageView normal_view = {}, VideoCore::ImageId normal_image = {},
                      vk::ImageView alpha_view = {}, VideoCore::ImageId alpha_image = {},
@@ -648,6 +649,10 @@ private:
     std::vector<RetiredBlock> retired_uv;
     u64 retired_uv_bytes = 0;   // bytes of retired_uv, still counted as used by uv_pool
     u64 surface_uv_evicted = 0; // meshes evicted because the UV pool was near full
+    u64 id_evicted = 0;         // meshes evicted to keep an eighth of the cache ids free
+    Rt::HomeTable home_table;   // animated meshes that stay in one place (swaying trees)
+    u64 home_stashed = 0, home_unstashed = 0; // copies of a tree put aside / taken back
+    const char* release_reason = "draw";       // BB_RT_SHORT_LOG: who erased an entry
     u64 retired_omm_bytes = 0;  // bytes of retired_omm, still counted as used by omm_pool
     u64 omm_evicted = 0;        // meshes evicted because the micromap pool was near full
     Rt::BlockPool uv_pool;
@@ -825,12 +830,16 @@ private:
         // (the player walked onto another collision).
         Rt::GeoVisible visible;
         std::vector<u32> drawn_now; // this frame's drawn placements of this map
+        bool reported = false;      // game mode: its read logged
     };
     std::vector<GeoMapState> geo_maps;
     bool geo_loaded = false;
+    bool geo_game = false; // read each map the game opens from its files (PollGeoMaps)
+    int geo_files_seen = 0;
     HostRing geo_ring;
     float geo_radius = 50.0f;
-    u32 geo_min_triangles = 32;
+    u32 geo_min_triangles = 1;
+    u32 geo_rule = 1; // BB_RT_GEO_RULE, rt_geo_cache.h GeoVisible::Shows
     // (map, placement, mesh) of what stands in the TLAS from the game's own draws, this frame
     // and the one before: the file's copy of those stays out.
     std::unordered_set<u64> geo_live, geo_live_prev;
@@ -843,6 +852,7 @@ private:
         return u64(map) << 44 | u64(place) << 22 | mesh;
     }
     void LoadGeoMaps();
+    void PollGeoMaps();
     Rt::CacheEntry* GeoEntry(GeoMapState& state, size_t map, u32 mesh);
     bool QueueGeoBuilds(u32 slot);
     void CollectGeoInstances(const std::array<float, 3>& camera, std::vector<KeptItem>& out);
@@ -1282,6 +1292,39 @@ private:
     float emitter_flicker_smooth = 0.1f;
     float emitter_sway = 0.15f;
     float emitter_steady_flicker = 0.35f;
+    u32 emitter_fade_in = 45;
+    float emitter_keep_dist = 80.0f;
+    // Candle lights (CandleClones): the game draws a candle's light only within ~23 m. Every
+    // flame point of the map files (rt_flame_table.h) is lit from its type's light template;
+    // lights the table does not hold are remembered by place on disk (BB_RT_LIGHT_CACHE).
+    struct CandleMemory {
+        Rt::Light light{};
+        u32 frames = 0; // frames the game drew it
+        u32 dark = 0;   // frames up close in view with no game light there
+        u64 lit_frame = 0;
+        bool saved = false, dead = false;
+        bool seed = false, dream = false; // from rt_flame_table.h; a Hunter's Dream map
+        u16 file_light = 0xFFFF; // seeds: Rt::FlameLights index of its model's map light
+        u16 ref = 0;                      // flame dummy reference id (seeds)
+    };
+    static constexpr size_t MaxCandles = 30000, MaxCandleClones = 192;
+    std::unordered_map<u16, Rt::Light> flame_templates;
+    int flame_dream = -1; // the last flame or sky seen is in the Hunter's Dream (-1 unknown)
+    bool candle_clone_on = true, candle_loaded = false, candle_dirty = false;
+    float candle_verify_dist = 12.0f;
+    std::string candle_path;
+    std::vector<CandleMemory> candles;
+    std::unordered_map<u64, std::vector<u32>> candle_cells;
+    std::deque<std::string> candle_names;
+    u32 candle_clones_last = 0;
+    u64 candle_log_frame = 0, candle_save_frame = 0, candle_forgotten = 0;
+    void CandleClones(const Rt::Affine& view);
+    [[nodiscard]] s64 CandleFind(const std::array<float, 3>& p, float reach,
+                                  bool dead_too = false) const;
+    // The table light (rt_flame_table.h FlameLights) of a flame point at `p`, or -1.
+    [[nodiscard]] s64 FileLightAt(const std::array<float, 3>& p) const;
+    void CandleLoad();
+    void CandleSave();
     float emitter_steady_dev = 0.05f;
     float fixed_sway = 0.015f;
     float candle_rmax = 3.0f;
@@ -1305,6 +1348,40 @@ private:
     bool glass_pass = true;
     u64 fill_vis_carried_log{};
     u64 direct_list_log{};
+    // BB_RT_LIGHT_HARVEST=<file> (tools/mapcache/effect_lights.py): every point light the game
+    // draws, averaged per 0.25 m spot, rewritten to the file every 120 frames.
+    struct HarvestLight {
+        // best: the brightest on-screen pass so far (means); pass: the one running now (sums)
+        double color[3]{}, spec[3]{}, radius{};
+        double pass_color[3]{}, pass_spec[3]{}, pass_radius{};
+        u32 pass_n{};
+        float world[3]{};
+        u32 seen{}, run{};
+        u64 last{};
+        bool legacy{};
+        const char* shader{};
+    };
+    // ends the running pass: it becomes the best when it is 10+ frames and brighter
+    static void HarvestCommit(HarvestLight& h) {
+        if (h.pass_n >= 10) {
+            const double n = h.pass_n;
+            const double sum = (h.pass_color[0] + h.pass_color[1] + h.pass_color[2]) / n;
+            if (!h.seen || sum > h.color[0] + h.color[1] + h.color[2]) {
+                for (int c = 0; c < 3; ++c) {
+                    h.color[c] = h.pass_color[c] / n;
+                    h.spec[c] = h.pass_spec[c] / n;
+                }
+                h.radius = h.pass_radius / n;
+                h.seen = h.pass_n;
+            }
+        }
+        h.pass_color[0] = h.pass_color[1] = h.pass_color[2] = 0.0;
+        h.pass_spec[0] = h.pass_spec[1] = h.pass_spec[2] = 0.0;
+        h.pass_radius = 0.0;
+        h.pass_n = 0;
+    }
+    std::unordered_map<u64, HarvestLight> harvest;
+    u64 harvest_dump{};
     float lamp_source = 0.6f, lamp_range = 6.0f, lamp_rmin = 1.0f, lamp_rmax = 6.0f;
     float lamp_enclosed = 0.4f;
     float lamp_up = 0.5f;
@@ -1342,6 +1419,7 @@ private:
     Rt::GpuSetSource direct_sets_source{};
     u64 direct_sets_gpu_frames = 0;
     bool moon_mask = false;
+    bool moon_veto = false; // BB_RT_MOON_VETO: the game shadow map caps the traced moon
     float moon_cone_cos = 1.0f;
     float moon_min_elevation = 0.0f; // BB_RT_MOON_MIN_EL, degrees
     bool moon_static = true;
@@ -1538,13 +1616,15 @@ private:
         u64 seen = 0;
         u32 hits = 0;
         float drift = 0.0f; // running mean distance of a capture from the average (m)
+        u64 lit = 0;        // frame it first passed GlowLampSteady (fade-in start)
     };
     std::vector<u64> glow_ps;
     std::vector<GlowLamp> glow_lamps;
+    std::vector<std::array<float, 3>> file_halo_spots; // glowing table lamps lit this frame
     float glow_strength = 0.6f, glow_radius = 2.0f, glow_skip = 1.5f, glow_dist = 40.0f;
     float glow_spec_power = 16.0f;
     float glow_merge = 2.5f;
-    u32 glow_max_lights = 8;
+    u32 glow_max_lights = 16; // Cathedral Ward street needs 9; 8 swapped the farthest in and out
     std::array<float, 3> glow_tint{1.0f, 0.55f, 0.2f};
     std::array<float, 3> lamp_hue{1.0f, 0.61f, 0.27f};
     float lamp_warm_max = 0.6f;
@@ -1553,7 +1633,7 @@ private:
     void TintLampLights();
     u64 glow_keep = 1800;
     u32 glow_min_hits = 30;
-    float glow_max_drift = 0.1f, glow_warm_max = 0.8f;
+    float glow_max_drift = 0.1f, glow_warm_max = 0.8f, glow_max_quad = 1.5f;
     u32 glow_added_last = 0;
     void AddGlowLights(const Rt::Affine* view);
     bool PortalDraw(u64 ps, u32 triangles) const {

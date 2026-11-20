@@ -1,6 +1,7 @@
 #include "video_core/renderer_vulkan/rt/vk_ray_tracing.h"
 #include "bbport_stdout.h"
 #include "video_core/renderer_vulkan/rt/rt_hitch.h"
+#include "video_core/renderer_vulkan/rt/rt_flame_table.h"
 #include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/rt/rt_address_map.h"
 
@@ -618,7 +619,10 @@ RayTracing::RayTracing(const Instance& instance_, Scheduler& scheduler_, Runtime
     capacity.triangles = u32(EnvU64("BB_RT_TRIANGLES", 4u << 20, 1024, 16u << 20));
     capacity.index_bytes =
         u32((std::min<u64>(u64(capacity.triangles) * 6, 1u << 30) + 255) & ~u64(255));
-    capacity.records = 8192;
+    // TLAS records = BLAS cache ids. With placement ids and kept off-screen instances 8192 ran
+    // full in Central Yharnam (0-60 ids free, 500-4000 draws a log line failed), so off-screen
+    // casters dropped out of the moon shadows after a look up and down.
+    capacity.records = u32(EnvU64("BB_RT_RECORDS", 8192, 1024, 65536));
     const Rt::LiveToggles wanted = Rt::ReadToggles(Rt::Knob, instance.GetVendorID());
     gi_spp = u32(EnvU64("BB_RT_SPP", 1, 1, 16));
     gi_debug = u32(EnvU64("BB_RT_GI_DEBUG", 0, 0, 27));
@@ -1599,7 +1603,7 @@ void RayTracing::DestroyMoonHistory() {
 
 void RayTracing::ReadLiveKnobs() {
     reflect_max_rough = EnvFloat("BB_RT_REFLECT_MAX_ROUGH", Rt::ReflectMaxRoughDefault, 0.0f, 1.0f);
-    direct_debug = u32(EnvU64("BB_RT_DIRECT_DEBUG", 0, 0, 11));
+    direct_debug = u32(EnvU64("BB_RT_DIRECT_DEBUG", 0, 0, 12));
     // Live: instance opacity is set every frame, so cut-outs of skinned draws can be A/B'd.
     skin_alpha = EnvU64("BB_RT_SKIN_ALPHA", 1, 0, 1) != 0;
     direct_light_log = EnvFloat("BB_RT_DIRECT_LIGHT_LOG", 0.0f, 0.0f, 1000.0f);
@@ -1620,7 +1624,7 @@ void RayTracing::ReadLiveKnobs() {
     omm_fast = u32(EnvU64("BB_RT_OMM_FAST", 0, 0, Rt::OmmFastMax));
     gi_bounces = u32(EnvU64("BB_RT_BOUNCES", 2, 0, Rt::MaxBounces));
     adaptive_ms = EnvFloat("BB_RT_ADAPTIVE_MS", 12.0f, 0.0f, float(Rt::AdaptiveBudgetMaxMs));
-    far_start = EnvFloat("BB_RT_FAR_START", 0.0f, 0.0f, Rt::FarFadeMaxM);
+    far_start = EnvFloat("BB_RT_FAR_START", 30.0f, 0.0f, Rt::FarFadeMaxM);
     far_band = EnvFloat("BB_RT_FAR_BAND", Rt::FarBandDefaultM, 0.0f, Rt::FarFadeMaxM);
     {
         const bool was = omm_skinned;
@@ -1636,6 +1640,7 @@ void RayTracing::ReadLiveKnobs() {
     direct_novis = novis_env && novis_env[0] == '1';
     const char* moon_env = Rt::Knob("BB_RT_MOON");
     moon_mask = moon_env && std::strcmp(moon_env, "mask") == 0;
+    moon_veto = EnvU64("BB_RT_MOON_VETO", 0, 0, 1) != 0;
     moon_cone_cos = Rt::MoonConeCos(float(EnvU64("BB_RT_MOON_ANGLE", 15, 0, 100)) * 0.1f);
     // Lowest moonlight elevation in degrees (rt_moon_dir.comp; 0 = the sky moon as drawn).
     moon_min_elevation = EnvFloat("BB_RT_MOON_MIN_EL", 0.0f, 0.0f, 80.0f);
@@ -1727,7 +1732,8 @@ void RayTracing::ReadLiveKnobs() {
         // Geometry cache (BB_RT_GEO_DIR): how far from the camera its pieces stand in as shadow
         // casters (0 = off) and the smallest mesh worth an instance.
         geo_radius = EnvFloat("BB_RT_GEO_RADIUS", 50.0f, 0.0f, 500.0f);
-        geo_min_triangles = u32(EnvU64("BB_RT_GEO_MIN_TRIS", 32, 1, 1000000));
+        geo_min_triangles = u32(EnvU64("BB_RT_GEO_MIN_TRIS", 1, 1, 1000000));
+        geo_rule = u32(EnvU64("BB_RT_GEO_RULE", 1, 0, 2));
     }
     // Learn the screen's sky into the 512x512 sky image the mirrors read (BB_RT_SKY_IMAGE).
     sky_image = EnvFloat("BB_RT_SKY_IMAGE", 1.0f, 0.0f, 1.0f) > 0.5f;
@@ -1808,6 +1814,17 @@ void RayTracing::ReadLiveKnobs() {
     // Flicker of our own for flames the game keeps steady: x exp(this x Rt::FlameNoise), so 0.35
     // swings between x0.70 and x1.42 (at 0.9 linear the dips read as the light going out).
     emitter_steady_flicker = EnvFloat("BB_RT_EMITTER_STEADY_FLICKER", 0.35f, 0.0f, 1.0f);
+    // A fixed flame's light fades in over this many drawn frames (0 = off). The game starts
+    // drawing a candle's light ~23 m from the camera; at full strength in one frame it read as
+    // lights popping up ahead of the player (2026-11-19).
+    emitter_fade_in = u32(EnvU64("BB_RT_EMITTER_FADE_IN", 45, 0, 600));
+    // Fixed emitters within this distance (m) of the camera stay lit however long the game has
+    // not drawn them (rt_direct.h KeepOffscreenLight); 0 = only BB_RT_DIRECT_KEEP_OFF frames.
+    emitter_keep_dist = EnvFloat("BB_RT_EMITTER_KEEP_DIST", 80.0f, 0.0f, 10000.0f);
+    // Candle lights remembered on disk (CandleClones, BB_RT_LIGHT_CACHE), lit up to
+    // BB_RT_EMITTER_KEEP_DIST away; BB_RT_CANDLE_CLONE=0 turns it off.
+    candle_clone_on = !Rt::KnobIs("BB_RT_CANDLE_CLONE", '0');
+    candle_verify_dist = EnvFloat("BB_RT_CANDLE_VERIFY", 12.0f, 1.0f, 22.0f);
     // Below this mean |colour / running mean - 1| the game's own flicker counts as steady and the
     // flame gets the flicker above (the fireplace swell measures 0.015; game-flickered flames 0.06+).
     emitter_steady_dev = EnvFloat("BB_RT_EMITTER_STEADY_DEV", 0.05f, 0.0f, 1.0f);
@@ -1975,7 +1992,10 @@ void RayTracing::ReadLiveKnobs() {
         const char* list = Rt::Knob("BB_RT_FLAME_PS");
         flame_ps = Rt::ParseHashList(list ? list : "d729c469");
     }
-    if (Rt::KnobIs("BB_RT_GLOW", '0')) {
+    // Off by default: lighting a lamp once its glow was seen popped lamps in as they were found
+    // (user, 2026-11-19: no "first time" rules). BB_RT_GLOW=1 + BB_RT_GLOW_DUMP=<file> record
+    // the glowing lamps for tools/mapcache/flame_table.py (harvest/glow_lamps_*.txt).
+    if (!Rt::KnobIs("BB_RT_GLOW", '1')) {
         glow_ps.clear();
     } else {
         const char* list = Rt::Knob("BB_RT_GLOW_PS");
@@ -1995,11 +2015,12 @@ void RayTracing::ReadLiveKnobs() {
     glow_skip = EnvFloat("BB_RT_GLOW_SKIP", 1.5f, 0.0f, 10.0f);
     glow_dist = EnvFloat("BB_RT_GLOW_DIST", 40.0f, 1.0f, 500.0f);
     glow_merge = EnvFloat("BB_RT_GLOW_MERGE", 2.5f, 0.0f, 20.0f);
-    glow_max_lights = u32(EnvU64("BB_RT_GLOW_MAX", 8, 0, 256));
+    glow_max_lights = u32(EnvU64("BB_RT_GLOW_MAX", 16, 0, 256));
     glow_spec_power = EnvFloat("BB_RT_GLOW_SPEC_POWER", 16.0f, 1.0f, 256.0f);
     glow_keep = EnvU64("BB_RT_GLOW_KEEP", 1800, 1, 100000000);
     glow_min_hits = u32(EnvU64("BB_RT_GLOW_MIN_HITS", 30, 0, 100000));
     glow_max_drift = EnvFloat("BB_RT_GLOW_MAX_DRIFT", 0.1f, 0.0f, 10.0f);
+    glow_max_quad = EnvFloat("BB_RT_GLOW_MAX_QUAD", 1.5f, 0.1f, 1000.0f);
     // Mirror rays that miss read the sky dome image (1) or the 32x32 sky probe (0).
     reflect_sky_dome = EnvFloat("BB_RT_REFLECT_SKY_DOME", 1.0f, 0.0f, 1.0f) > 0.5f;
     glow_warm_max = EnvFloat("BB_RT_GLOW_WARM_MAX", 0.8f, 0.0f, 10.0f);
@@ -3125,6 +3146,14 @@ void RayTracing::ReclaimBlocks() {
 }
 
 void RayTracing::ReleaseEntry(const Rt::CacheEntry& entry) {
+    static const bool short_log = Rt::KnobIs("BB_RT_SHORT_LOG", '1');
+    if (short_log && entry.updatable && entry.triangles > 60000) {
+        Log("RT big release frame %llu: entry %u, %u tris, home %u, last used %llu, seen %u, "
+            "short %u, dirty %u, by %s\n",
+            (unsigned long long)frame, entry.id, entry.triangles, entry.stays_home ? 1u : 0u,
+            (unsigned long long)entry.last_used, entry.seen ? 1u : 0u,
+            Rt::KeepShortLived(entry) ? 1u : 0u, entry.dirty ? 1u : 0u, release_reason);
+    }
     if (entry.id < instance_state_prev.size()) {
         instance_state_prev[entry.id] = 0;
     }
@@ -3209,7 +3238,15 @@ bool RayTracing::AllocateEntry(u32 triangles, bool updatable, bool omm, Rt::Cach
     auto geometry_desc = SoupGeometry(soup.address, input.max_vertex);
     const auto release = [&](const Rt::CacheEntry& e) { ReleaseEntry(e); };
     if (free_ids.empty()) {
-        cache.EvictLeastRecent(release);
+        const std::array<float, 3> at = frame_camera_valid
+                                            ? Rt::Transform(frame_inv_view, {0.0f, 0.0f, 0.0f})
+                                            : std::array<float, 3>{};
+        cache.EvictFarthest(
+            1, at,
+            [&](const Rt::CacheEntry& e) {
+                return frame_camera_valid && Rt::KeepInstance(e, frame, at, keep_rules);
+            },
+            release);
         return false;
     }
     const u32 id = free_ids.back();
@@ -3450,6 +3487,12 @@ void RayTracing::BeginSlot() {
                     pe->anchor = at;
                     pe->anchor_k = k;
                 }
+                // A sample from before the entry's build belongs to whatever held the id then.
+                if (pe && pe->updatable && pe->built_frame <= probe_frame &&
+                    std::isfinite(at[0]) && std::isfinite(at[1]) &&
+                    std::isfinite(at[2])) {
+                    pe->stays_home = home_table.Sample(pe->palette, pe->triangles, at, frame);
+                }
             }
             if (words[0]) {
                 const bool kept = i < skin_keep.size() && skin_keep[i];
@@ -3459,6 +3502,12 @@ void RayTracing::BeginSlot() {
                 // must not dirty it out of the TLAS.
                 const Rt::DrawKey* home = cache.KeyOf(entries[i]);
                 if (home && (home->occurrence & Rt::BlasCache::ShelfBit)) {
+                    continue;
+                }
+                // An animated mesh that stays home is rebuilt or refit whenever it is drawn; a
+                // flag (sway, a late sample) only made the off-screen copy dirty, so it left the
+                // TLAS and was evicted 120 frames later with its shadow (2026-11-19).
+                if (const Rt::CacheEntry* he = cache.ById(entries[i]); he && he->stays_home) {
                     continue;
                 }
                 // A static mesh found metres from where it was built is the same draw at another
@@ -3549,6 +3598,7 @@ void RayTracing::BeginSlot() {
                                : std::array<float, 3>{};
         const bool kept_limits = off_switches.instances && off_switches.evict;
         placed_frame_seen.clear();
+        release_reason = "unused";
         cache.EvictUnusedBy(
             [&](const Rt::CacheEntry& e) {
                 // A shared mesh a kept placement showed on the last frames is in use.
@@ -3565,9 +3615,22 @@ void RayTracing::BeginSlot() {
                            : Rt::UnsettledLimit(e, keep_rules.unused_frames);
             },
             [&](const Rt::CacheEntry& e) { ReleaseEntry(e); });
+        release_reason = "pool";
         while (pool.Used() - retired_bytes > pool.Size() / 4 * 3 &&
                cache.EvictLeastRecent([&](const Rt::CacheEntry& e) { ReleaseEntry(e); })) {
         }
+        // Ids run out before the pool does (kept placements): keep an eighth free, farthest
+        // from the camera first, at most 256 a frame so a full cache drains without a hitch.
+        release_reason = "ids";
+        if (const size_t reserve = capacity.records / 8; free_ids.size() < reserve) {
+            id_evicted += cache.EvictFarthest(
+                std::min<size_t>(reserve - free_ids.size(), 256), evict_camera,
+                [&](const Rt::CacheEntry& e) {
+                    return frame_camera_valid && Rt::KeepInstance(e, frame, evict_camera, keep_rules);
+                },
+                [&](const Rt::CacheEntry& e) { ReleaseEntry(e); });
+        }
+        release_reason = "uv/omm pool";
         // The UV pool fills before the BLAS pool does (Rt::UvPoolDefaultMb).
         while (Rt::PoolNearFull(uv_pool.Used(), retired_uv_bytes, uv_pool.Size()) &&
                cache.EvictLeastRecent([&](const Rt::CacheEntry& e) { ReleaseEntry(e); })) {
@@ -3578,6 +3641,7 @@ void RayTracing::BeginSlot() {
             ++omm_evicted;
         }
     }
+    release_reason = "draw";
     rebuild_budget.BeginFrame();
     refit_budget.BeginFrame(frame);
     Rt::Capacity frame_capacity = capacity;
@@ -3945,15 +4009,58 @@ void RayTracing::AddFog(std::span<const Rt::FxParticle> world_particles) {
     }
 }
 
-void RayTracing::AddGlows(std::span<const std::array<float, 6>> vertices) {
+void RayTracing::AddGlows(std::span<const std::array<float, 6>> vertices, u64 ps_hash) {
     constexpr float JoinRadius = 0.6f;
     constexpr size_t MaxGlowLamps = 256;
+    if (Rt::KnobIs("BB_RT_HALO_LOG", '1')) {
+        std::array<float, 3> lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+        float edge = 0.0f;
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            for (int k = 0; k < 3; ++k) {
+                lo[k] = std::min(lo[k], vertices[i][k]);
+                hi[k] = std::max(hi[k], vertices[i][k]);
+            }
+            if (i % 3 != 0) {
+                const auto& a = vertices[i];
+                const auto& b = vertices[i - 1];
+                edge = std::max(edge, std::sqrt((a[0] - b[0]) * (a[0] - b[0]) +
+                                                (a[1] - b[1]) * (a[1] - b[1]) +
+                                                (a[2] - b[2]) * (a[2] - b[2])));
+            }
+        }
+        Log("RT glow draw frame %llu ps %#llx verts %zu lo (%.2f %.2f %.2f) hi (%.2f %.2f %.2f) "
+            "max edge %.2f col (%.2f %.2f %.2f)\n",
+            (unsigned long long)frame, (unsigned long long)ps_hash, vertices.size(), lo[0], lo[1],
+            lo[2], hi[0], hi[1], hi[2], edge, vertices[0][3], vertices[0][4], vertices[0][5]);
+    }
     struct Cluster {
         std::array<float, 6> sum{};
         float n = 0.0f;
     };
+    // Lamp glass is a small quad (edges up to about 1.1 m) around the flame. The same glow shader
+    // also draws the lamps' big light-ray sprites (edges 3-5 m, turning slowly): their corners sat
+    // still enough to pass GlowLampSteady and became halo spots up to 2.5 m off the lamp, which
+    // showed as orbs floating in the air (Central Yharnam, 2026-11-19). Quads (4 vertices, or 3
+    // when the count is not a multiple of 4) wider than BB_RT_GLOW_MAX_QUAD are not lamp glass.
+    const size_t group = vertices.size() % 4 == 0 ? 4 : 3;
+    std::vector<std::array<float, 6>> kept;
+    kept.reserve(vertices.size());
+    for (size_t g = 0; g + group <= vertices.size(); g += group) {
+        float widest = 0.0f;
+        for (size_t i = g; i < g + group; ++i) {
+            for (size_t j = i + 1; j < g + group; ++j) {
+                const float dx = vertices[i][0] - vertices[j][0],
+                            dy = vertices[i][1] - vertices[j][1],
+                            dz = vertices[i][2] - vertices[j][2];
+                widest = std::max(widest, dx * dx + dy * dy + dz * dz);
+            }
+        }
+        if (widest <= glow_max_quad * glow_max_quad) {
+            kept.insert(kept.end(), vertices.begin() + g, vertices.begin() + g + group);
+        }
+    }
     std::vector<Cluster> clusters;
-    for (const auto& v : vertices) {
+    for (const auto& v : kept) {
         Cluster* hit = nullptr;
         for (Cluster& c : clusters) {
             const float dx = c.sum[0] / c.n - v[0], dy = c.sum[1] / c.n - v[1],
@@ -4041,9 +4148,22 @@ void RayTracing::TintLampLights() {
 
 void RayTracing::AddGlowLights(const Rt::Affine* view) {
     glow_added_last = 0;
-    halo_spots.clear();
+    // Halos on the glowing lamps of the flame table (CandleClones), from any distance.
+    halo_spots = file_halo_spots;
     if (glow_ps.empty() || glow_lamps.empty()) {
         return;
+    }
+    if (const char* dump = Rt::Knob("BB_RT_GLOW_DUMP"); dump && *dump && frame % 120 == 0) {
+        if (FILE* f = std::fopen(dump, "w")) {
+            for (const GlowLamp& g : glow_lamps) {
+                if (Rt::GlowLampSteady(g.hits, g.drift, g.color, glow_min_hits, glow_max_drift,
+                                       glow_warm_max)) {
+                    std::fprintf(f, "%.3f %.3f %.3f %.3f %.3f %.3f %u\n", g.world[0], g.world[1],
+                                 g.world[2], g.color[0], g.color[1], g.color[2], g.hits);
+                }
+            }
+            std::fclose(f);
+        }
     }
     struct Pick {
         float d2;
@@ -4051,11 +4171,14 @@ void RayTracing::AddGlowLights(const Rt::Affine* view) {
     };
     std::vector<Pick> picks;
     for (size_t k = 0; k < glow_lamps.size(); ++k) {
-        const GlowLamp& g = glow_lamps[k];
+        GlowLamp& g = glow_lamps[k];
         if (frame - g.seen > glow_keep ||
             !Rt::GlowLampSteady(g.hits, g.drift, g.color, glow_min_hits, glow_max_drift,
                                 glow_warm_max)) {
             continue;
+        }
+        if (g.lit == 0) {
+            g.lit = frame;
         }
         float d2 = 0.0f;
         if (view) {
@@ -4084,6 +4207,7 @@ void RayTracing::AddGlowLights(const Rt::Affine* view) {
         std::array<float, 3> sum{};
         float weight = 0.0f;
         std::array<float, 3> color{};
+        float ramp = 0.0f;
     };
     std::vector<Group> groups;
     for (const Pick& pick : picks) {
@@ -4110,6 +4234,9 @@ void RayTracing::AddGlowLights(const Rt::Affine* view) {
             hit->color[c] = std::max(hit->color[c], g.color[c]);
         }
         hit->weight += w;
+        // A lamp found while walking (the game draws its glow from ~30 m) ramps in over 60
+        // frames instead of switching on (user, 2026-11-19: "some lights is now popin").
+        hit->ramp = std::max(hit->ramp, std::min(float(frame - g.lit) / 60.0f, 1.0f));
     }
     for (size_t i = 0; i < groups.size() && direct_lights.size() < Rt::MaxDirectLights; ++i) {
         const Group& g = groups[i];
@@ -4122,8 +4249,22 @@ void RayTracing::AddGlowLights(const Rt::Affine* view) {
         l.position = view ? Rt::Transform(*view, world) : world;
         l.radius = glow_radius;
         for (size_t c = 0; c < 3; ++c) {
-            l.color[c] = g.color[c] * glow_tint[c] * glow_strength;
+            l.color[c] = g.color[c] * glow_tint[c] * glow_strength * g.ramp;
             l.spec[c] = l.color[c] * 0.5f;
+        }
+        // Fade out over the last 30% of glow_dist (the lamps stop there), like the halos: a lamp
+        // light switching on at 40 m popped (user, 2026-11-19: "some lights is now popin").
+        if (view) {
+            const float d = std::sqrt(l.position[0] * l.position[0] +
+                                      l.position[1] * l.position[1] +
+                                      l.position[2] * l.position[2]);
+            const float edge = glow_dist * 0.7f;
+            float t = std::clamp(1.0f - (d - edge) / (glow_dist - edge), 0.0f, 1.0f);
+            t = t * t * (3.0f - 2.0f * t);
+            for (size_t c = 0; c < 3; ++c) {
+                l.color[c] *= t;
+                l.spec[c] *= t;
+            }
         }
         l.spec_power = glow_spec_power;
         l.wrap = {1.0f, 1.0f};
@@ -4542,7 +4683,48 @@ void RayTracing::AddOne(const Rt::DrawInput& draw, u32 draw_index) {
             return;
         }
     }
+    // Two copies of one animated mesh (the swaying trees of the Central Yharnam bridge) share an
+    // occurrence key: which copy is occurrence 0 depends on what the view draws, so the copy the
+    // game culls lost its BLAS to the other and its moon shadow went (2026-11-19). An entry that
+    // stays home and was built from a world matrix over StashMetres away is put aside under its
+    // own key (kept off screen as before); this copy takes back its own stashed entry if any.
+    const u64 world = !key.placement && draw.skinned && draw.placements && draw.placement_count
+                          ? Rt::PlacementId(draw.placements)
+                          : 0;
+    std::array<float, 3> world_at{};
+    if (world) {
+        const Rt::Affine m = Rt::PlacementAffine(draw.placements);
+        world_at = {m[3], m[7], m[11]};
+        // The tree's matrix origin is about 28 m from where the probe hits its crown, so the
+        // copies are told apart by matrix alone (A at (-19.0 16.7 232.8), B at (-13.6 17.1 238.6)).
+        constexpr float StashMetres = 4.0f;
+        const Rt::DrawKey next = cache.NextKey(key);
+        Rt::CacheEntry* held = cache.Peek(next);
+        if (held && held->stays_home && held->world && held->world != world &&
+            Rt::Distance2(held->world_at, world_at) > StashMetres * StashMetres) {
+            const Rt::DrawKey stash = Rt::BlasCache::StashKey(next, held->world);
+            // An older stashed copy of the same tree: the one held now is the newer build.
+            if (const Rt::CacheEntry* old = cache.Peek(stash); old && old->id != held->id) {
+                const u32 held_id = held->id;
+                cache.Erase(old->id, [&](const Rt::CacheEntry& e) { ReleaseEntry(e); });
+                held = cache.ById(held_id);
+            }
+            if (held && cache.Peek(stash) == nullptr && cache.Rekey(held->id, stash)) {
+                ++home_stashed;
+            }
+        }
+        if (cache.Peek(next) == nullptr) {
+            if (Rt::CacheEntry* back = cache.Peek(Rt::BlasCache::StashKey(next, world));
+                back && back->world == world && cache.Rekey(back->id, next)) {
+                ++home_unstashed;
+            }
+        }
+    }
     auto lookup = cache.Find(key, draw.palette, draw.skinned, draw.unreadable, u32(count));
+    if (lookup.entry && world) {
+        lookup.entry->world = world;
+        lookup.entry->world_at = world_at;
+    }
     if (key.placement && lookup.reason == Rt::Rebuild::Miss) {
         // Movers are told at the frame's end (FindPlacementMovers) from its placed misses.
         placement_movers.NoteMiss(key);
@@ -6381,6 +6563,7 @@ void RayTracing::EndLightFrame() {
     if (direct_lights_wanted) {
         Rt::LightKeepView keep_view{};
         keep_view.offscreen_frames = direct_keep_offscreen;
+        keep_view.static_keep_dist = emitter_keep_dist;
         keep_view.xs = light_keep_proj[0];
         keep_view.ys = light_keep_proj[1];
         keep_view.reproject = off_switches.cone;
@@ -6413,6 +6596,11 @@ void RayTracing::EndLightFrame() {
                 light_keep_cam_gap = std::sqrt(dx * dx + dy * dy + dz * dz);
             }
         }
+        // a harvest (BB_RT_LIGHT_HARVEST) records only the game's own lights
+        static const bool harvesting = std::getenv("BB_RT_LIGHT_HARVEST") != nullptr;
+        if (candle_clone_on && keep_view.valid && !harvesting) {
+            CandleClones(keep_view.view);
+        }
         direct_duplicates +=
             Rt::MergeDirectLights(pending_lights, light_frame, direct_keep, direct_tracks, direct_lights,
                                   &direct_keys, off_switches.lights ? &keep_view : nullptr);
@@ -6433,7 +6621,12 @@ void RayTracing::EndLightFrame() {
             const bool tracked = i < direct_tracks.list.size();
             const bool mobile = tracked && direct_tracks.list[i].mobile;
             bool housed = false, fire_pit = false;
-            if (tracked) {
+            if (FileLightAt(l.world) >= 0) {
+                // A table lamp is a lamp from the table, near or far, game-drawn or cloned: the
+                // fill-vis probe latches only lights seen near and on screen, so the same lamp
+                // turned 5x brighter when the game took it over at ~23 m (pop-in).
+                housed = l.radius > candle_rmax;
+            } else if (tracked) {
                 const auto f = fill_vis.find(Rt::FillVisKey(direct_tracks.list[i].light));
                 housed = f != fill_vis.end() && f->second.lamp;
                 fire_pit = f != fill_vis.end() && f->second.fire_pit;
@@ -6470,7 +6663,11 @@ void RayTracing::EndLightFrame() {
                 if (grow > 1.0f) {
                     k *= emitter_big_gain;
                 }
-                for (float& c : l.color) c *= k;
+                if (!mobile && !l.held && emitter_fade_in > 0) {
+                    const float t = std::min(float(direct_tracks.list[i].frames) /
+                                                 float(emitter_fade_in), 1.0f);
+                    k *= t * t * (3.0f - 2.0f * t);
+                }                for (float& c : l.color) c *= k;
                 for (float& c : l.spec) c *= k;
                 // Carried flames (hand torch, enemy torches) sway, scaled by the game radius. Fixed
                 // flames (candles, candelabra, fireplace) sway by BB_RT_FIXED_SWAY: an indoor
@@ -6507,6 +6704,60 @@ void RayTracing::EndLightFrame() {
         AddGlowLights(keep_view.cull_valid ? &keep_view.cull_view
                       : keep_view.valid    ? &keep_view.view
                                            : nullptr);
+        if (static const char* harvest_path = std::getenv("BB_RT_LIGHT_HARVEST"); harvest_path) {
+            for (const Rt::Light& r : pending_lights) {
+                if (!Rt::DirectCandidate(r)) {
+                    continue;
+                }
+                const auto q = [](float v) { return (u64)(s64)std::lround(v * 4.0f) & 0x1FFFFF; };
+                const u64 key = q(r.world[0]) | q(r.world[1]) << 21 | q(r.world[2]) << 42;
+                HarvestLight& h = harvest[key];
+                // an effect light fades in over its first frames: average only after a second
+                // of uninterrupted drawing (the gate lamps read 22% dark with the fade counted)
+                // and the game updates an effect's light only on screen (off screen it keeps its
+                // last value, 0 before the first look; the sweep turns the camera at each stop):
+                // count on-screen frames only
+                const bool on_screen =
+                    keep_view.valid && Rt::SphereInFrustum(Rt::Transform(keep_view.view, r.world),
+                                                           0.25f, keep_view.xs, keep_view.ys);
+                h.run = on_screen && h.last + 1 >= light_frame ? h.run + 1 : 0;
+                h.last = on_screen ? light_frame : 0;
+                // each on-screen pass is averaged on its own and the brightest pass is kept: the
+                // first pass of a turn still holds the fade-in (lamps read 25% dark averaged)
+                if (h.run == 0) {
+                    HarvestCommit(h);
+                }
+                if (h.run < 20) {
+                    continue;
+                }
+                for (int c = 0; c < 3; ++c) {
+                    h.pass_color[c] += r.color[c];
+                    h.pass_spec[c] += r.spec[c];
+                    h.world[c] = r.world[c];
+                }
+                h.pass_radius += r.radius;
+                h.legacy = r.legacy;
+                h.shader = r.shader_name;
+                ++h.pass_n;
+            }
+            if (light_frame >= harvest_dump + 120) {
+                harvest_dump = light_frame;
+                if (FILE* f = std::fopen(harvest_path, "w")) {
+                    for (auto& [k, h] : harvest) {
+                        HarvestLight b = h;
+                        HarvestCommit(b);
+                        if (!b.seen) {
+                            continue;
+                        }
+                        std::fprintf(f, "%.3f %.3f %.3f %.3f %.4f %.4f %.4f %.4f %.4f %.4f %u %d %s\n",
+                                     b.world[0], b.world[1], b.world[2], b.radius, b.color[0],
+                                     b.color[1], b.color[2], b.spec[0], b.spec[1], b.spec[2],
+                                     b.seen, b.legacy ? 1 : 0, b.shader ? b.shader : "?");
+                    }
+                    std::fclose(f);
+                }
+            }
+        }
         // BB_RT_DIRECT_LIST_LOG=1 (live): every 30 frames, the state of each direct light (game
         // radius, reach used, emitter, fill-vis state, track age and mobility).
         // =2: every frame (flicker timing).
@@ -7869,6 +8120,13 @@ void RayTracing::ReadKeptProbe() {
                 if (r.last_frame >= probed) {
                     continue; // drawn again since the probe
                 }
+                // Alpha-tested mesh (a brazier cage, a fence): the probe ray passes a lattice edge
+                // the raster drew as a hole (other mip, OMM micro-triangle), so one hit says
+                // nothing. It hid the brazier cages whenever the camera pitched up and the game
+                // left them out of its draws: the cage shadows went flat (2026-11-19).
+                if (const Rt::CacheEntry* pe = cache.ById(r.entry_id); pe && pe->alpha_test) {
+                    continue;
+                }
                 if (r.probe_hidden <= r.last_frame) {
                     ++kept_probe_hidden;
                     ++kept_probe_hidden_placed;
@@ -7891,6 +8149,12 @@ void RayTracing::ReadKeptProbe() {
             Rt::CacheEntry* e = id != ~0u ? cache.ById(id) : nullptr;
             if (!e || e->last_used >= probed) {
                 continue; // not an instance of that frame, or drawn again since the probe
+            }
+            // A swaying tree kept in its last pose is in front of the drawn frame wherever the
+            // wind moved a branch: the test cannot tell, and it took the trees' shadows out
+            // until they were drawn again (2026-11-19).
+            if (e->stays_home || e->alpha_test) {
+                continue;
             }
             if (e->probe_hidden <= e->last_used) {
                 ++kept_probe_hidden;
@@ -8529,6 +8793,7 @@ void RayTracing::RecordDirect(const SceneInputs& inputs) {
                                  (moon_hist_valid ? Rt::DirectFlagMoonHistoryValid : 0u) |
                                  (object_valid ? Rt::DirectFlagObjectMotion : 0u) |
                                  (kept_probe_on ? Rt::DirectFlagKeptProbe : 0u) |
+                                 (mask_valid && moon_veto ? Rt::DirectFlagMoonVeto : 0u) |
                                  Rt::DirectOmmFastFlags(omm_enabled, omm_fast) |
                                  Rt::MoonHalfFlags(moon_half, mask_valid && moon_mask, direct_debug)},
         .cfg = {(normal_valid ? normal_source.mode : Rt::NormalFromDepth) |
@@ -10772,7 +11037,20 @@ u32 RayTracing::WriteGiLights(u32 slot, const Rt::Affine& view) {
     }
     std::array<float, 8 * Rt::MaxHalos> halos{};
     halo_count = Rt::BuildHalos(gi_lights_scratch, halo_view_scratch, halo_strength, halo_radius,
-                                halo_core, halo_match, halos.data());
+                                halo_core, halo_match, halos.data(), glow_dist);
+    if (Rt::KnobIs("BB_RT_HALO_LOG", '1')) {
+        const Rt::Affine cam = Rt::InverseRigid(view);
+        Log("RT halo frame %llu slot %u cam (%.2f %.2f %.2f) fwd (%.2f %.2f %.2f) spots %zu halos %u\n",
+            (unsigned long long)frame, slot, cam[3], cam[7], cam[11], cam[2], cam[6], cam[10],
+            halo_spots.size(), halo_count);
+        for (u32 k = 0; k < halo_count; ++k) {
+            const float* o = halos.data() + 8 * k;
+            const Rt::Affine& m = cam;
+            const std::array<float, 3> w = Rt::Transform(m, {o[0], o[1], o[2]});
+            Log("  halo %u view (%.2f %.2f %.2f) world (%.2f %.2f %.2f) I %.3f\n", k, o[0], o[1],
+                o[2], w[0], w[1], w[2], std::max({o[4], o[5], o[6]}));
+        }
+    }
     if (halo_ring.mapped) {
         std::memcpy(halo_ring.mapped + u64(slot) * halo_ring.slot_bytes, halos.data(),
                     halo_count * 8 * sizeof(float));
@@ -11039,7 +11317,7 @@ void RayTracing::PrintStats(u32 triangles) {
             if (in_play) {
                 size_t shown = 0;
                 for (const u32 p : state.nearby) {
-                    shown += state.visible.Shows(state.map, state.map.places[p]) ? 1u : 0u;
+                    shown += state.visible.Shows(state.map, state.map.places[p], geo_rule) ? 1u : 0u;
                 }
                 Log("Ray tracing: geometry cache %s in play: %u of %zu collision group sets fit "
                     "the %u placements the game drew lately (the best misses %u), %zu of %zu "
@@ -11073,7 +11351,7 @@ void RayTracing::PrintStats(u32 triangles) {
                 "(BB_RT_PLACEMENT %u, %u shaders trusted, %u rejected, %u pending) %llu draws "
                 "(%llu instances), %llu static draws fell back, %llu kept skipped as the same "
                 "placement drawn, %llu movers found, %llu draws of moving meshes; cache %zu "
-                "entries (%zu ids free), last frame %u of %u TLAS records, since the last line "
+                "entries (%zu ids free, %llu evicted for ids), last frame %u of %u TLAS records, since the last line "
                 "%llu draws failed for lack of ids or pool space and %llu over the record or "
                 "triangle capacity\n",
                 reason(Rt::Rebuild::Miss), reason(Rt::Rebuild::Size),
@@ -11098,7 +11376,7 @@ void RayTracing::PrintStats(u32 triangles) {
                 (unsigned long long)placement_kept_skipped,
                 (unsigned long long)placement_movers_found,
                 (unsigned long long)placement_moving_draws, cache.Size(), free_ids.size(),
-                last_instances, capacity.records,
+                (unsigned long long)id_evicted, last_instances, capacity.records,
                 (unsigned long long)(pool_full_draws - placement_pool_full_seen),
                 (unsigned long long)(s.capacity - placement_capacity_seen));
     // Splitting a batch takes one cache id and one TLAS record per instance (capacity.records):
@@ -11739,7 +12017,36 @@ void RayTracing::AppendKeptInstances(const Rt::Affine& current_inv_view) {
     // TLAS once.
     const bool check_placed = !drawn_placements.Empty();
     std::vector<Rt::CacheEntry*> candidates;
+    static const bool short_log = Rt::KnobIs("BB_RT_SHORT_LOG", '1');
+    const bool big_log = short_log && frame % 60 == 0;
+    if (big_log) {
+        Log("RT home frame %llu: %llu stashed, %llu taken back\n", (unsigned long long)frame,
+            (unsigned long long)home_stashed, (unsigned long long)home_unstashed);
+    }
     cache.ForEachOrdered([&](Rt::CacheEntry& e) {
+        if (big_log && e.updatable && e.triangles > 5000 && Rt::KeepNear(e, camera, keep_rules)) {
+            Log("RT big frame %llu: entry %u, %u tris, age %llu, valid %u dirty %u, home %u, "
+                "short %u, probe hidden %lld, keep %u, anchor (%.1f %.1f %.1f), world (%.1f %.1f "
+                "%.1f), occ %08x\n",
+                (unsigned long long)frame, e.id, e.triangles,
+                (unsigned long long)(frame - e.last_used), e.valid ? 1u : 0u, e.dirty ? 1u : 0u,
+                e.stays_home ? 1u : 0u, Rt::KeepShortLived(e) ? 1u : 0u,
+                e.probe_hidden ? (long long)(frame - e.probe_hidden) : -1ll,
+                Rt::KeepInstance(e, frame, camera, keep_rules) ? 1u : 0u, e.anchor[0],
+                e.anchor[1], e.anchor[2], e.world_at[0], e.world_at[1], e.world_at[2],
+                cache.KeyOf(e.id) ? cache.KeyOf(e.id)->occurrence : 0u);
+        }
+        if (short_log && e.valid && !e.dirty && Rt::KeepShortLived(e) &&
+            frame - e.last_used == keep_rules.skinned_frames + 1 && Rt::KeepNear(e, camera, keep_rules)) {
+            const Rt::DrawTag tag = e.id < entry_tags.size() ? entry_tags[e.id] : Rt::DrawTag{};
+            Log("RT short drop frame %llu: entry %u, %u tris, palette %llx, skinned %u, moving %u, "
+                "updatable %u, instances %u, built %llu, refits %u, anchor (%.1f %.1f %.1f) k %u, "
+                "ps %08x vs %08x\n",
+                (unsigned long long)frame, e.id, e.triangles, (unsigned long long)e.palette,
+                e.skinned ? 1u : 0u, e.moving ? 1u : 0u, e.updatable ? 1u : 0u, e.instances,
+                (unsigned long long)e.built_frame, e.refits, e.anchor[0], e.anchor[1],
+                e.anchor[2], e.anchor_k, u32(tag.ps), u32(tag.vs));
+        }
         // A mesh entry shared by its placements is kept through them (CollectKeptPlacements).
         if (!e.shared && !e.blended && Rt::KeepInstance(e, frame, camera, keep_rules)) {
             const Rt::DrawKey* k = check_placed && e.placement ? cache.KeyOf(e.id) : nullptr;
@@ -11917,6 +12224,396 @@ bool RayTracing::NotePlaced(u32 entry_id, const Rt::DrawKey& shared_key,
     return r.first_frame < frame;
 }
 
+// The game draws a candle's light only within ~23 m of the camera: it is a light of the flame
+// effect, not a map light (none of the maps' .btl files holds them), and the candelabras are part
+// of large merged map meshes, so no drawn object can carry it. Walking up to a row of candles,
+// each light popped on at ~23 m (2026-11-19, user: "you have the static objects location, why you
+// cant make them light from view"; then: "this need to work from fresh new save").
+// The engine spawns those flames on map-piece model dummies: the Cathedral hall's candle is map
+// piece m000086 with dummy reference id 703 at (0, 0.675, -0.256), and all 67 candle lights the
+// game drew there sit on those points within 0.01 m. tools/mapcache/flame_table.py writes every
+// flame dummy (ids 700-710) of every placed map piece of every map, in world space, to
+// rt_flame_table.h (7302 points, 16 maps). Each point is lit from its id's light template (the
+// candle's is built in and stands in for an id the game has not shown yet (the Cathedral
+// chandeliers, id 700: no game light within reach); another id's own is learned from the first
+// light the game draws on one of its points and kept in BB_RT_LIGHT_CACHE), whenever it is within BB_RT_EMITTER_KEEP_DIST of
+// the camera and the game is not drawing it. A flame light the table does not hold is
+// remembered by place on disk instead, once the game drew it for CandleSaveFrames.
+// The Hunter's Dream (m21) shares coordinates with Yharnam, so its points are lit only while the
+// sky the files name (SkyFinder) is the Dream's, and the others only while it is not.
+// Up close the game decides: a point inside the view within BB_RT_CANDLE_VERIFY m where the game
+// draws no lit light for CandleDarkFrames goes dark for the session (a candle put out).
+namespace {
+constexpr u32 CandleSaveFrames = 30, CandleDarkFrames = 120;
+constexpr float CandleSame = 0.3f, CandleLit = 0.5f, CandleCell = 4.0f;
+constexpr u16 CandleRef = 703;
+
+u64 CandleCellKey(const std::array<float, 3>& p) {
+    const auto q = [](float v) { return u64(s64(std::floor(v / CandleCell)) & 0x1FFFFF); };
+    return q(p[0]) | q(p[1]) << 21 | q(p[2]) << 42;
+}
+
+// The candle light (id 703) as the game draws it (Cathedral Ward hall, every candle the same).
+Rt::Light CandleTemplate() {
+    Rt::Light l{};
+    l.kind = Rt::LightKind::Point;
+    l.has_world = true;
+    l.emitter = true;
+    l.radius = 3.0f;
+    l.color = {1.07239f, 0.60322f, 0.32440f};
+    l.spec = {0.53619f, 0.22654f, 0.13405f};
+    l.spec_power = 0.5f;
+    l.wrap = {1.0f, 1.0f};
+    l.shader_name = "DPointLight";
+    return l;
+}
+} // namespace
+
+s64 RayTracing::FileLightAt(const std::array<float, 3>& p) const {
+    constexpr float Reach = 0.35f;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                const auto it = candle_cells.find(CandleCellKey(
+                    {p[0] + dx * CandleCell, p[1] + dy * CandleCell, p[2] + dz * CandleCell}));
+                if (it == candle_cells.end()) {
+                    continue;
+                }
+                for (const u32 k : it->second) {
+                    const CandleMemory& m = candles[k];
+                    if (m.seed && m.file_light < std::size(Rt::FlameLights) &&
+                        Rt::Distance2(m.light.world, p) <= Reach * Reach) {
+                        return s64(m.file_light);
+                    }
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+s64 RayTracing::CandleFind(const std::array<float, 3>& p, float reach, bool dead_too) const {
+    s64 best = -1;
+    float best_d2 = reach * reach;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                const auto it = candle_cells.find(CandleCellKey(
+                    {p[0] + dx * CandleCell, p[1] + dy * CandleCell, p[2] + dz * CandleCell}));
+                if (it == candle_cells.end()) {
+                    continue;
+                }
+                for (const u32 k : it->second) {
+                    if (candles[k].dead && !dead_too) {
+                        continue;
+                    }
+                    const float d2 = Rt::Distance2(candles[k].light.world, p);
+                    if (d2 <= best_d2) {
+                        best_d2 = d2;
+                        best = s64(k);
+                    }
+                }
+            }
+        }
+    }
+    return best;
+}
+
+void RayTracing::CandleLoad() {
+    candle_loaded = true;
+    for (const Rt::FlameSeed& s : Rt::FlameSeeds) {
+        CandleMemory m{};
+        m.seed = true;
+        m.ref = s.ref;
+        m.file_light = s.light;
+        m.dream = std::strncmp(Rt::FlameMaps[s.map], "m21", 3) == 0;
+        m.light.world = {s.pos[0], s.pos[1], s.pos[2]};
+        if (s.light < std::size(Rt::FlameLights)) {
+            // where the game draws that light (it can sit off the dummy): a game light there
+            // covers the point, so the clone and the game's own light never both draw
+            const float* f = Rt::FlameLights[s.light].pos;
+            m.light.world = {f[0], f[1], f[2]};
+        }
+        candle_cells[CandleCellKey(m.light.world)].push_back(u32(candles.size()));
+        candles.push_back(m);
+    }
+    const size_t seeds = candles.size();
+    flame_templates[CandleRef] = CandleTemplate();
+    const char* path = Rt::Knob("BB_RT_LIGHT_CACHE");
+    candle_path = path && path[0] ? path : "rt_lights.txt";
+    std::FILE* f = std::fopen(candle_path.c_str(), "r");
+    size_t loaded = 0, templates = 0;
+    char line[512];
+    while (f && std::fgets(line, sizeof(line), f)) {
+        Rt::Light l{};
+        int legacy = 0;
+        unsigned stencil = 0, ref = 0;
+        char name[96] = {};
+        const bool tmpl = line[0] == 'T' && line[1] == ' ';
+        const char* text = line;
+        if (tmpl && std::sscanf(line + 2, "%u", &ref) == 1) {
+            text = std::strchr(line + 2, ' ');
+            if (!text) {
+                continue;
+            }
+        }
+        if (std::sscanf(text, "%f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %d %u %95s",
+                        &l.world[0], &l.world[1], &l.world[2], &l.radius, &l.color[0],
+                        &l.color[1], &l.color[2], &l.spec[0], &l.spec[1], &l.spec[2],
+                        &l.spec_power, &l.wrap[0], &l.wrap[1], &l.spot_flag, &l.source, &legacy,
+                        &stencil, name) != 18) {
+            continue;
+        }
+        l.kind = Rt::LightKind::Point;
+        l.has_world = true;
+        l.emitter = true;
+        l.legacy = legacy != 0;
+        l.stencil = stencil;
+        l.shader_name = candle_names.emplace_back(name).c_str();
+        if (tmpl) {
+            flame_templates[u16(ref)] = l;
+            ++templates;
+            continue;
+        }
+        if (CandleFind(l.world, CandleSame) >= 0 || candles.size() >= MaxCandles) {
+            continue; // a flame point of the files holds it
+        }
+        CandleMemory m{};
+        m.light = l;
+        m.frames = CandleSaveFrames;
+        m.saved = true;
+        candle_cells[CandleCellKey(l.world)].push_back(u32(candles.size()));
+        candles.push_back(m);
+        ++loaded;
+    }
+    if (f) {
+        std::fclose(f);
+    }
+    Log("Ray tracing: %zu flame points from the map files, %zu learned light types and %zu "
+        "remembered lights from %s\n",
+        seeds, templates, loaded, candle_path.c_str());
+}
+
+void RayTracing::CandleSave() {
+    candle_dirty = false;
+    const std::string tmp = candle_path + ".tmp";
+    std::FILE* f = std::fopen(tmp.c_str(), "w");
+    if (!f) {
+        return;
+    }
+    const auto put = [&](const Rt::Light& l) {
+        std::fprintf(f, "%.3f %.3f %.3f %.4f %.5f %.5f %.5f %.5f %.5f %.5f %.4f %.4f %.4f %.4f %.4f %d %u %s\n",
+                     l.world[0], l.world[1], l.world[2], l.radius, l.color[0], l.color[1],
+                     l.color[2], l.spec[0], l.spec[1], l.spec[2], l.spec_power, l.wrap[0],
+                     l.wrap[1], l.spot_flag, l.source, l.legacy ? 1 : 0, l.stencil,
+                     l.shader_name && l.shader_name[0] ? l.shader_name : "Candle");
+    };
+    size_t n = 0;
+    for (const auto& [ref, l] : flame_templates) {
+        if (ref != CandleRef) {
+            std::fprintf(f, "T %u ", unsigned(ref));
+            put(l);
+        }
+    }
+    for (const CandleMemory& m : candles) {
+        if (m.seed || m.dead || m.frames < CandleSaveFrames) {
+            continue;
+        }
+        put(m.light);
+        ++n;
+    }
+    const bool ok = std::fclose(f) == 0;
+    std::error_code ec;
+    if (ok) {
+        std::filesystem::rename(tmp, candle_path, ec);
+    }
+    Log("Ray tracing: saved %zu learned light types and %zu remembered lights to %s%s\n",
+        flame_templates.size() - 1, n, candle_path.c_str(), ok && !ec ? "" : " (failed)");
+}
+
+void RayTracing::CandleClones(const Rt::Affine& view) {
+    if (!candle_loaded) {
+        CandleLoad();
+    }
+    const Rt::Affine inv = Rt::InverseRigid(view);
+    const std::array<float, 3> cam{inv[3], inv[7], inv[11]};
+    if (sky_finder.Sky() >= 0) {
+        flame_dream = std::strncmp(sky_finder.Name(), "m21", 3) == 0 ? 1 : 0;
+    }
+    // real: the game's lit flame lights (learned from); present: every small point light the
+    // game places this frame, lit or not (a point it covers is not cloned).
+    std::vector<size_t> real, present;
+    for (size_t i = 0; i < pending_lights.size(); ++i) {
+        const Rt::Light& l = pending_lights[i];
+        if (l.kind != Rt::LightKind::Point || !l.has_world || l.camera_fixed || l.held ||
+            l.radius <= 0.0f || !Rt::Finite3(l.world) || !Rt::Finite3(l.color)) {
+            continue;
+        }
+        // any size covers a point (the gate lamps are 5.5 m: with the old 3 m limit the game's
+        // light and the clone both drew); only candle-size lights are learned from
+        present.push_back(i);
+        if (l.radius <= candle_rmax && l.emitter && l.color[0] + l.color[1] + l.color[2] > 0.0f) {
+            real.push_back(i);
+        }
+    }
+    // Learn: each game flame refreshes its point (the game's own values, latest) and its type.
+    for (const size_t i : real) {
+        const Rt::Light& l = pending_lights[i];
+        s64 k = CandleFind(l.world, CandleSame, true); // a lit light revives a dark point
+        if (k < 0) {
+            if (candles.size() >= MaxCandles) {
+                continue;
+            }
+            k = s64(candles.size());
+            candles.emplace_back();
+            candle_cells[CandleCellKey(l.world)].push_back(u32(k));
+        }
+        CandleMemory& m = candles[size_t(k)];
+        const std::array<float, 3> at = m.frames || m.seed ? m.light.world : l.world;
+        m.light = l;
+        m.light.world = at; // the cell list holds the first place
+        m.dark = 0;
+        m.dead = false;
+        m.lit_frame = frame;
+        ++m.frames;
+        if (m.seed) {
+            if (sky_finder.Sky() < 0) {
+                flame_dream = m.dream ? 1 : 0;
+            }
+            if (m.ref != CandleRef && m.frames == CandleSaveFrames) {
+                flame_templates[m.ref] = l;
+                candle_dirty = true;
+            }
+        } else if (m.frames == CandleSaveFrames || (!m.saved && m.frames > CandleSaveFrames)) {
+            m.saved = true;
+            candle_dirty = true;
+        }
+    }
+    // Light the points the game is not drawing.
+    struct Pick {
+        float d2;
+        size_t k;
+    };
+    std::vector<Pick> picks;
+    const float keep2 = emitter_keep_dist * emitter_keep_dist;
+    for (size_t k = 0; k < candles.size(); ++k) {
+        CandleMemory& m = candles[k];
+        if (m.lit_frame == frame) {
+            continue;
+        }
+        // Only the flame points of the table: a light remembered from play lit some candles
+        // from afar and not others (user, 2026-11-19: "the lights is incosistence").
+        if (!m.seed || flame_dream < 0 || m.dream != (flame_dream == 1)) {
+            continue;
+        }
+        const float d2 = Rt::Distance2(m.light.world, cam);
+        if (d2 > keep2) {
+            continue;
+        }
+        bool drawn = false, unlit = false;
+        const Rt::FlameLight* file =
+            m.file_light < std::size(Rt::FlameLights) ? &Rt::FlameLights[m.file_light] : nullptr;
+        for (const size_t i : present) {
+            if (Rt::Distance2(pending_lights[i].world, m.light.world) <= CandleLit * CandleLit) {
+                drawn = true;
+                auto& c = pending_lights[i].color;
+                float sum = c[0] + c[1] + c[2];
+                // the game fades its lamp light in and out at the ~23 m edge (from 0): below 70%
+                // of the recorded light it is fading, so it draws at the recorded light
+                if (file && sum < 0.7f * (file->color[0] + file->color[1] + file->color[2])) {
+                    c = {file->color[0], file->color[1], file->color[2]};
+                    pending_lights[i].spec = {file->spec[0], file->spec[1], file->spec[2]};
+                    pending_lights[i].emitter = true;
+                    sum = c[0] + c[1] + c[2];
+                }
+                unlit = unlit || sum <= 0.0f;
+            }
+        }
+        if (drawn && !unlit) {
+            m.dark = 0;
+            m.dead = false; // the game lights it again (any size; learning revives candles only)
+            continue;
+        }
+        // No "gone dark" verdict from what the camera saw: the table decides (user, 2026-11-19:
+        // lamps went dark for good after a near pass and only came back in the game's range).
+        if (!drawn) {
+            picks.push_back({d2, k});
+        }
+    }
+    std::sort(picks.begin(), picks.end(), [](const Pick& a, const Pick& b) { return a.d2 < b.d2; });
+    candle_clones_last = 0;
+    file_halo_spots.clear();
+    for (const Pick& p : picks) {
+        if (candle_clones_last >= MaxCandleClones) {
+            break;
+        }
+        const CandleMemory& m = candles[p.k];
+        // A seed the game has not lit yet is lit only where stock lights it, from the files
+        // (flame_table.py; 2026-11-19, user: "only light where the lamp on stock has the color on
+        // the lamp mesh, or real light on stock"): the map light (BTL) at that very lamp, or the
+        // candle light on the candle models. Other flame points (lamp posts that only glow, the
+        // Hunter's Dream gravestones) stay dark.
+        Rt::Light l = m.light;
+        bool at_file_pos = false;
+        if (m.seed && m.frames == 0) {
+            if (m.file_light < std::size(Rt::FlameLights)) {
+                const Rt::FlameLight& f = Rt::FlameLights[m.file_light];
+                l = flame_templates[CandleRef];
+                l.color = {f.color[0], f.color[1], f.color[2]};
+                l.spec = {f.spec[0], f.spec[1], f.spec[2]};
+                l.radius = f.radius;
+                l.legacy = true; // the game draws its map lights as LegacyDPointLight
+                l.shader_name = "LegacyDPointLight";
+                l.world = {f.pos[0], f.pos[1], f.pos[2]};
+                at_file_pos = true;
+            } else if (m.file_light == Rt::FlameCandle) {
+                auto t = flame_templates.find(m.ref);
+                l = (t != flame_templates.end() ? t : flame_templates.find(CandleRef))->second;
+            } else {
+                continue;
+            }
+        }
+        if (!at_file_pos) {
+            l.world = m.light.world;
+        }
+        // Fade in over the last 30% of the reach: a lamp switching on at full strength at 80 m
+        // popped (user, 2026-11-19: "the halos is popin ... smooth the light of the halo").
+        {
+            const float d = std::sqrt(p.d2);
+            const float edge = emitter_keep_dist * 0.7f;
+            if (d > edge && emitter_keep_dist > edge) {
+                float t = std::clamp(1.0f - (d - edge) / (emitter_keep_dist - edge), 0.0f, 1.0f);
+                t = t * t * (3.0f - 2.0f * t);
+                for (int c = 0; c < 3; ++c) {
+                    l.color[c] *= t;
+                    l.spec[c] *= t;
+                }
+            }
+        }
+        l.position = Rt::Transform(view, l.world);
+        pending_lights.push_back(l);
+        ++candle_clones_last;
+        if (m.seed && m.file_light >= Rt::FlameGlowFirst && m.file_light < std::size(Rt::FlameLights)) {
+            file_halo_spots.push_back(m.light.world); // the lamp glass (flame dummy)
+        }
+    }
+    if (candle_dirty && frame >= candle_save_frame + 600) {
+        candle_save_frame = frame;
+        CandleSave();
+    }
+    if (frame >= candle_log_frame + 600) {
+        candle_log_frame = frame;
+        size_t known = 0;
+        for (const CandleMemory& m : candles) {
+            known += !m.seed && !m.dead && m.frames >= CandleSaveFrames;
+        }
+        Log("RT candle memory frame %llu: %u lit from the files or memory (%zu within reach), "
+            "%zu drawn by the game, %zu remembered, %llu gone dark, dream %d\n",
+            (unsigned long long)frame, candle_clones_last, picks.size(), real.size(), known,
+            (unsigned long long)candle_forgotten, flame_dream);
+    }
+}
+
 // The placements of shared meshes that are not drawn this frame and still belong in the TLAS:
 // seen on at least two frames (a mover's one-frame placements never are), their mesh entry still
 // built, seen from near this camera position (the same rule as kept entries), and not drawn
@@ -12056,11 +12753,18 @@ void RayTracing::CollectKeptPlacements(const std::array<float, 3>& camera,
     }
 }
 
-// BB_RT_GEO_DIR: every `<map>.bbgeo` in that folder (tools/mapcache/build_cache.py).
+// The runtime's list of the map files the game opened (src/runtime_file.c).
+extern "C" int runtime_file_map_files(void);
+extern "C" const char* runtime_file_map_file(int index);
+
+// BB_RT_GEO_DIR: every `<map>.bbgeo` in that folder (tools/mapcache/build_cache.py). Without it
+// (the default), each map the game loads is read from the game's own files (PollGeoMaps);
+// BB_RT_GEO_GAME=0 turns that off.
 void RayTracing::LoadGeoMaps() {
     geo_loaded = true;
     const char* dir = Rt::Knob("BB_RT_GEO_DIR");
     if (!dir || !dir[0]) {
+        geo_game = !Rt::KnobIs("BB_RT_GEO_GAME", '0');
         return;
     }
     std::error_code ec;
@@ -12088,6 +12792,63 @@ void RayTracing::LoadGeoMaps() {
     if (!EnsureSoupRing()) {
         Log("Ray tracing: geometry cache off, no room for its build buffer\n");
         geo_maps.clear();
+    }
+}
+
+// Game mode: a map file the game opened starts a read of that map's pieces on a thread
+// (rt_map_files.cpp); the tables come in here once they are ready, a second or two later.
+void RayTracing::PollGeoMaps() {
+    if (!geo_game) {
+        return;
+    }
+    constexpr size_t MaxMaps = 64;
+    for (const int n = runtime_file_map_files(); geo_files_seen < n; ++geo_files_seen) {
+        const char* file = runtime_file_map_file(geo_files_seen);
+        if (!file || geo_maps.size() >= MaxMaps) {
+            continue;
+        }
+        // <dvdroot>/map/MapStudio/<id>.msb.dcx
+        std::string path = file;
+        std::replace(path.begin(), path.end(), '\\', '/');
+        std::string low = path;
+        std::transform(low.begin(), low.end(), low.begin(),
+                       [](unsigned char c) { return char(std::tolower(c)); });
+        const size_t at = low.rfind("/map/mapstudio/");
+        const size_t slash = path.find_last_of('/');
+        if (at == std::string::npos || path.size() < slash + 1 + 8) {
+            continue;
+        }
+        const std::string id = path.substr(slash + 1, path.size() - slash - 1 - 8);
+        if (!EnsureSoupRing()) {
+            Log("Ray tracing: geometry cache off, no room for its build buffer\n");
+            geo_game = false;
+            return;
+        }
+        GeoMapState state;
+        state.map.StartGame(path.substr(0, at), id);
+        Log("Ray tracing: geometry cache: the game opened map %s, reading its pieces\n", id.c_str());
+        geo_maps.push_back(std::move(state));
+    }
+    for (GeoMapState& state : geo_maps) {
+        if (state.map.PollGame()) {
+            state.entry.assign(state.map.meshes.size(), ~0u);
+            state.visible.Begin(state.map);
+            Log("Ray tracing: geometry cache %s from the game's files: %s\n", state.map.name.c_str(),
+                state.map.GameReport().c_str());
+            // The draws looked up before this map came in found no piece: look them up again.
+            for (auto& [id, r] : placed_records) {
+                r.geo_map = r.geo_map == -1 ? -2 : r.geo_map;
+            }
+            cache.ForEach([](Rt::CacheEntry& e) {
+                if (e.geo_key_count == 0) {
+                    e.geo_key_count = 0xFF;
+                }
+            });
+        } else if (!state.reported && state.map.GameFailed()) {
+            Log("Ray tracing: geometry cache %s not read: %s\n", state.map.name.c_str(),
+                state.map.GameReport().c_str());
+        }
+        state.reported = state.reported || state.map.GameFailed() || !state.entry.empty();
     }
 }
 
@@ -12280,6 +13041,7 @@ bool RayTracing::QueueGeoBuilds(u32 slot) {
     if (!geo_loaded) {
         LoadGeoMaps();
     }
+    PollGeoMaps();
     if (geo_maps.empty() || !geo_ring.mapped || !(geo_radius > 0.0f) || !frame_camera_valid ||
         !placement_on || !placement_shared || ptlas_on) {
         return false;
@@ -12311,7 +13073,7 @@ bool RayTracing::QueueGeoBuilds(u32 slot) {
         for (const u32 p : state.nearby) {
             const Rt::GeoPlace& place = state.map.places[p];
             if (Rt::BoxDistance(place.box, camera) > geo_radius ||
-                !state.visible.Shows(state.map, place)) {
+                !state.visible.Shows(state.map, place, geo_rule)) {
                 continue;
             }
             const Rt::GeoModel& model = state.map.models[place.model];
@@ -12335,8 +13097,9 @@ bool RayTracing::QueueGeoBuilds(u32 slot) {
                     continue;
                 }
                 geo_soup.resize(size_t(triangles) * 9);
-                if (!state.map.ReadSoup(mi, geo_soup.data(), geo_vertices, geo_indices)) {
-                    ++geo_build_failures;
+                const int soup = state.map.ReadSoup(mi, geo_soup.data(), geo_vertices, geo_indices);
+                if (soup <= 0) {
+                    geo_build_failures += soup < 0 ? 1u : 0u; // 0: its model is still being read
                     continue;
                 }
                 Rt::CacheEntry entry{};
@@ -12395,7 +13158,7 @@ void RayTracing::CollectGeoInstances(const std::array<float, 3>& camera,
             for (const u32 p : state.nearby) {
                 const Rt::GeoPlace& place = state.map.places[p];
                 if (Rt::BoxDistance(place.box, camera) > geo_radius ||
-                    !state.visible.Shows(state.map, place)) {
+                    !state.visible.Shows(state.map, place, geo_rule)) {
                     continue;
                 }
                 const Rt::GeoModel& model = state.map.models[place.model];

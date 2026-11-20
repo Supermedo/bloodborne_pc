@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -73,6 +74,10 @@ struct GeoPlace {
 };
 static_assert(sizeof(GeoPlace) == 112);
 
+// Game mode (rt_map_files.cpp): the tables built from the game's own files on a thread, and the
+// triangles of a model read on another when a build asks for them.
+struct GeoGame;
+
 class GeoMap {
 public:
     GeoMap() = default;
@@ -92,6 +97,8 @@ public:
         places = std::move(o.places);
         collisions = std::move(o.collisions);
         cells = std::move(o.cells);
+        game = std::move(o.game);
+        mesh_model = std::move(o.mesh_model);
         return *this;
     }
     ~GeoMap() {
@@ -121,17 +128,21 @@ public:
         }
         const size_t slash = path.find_last_of("/\\");
         name = path.substr(slash == std::string::npos ? 0 : slash + 1);
-        cells.clear();
-        cells.reserve(places.size());
-        for (uint32_t i = 0; i < places.size(); ++i) {
-            cells.emplace(Cell(places[i].m[3], places[i].m[7], places[i].m[11]), i);
-        }
+        BuildCells();
         return true;
     }
 
     bool Valid() const {
-        return file != nullptr;
+        return file != nullptr || (game && !places.empty());
     }
+
+    // Game mode: build the tables of map `map_id` from `dvdroot` (the game's dvdroot_ps4) on a
+    // thread. PollGame takes them in once they are ready: true on that call only.
+    void StartGame(const std::string& dvdroot, const std::string& map_id);
+    bool PollGame();
+    bool GameFailed() const;
+    // Game mode, after PollGame: a line about the build (time, counts, failures).
+    std::string GameReport() const;
 
     // The placement with this world matrix (the game's, from its vertex shader constants), or -1.
     // Translation within 5 mm, the rest within 1e-3: the file's matrix comes from the same
@@ -171,11 +182,15 @@ public:
         return -1;
     }
 
-    // The mesh's triangles as a soup: 9 floats a triangle, model space. False on a read error.
-    bool ReadSoup(uint32_t mesh_index, float* out, std::vector<float>& vertices,
-                  std::vector<uint32_t>& indices) {
+    // The mesh's triangles as a soup: 9 floats a triangle, model space. 1 done, -1 a read
+    // error, 0 not read yet (game mode: its model is being read on the loader thread).
+    int ReadSoup(uint32_t mesh_index, float* out, std::vector<float>& vertices,
+                 std::vector<uint32_t>& indices) {
+        if (game && mesh_index < meshes.size()) {
+            return GameSoup(mesh_index, out);
+        }
         if (!file || mesh_index >= meshes.size()) {
-            return false;
+            return -1;
         }
         const GeoMesh& mesh = meshes[mesh_index];
         vertices.resize(size_t(mesh.vertex_count) * 3);
@@ -184,13 +199,13 @@ public:
                     vertices.size() * 4) ||
             !ReadAt(header.index_at + uint64_t(mesh.first_index) * 4, indices.data(),
                     indices.size() * 4)) {
-            return false;
+            return -1;
         }
         for (size_t i = 0; i < indices.size(); ++i) {
             const uint32_t v = indices[i] < mesh.vertex_count ? indices[i] : 0u;
             std::memcpy(out + i * 3, vertices.data() + size_t(v) * 3, 12);
         }
-        return true;
+        return 1;
     }
 
     std::string name;
@@ -243,9 +258,20 @@ private:
         }
     }
 
+    int GameSoup(uint32_t mesh_index, float* out);
+    void BuildCells() {
+        cells.clear();
+        cells.reserve(places.size());
+        for (uint32_t i = 0; i < places.size(); ++i) {
+            cells.emplace(Cell(places[i].m[3], places[i].m[7], places[i].m[11]), i);
+        }
+    }
+
     std::FILE* file = nullptr;
     GeoHeader header{};
     std::unordered_multimap<uint64_t, uint32_t> cells;
+    std::shared_ptr<GeoGame> game;
+    std::vector<uint32_t> mesh_model; // game mode: the model of each mesh
 };
 
 // Distance from a point to an axis-aligned box (0 inside).
@@ -335,16 +361,25 @@ struct GeoVisible {
         }
         return n;
     }
-    bool Shows(const GeoMap& map, const GeoPlace& place) const {
+    // rule (BB_RT_GEO_RULE): 0 = every fitting set shows the piece, 1 = any fitting set does,
+    // 2 = every placeable piece (no group test).
+    bool Shows(const GeoMap& map, const GeoPlace& place, uint32_t rule = 0) const {
+        if (rule >= 2) {
+            return true;
+        }
         bool any = false;
         for (size_t k = 0; k < fits.size(); ++k) {
             if (!fits[k]) {
                 continue;
             }
-            if (!GeoGroupsMeet(place.groups, map.collisions[k])) {
+            const bool meet = GeoGroupsMeet(place.groups, map.collisions[k]);
+            if (rule == 1 && meet) {
+                return true;
+            }
+            if (rule == 0 && !meet) {
                 return false;
             }
-            any = true;
+            any = any || rule == 0;
         }
         return any;
     }

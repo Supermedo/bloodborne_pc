@@ -368,9 +368,51 @@ Per frame (`AddDraw`):
 Memory is fixed at startup: the pool is `BB_RT_BLAS_MB` MiB (default since 2026-11-15: the
 larger of 1.5 x the single-BLAS size of `BB_RT_TRIANGLES` and an eighth of the video memory
 clamped to 512 MiB..2 GiB; printed at startup), one `VkAccelerationStructureKHR` per entry on the pool
-buffer, at most 8192 entries, fingerprints 512 KiB, probe/flag rings per slot. Eviction at frame
+buffer, at most `BB_RT_RECORDS` entries (default 8192, boot knob), fingerprints 512 KiB, probe/flag rings per slot. Eviction at frame
 start: entries unused for 120 frames (loading screens, area changes), then least recently used
-entries until the pool is under 75 %. Freed blocks are reused only after the GPU passed the tick
+entries until the pool is under 75 %, then (2026-11-19) up to 256 entries a frame until an eighth
+of the ids is free, those last seen farthest from the camera first (`EvictFarthest`). Before it,
+ids ran out first in Central Yharnam (0-60 free, 500-4000 draws failed per stats line) and the
+least-recent pick took the kept off-screen casters next to the player, so shadows from things
+outside the view changed after a look up and down. After: ~1000 ids free, 0 failed draws, the
+same shadows after the pan, fps unchanged (52-64). Stats line: `evicted for ids`.
+
+Swaying trees (2026-11-19): the Central Yharnam trees are skinned meshes (wind), so off screen
+they were kept only `BB_RT_KEEP_SKINNED` (30) frames like characters, and their moon shadows on
+the shrouds went 0.5 s after a look up (proven: `BB_RT_KEEP_SKINNED=1000000` kept them). Per
+entry tracking failed (two copies of the tree share one draw key; the entry is rebuilt under a
+new id every ~30 frames), so `Rt::HomeTable` remembers by place: (palette, triangles, 2 m cell of
+the probe sample). A cell sampled 8 times over 300+ frames marks the mesh `stays_home` and it is
+kept like static geometry. Two copies of the tree share one occurrence key: which one is
+occurrence 0 depends on what the view draws, so after a look up the copy the game culled lost
+its BLAS to the other (user: "when look down, it shows trees shadows, when up, disappear"). Now
+a `stays_home` entry whose world matrix (from the draw's placement buffer, A at (-19.0 16.7
+232.8), B at (-13.6 17.1 238.6)) is over 4 m from the drawing copy's is moved to a `StashBit`
+key named by its matrix and stays kept; the copy takes back its own stashed entry when it is
+drawn again. `EvictFarthest` also had to change: it now takes entries outside the TLAS first,
+then 10 m distance bands, then the smallest mesh. Ranked by exact distance, the stashed tree
+(last seen from the down-view camera 3 m off) was the first kept entry the id reserve took.
+Two probe checks also dropped a kept tree while walking (user: "missing sometimes", "sometimes
+moving"): the kept probe found the frozen pose in front of the drawn frame wherever the wind had
+moved a branch (`probe_hidden`), and late probe flags made the off-screen copy dirty, so it left
+the TLAS and was evicted 120 frames later. Both now skip `stays_home` entries; when one is drawn
+it is refit or rebuilt anyway. After: every tree copy around the bridge kept for 1170+ frames
+across walks and look up/down. Known cost: a copy may stay kept twice (stash and an old
+occurrence key) at the same place.
+
+Brazier cages (2026-11-19, user: "when look up and down, the lamps shadows disappear"): the
+Cathedral Ward braziers' cage pattern on the floor and pillars went flat when the camera pitched
+up. The cage is a shared 90-triangle alpha-tested mesh (entry 43, ps 1c3953c6, OMM) 0.37 m from
+the flame; in the up view the game leaves the brazier out of the draws we capture, so it is a kept
+placement, and the kept probe hid it: its ray meets a lattice edge the raster drew as a hole
+(other mip, OMM micro-triangle). Proven with `BB_RT_KEPT_PROBE=0` (pattern back) and
+`BB_RT_LIGHT_DROP=DPointLight1` (lantern off, brazier light alone). The kept probe now skips
+alpha-tested entries and placements; after: pattern in up, down and up again views, 20 s held.
+Measured: tree A kept 612+ frames in the level gate view (before: dropped at 30 frames, then by
+the id reserve at ~100), ~1020 ids free, 0 failed draws. `BB_RT_SHORT_LOG=1` logs each animated
+mesh dropped after the 30 frames, the big animated entries near the camera every 60 frames
+(`RT big`), their releases (`RT big release`, with the eviction that took them) and the stash
+counts (`RT home`). Freed blocks are reused only after the GPU passed the tick
 of the frame that released them (`retired`, `ReclaimBlocks`); handles are destroyed through
 `Scheduler::DeferOperation`. A draw whose BLAS does not fit (pool full, no free entry) is dropped
 for the frame and counted (`pool full` in the stats line); it is retried the next frame.
@@ -3367,9 +3409,9 @@ first hit of a GI path reads a SHaRC-style hash grid and the path stops there, s
 - Tests: `rt-sharc-test` (levels, key and hash distinctness, resolve mean/EMA/cap, overflow
   bound, stale check, update ratio).
 
-## Distance fade to stock lighting (P3, opt-in)
+## Distance fade to stock lighting (P3, on by default since 2026-11-19)
 
-`BB_RT_FAR_START` (live, metres of camera distance, default 0 = off) and `BB_RT_FAR_BAND` (live,
+`BB_RT_FAR_START` (live, metres of camera distance, default 30, 0 = off: from far the game draws coarse far-view shells over a block, hidden behind the real walls but in the TLAS, and the Cathedral Ward gate arch went dark past ~30 m because its lamps sat inside one) and `BB_RT_FAR_BAND` (live,
 default 10). Weight w = clamp((START + BAND - d) / BAND, 0, 1) (`rt_far.h`, same math in the shaders,
 band 0 = hard step). Beyond START + BAND (w = 0):
 
@@ -4025,6 +4067,87 @@ Steady flicker, take two: the wall lamp's swing read too small, and at 0.9 (line
 went down to the 0.25 clamp and read as the lamp going out. Now the scale is
 exp(`BB_RT_EMITTER_STEADY_FLICKER` x noise), default 0.35 (x0.70-x1.42, dips as gentle as
 flares), and FlameNoise is slower (0.25-1.6 Hz), which the accumulated GI follows better.
+
+Fade-in (2026-11-19, user: "the lights pop up in front of the player"): the game draws a candle's
+light (DPointLight3-10, r 3) only within ~22-24 m of the camera (measured over a 6 s walk in the
+Cathedral hall: every new candle track started at 22.1-24.4 m). Our emitter took full strength
+on its first frame, so lit pools appeared ahead of the player. A fixed (not mobile, not held)
+emitter now scales by smoothstep(drawn frames / `BB_RT_EMITTER_FADE_IN`), default 45 (live, 0 =
+off): lum 0.007 -> 2.04 over 45 frames, about 1.5 m of walking.
+User follow-up: "the light goes on when approach, but needs the first approach, and then they
+missing when go out of range but still on screen". A kept light was dropped after
+`BB_RT_DIRECT_KEEP_OFF` (1800 frames, 30 s) whatever its distance (log: ids gone at age ~1790).
+Fixed emitters (drawn 30+ frames, not mobile, not held) are now kept while within
+`BB_RT_EMITTER_KEEP_DIST` (80 m, live, 0 = old rule) of the camera (`LightKeepView::
+static_keep_dist`). A distance fade (off at 22 m) was tried and removed: it is the opposite of
+the wanted look.
+Candle lights from the map files (user: "you have the static objects location, why you cant
+make them light from view", then: "this need to work from fresh new save"). Dropped on the way:
+(1) cloning a light onto every placement of the mesh it sits on (the hall's candelabras are inside
+merged map meshes, 32,620 triangles); (2) the maps' `.btl` light banks (no map holds the candle
+lights, they belong to the flame effect); (3) the MSB effect events (type 2, 313 in m24_01: no
+match to the candles in any map); (4) a learn-and-remember cache (worked, but a candle never seen
+still popped on its first visit). What the files hold: the engine spawns candle flames on
+map-piece model dummies. The Cathedral hall candle is map piece `m000086` of m26_00, dummy
+reference id 703 at (0, 0.675, -0.256), and all 67 candle lights the game drew there sit on its
+487 placements within 0.01 m. `tools/mapcache/flame_table.py` writes every flame dummy (ids
+700-710) of every placed map piece of every map, in world space, to `rt/rt_flame_table.h` (7302
+points in 16 maps; 703 candle, 700/701/702/705/706/710 other flames). `CandleClones` lights each
+point within `BB_RT_EMITTER_KEEP_DIST` (80 m) that the game is not drawing (nearest 128), from
+its id's light template: 703 is built in (the game's candle: r 3, colour 1.072 0.603 0.324, the
+same on all 67); another id's is taken from the first light the game draws on one of its points
+and kept in `BB_RT_LIGHT_CACHE` (`T <id> ...` lines). Lights the table does not hold are
+remembered by place in the same file. The Hunter's Dream (m21) shares coordinates with Yharnam:
+its points are lit only while `SkyFinder` names a Dream sky, the others only while it does not.
+A point in view within `BB_RT_CANDLE_VERIFY` (12 m) where the game draws no lit light for 120
+frames goes dark for the session (a candle put out); a lit game light there revives it.
+Live 2026-11-19, Cathedral hall, empty light cache (fresh install): 7302 points loaded, 259
+within 80 m at the spawn, 128 lit from frame one, 0 gone dark and nothing saved after a walk.
+Back view: far candles on the left and the wall they light show up (dark without). Cost: same
+FPS (44.8 vs 47.5 in that view, noise). The upper gallery measures darker than before (luma 48
+vs 62): there the far candles were lit by `GlowLamp` stand-ins (r 5, about twice a wall lamp);
+the file candles now cover those spots, so the game's own candle values are used
+(`BB_RT_GLOW_SKIP=0` puts the stand-ins back: 57.5).
+`BB_RT_CANDLE_CLONE=0` turns it off (a live 0 does not remove lights already kept as tracks).
+Limit: an id other than 703 needs its first game light once (any one point of that type, any
+map) before its points light from afar; not measured live yet: 700 (chandeliers), 702, 706.
+Regenerate the table: `python tools/mapcache/flame_table.py <dvdroot_ps4> gpu/shadps4/video_core/renderer_vulkan/rt/rt_flame_table.h`.
+
+### Glowing lamps from the files, no "first seen" (2026-11-19)
+
+User rule: light only where stock lights (a game light) or where the lamp head glows in stock;
+lights come from the files, never from what the camera has seen. Which lamp copies glow is in no
+part field (m009703_8103 glows, 8305 is dark, same groups), so the game's glow sprites were
+recorded once per map (`tools/mapcache/harvest/glowsweep.py`: lamp travel, teleport through the
+unlit flame points, `BB_RT_GLOW=1` + `BB_RT_GLOW_DUMP=<file>`) into
+`harvest/glow_lamps_<map>.txt`. `flame_table.py glow_lights` marks the flame point each sprite
+sits on (0.05 m, match 0.3 m), one light per lamp head (`LAMP`, the m24_01 BTL lamp: colour
+2.956 1.794 1.002, r 5), none within 2.5 m of a game light. Those lights come last in
+`FlameLights` (`FlameGlowFirst`); `CandleClones` lights them up to 80 m and puts a halo on each
+(`file_halo_spots`).
+- The runtime catcher (`AddGlowLights`) is off by default (`BB_RT_GLOW=1` for recording only):
+  it lit a lamp only after 30 frames of its glow within 40 m, so lamps popped in while walking.
+- Fades instead of hard edges (user: "the halos is popin", "some lights is now popin"): file
+  lights and clones fade over the last 30% of `BB_RT_EMITTER_KEEP_DIST`; halos (`BuildHalos`
+  `fade_dist`) and catcher lamps over the last 30% of `BB_RT_GLOW_DIST`; GI no longer cuts at
+  `BB_RT_FAR_START` (`rt_gi.comp` FarWeight 1). `BB_RT_GLOW_MAX` 8 -> 16 (the street needed 9).
+- Live, Cathedral Ward street, fresh load: 22 lamp heads lit from the file, posts 8302-8305 dark
+  as in stock, no pop on a 30 s walk; the gate lamps now light the gate from afar (stock: dark
+  until ~23 m).
+- Full sweep (2026-11-20), all maps with a lit lamp in the user's save: m21_01 m22 m23 m24_00-02
+  m25-m28 m32-m36 recorded; 273 lamp heads + 2 candle groups lit from the files. m21_00 (Hunter's
+  Dream) has no return point. m24_00 is partial: amygdalas grab the player there even with
+  `cheat_stealth` + `cheat_silent`, and their throw left it at the kill plane (`land()` now waits a
+  grab out and `unstick()` returns to the last stop that held). Far jumps also land before the
+  ground's collision loads (5-14 stops per map fell; `land()` jumps again until the player stands).
+  One game crash (guest write fault) right after m24_02; the driver runs one map per process.
+- Only flame dummies 703 (street lamps) and 705 (bridge double lamps) get `LAMP`. A glow on any
+  other dummy is a candle group (m33 m000201 at the shrine arches) and gets the game's candle
+  light (`LAMP_HEAD_REFS`): with `LAMP` it flooded the cave orange where stock shows small
+  candles.
+- Live: m33 shrine arch (candle glow now local) and an m32 woods lamp (lit as in stock). The woods
+  there are lit orange far wider than stock (blue fog); that is the game's own lamp lights at the
+  RT lamp gain (game sum 2-5.75 -> RT lum 21-52), unchanged by this work.
 
 ### Workshop fireplace and candelabra flicker (2026-11-09)
 
@@ -4991,6 +5114,25 @@ blocker a far rock mesh (ps `6b45aeff`) 74-85 m along the ray, mode "kept off-sc
 The TLAS holds only what the game has drawn: the rocks join it when the camera looks at them and
 are then kept (`BB_RT_KEEP_UNUSED`), so the same view is lit before and shadowed after.
 
+Moonlight through walls (user 2026-11-19, Cathedral balcony, m26): the traced moon lit an
+indoor balcony that stock keeps dark. `BB_RT_DIRECT_DEBUG=11` showed it all green (lit), while
+`BB_RT_MOON=mask` showed the game's cascade mask fully shadowed: the roof and walls between the
+balcony and the low moon (14 degrees) were never drawn, so they were not in the TLAS.
+
+First try, `BB_RT_MOON_VETO` (live, now default 0): `moon_vis = min(traced, mask .z)` in
+rt_direct.comp DirectionalSets. It fixed the balcony (luma 43.9 / 42.3 vs 114.8 / 117.3) but
+broke open streets: in Central Yharnam the game's mask does not line up with our moon direction
+and read "shadowed" in open moonlight (ground 121 -> 65). `BB_RT_DIRECT_DEBUG=12` shows traced
+moon against the mask (green: we light what the game shadows, red: the opposite); outdoors it is
+not a valid truth.
+
+Fix: the walls come from the game's map files (geometry cache, game mode, below), read when the
+game loads the map. Fresh load at the balcony, no look-around, one run interleaved: floor luma
+44.4 / 43.8 (on) vs 116.6 / 113.1 (`BB_RT_GEO_RADIUS=0`). `BB_RT_GEO_RULE=1` (a piece stands
+in when any fitting collision set shows it) took the balcony leak from 0.62 % to 0.02 % of
+moon-facing pixels with 0.01 % false shadow; Central Yharnam showed no false shadow (0.19 %,
+the method's floor).
+
 `BB_RT_MOON_REACH` (live, metres, 0 = 10 km as before) caps the moon shadow ray in the direct
 pass (centre, cone, thin-card paths), GI bounce moon, the haze light and the traced mist. It
 rides in `far_fade.x` of the direct and GI params (the far fade reads `.yzw` only).
@@ -5131,9 +5273,12 @@ Plan, measurements and status of every step: `GEOMETRY_CACHE_PLAN.md` (study:
   eighth of the video memory (`BB_RT_BLAS_MB`). Misses 0.04-0.07 a frame; the look-away test
   holds (player luma 31.7 -> 34.1, 32.8, 31.8).
 - Map pieces the game has not drawn, loaded from the game's files as shadow casters
-  (`BB_RT_GEO_DIR`, `BB_RT_GEO_RADIUS`, `BB_RT_GEO_MIN_TRIS`, `BB_RT_GEO_LOG`): built, correct,
-  and off by default. At the test bed they add no visible shadow in 11 views and cost 4 % of
-  the frames.
+  (`BB_RT_GEO_GAME`, `BB_RT_GEO_DIR`, `BB_RT_GEO_RADIUS`, `BB_RT_GEO_MIN_TRIS`, `BB_RT_GEO_RULE`,
+  `BB_RT_GEO_LOG`). On by default since 2026-11-19 (game mode): when the game opens
+  `map/MapStudio/<id>.msb.dcx` (src/runtime_file.c), `rt_map_files.cpp` reads that map's MSB and
+  every map-piece FLVER on 3 threads (1.2-1.9 s a map, no files written) and a loader thread
+  reads a model's coarsest triangles when a BLAS build asks. `tools/mapcache/geo_check.cpp`
+  checks it against `build_cache.py`: m26, m24_00, m24_01 identical (tables and triangles).
 
 New knobs (all live unless noted):
 
@@ -5142,9 +5287,12 @@ New knobs (all live unless noted):
 | `BB_RT_PLACEMENT` | `1` | A static draw is keyed by mesh and world matrix once its shader's matrices agreed with the GPU probe. `0`: draw order, as before. |
 | `BB_RT_PLACEMENT_SHARED` | `1` | One BLAS per mesh, placements as instances. Switching it drops what the camera has seen (used by the tests as a purge). |
 | `BB_RT_BLAS_MB` | VRAM / 8, 512..2048 | Load time. BLAS pool size. |
-| `BB_RT_GEO_DIR` | unset | Load time. Folder of `<map>.bbgeo` files (`tools/mapcache/build_cache.py`). Unset: the file pieces are off. |
+| `BB_RT_GEO_GAME` | `1` | Load time. Read each map the game opens from its own files. `0` off. |
+| `BB_RT_GEO_DIR` | unset | Load time. Folder of `<map>.bbgeo` files (`tools/mapcache/build_cache.py`) instead of game mode. |
 | `BB_RT_GEO_RADIUS` | `50` | Metres around the camera in which file pieces stand in. `0` off. |
-| `BB_RT_GEO_MIN_TRIS` | `32` | Load time. Smallest file mesh worth an instance. |
+| `BB_RT_GEO_MIN_TRIS` | `1` | Smallest file mesh worth an instance (was 32: a small pillar block let the moon through). |
+| `BB_RT_GEO_RULE` | `1` | Which collision sets decide: 0 every fitting set shows the piece, 1 any, 2 no group test. |
+| `BB_RT_MOON_VETO` | `0` | Moon visibility capped by the game's cascade mask. Wrong outdoors (see "Moonlight through walls"). |
 | `BB_RT_MOON_FILES` | `1` | The moon or sun of the sky the game draws, from the game's files (next section). `0`: search and moon cache only. |
 | `BB_RT_SKY_LOG` | `0` | Every 120th frame, each sky draw with the vertices the CPU reads of it. |
 | `BB_RT_FAR_LOG`, `BB_RT_MISS_LOG`, `BB_RT_GEO_LOG` | `0` | Diagnostics: far draws, cache misses, the pieces the game draws per map. |
@@ -5276,3 +5424,18 @@ triangles (the creature's 15,140 and a few more).
 Tried and dropped: "every instanced G-buffer draw takes the motion variant" (the trees were
 tessellated, not this) and "two 864-byte buffers mean an 18-bone skeleton" (the selection log
 showed the 18,960-byte palette instead).
+
+## Orbs in the air near lamps: light-ray sprites became halo spots (2026-11-19)
+
+Central Yharnam, at the lamp by the stairs (-25.2 40.6 250.3): three warm orbs blinked over the
+dark stairs, about 9 frames on, 43 off. `BB_RT_HALO=0` removed them. `BB_RT_HALO_LOG=1` (live)
+logs every glow draw (shader, vertex box, widest edge) and every halo frame (camera, spots,
+each halo's view and world position). The glow shader 0x5e224cb6 draws the lamp glass (4
+vertices, edges 0.21 and 1.06 m) and also the lamp's big light-ray sprites (8 vertices, edges
+3-5 m, turning slowly). Their corners moved a few cm a frame, so they passed `GlowLampSteady`
+(30 hits, drift <= 0.1 m) and became 24 halo spots in a flat grid 7.8 m from the camera, each
+matched to the lamp's light within `BB_RT_HALO_MATCH` 2 m. Fix: `AddGlows` drops any quad (4
+vertices, or 3 when the count is not a multiple of 4) wider than `BB_RT_GLOW_MAX_QUAD` 1.5 m
+before clustering. A quad that wide could never give a centred spot anyway (`JoinRadius` 0.6).
+Checked live at that spot: 0 spots, 0 halos, no orbs in 40 frames. A depth test per halo (no halo when
+the surface at the lamp's pixel is in front of it) did not change these orbs and was not kept.

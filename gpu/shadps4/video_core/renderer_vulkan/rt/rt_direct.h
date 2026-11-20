@@ -47,6 +47,10 @@ constexpr uint32_t DirectFlagKeptProbe = 131072;
 // rt_direct.comp ThinMoonVisibility: the part of a moon ray past MoonExactFar is traced with
 // the micromaps forced to 2 states. Only with micromaps in the TLAS (BB_RT_OMM_FAST >= 1).
 constexpr uint32_t DirectFlagMoonFarFast = 262144;
+// rt_direct.comp DirectionalSets: the game's cascade shadow (mask .z) caps the traced moon. The
+// TLAS holds only what the game drew, so a roof or wall off screen let the moon through
+// (Cathedral balcony, 2026-11-19); the game's shadow map has every caster. BB_RT_MOON_VETO.
+constexpr uint32_t DirectFlagMoonVeto = 524288;
 constexpr uint32_t DirectOmmFastFlags(bool omm, uint32_t fast) {
     return omm && fast >= 1 ? DirectFlagMoonFarFast : 0;
 }
@@ -552,7 +556,8 @@ constexpr uint32_t MaxHalos = 16;
 constexpr uint32_t HaloBlockWords = 4 + 8 * MaxHalos;
 inline uint32_t BuildHalos(std::span<const DirectLightGpu> lights,
                            std::span<const std::array<float, 3>> spots, float strength,
-                           float radius, float core, float match, float* out) {
+                           float radius, float core, float match, float* out,
+                           float fade_dist = 0.0f) {
     if (!(strength > 0.0f) || !out) {
         return 0;
     }
@@ -596,8 +601,16 @@ inline uint32_t BuildHalos(std::span<const DirectLightGpu> lights,
         o[1] = p[1];
         o[2] = p[2];
         o[3] = radius;
+        // Fade out over the last 30% of fade_dist (the spots stop there): a halo switching on at
+        // full strength at 40 m popped (user, 2026-11-19: "when move front, it goes pop the halo").
+        float fade = 1.0f;
+        if (fade_dist > 0.0f) {
+            const float d = std::sqrt(picks[k].d2), edge = fade_dist * 0.7f;
+            const float t = std::clamp(1.0f - (d - edge) / (fade_dist - edge), 0.0f, 1.0f);
+            fade = t * t * (3.0f - 2.0f * t);
+        }
         for (int c = 0; c < 3; ++c) {
-            o[4 + c] = std::max(g.color_sp[c], 0.0f) * g.wrap_r_flag[2] * strength;
+            o[4 + c] = std::max(g.color_sp[c], 0.0f) * g.wrap_r_flag[2] * strength * fade;
         }
         o[7] = core;
     }
@@ -762,6 +775,9 @@ struct LightKeepView {
     // camera read 62.8 m away), so lights and glow lamps behind the player were culled by it.
     Affine cull_view{};
     bool cull_valid{};
+    // A fixed emitter (candle, lamp) within this many metres of the camera is kept however long
+    // the game has not drawn it (0 = only offscreen_frames).
+    float static_keep_dist{};
 };
 
 inline bool SphereInFrustum(const std::array<float, 3>& p, float r, float xs, float ys) {
@@ -781,13 +797,24 @@ inline bool KeepOffscreenLight(const DirectTrack& t, uint64_t frame_no, uint32_t
     if (age <= keep) {
         return true;
     }
+    const bool fixed_emitter =
+        t.light.emitter && !t.light.held && !t.mobile && t.frames >= DirectKeepMinFrames;
+    // The game draws a candle's light only within ~23 m of the camera: walking away, a candle
+    // still on screen lost its light once offscreen_frames (30 s) ran out (2026-11-19, user: "when
+    // go out of range, but still on screen"). Fixed emitters are kept by distance instead.
+    if (fixed_emitter && kv.valid && kv.static_keep_dist > 0.0f) {
+        const auto p = Transform(kv.cull_valid ? kv.cull_view : kv.view, t.light.world);
+        if (p[0] * p[0] + p[1] * p[1] + p[2] * p[2] <= kv.static_keep_dist * kv.static_keep_dist) {
+            return true;
+        }
+    }
     if (!kv.valid || age > kv.offscreen_frames || kv.xs == 0.0f || kv.ys == 0.0f) {
         return false;
     }
     // A real emitter (candle, lamp) does not switch off: the game also skips drawing it when its
     // small legacy sphere is still partly on screen (its own culling), but our extended reach can
     // still light what is visible, so it is kept whether or not its sphere is in the frustum.
-    if (t.light.emitter && !t.light.held && !t.mobile && t.frames >= DirectKeepMinFrames) {
+    if (fixed_emitter) {
         return true;
     }
     return !SphereInFrustum(Transform(kv.cull_valid ? kv.cull_view : kv.view, t.light.world),

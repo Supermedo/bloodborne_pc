@@ -155,6 +155,7 @@ const uint FlagMoonHistoryValid = 32768u; // last frame's history matches this c
 const uint FlagObjectMotion = 65536u;     // rt_direct.h DirectFlagObjectMotion: binding 19 valid
 const uint FlagKeptProbe = 131072u;       // rt_direct.h DirectFlagKeptProbe: KeptProbe runs
 const uint FlagMoonFarFast = 262144u;     // rt_direct.h DirectFlagMoonFarFast (BB_RT_OMM_FAST)
+const uint FlagMoonVeto = 524288u;        // rt_direct.h DirectFlagMoonVeto (BB_RT_MOON_VETO)
 const uint SurfacePortalPane = 0x40000000u; // rt_surface.h SurfacePortal
 const uint MaskPortal = 0x08u; // rt_geometry.h MaskPortal
 // Painted windows are drawn a few cm in front of a solid wall (0.63 m measured at the tall
@@ -1125,6 +1126,8 @@ float debug_moon = -1.0;
 // cyan = lit through a thin card, black = shadowed, blue = faces away from the moon, dark red =
 // no moon term.
 vec3 debug_moon_class = vec3(0.4, 0.0, 0.0);
+// BB_RT_DIRECT_DEBUG=12: our traced moon (before the veto) against the game's cascade mask.
+float debug_traced = -1.0, debug_game = 1.0;
 
 void DirectionalSets(Surface s, vec4 g3, ivec2 pixel, inout vec3 diffuse, inout vec3 specular) {
     vec3 L1, dd1, ds1;
@@ -1137,11 +1140,13 @@ void DirectionalSets(Surface s, vec4 g3, ivec2 pixel, inout vec3 diffuse, inout 
     const bool have_mask = (Flags() & FlagShadowMask) != 0u;
     const bool moon_mask = have_mask && (Flags() & FlagMoonMask) != 0u;
     vec3 stock_moon = vec3(1.0);
+    float game_vis = 1.0;
     if (have_mask) {
         const vec4 sm = texelFetch(shadow_mask_tex, pixel, 0);
         if (Finite(vec3(sm.zw, 0.0))) {
             const vec3 fill = clamp(shadow_color.rgb, vec3(0.0), vec3(1.0));
             stock_moon = clamp(sm.z, 0.0, 1.0) * mix(vec3(1.0), vec3(clamp(sm.w, 0.0, 1.0)), fill);
+            game_vis = clamp(sm.z, 0.0, 1.0);
         }
         if (moon_mask) {
             shadow = vec3(sm.z);
@@ -1153,6 +1158,14 @@ void DirectionalSets(Surface s, vec4 g3, ivec2 pixel, inout vec3 diffuse, inout 
         float moon_vis = 1.0;
         if (trace && far_w > 0.0) {
             moon_vis = moon_given >= 0.0 ? moon_given : MoonVisibility(s, L1, pixel);
+        }
+        if (trace && far_w > 0.0 && dot(s.n, L1) > 0.0) {
+            debug_traced = moon_vis;
+            debug_game = game_vis;
+        }
+        // A caster off screen is missing from the TLAS but not from the game's shadow map.
+        if ((Flags() & FlagMoonVeto) != 0u) {
+            moon_vis = min(moon_vis, game_vis);
         }
         shadow = mix(stock_moon, vec3(moon_vis), far_w);
         spec_shadow = vec3(mix(1.0, moon_vis, far_w));
@@ -2071,6 +2084,23 @@ void main() {
             c = (vec3(float(((best * 37u) & 7u) + 1u), float(((best * 101u) & 7u) + 1u),
                       float(((best * 59u) & 7u) + 1u)) / 8.0) *
                 (0.25 + 0.75 * w_best / max(w_total, 1e-6));
+        }
+        imageStore(diffuse_img, pixel, vec4(c, 1.0));
+        imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    if (debug == 12u) {
+        // Green: we light what the game shadows (a caster missing from the TLAS). Red: we
+        // shadow what the game lights (a false caster, or a shadow past the cascades). Grey:
+        // both lit, black: both shadowed, blue: faces away or not traced.
+        DirectionalSets(s, g3, pixel, diffuse, specular);
+        vec3 c = vec3(0.0, 0.0, 0.4);
+        if (debug_traced >= 0.0) {
+            const bool ours = debug_traced > 0.5, game = debug_game > 0.5;
+            c = ours && !game ? vec3(0.0, 1.0, 0.0)
+                : !ours && game ? vec3(1.0, 0.0, 0.0)
+                : ours          ? vec3(0.25)
+                                : vec3(0.0);
         }
         imageStore(diffuse_img, pixel, vec4(c, 1.0));
         imageStore(spec_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));

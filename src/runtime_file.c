@@ -367,12 +367,38 @@ static int commit_file(const File *f) {
     return 0;
 }
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
+/* The map files the game opened (map/MapStudio/<id>.msb.dcx, host paths): the ray tracer reads
+ * the same map's pieces from the game's files to cast shadows the game has not drawn yet. */
+#define MAX_MAP_FILES 64
+static char map_files[MAX_MAP_FILES][600];
+static int map_file_count;
+static void note_map_file(const char *host) {
+    char low[600];
+    size_t n=strlen(host);
+    if (n<20 || n>=sizeof(low)) return;
+    for (size_t i=0;i<=n;++i) {
+        char c=host[i]=='\\' ? '/' : host[i];
+        low[i]=(c>='A' && c<='Z') ? (char)(c-'A'+'a') : c;
+    }
+    if (strcmp(low+n-8,".msb.dcx") || !strstr(low,"/map/mapstudio/")) return;
+    pthread_mutex_lock(&lock);
+    int count=map_file_count, known=0;
+    for (int i=0;i<count;++i) known|=!strcmp(map_files[i],host);
+    if (!known && count<MAX_MAP_FILES) {
+        snprintf(map_files[count],sizeof(map_files[count]),"%s",host);
+        __atomic_store_n(&map_file_count,count+1,__ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&lock);
+}
+int runtime_file_map_files(void) { return __atomic_load_n(&map_file_count,__ATOMIC_ACQUIRE); }
+const char *runtime_file_map_file(int i) { return i>=0 && i<runtime_file_map_files() ? map_files[i] : NULL; }
 static int64_t do_open(const char *guest,int flags,int mode) {
     runtime_quit_on_open(guest);
     if (game_path(guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
+    if (!(flags&3)) note_map_file(path);
     char *commit=NULL, *temp=NULL;
 #ifdef _WIN32
     /* Windows cannot open a directory as a CRT descriptor: directories are listings only. */

@@ -1412,7 +1412,7 @@ void Rasterizer::CaptureGlow(const GraphicsPipeline* pipeline, const AmdGpu::Reg
                             float(c[0]) * a});
     }
     if (!vertices.empty()) {
-        ray_tracing->AddGlows(vertices);
+        ray_tracing->AddGlows(vertices, pipeline->GetStage(Shader::SwStage::Fragment).pgm_hash);
     }
 }
 

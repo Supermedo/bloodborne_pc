@@ -98,9 +98,11 @@ supervisor in small steps, each built and measured live before the next; nothing
    (placements + models, lowest detail), loaded per map, added within a radius as shadow-only
    casters (TLAS mask `MaskKept`), skipped where the same placement is drawn or kept live.
    Target: a fresh launch is lit the same before and after a look away.
-   Status: **built and measured live 2026-11-15; correct, but no gain at the test bed, so it is
-   off unless asked for** (`BB_RT_GEO_DIR=<folder of .bbgeo>`; nothing sets it by default and
-   the launcher does not build the files).
+   Status: **on by default since 2026-11-19 (game mode)**. The engine reads each map the game
+   opens straight from its files (`rt/rt_map_files.cpp`, same rules as `build_cache.py`, checked
+   identical by `tools/mapcache/geo_check.cpp`), so a fresh install casts the shadows of unseen
+   pieces with no files to build. It fixed the moon through the Cathedral balcony walls (m26).
+   `BB_RT_GEO_DIR` still loads `.bbgeo` files instead.
 
    How it works: `tools/mapcache/build_cache.py` writes `<map>.bbgeo` (version 3: models, meshes
    with the index counts of every detail level, placements with matrix, box and draw groups,
