@@ -58,6 +58,9 @@ public:
     [[nodiscard]] std::array<u32, 2> RenderSize() const noexcept {
         return render_size;
     }
+    [[nodiscard]] std::array<float, 4> CurrentProjection() const noexcept {
+        return current.valid ? current.proj : std::array<float, 4>{};
+    }
     /// Vertical field of view and near/far planes of the current camera.
     [[nodiscard]] float VerticalFov() const noexcept;
     [[nodiscard]] float Near() const noexcept;

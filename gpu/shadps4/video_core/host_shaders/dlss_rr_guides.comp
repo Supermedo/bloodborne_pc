@@ -1,0 +1,133 @@
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1) uniform texture2D albedo_tex;
+layout(binding = 2) uniform texture2D normal_tex;
+layout(binding = 3) uniform texture2D g1_tex;
+layout(binding = 4) uniform texture2D g3_tex;
+layout(binding = 5, rgba8) uniform writeonly image2D diffuse_img;
+layout(binding = 6, rgba8) uniform writeonly image2D specular_img;
+layout(binding = 7, rgba16f) uniform writeonly image2D normal_rough_img;
+
+layout(push_constant, std140) uniform Params {
+    vec4 proj;
+    vec4 world_rows[3];
+    vec4 size_jitter;
+    uvec4 cfg;
+};
+
+const uint FlagAlbedo = 1u;
+const uint FlagNormal = 2u;
+const uint FlagG1 = 4u;
+const uint FlagG3 = 8u;
+const uint NormalFromDepth = 0u;
+const uint NormalUnorm = 1u;
+const uint NormalWorldSpace = 0x10u;
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+uint NormalMode() { return cfg.x & 0xFu; }
+bool NormalWorld() { return (cfg.x & NormalWorldSpace) != 0u; }
+uint NormalSwizzle() { return cfg.x >> 8u; }
+uint NormalComponents() { return (cfg.x >> 16u) & 0xFu; }
+uint Flags() { return cfg.y; }
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+vec3 ViewAt(ivec2 pixel) {
+    return PixelToView(vec2(pixel), DepthAt(pixel));
+}
+
+vec3 NormalFromDepthAt(ivec2 pixel, vec3 p) {
+    const vec3 px = ViewAt(pixel + ivec2(1, 0)), mx = ViewAt(pixel - ivec2(1, 0));
+    const vec3 py = ViewAt(pixel + ivec2(0, 1)), my = ViewAt(pixel - ivec2(0, 1));
+    const vec3 dx = abs(px.z - p.z) < abs(p.z - mx.z) ? px - p : p - mx;
+    const vec3 dy = abs(py.z - p.z) < abs(p.z - my.z) ? py - p : p - my;
+    const vec3 n = cross(dy, dx);
+    return dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, -1.0);
+}
+
+float Component(vec4 v, uint index) {
+    return index == 0u ? v.x : index == 1u ? v.y : index == 2u ? v.z : v.w;
+}
+
+vec3 ToWorld(vec3 n) {
+    return vec3(dot(world_rows[0].xyz, n), dot(world_rows[1].xyz, n), dot(world_rows[2].xyz, n));
+}
+
+vec3 SurfaceNormal(ivec2 pixel, vec3 p) {
+    vec3 n;
+    bool world = false;
+    if (NormalMode() == NormalFromDepth || (Flags() & FlagNormal) == 0u) {
+        n = NormalFromDepthAt(pixel, p);
+    } else {
+        const vec4 t = texelFetch(normal_tex, pixel, 0);
+        const uint sw = NormalSwizzle();
+        n = vec3(Component(t, sw & 3u), Component(t, (sw >> 2u) & 3u),
+                 NormalComponents() == 3u ? Component(t, (sw >> 4u) & 3u) : 0.0);
+        if (NormalMode() == NormalUnorm) {
+            n = n * 2.0 - 1.0;
+        }
+        if (NormalComponents() == 2u) {
+            n.z = -sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        if (any(isnan(n)) || dot(n, n) < 1e-6) {
+            n = NormalFromDepthAt(pixel, p);
+        } else {
+            n = normalize(n);
+            world = NormalWorld();
+        }
+    }
+    if (!world) {
+        if (dot(n, p) > 0.0) {
+            n = -n;
+        }
+        n = ToWorld(n);
+    }
+    return n;
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(Size())))) {
+        return;
+    }
+    const float depth = DepthAt(pixel);
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const bool sky = depth <= 0.0 || depth >= 1.0 || -p.z > 1e5;
+    if (sky) {
+        imageStore(diffuse_img, pixel, vec4(0.5, 0.5, 0.5, 1.0));
+        imageStore(specular_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        imageStore(normal_rough_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        return;
+    }
+    const vec3 albedo =
+        (Flags() & FlagAlbedo) != 0u ? texelFetch(albedo_tex, pixel, 0).rgb : vec3(0.5);
+    const vec3 spec = (Flags() & FlagG3) != 0u ? texelFetch(g3_tex, pixel, 0).rgb : vec3(0.04);
+    float roughness = 0.5;
+    if ((Flags() & FlagG1) != 0u) {
+        const float e = exp2(13.0 * texelFetch(g1_tex, pixel, 0).x);
+        const float sp = max(1.0, e / (0.01 * e + 1.0));
+        roughness = clamp(sqrt(2.0 / (sp + 2.0)), 0.02, 1.0);
+    }
+    const vec3 n = SurfaceNormal(pixel, p);
+    imageStore(diffuse_img, pixel, vec4(albedo, 1.0));
+    imageStore(specular_img, pixel, vec4(spec, 1.0));
+    imageStore(normal_rough_img, pixel, vec4(n, roughness));
+}

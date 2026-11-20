@@ -1,0 +1,225 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_samplerless_texture_functions : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer TlasSpace {
+    vec4 tlas_rows[3];
+};
+
+TlasSpace TlasSpaceOf(uvec2 tlas) {
+    return TlasSpace(uvec2(tlas.x - 256u, tlas.y - (tlas.x < 256u ? 1u : 0u)));
+}
+
+vec3 TlasPoint(uvec2 tlas, vec3 p) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0], vec4(p, 1.0)), dot(s.tlas_rows[1], vec4(p, 1.0)),
+                dot(s.tlas_rows[2], vec4(p, 1.0)));
+}
+
+vec3 TlasDir(uvec2 tlas, vec3 d) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return vec3(dot(s.tlas_rows[0].xyz, d), dot(s.tlas_rows[1].xyz, d), dot(s.tlas_rows[2].xyz, d));
+}
+
+mat3 TlasToView(uvec2 tlas, mat3 m) {
+    TlasSpace s = TlasSpaceOf(tlas);
+    return mat3(s.tlas_rows[0].xyz, s.tlas_rows[1].xyz, s.tlas_rows[2].xyz) * m;
+}
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform texture2D depth_tex;
+layout(binding = 1, rgba16f) uniform image2D scene_img;
+layout(binding = 2) uniform texture2D albedo_tex;
+layout(binding = 3) uniform texture2D normal_tex;
+layout(binding = 5) uniform texture2D spec_tex;
+
+struct ShadowLight {
+    vec4 pos_inv_r2;
+    vec4 color;
+};
+
+layout(binding = 4, std140) uniform Params {
+    vec4 proj;
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    uvec4 tlas_count_flags;
+    uvec4 cfg;
+    vec4 strength_bias;
+    ShadowLight lights[8];
+};
+
+const uint FlagAlbedo = 1u;
+const uint FlagDebug = 2u;
+const uint FlagSpecular = 4u;
+const uint NormalFromDepth = 0u;
+const uint NormalUnorm = 1u;
+const uint NormalSigned = 2u;
+const uint NormalWorldSpace = 0x10u;
+
+vec2 Size() { return size_jitter.xy; }
+vec2 Jitter() { return size_jitter.zw; }
+uint LightCount() { return min(tlas_count_flags.z, 8u); }
+uint Flags() { return tlas_count_flags.w; }
+uint NormalMode() { return cfg.x & 0xFu; }
+bool NormalWorld() { return (cfg.x & NormalWorldSpace) != 0u; }
+uint NormalSwizzle() { return cfg.x >> 8u; }
+uint NormalComponents() { return (cfg.x >> 16u) & 0xFu; }
+float Strength() { return strength_bias.x; }
+float Bias() { return strength_bias.y; }
+float TMin() { return strength_bias.z; }
+float EndGap() { return strength_bias.w; }
+
+float ViewZ(float depth) {
+    return proj.w / min(depth - proj.z, -1e-8);
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - Jitter()) / Size();
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = ViewZ(depth);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+float DepthAt(ivec2 pixel) {
+    return texelFetch(depth_tex, clamp(pixel, ivec2(0), ivec2(Size()) - 1), 0).r;
+}
+
+vec3 ViewAt(ivec2 pixel) {
+    return PixelToView(vec2(pixel), DepthAt(pixel));
+}
+
+vec3 NormalFromDepthAt(ivec2 pixel, vec3 p) {
+    const vec3 px = ViewAt(pixel + ivec2(1, 0)), mx = ViewAt(pixel - ivec2(1, 0));
+    const vec3 py = ViewAt(pixel + ivec2(0, 1)), my = ViewAt(pixel - ivec2(0, 1));
+    const vec3 dx = abs(px.z - p.z) < abs(p.z - mx.z) ? px - p : p - mx;
+    const vec3 dy = abs(py.z - p.z) < abs(p.z - my.z) ? py - p : p - my;
+    const vec3 n = cross(dy, dx);
+    return dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 0.0, -1.0);
+}
+
+float Component(vec4 v, uint index) {
+    return index == 0u ? v.x : index == 1u ? v.y : index == 2u ? v.z : v.w;
+}
+
+vec3 SurfaceNormal(ivec2 pixel, vec3 p) {
+    vec3 n;
+    if (NormalMode() == NormalFromDepth) {
+        n = NormalFromDepthAt(pixel, p);
+    } else {
+        const vec4 t = texelFetch(normal_tex, pixel, 0);
+        const uint sw = NormalSwizzle();
+        n = vec3(Component(t, sw & 3u), Component(t, (sw >> 2u) & 3u),
+                 NormalComponents() == 3u ? Component(t, (sw >> 4u) & 3u) : 0.0);
+        if (NormalMode() == NormalUnorm) {
+            n = n * 2.0 - 1.0;
+        }
+        if (NormalComponents() == 2u) {
+            n.z = -sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        if (NormalWorld()) {
+            n = vec3(dot(view_rows[0].xyz, n), dot(view_rows[1].xyz, n), dot(view_rows[2].xyz, n));
+        }
+        if (any(isnan(n)) || dot(n, n) < 1e-6) {
+            n = NormalFromDepthAt(pixel, p);
+        } else {
+            n = normalize(n);
+        }
+    }
+    if (dot(n, p) > 0.0) {
+        n = -n;
+    }
+    return n;
+}
+
+bool Blocked(vec3 origin, vec3 dir, float t_max) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(tlas_count_flags.xy),
+                          gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x05u, TlasPoint(tlas_count_flags.xy, origin),
+                          TMin(), TlasDir(tlas_count_flags.xy, dir), t_max);
+    while (rayQueryProceedEXT(q)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+bool Finite(vec3 v) {
+    return !(any(isnan(v)) || any(isinf(v)));
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const vec2 size = Size();
+    if (pixel.x >= int(size.x) || pixel.y >= int(size.y)) {
+        return;
+    }
+    const bool debug = (Flags() & FlagDebug) != 0u;
+    const float depth = DepthAt(pixel);
+    if (depth >= 1.0 || depth < 0.0 || isnan(depth)) {
+        if (debug) {
+            imageStore(scene_img, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+        }
+        return;
+    }
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const vec3 n = SurfaceNormal(pixel, p);
+    const vec3 origin = p + n * (Bias() + p.z * 2e-4);
+    vec3 albedo = vec3(1.0);
+    if ((Flags() & FlagAlbedo) != 0u) {
+        albedo = texelFetch(albedo_tex, pixel, 0).rgb;
+        if (!Finite(albedo)) {
+            albedo = vec3(0.0);
+        }
+        albedo = clamp(albedo, vec3(0.0), vec3(1.0));
+    }
+    if ((Flags() & FlagSpecular) != 0u) {
+        vec3 g = texelFetch(spec_tex, pixel, 0).rgb;
+        g = Finite(g) ? clamp(g, vec3(0.0), vec3(1.0)) : vec3(0.0);
+        albedo *= vec3(1.0) - g * g * 0.5;
+    }
+    vec3 blocked_light = vec3(0.0);
+    float lit = 0.0, in_range = 0.0;
+    const uint count = LightCount();
+    for (uint i = 0u; i < count; ++i) {
+        const vec3 light_pos = lights[i].pos_inv_r2.xyz;
+        const vec3 d = light_pos - p;
+        const float inv_r2 = lights[i].pos_inv_r2.w;
+        const float d2 = dot(d, d);
+        if (d2 <= 1e-6 || d2 * inv_r2 >= 1.0) {
+            continue;
+        }
+        const float ndl = min(dot(n, d * inversesqrt(d2)), 1.0);
+        if (ndl <= 0.0) {
+            continue;
+        }
+        const vec3 ray = light_pos - origin;
+        const float ray_len = length(ray);
+        if (ray_len <= 1e-3) {
+            continue;
+        }
+        in_range += 1.0;
+        const float t_max = max(ray_len - EndGap(), TMin());
+        if (Blocked(origin, ray / ray_len, t_max)) {
+            const float attenuation = max(0.0, 1.0 / d2 - inv_r2);
+            blocked_light += lights[i].color.rgb * (attenuation * ndl);
+        } else {
+            lit += 1.0;
+        }
+    }
+    if (debug) {
+        const float v = in_range > 0.0 ? lit / in_range : 1.0;
+        imageStore(scene_img, pixel, vec4(v, v, in_range > 0.0 ? v : 0.5, 1.0));
+        return;
+    }
+    if (dot(blocked_light, blocked_light) <= 0.0) {
+        return;
+    }
+    const vec4 current = imageLoad(scene_img, pixel);
+    vec3 result = current.rgb - min(albedo * blocked_light * Strength(), vec3(65504.0));
+    result = clamp(result, vec3(0.0), vec3(65504.0));
+    if (!Finite(result)) {
+        result = current.rgb;
+    }
+    imageStore(scene_img, pixel, vec4(result, current.a));
+}

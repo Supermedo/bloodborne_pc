@@ -29,5 +29,10 @@ struct Coherence {
     void CopiedToProxy() { valid = true; dirty = false; }
     void Resolved() { dirty = false; }
     void NativeWrite() { valid = dirty = false; }
+    void ProxyAccess(bool writes) {
+        if (writes) {
+            ProxyWrite();
+        }
+    }
 };
 } // namespace Vulkan::SceneResolution

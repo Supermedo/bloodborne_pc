@@ -20,6 +20,7 @@
 #include <nvsdk_ngx_vk.h>
 #include <nvsdk_ngx_helpers_vk.h>
 #include <nvsdk_ngx_helpers_dlssg_vk.h>
+#include <nvsdk_ngx_helpers_dlssd_vk.h>
 
 namespace {
 
@@ -44,6 +45,12 @@ struct State {
     BbDlssgFeature fg_desc{};
     bool fg_device_supported{};
     int32_t fg_max_count{};
+    NVSDK_NGX_FeatureDiscoveryInfo discovery_rr{};
+    NVSDK_NGX_Parameter* rr_parameters{};
+    NVSDK_NGX_Handle* rr_feature{};
+    BbDlssFeature rr_desc{};
+    bool rr_device_supported{};
+    bool rr_available{};
     // Extensions of both features, without duplicates.
     std::vector<VkExtensionProperties> instance_extensions, device_extensions;
     VkDevice device{};
@@ -88,6 +95,8 @@ int32_t Configure(const wchar_t* dll_directory, const wchar_t* data_directory, B
     state.discovery.FeatureInfo = &state.common;
     state.discovery_fg = state.discovery;
     state.discovery_fg.FeatureID = NVSDK_NGX_Feature_FrameGeneration;
+    state.discovery_rr = state.discovery;
+    state.discovery_rr.FeatureID = NVSDK_NGX_Feature_RayReconstruction;
     state.configured = true;
     return 1;
 }
@@ -119,6 +128,9 @@ int32_t InstanceExtensions(uint32_t* count, const VkExtensionProperties** extens
     // Frame Generation's own needs; without them only DLSS is offered.
     if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
             &state.discovery_fg, &required_count, &required)))
+        Merge(state.instance_extensions, required, required_count);
+    if (NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
+            &state.discovery_rr, &required_count, &required)))
         Merge(state.instance_extensions, required, required_count);
     *count = uint32_t(state.instance_extensions.size());
     *extensions = state.instance_extensions.data();
@@ -160,6 +172,20 @@ int32_t DeviceExtensions(VkInstance instance, VkPhysicalDevice physical, uint32_
     } else {
         Log(0, "Frame Generation is not supported on this GPU or driver (code 0x%x)",
             static_cast<unsigned>(fg_support.FeatureSupported));
+    }
+    NVSDK_NGX_FeatureRequirement rr_support{};
+    state.rr_device_supported =
+        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureRequirements(instance, physical,
+                                                                  &state.discovery_rr,
+                                                                  &rr_support)) &&
+        rr_support.FeatureSupported == NVSDK_NGX_FeatureSupportResult_Supported &&
+        NVSDK_NGX_SUCCEED(NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
+            instance, physical, &state.discovery_rr, &required_count, &required));
+    if (state.rr_device_supported) {
+        Merge(state.device_extensions, required, required_count);
+    } else {
+        Log(0, "Ray Reconstruction is not supported on this GPU or driver (code 0x%x)",
+            static_cast<unsigned>(rr_support.FeatureSupported));
     }
     *count = uint32_t(state.device_extensions.size());
     *extensions = state.device_extensions.data();
@@ -210,6 +236,79 @@ int32_t Initialize(VkInstance instance, VkPhysicalDevice physical, VkDevice devi
     } else if (fg_needs_driver) {
         Log(1, "Frame Generation needs a newer NVIDIA driver");
     }
+    int rr_available{}, rr_needs_driver{};
+    NVSDK_NGX_Parameter_GetI(state.capabilities,
+                             NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, &rr_available);
+    NVSDK_NGX_Parameter_GetI(state.capabilities,
+                             NVSDK_NGX_Parameter_SuperSamplingDenoising_NeedsUpdatedDriver,
+                             &rr_needs_driver);
+    state.rr_available = state.rr_device_supported && rr_available != 0;
+    if (state.rr_available) {
+        Log(0, "Ray Reconstruction available");
+    } else if (rr_needs_driver) {
+        Log(1, "Ray Reconstruction needs a newer NVIDIA driver");
+    }
+    return 1;
+}
+
+int32_t RayReconstructionAvailable() {
+    return state.initialized && state.rr_available ? 1 : 0;
+}
+
+void RayReconstructionRelease() {
+    if (state.rr_feature) {
+        NVSDK_NGX_VULKAN_ReleaseFeature(state.rr_feature);
+        state.rr_feature = nullptr;
+    }
+    if (state.rr_parameters) {
+        NVSDK_NGX_VULKAN_DestroyParameters(state.rr_parameters);
+        state.rr_parameters = nullptr;
+    }
+}
+
+int32_t RayReconstructionCreate(VkCommandBuffer command, const BbDlssFeature* desc) {
+    if (!RayReconstructionAvailable() || !desc)
+        return 0;
+    RayReconstructionRelease();
+    if (!Check("Ray Reconstruction parameter allocation",
+               NVSDK_NGX_VULKAN_AllocateParameters(&state.rr_parameters)))
+        return 0;
+    for (const char* key : {NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA,
+                            NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality,
+                            NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced,
+                            NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance,
+                            NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance,
+                            NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality})
+        NVSDK_NGX_Parameter_SetUI(state.rr_parameters, key, desc->preset);
+    static constexpr std::array qualities{
+        NVSDK_NGX_PerfQuality_Value_DLAA, NVSDK_NGX_PerfQuality_Value_MaxQuality,
+        NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf,
+        NVSDK_NGX_PerfQuality_Value_UltraPerformance};
+    NVSDK_NGX_DLSSD_Create_Params settings{};
+    settings.InDenoiseMode = NVSDK_NGX_DLSS_Denoise_Mode_DLUnified;
+    settings.InRoughnessMode = NVSDK_NGX_DLSS_Roughness_Mode_Packed;
+    settings.InUseHWDepth = NVSDK_NGX_DLSS_Depth_Type_HW;
+    settings.InWidth = desc->input_width;
+    settings.InHeight = desc->input_height;
+    settings.InTargetWidth = desc->output_width;
+    settings.InTargetHeight = desc->output_height;
+    settings.InPerfQualityValue = qualities[std::clamp(desc->quality, 0, 4)];
+    settings.InFeatureCreateFlags =
+        NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
+        (desc->depth_inverted ? NVSDK_NGX_DLSS_Feature_Flags_DepthInverted : 0) |
+        (desc->hdr ? NVSDK_NGX_DLSS_Feature_Flags_IsHDR | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure
+                   : 0);
+    const auto result = NGX_VULKAN_CREATE_DLSSD_EXT1(state.device, command, 1, 1,
+                                                    &state.rr_feature, state.rr_parameters,
+                                                    &settings);
+    if (!Check("Ray Reconstruction feature creation", result) || !state.rr_feature) {
+        state.rr_feature = nullptr;
+        return 0;
+    }
+    state.rr_desc = *desc;
+    Log(0, "Ray Reconstruction %ux%u -> %ux%u, quality %d, preset %u%s", desc->input_width,
+        desc->input_height, desc->output_width, desc->output_height, desc->quality,
+        desc->preset, desc->hdr ? ", HDR input" : "");
     return 1;
 }
 
@@ -294,6 +393,53 @@ int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
     parameters.InFrameTimeDeltaInMsec = evaluate->frame_ms;
     return Check("DLSS evaluation", NGX_VULKAN_EVALUATE_DLSS_EXT(command, state.feature,
                                                                 state.parameters, &parameters))
+               ? 1
+               : 0;
+}
+
+int32_t RayReconstructionEvaluate(VkCommandBuffer command, const BbDlssdEvaluate* evaluate) {
+    if (!state.rr_feature || !state.rr_parameters || !evaluate)
+        return 0;
+    const auto& base = evaluate->base;
+    auto color = Wrap(base.color, false);
+    auto depth = Wrap(base.depth, false);
+    auto motion = Wrap(base.motion, false);
+    auto output = Wrap(base.output, true);
+    auto diffuse = Wrap(evaluate->diffuse_albedo, false);
+    auto specular = Wrap(evaluate->specular_albedo, false);
+    auto normals = Wrap(evaluate->normal_roughness, false);
+    NVSDK_NGX_VK_DLSSD_Eval_Params parameters{};
+    parameters.pInColor = &color;
+    parameters.pInOutput = &output;
+    parameters.pInDepth = &depth;
+    parameters.pInMotionVectors = &motion;
+    parameters.pInDiffuseAlbedo = &diffuse;
+    parameters.pInSpecularAlbedo = &specular;
+    parameters.pInNormals = &normals;
+    parameters.pInRoughness = &normals;
+    NVSDK_NGX_Resource_VK hit{};
+    if (evaluate->specular_hit.image != VK_NULL_HANDLE) {
+        hit = Wrap(evaluate->specular_hit, false);
+        parameters.pInSpecularHitDistance = &hit;
+    }
+    float world_to_view[16], view_to_clip[16];
+    if (evaluate->has_matrices) {
+        std::memcpy(world_to_view, evaluate->world_to_view, sizeof(world_to_view));
+        std::memcpy(view_to_clip, evaluate->view_to_clip, sizeof(view_to_clip));
+        parameters.pInWorldToViewMatrix = world_to_view;
+        parameters.pInViewToClipMatrix = view_to_clip;
+    }
+    parameters.InRenderSubrectDimensions = {state.rr_desc.input_width,
+                                            state.rr_desc.input_height};
+    parameters.InJitterOffsetX = base.jitter_x;
+    parameters.InJitterOffsetY = base.jitter_y;
+    parameters.InReset = base.reset;
+    parameters.InMVScaleX = parameters.InMVScaleY = 1.0f;
+    parameters.InPreExposure = parameters.InExposureScale = 1.0f;
+    parameters.InFrameTimeDeltaInMsec = base.frame_ms;
+    return Check("Ray Reconstruction evaluation",
+                 NGX_VULKAN_EVALUATE_DLSSD_EXT(command, state.rr_feature, state.rr_parameters,
+                                               &parameters))
                ? 1
                : 0;
 }
@@ -445,6 +591,7 @@ int32_t FrameGenEvaluate(VkCommandBuffer command, const BbDlssgEvaluate* evaluat
 }
 
 void Shutdown() {
+    RayReconstructionRelease();
     FrameGenRelease();
     ReleaseFeature();
     if (state.capabilities) {
@@ -461,7 +608,8 @@ void Shutdown() {
 const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,        InstanceExtensions, DeviceExtensions,
                     Initialize,             CreateFeature,    Evaluate,           ReleaseFeature,
                     Shutdown,               FrameGenMaxCount, FrameGenCreate,     FrameGenEvaluate,
-                    FrameGenRelease};
+                    FrameGenRelease,        RayReconstructionAvailable, RayReconstructionCreate,
+                    RayReconstructionEvaluate, RayReconstructionRelease};
 
 } // namespace
 

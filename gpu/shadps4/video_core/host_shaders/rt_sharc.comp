@@ -1,0 +1,62 @@
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer SharcGrid {
+    uint words[];
+};
+
+layout(push_constant) uniform SharcPush {
+    uvec2 grid;
+    uint slots;
+    uint frame;
+} push;
+
+const uint SharcEntryWords = 8u;
+const uint SharcScale = 4096u;
+const uint SharcFrameCap = 256u;
+const float SharcMaxWeight = 32.0;
+const uint SharcStaleFrames = 64u;
+
+void main() {
+    const uint slot = gl_GlobalInvocationID.x;
+    if (slot >= push.slots) {
+        return;
+    }
+    SharcGrid g = SharcGrid(push.grid);
+    const uint base = slot * SharcEntryWords;
+    if (g.words[base] == 0u) {
+        return;
+    }
+    if (push.frame - g.words[base + 1u] > SharcStaleFrames) {
+        for (uint i = 0u; i < SharcEntryWords; ++i) {
+            g.words[base + i] = 0u;
+        }
+        return;
+    }
+    const uint n = min(g.words[base + 5u], SharcFrameCap);
+    if (n == 0u) {
+        return;
+    }
+    const vec3 sum = vec3(g.words[base + 2u], g.words[base + 3u], g.words[base + 4u]);
+    const vec2 rg = unpackHalf2x16(g.words[base + 6u]);
+    const vec2 bw = unpackHalf2x16(g.words[base + 7u]);
+    vec3 old = vec3(rg, bw.x);
+    float weight = bw.y;
+    if (any(isnan(old)) || any(isinf(old)) || isnan(weight) || weight < 0.0) {
+        old = vec3(0.0);
+        weight = 0.0;
+    }
+    const float total = weight + float(n);
+    const float alpha = min(float(n) / min(total, SharcMaxWeight), 1.0);
+    const vec3 mean = sum / (float(n) * float(SharcScale));
+    const vec3 resolved = old + (mean - old) * alpha;
+    g.words[base + 6u] = packHalf2x16(resolved.rg);
+    g.words[base + 7u] = packHalf2x16(vec2(resolved.b, min(total, SharcMaxWeight)));
+    g.words[base + 2u] = 0u;
+    g.words[base + 3u] = 0u;
+    g.words[base + 4u] = 0u;
+    g.words[base + 5u] = 0u;
+}

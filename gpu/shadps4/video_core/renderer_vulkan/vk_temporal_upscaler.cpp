@@ -27,11 +27,13 @@
 #include "video_core/host_shaders/taa_sharpen_fused_comp.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
+#include "video_core/renderer_vulkan/vk_dlss_rr.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/rt/rt_gi.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
@@ -165,6 +167,10 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
                                    CameraMotion& camera_motion_, SceneTargets& scene_targets_)
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
       runtime{runtime_}, camera_motion{camera_motion_}, scene_targets{scene_targets_} {
+    rr_wanted = Rt::RayReconstructionFromEnv(std::getenv("BB_RT_DLSS_RR"));
+    if (const char* rr_hdr = std::getenv("BB_RT_DLSS_RR_HDR")) {
+        rr_linearize = rr_hdr[0] != '0';
+    }
     // Reject unsupported shaders before allocating resources or recording a frame.
     BbSettings::ConfigureUpscalerSupport(instance.IsFsr4Int8Supported(),
                                          instance.IsFsr411Supported(), instance.Fsr411Problem());
@@ -1214,8 +1220,7 @@ bool TemporalUpscaler::RecordReactive(vk::ImageView color_view) {
 
 void TemporalUpscaler::Run() {
     if (auto* profiler = GpuProfiler::Get()) {
-        const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler Run (TAA)" : "upscaler Run (FSR)";
+        const char* label = ProfileLabel(false);
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -1986,8 +1991,7 @@ void TemporalUpscaler::ShowScaledMotion(vk::CommandBuffer cmdbuf, u32 render_wid
 
 void TemporalUpscaler::RunScaled() {
     if (auto* profiler = GpuProfiler::Get()) {
-        const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler RunScaled (TAA)" : "upscaler RunScaled (FSR)";
+        const char* label = ProfileLabel(true);
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -2482,6 +2486,39 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
                                   const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh,
                                   float frame_ms, bool hdr) {
     Dlss* dlss = Dlss::Get();
+    if (UseRayReconstruction() &&
+        RecordRayReconstruction(cmdbuf, color, depth, w, h, ow, oh, frame_ms, hdr)) {
+        rr_active = true;
+        const u32 path = hdr ? 1u : rr_linear_frame ? 4u : 2u;
+        if (!(rr_path_logged & path)) {
+            rr_path_logged |= path;
+            std::printf("DLSS: Ray Reconstruction runs on the %s, %ux%u -> %ux%u\n",
+                        hdr ? "HDR scene colour before tonemapping (IsHDR on)"
+                        : rr_linear_frame
+                            ? "scaled output path's scene colour inverse-tonemapped to linear "
+                              "HDR, re-tonemapped after (IsHDR on)"
+                            : "tonemapped scene colour of the scaled output path (IsHDR off)",
+                        w, h, ow, oh);
+        }
+        return true;
+    }
+    if (rr_active) {
+        rr_active = false;
+        reset = true;
+    }
+    const bool rr_now = ray_tracing && ray_tracing->Enabled() ? ray_tracing->RayReconstructionWanted()
+                                                              : rr_wanted > 0;
+    if (!rr_now) {
+        rr_logged = false;
+    }
+    if (rr_now && !rr_logged) {
+        rr_logged = true;
+        std::printf("DLSS: BB_RT_DLSS_RR=1 but %s; Super Resolution continues\n",
+                    !ray_tracing || !ray_tracing->Enabled() ? "ray tracing is off (BB_RT=1)"
+                    : !dlss->RayReconstructionAvailable()  ? "Ray Reconstruction is unavailable"
+                    : rr_failed                            ? "Ray Reconstruction failed"
+                                                            : "its guides could not be made");
+    }
     const Dlss::FeatureDesc desc{w, h, ow, oh, Dlss::QualityForScale(float(ow) / float(w)), hdr};
     bool ok = true;
     if (!dlss->HasFeature(desc)) {
@@ -2495,6 +2532,7 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
         // The jitter and motion vectors FSR 3 gets: render pixels, current to previous.
         const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
         const auto& settings = BbSettings::Get();
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::Dlss, 0);
         ok = dlss->Evaluate(cmdbuf, {
             .color = color,
             .depth = depth,
@@ -2516,6 +2554,111 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
         std::printf("Upscaler: DLSS failed; falling back to FSR 3.1\n");
         BbSettings::Get().upscaler = BbSettings::UpscalerFsr3;
         dlss_failed = true; // EnsureResources creates the FSR 3 context next frame
+        reset = true;
+    }
+    return ok;
+}
+
+const char* TemporalUpscaler::ProfileLabel(bool scaled) const {
+    if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
+        return scaled ? "upscaler RunScaled (TAA)" : "upscaler Run (TAA)";
+    }
+    if (UseDlss()) {
+        if (UseRayReconstruction()) {
+            return scaled ? "upscaler RunScaled (DLSS RR)" : "upscaler Run (DLSS RR)";
+        }
+        return scaled ? "upscaler RunScaled (DLSS)" : "upscaler Run (DLSS)";
+    }
+    return scaled ? "upscaler RunScaled (FSR)" : "upscaler Run (FSR)";
+}
+
+bool TemporalUpscaler::UseRayReconstruction() const {
+    const Dlss* dlss = Dlss::Get();
+    return !rr_failed && ray_tracing && ray_tracing->RayReconstructionWanted() && dlss &&
+           dlss->RayReconstructionAvailable();
+}
+
+bool TemporalUpscaler::RecordRayReconstruction(vk::CommandBuffer cmdbuf,
+                                               const Dlss::Resource& color,
+                                               const Dlss::Resource& depth, u32 w, u32 h, u32 ow,
+                                               u32 oh, float frame_ms, bool hdr) {
+    Dlss* dlss = Dlss::Get();
+    if (!rr_guides) {
+        rr_guides = std::make_unique<DlssGuides>(instance, scheduler, runtime, texture_cache,
+                                                 scene_targets);
+    }
+    DlssGuides::Camera camera{};
+    camera.projection = camera_motion.CurrentProjection();
+    camera.jitter = jitter;
+    camera.valid = camera_motion.WorldCamera(camera.inv_view);
+    Dlss::RrGuides guides{};
+    const bool reduced = !scaled_session && (w != ow || h != oh);
+    Checkpoint::Set(cmdbuf, Checkpoint::Op::RrGuides, 0);
+    if (!rr_guides->Record(cmdbuf, ray_tracing->RayReconstructionSource(), depth, reduced, camera,
+                           guides)) {
+        return false;
+    }
+    if (!rr_active) {
+        reset = true;
+    }
+    const auto& p = camera.projection;
+    const bool matrices = camera.valid && p[0] != 0.0f && p[1] != 0.0f && p[3] != 0.0f;
+    const Rt::Affine view = Rt::InverseRigid(camera.inv_view);
+    const std::array<float, 16> world_to_view{view[0], view[4], view[8],  0.0f,
+                                              view[1], view[5], view[9],  0.0f,
+                                              view[2], view[6], view[10], 0.0f,
+                                              view[3], view[7], view[11], 1.0f};
+    const std::array<float, 16> view_to_clip{p[0], 0.0f, 0.0f, 0.0f, 0.0f, p[1], 0.0f, 0.0f,
+                                             0.0f, 0.0f, p[2], 1.0f, 0.0f, 0.0f, p[3], 0.0f};
+    Dlss::Resource input = color;
+    Checkpoint::Set(cmdbuf, Checkpoint::Op::RrLinearize, 0);
+    rr_linear_frame = !hdr && rr_linearize && rr_guides->Linearize(cmdbuf, color, input);
+    const Dlss::FeatureDesc desc{w, h, ow, oh, Dlss::QualityForScale(float(ow) / float(w)),
+                                 hdr || rr_linear_frame};
+    bool ok = true;
+    if (!dlss->HasRrFeature(desc)) {
+        scheduler.WaitSubmitted();
+        dlss->ReleaseRrFeature();
+        ok = dlss->CreateRrFeature(cmdbuf, desc);
+        reset = true;
+    }
+    if (ok) {
+        const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
+        const auto& settings = BbSettings::Get();
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::DlssRr, 0);
+        ok = dlss->EvaluateRr(
+            cmdbuf,
+            {.base = {.color = input,
+                      .depth = depth,
+                      .motion = {vk::Image(motion_image), *motion_view, vk::Format::eR16G16Sfloat,
+                                 vk::ImageAspectFlagBits::eColor, w, h},
+                      .output = {vk::Image(output_image), *output_view,
+                                 vk::Format::eR16G16B16A16Sfloat, vk::ImageAspectFlagBits::eColor,
+                                 ow, oh},
+                      .jitter_x = sign * jitter[0],
+                      .jitter_y = sign * jitter[1],
+                      .reset = reset,
+                      .frame_ms = frame_ms,
+                      .sharpness = settings.sharpen ? std::min(settings.sharpness.load(), 1.0f)
+                                                    : 0.0f},
+             .guides = guides,
+             .has_matrices = matrices,
+             .world_to_view = world_to_view,
+             .view_to_clip = view_to_clip});
+        scheduler.GetDynamicState().Invalidate();
+        Checkpoint::Set(cmdbuf, Checkpoint::Op::DlssDone, 1);
+        if (ok && rr_linear_frame) {
+            Checkpoint::Set(cmdbuf, Checkpoint::Op::RrTonemap, 0);
+            rr_guides->Tonemap(cmdbuf, {vk::Image(output_image), *output_view,
+                                        vk::Format::eR16G16B16A16Sfloat,
+                                        vk::ImageAspectFlagBits::eColor, ow, oh});
+        }
+    }
+    if (!ok) {
+        std::printf("DLSS: Ray Reconstruction failed; Super Resolution continues\n");
+        rr_failed = true;
+        rr_active = false;
+        dlss->ReleaseRrFeature();
         reset = true;
     }
     return ok;

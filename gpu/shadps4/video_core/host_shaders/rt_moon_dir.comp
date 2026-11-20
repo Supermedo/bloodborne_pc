@@ -1,0 +1,61 @@
+#version 460
+
+// Moonlight from the moon the sky draws. The game lights each map from a direction its artists
+// picked, which is not where its sky draws the moon (Cathedral Ward: light 1 comes from behind
+// the camera on the bridge while the moon hangs in front), so traced moon shadows and GI came
+// from the wrong side. The sky layer pass (rt_gi.comp RT_SKY_LAYER) finds the moon disc in the
+// game's moon and cloud layer mesh and stores its world direction; this pass runs on the
+// per-frame copy of the directional sets (never the game's buffer) right after the copy and
+// points light 1 of every set that has a light 1 colour at it, keeping the spec power in .w.
+// Direct, GI, reflections and fog all read this copy. The game's direction stays while no
+// layer moon is known (slot w == 0).
+
+layout(local_size_x = 64) in;
+
+layout(binding = 0, std430) buffer DirSets {
+    vec4 sets[];
+};
+layout(binding = 1, std430) readonly buffer Material {
+    vec4 material[];
+};
+
+layout(push_constant) uniform Push {
+    uint set_count;
+    uint moon_slot;
+    float min_sin; // BB_RT_MOON_MIN_EL: lowest elevation (sine) of the light, 0 = as drawn
+    uint pad1;
+};
+
+// The sky's moon can hang low (Central Yharnam's late moon ~18 degrees, behind the gate walls)
+// while the game lights its streets from ~40 degrees on the same side. Raising the light keeps
+// its compass direction, so shadows still fall away from the moon the player sees.
+vec3 RaiseMoon(vec3 d) {
+    if (!(min_sin > 0.0) || d.y >= min_sin) {
+        return d;
+    }
+    const vec2 h = d.xz;
+    const float len = length(h);
+    if (!(len > 1e-4)) {
+        return d;
+    }
+    const vec2 flat_dir = h / len * sqrt(max(0.0, 1.0 - min_sin * min_sin));
+    return vec3(flat_dir.x, min_sin, flat_dir.y);
+}
+
+void main() {
+    const uint id = gl_GlobalInvocationID.x;
+    if (id >= set_count || moon_slot >= material.length()) {
+        return;
+    }
+    const vec4 moon = material[moon_slot];
+    if (!(moon.w > 0.0) || any(isnan(moon.xyz)) || any(isinf(moon.xyz)) ||
+        !(dot(moon.xyz, moon.xyz) > 0.5)) {
+        return;
+    }
+    const uint base = id * 18u;
+    const vec3 c = sets[base + 4u].xyz;
+    if (!(dot(c, c) > 0.0)) {
+        return;
+    }
+    sets[base] = vec4(RaiseMoon(normalize(moon.xyz)), sets[base].w);
+}

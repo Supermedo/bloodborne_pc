@@ -41,8 +41,14 @@ VertexRange IndexedRange(std::span<const Index, Extent> indices, int32_t base_ve
 // (48 bytes per bone). Characters have 656+ bytes; weapons and props 2-8 bones (96-384).
 enum class BufferRole { Other, Skeleton, SmallSkeleton };
 inline BufferRole ClassifyBuffer(uint32_t size) {
-    if (size == 864 || size > 16384) {
+    if (size == 864) {
         return BufferRole::Other;
+    }
+    // Over 341 bones: still a palette while it is a whole number of bones (a creature of 395
+    // bones in Upper Cathedral Ward, 18960 bytes, was taken for no skeleton at all: its draws
+    // got no motion variant, stored no positions and never reached the ray tracer).
+    if (size > 16384) {
+        return size % 48 == 0 && size <= 65536 ? BufferRole::Skeleton : BufferRole::Other;
     }
     if (size >= 640) {
         return BufferRole::Skeleton;
@@ -223,6 +229,8 @@ struct Draw {
 class History {
 public:
     explicit History(uint32_t capacity) : capacity{capacity} {}
+    // Before the first draw only.
+    void SetCapacity(uint32_t capacity_) { capacity = capacity_; }
 
     struct Allocation {
         uint32_t store{}, load{}, vertices{}, instances{}, first_vertex{}, first_instance{};
@@ -259,6 +267,8 @@ public:
         gate_occurrences.clear();
         ++frame;
         used = 0;
+        wanted_max = std::max(wanted_max, wanted);
+        wanted = 0;
     }
 
     Allocation Prepare(const Draw& draw) {
@@ -280,6 +290,7 @@ public:
         } else {
             ++stats.unmatched;
         }
+        wanted += count;
         if (count <= capacity - used) {
             result.store = 1 + uint32_t(frame & 1) * capacity + used;
             used += uint32_t(count);
@@ -292,6 +303,9 @@ public:
     }
 
     uint32_t Used() const { return used; }
+    // The most vertices the draws of one frame asked for since it was last read (those
+    // that found no room included): how large the store would have to be.
+    uint64_t TakeWantedMax() { return std::exchange(wanted_max, 0); }
 
 private:
     struct Key {
@@ -311,6 +325,7 @@ private:
         }
     };
     uint32_t capacity{}, used{};
+    uint64_t wanted{}, wanted_max{};
     uint64_t frame{};
     FlatMap<Key, uint32_t, Hash> previous, current, occurrences;
     struct GateHash {

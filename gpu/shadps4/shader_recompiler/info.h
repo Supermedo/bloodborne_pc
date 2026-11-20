@@ -77,6 +77,21 @@ struct InfoPersistent {
     bool has_bitwise_xor{};
     bool uses_dma{};
 
+    // bbport: the ray tracer reads these at every draw (vk_rasterizer.cpp), so they persist with
+    // the pipeline cache. In Info they were lost for every pipeline the cache preloaded: those
+    // draws went into the BVH with no texture or UVs and no alpha test (the moon layer read
+    // blank, so the sky moon was never found and moonlight fell back to the game's directions).
+    bool has_discard{};
+    s32 rt_albedo_image{-1};
+    s32 rt_albedo_input{-1};
+    u8 rt_albedo_components{};
+    s32 rt_alpha_image{-1};
+    s32 rt_alpha_input{-1};
+    u8 rt_alpha_components{};
+    u8 rt_alpha_channel{3};
+    s32 rt_normal_image{-1};
+    std::array<s32, 2> rt_normal_inputs{-1, -1};
+
     InfoPersistent() = default;
     InfoPersistent(HwStage hw_stage_, SwStage sw_stage_, u64 pgm_hash_)
         : hw_stage{hw_stage_}, sw_stage{sw_stage_}, pgm_hash{pgm_hash_} {}
@@ -131,7 +146,6 @@ struct Info : InfoPersistent {
 
     VAddr pgm_base;
     bool has_storage_images{};
-    bool has_discard{};
     bool has_image_gather{};
     bool has_image_query{};
     bool has_readconst{};

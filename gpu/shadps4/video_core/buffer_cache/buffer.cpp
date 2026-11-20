@@ -9,6 +9,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/rt/rt_address_map.h"
 
 #include <vk_mem_alloc.h>
 
@@ -71,6 +72,9 @@ UniqueBuffer::~UniqueBuffer() {
 }
 
 void UniqueBuffer::Destroy() {
+    if (bda_addr) {
+        Vulkan::Rt::AddressMap::Remove(bda_addr);
+    }
     if (allocation) {
         vmaDestroyBuffer(allocator, buffer, allocation);
     } else if (buffer) {
@@ -125,6 +129,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
         auto bda_result = device.getBufferAddress(bda_info);
         ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
         bda_addr = bda_result;
+        Vulkan::Rt::AddressMap::Add(bda_addr, buffer_ci.size, Vulkan::Rt::AddressMap::Kind::Game);
     }
 }
 

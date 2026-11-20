@@ -369,10 +369,14 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // at the exact position rather than append
 
     vk::ShaderModule module{};
+    // The store keeps the recompiler's own SPIR-V; a source-matched fix applies here as on compile.
+    const auto source_patch =
+        GetSourcePatch(program->info.pgm_hash, program->info.hw_stage, spv);
+    const std::vector<u32>& code = source_patch ? *source_patch : spv;
 
     auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
     if (new_program) {
-        module = CompileSPV(spv, instance.GetDevice());
+        module = CompileSPV(code, instance.GetDevice());
         it_pgm.value() = std::move(program);
     } else {
         const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
@@ -390,7 +394,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             }
             module = it->module;
         } else {
-            module = CompileSPV(spv, instance.GetDevice());
+            module = CompileSPV(code, instance.GetDevice());
         }
     }
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);

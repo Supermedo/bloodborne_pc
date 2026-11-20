@@ -1,0 +1,46 @@
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#ifndef RR_TONEMAP_FORWARD
+layout(binding = 0) uniform texture2D src_tex;
+layout(binding = 1, rgba16f) uniform writeonly image2D dst_img;
+#else
+layout(binding = 1, rgba16f) uniform image2D dst_img;
+#endif
+
+layout(push_constant, std140) uniform Params {
+    uvec4 size;
+};
+
+const float Scale = 0.99;
+
+float Max3(vec3 v) { return max(v.r, max(v.g, v.b)); }
+
+vec3 Decode(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), greaterThan(c, vec3(0.04045)));
+}
+
+vec3 Encode(vec3 l) {
+    return mix(l * 12.92, 1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055,
+               greaterThan(l, vec3(0.0031308)));
+}
+
+void main() {
+    const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(size.x) || p.y >= int(size.y)) {
+        return;
+    }
+#ifndef RR_TONEMAP_FORWARD
+    const vec4 c = texelFetch(src_tex, p, 0);
+    const vec3 l = Decode(clamp(c.rgb, 0.0, 1.0));
+    imageStore(dst_img, p, vec4(l / (1.0 - Scale * Max3(l)), c.a));
+#else
+    const vec4 v = imageLoad(dst_img, p);
+    vec3 l = max(v.rgb, vec3(0.0));
+    l = mix(l, vec3(0.0), isnan(l));
+    const vec3 t = clamp(l / (1.0 + Scale * Max3(l)), 0.0, 1.0);
+    imageStore(dst_img, p, vec4(Encode(t), v.a));
+#endif
+}

@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string_view>
 #include "bbport_settings.h"
+#include "bbport_stdout.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
 #include "core/emulator_settings.h"
@@ -443,7 +444,7 @@ void PresentEnd(u64 id) {
     if (now - state.window >= std::chrono::seconds(5)) {
         if (state.latency_frames && state.log) {
             const double n = state.latency_frames;
-            std::printf("Latency: %.1f ms from the game starting a frame to its present (worst "
+            BbOut::Print("Latency: %.1f ms from the game starting a frame to its present (worst "
                         "%.1f ms, %u frames, %s): game %.1f, GPU thread %.1f, waiting to present "
                         "%.1f, present %.1f ms; GPU finished it at %.1f ms\n",
                         state.latency_ms / n, state.latency_max_ms, state.latency_frames,

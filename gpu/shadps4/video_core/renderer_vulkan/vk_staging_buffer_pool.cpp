@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "bbport_stdout.h"
 #include "bbport_toggles.h"
 #include <algorithm>
 #include <bit>
@@ -243,7 +244,8 @@ void StagingBufferPool::PublishStats() const {
             used += n > 0 ? size_t(n) : 0;
         }
         const auto mib = [](u64 bytes) { return (unsigned long long)(bytes >> 20); };
-        std::printf("Staging: host ring %llu MiB, host large %llu MiB, cached %llu MiB, VRAM ring "
+        // bbport: one sink write; printf to the unbuffered log stalled the frame ~200 ms.
+        BbOut::Print("Staging: host ring %llu MiB, host large %llu MiB, cached %llu MiB, VRAM ring "
                     "%llu MiB, VRAM large %llu MiB%s\n",
                     mib(ring_bytes[u32(MemoryType::HostUncached)]),
                     mib(large_bytes[u32(MemoryType::HostUncached)]),

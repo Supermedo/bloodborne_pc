@@ -1,0 +1,6 @@
+out/
+__pycache__/
+study/cache/
+study/out_*.txt
+study/*.out
+study/*.tsv

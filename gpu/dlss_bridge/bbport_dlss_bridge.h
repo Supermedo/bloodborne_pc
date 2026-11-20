@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // 2: DLSS Frame Generation (the FrameGen* members; an ABI 1 bridge has DLSS only).
-#define BBPORT_DLSS_BRIDGE_ABI 2
+#define BBPORT_DLSS_BRIDGE_ABI 4
 
 typedef void (*BbDlssLogFn)(int warning, const char* message);
 
@@ -84,6 +84,17 @@ typedef struct BbDlssgEvaluate {
     float prev_clip_to_clip[4][4];
 } BbDlssgEvaluate;
 
+typedef struct BbDlssdEvaluate {
+    BbDlssEvaluate base;
+    BbDlssImage diffuse_albedo;
+    BbDlssImage specular_albedo;
+    BbDlssImage normal_roughness;
+    BbDlssImage specular_hit;
+    int32_t has_matrices;
+    float world_to_view[4][4];
+    float view_to_clip[4][4];
+} BbDlssdEvaluate;
+
 typedef struct BbDlssApi {
     uint32_t abi;
     // UTF-16 paths: the directory with nvngx_dlss.dll, and a writable data directory.
@@ -110,6 +121,11 @@ typedef struct BbDlssApi {
     int32_t (*FrameGenEvaluate)(VkCommandBuffer command, const BbDlssgEvaluate* evaluate);
     // The caller must have waited for the GPU work that used the feature.
     void (*FrameGenRelease)(void);
+    int32_t (*RayReconstructionAvailable)(void);
+    int32_t (*RayReconstructionCreate)(VkCommandBuffer command, const BbDlssFeature* feature);
+    int32_t (*RayReconstructionEvaluate)(VkCommandBuffer command,
+                                         const BbDlssdEvaluate* evaluate);
+    void (*RayReconstructionRelease)(void);
 } BbDlssApi;
 
 typedef const BbDlssApi* (*BbDlssGetApiFn)(void);

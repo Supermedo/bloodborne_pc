@@ -1,0 +1,288 @@
+#version 460
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0, rgba16f) uniform image2D scene_img;
+layout(binding = 1) uniform texture2D albedo_tex;
+layout(binding = 2) uniform texture2D history_tex;
+layout(binding = 3) uniform texture2D raw_tex;
+layout(binding = 4) uniform texture2D debug_tex;
+layout(binding = 5, std430) buffer Material {
+    vec4 material[];
+};
+layout(binding = 6, std430) buffer Accum {
+    uvec4 accum[];
+};
+layout(binding = 7) uniform texture2D depth_tex;
+layout(binding = 8) uniform texture2D g3_tex;
+layout(binding = 9, std140) uniform Params {
+    vec4 proj;
+    vec4 prev_proj;
+    vec4 reproject[3];
+    vec4 view_rows[3];
+    vec4 size_jitter;
+    vec4 prev_jitter_sky_clamp;
+    uvec4 tlas_frame_flags;
+    uvec4 cfg;
+    vec4 strength_bias;
+    uvec4 bounce;
+    uvec4 bounce_cfg;
+    vec4 bounce_misc;
+    vec4 shadow_color;
+};
+layout(binding = 10, std430) readonly buffer FogSets {
+    vec4 fog_sets[];
+};
+// Diffuse keep factor from the reflection pass (see-through glass), read when glass_keep != 0.
+layout(binding = 11) uniform texture2D keep_tex;
+// Lamp halos (Rt::BuildHalos): per halo (view pos, reach) and (intensity x strength, core).
+layout(binding = 12, std430) readonly buffer Halos {
+    vec4 halos[];
+};
+
+const uint BounceFlagG3 = 1u;
+const vec3 FogLuma = vec3(0.29891, 0.58661, 0.11448);
+
+layout(push_constant) uniform Constants {
+    vec2 size;
+    float strength;
+    uint mode;
+    float max_history;
+    uint albedo_valid;
+    uint records;
+    uint denoise;
+    float debug_threshold;
+    uint glass_keep; // 0 none (keep 1), 1 scale the GI by it, 2 show it (BB_RT_GLASS_DEBUG=3)
+    uint halo_count;
+};
+
+const uint MaterialScale = 256u;
+const float MaterialBlend = 0.125;
+const float MaterialMaxFrames = 255.0;
+
+bool Finite(vec3 v) {
+    return !(any(isnan(v)) || any(isinf(v)));
+}
+
+vec3 PixelToView(vec2 pixel, float depth) {
+    const vec2 uv = (pixel + 0.5 - size_jitter.zw) / size_jitter.xy;
+    const vec2 ndc = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    const float z = proj.w / min(depth - proj.z, -1e-8);
+    return vec3(ndc.x * z / proj.x, ndc.y * z / proj.y, z);
+}
+
+vec3 WorldDir(vec3 v) {
+    return view_rows[0].xyz * v.x + view_rows[1].xyz * v.y + view_rows[2].xyz * v.z;
+}
+
+void FogFactors(ivec2 pixel, out float t, out vec3 k) {
+    t = 1.0;
+    k = vec3(0.0);
+    const uint count = bounce_cfg.z;
+    if (count == 0u) {
+        return;
+    }
+    uint set_id = 0u;
+    if ((bounce_cfg.y & BounceFlagG3) != 0u) {
+        const float a = texelFetch(g3_tex, pixel, 0).a;
+        set_id = isnan(a) ? 0u : uint(clamp(a, 0.0, 1.0) * 255.0);
+    }
+    const uint base = set_id * 6u;
+    if (base + 5u >= count) {
+        return;
+    }
+    const float depth = texelFetch(depth_tex, pixel, 0).x;
+    const vec3 o = WorldDir(PixelToView(vec2(pixel), depth));
+    if (!Finite(o)) {
+        return;
+    }
+    const vec4 c1 = fog_sets[base + 1u];
+    const vec4 c2 = fog_sets[base + 2u];
+    const vec4 c3 = fog_sets[base + 3u];
+    const vec4 c4 = fog_sets[base + 4u];
+    const float d = sqrt(o.x * o.x + o.z * o.z) - c2.y;
+    const float a1 = clamp(c2.x - c2.x * exp2(-d * c2.z), 0.0, 1.0);
+    const float a2 = clamp(c3.x * clamp(c3.z * (o.y + c3.w - c3.y), 0.0, 1.0), 0.0, 1.0);
+    t = (1.0 - a1) * (1.0 - a2);
+    k = a1 * (1.0 - a2) * c1.w * c1.rgb + a2 * c4.w * c4.rgb;
+    if (!Finite(k) || isnan(t)) {
+        t = 1.0;
+        k = vec3(0.0);
+    }
+}
+
+// Spatial denoise (BB_RT_GI_DENOISE = tap stride in pixels, 0 off): a 5x5 a-trous style
+// bilateral over the accumulated, albedo-free GI. Taps are weighted by a Gaussian and by how far
+// they sit off the centre pixel's surface plane (normal from depth), so edges between surfaces
+// stay sharp while noise within a surface averages out. It only
+// redistributes the traced GI between neighbouring pixels of one surface; it adds no light.
+vec3 ViewPos(ivec2 p) {
+    return PixelToView(vec2(p), texelFetch(depth_tex, p, 0).x);
+}
+
+vec3 SpatialGi(ivec2 pixel, vec4 centre) {
+    const ivec2 size_i = ivec2(size);
+    const float depth = texelFetch(depth_tex, pixel, 0).x;
+    if (denoise == 0u || depth >= 1.0) {
+        return centre.rgb;
+    }
+    const vec3 p = PixelToView(vec2(pixel), depth);
+    const ivec2 rx = ivec2(min(pixel.x + 1, size_i.x - 1), pixel.y);
+    const ivec2 lx = ivec2(max(pixel.x - 1, 0), pixel.y);
+    const ivec2 dy = ivec2(pixel.x, min(pixel.y + 1, size_i.y - 1));
+    const ivec2 uy = ivec2(pixel.x, max(pixel.y - 1, 0));
+    const vec3 ddx_r = ViewPos(rx) - p, ddx_l = p - ViewPos(lx);
+    const vec3 ddy_d = ViewPos(dy) - p, ddy_u = p - ViewPos(uy);
+    const vec3 ddx = abs(ddx_r.z) < abs(ddx_l.z) ? ddx_r : ddx_l;
+    const vec3 ddy = abs(ddy_d.z) < abs(ddy_u.z) ? ddy_d : ddy_u;
+    vec3 n = cross(ddx, ddy);
+    const float nl = length(n);
+    if (!(nl > 1e-12)) {
+        return centre.rgb;
+    }
+    n /= nl;
+    const float plane_tol = 0.01 * max(abs(p.z), 0.05) + 0.005;
+    const int stride = int(denoise);
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    for (int j = -2; j <= 2; ++j) {
+        for (int i = -2; i <= 2; ++i) {
+            const ivec2 q = pixel + ivec2(i, j) * stride;
+            if (any(lessThan(q, ivec2(0))) || any(greaterThanEqual(q, size_i))) {
+                continue;
+            }
+            const float qd = texelFetch(depth_tex, q, 0).x;
+            if (qd >= 1.0) {
+                continue;
+            }
+            const vec4 h = (i == 0 && j == 0) ? centre : texelFetch(history_tex, q, 0);
+            if (!Finite(h.rgb)) {
+                continue;
+            }
+            const float off_plane = abs(dot(n, PixelToView(vec2(q), qd) - p)) / plane_tol;
+            const float g = exp(-0.5 * float(i * i + j * j) / 2.25);
+            const float w = g * exp(-off_plane * off_plane);
+            sum += w * max(h.rgb, vec3(0.0));
+            wsum += w;
+        }
+    }
+    return wsum > 1e-6 ? sum / wsum : centre.rgb;
+}
+
+// Air glow around fixed flames: along the camera ray up to the surface (or far for the sky), the
+// inverse-square in-scatter I / (d^2 + c^2) in closed form (atan), times a Gaussian of the ray's
+// closest approach to the flame, exp(-h^2 / R^2): a hot core fading smoothly, no edge. The
+// intensity carries the light's flicker, so the halo flickers with it.
+const vec3 HALO_TINT = vec3(1.0, 0.5, 0.22);
+
+vec3 HaloGlow(ivec2 pixel) {
+    if (halo_count == 0u) {
+        return vec3(0.0);
+    }
+    const float depth = texelFetch(depth_tex, pixel, 0).x;
+    const bool sky = !(depth < 1.0);
+    const vec3 v = PixelToView(vec2(pixel), sky ? 0.5 : depth);
+    const float len = length(v);
+    if (!(len > 1e-6) || !Finite(v)) {
+        return vec3(0.0);
+    }
+    const vec3 dir = v / len;
+    const float ray_len = sky ? 1.0e4 : len;
+    vec3 sum = vec3(0.0);
+    for (uint i = 0u; i < min(halo_count, 16u); ++i) {
+        const vec4 pr = halos[2u * i];
+        const vec4 ic = halos[2u * i + 1u];
+        const float b = dot(pr.xyz, dir);
+        const float h2 = max(dot(pr.xyz, pr.xyz) - b * b, 0.0);
+        const float r2 = pr.w * pr.w;
+        if (h2 >= 9.0 * r2 || b <= 0.0) {
+            continue;
+        }
+        const float hh = sqrt(h2 + ic.w * ic.w);
+        const float glow = (atan((ray_len - b) / hh) + atan(b / hh)) / hh * exp(-h2 / r2);
+        // Lights carry the game's tint (creamy to deep red), which reads as fake in the
+        // haze; every halo gets one flame colour at the light's peak channel.
+        const float peak = max(max(ic.r, ic.g), max(ic.b, 1e-6));
+        sum += HALO_TINT * peak * glow;
+    }
+    return Finite(sum) ? sum : vec3(0.0);
+}
+
+void ResolveMaterial(uint id) {
+    const uvec4 sum = accum[id];
+    if (sum.w == 0u) {
+        return;
+    }
+    accum[id] = uvec4(0u);
+    const vec4 stored = material[id];
+    const vec3 mean = vec3(sum.xyz) / (float(sum.w) * float(MaterialScale));
+    const float w = stored.w > 0.0 && Finite(stored.rgb) ? MaterialBlend : 1.0;
+    material[id] = vec4(mix(stored.rgb, mean, w), min(stored.w + 1.0, MaterialMaxFrames));
+}
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (pixel.x >= int(size.x) || pixel.y >= int(size.y)) {
+        return;
+    }
+    const uint linear = uint(pixel.y) * uint(size.x) + uint(pixel.x);
+    if (linear < material.length() && linear < accum.length()) {
+        ResolveMaterial(linear);
+    }
+    const vec4 current = imageLoad(scene_img, pixel);
+    const vec4 history = texelFetch(history_tex, pixel, 0);
+    const vec4 raw = texelFetch(raw_tex, pixel, 0);
+    vec3 albedo = albedo_valid != 0u ? texelFetch(albedo_tex, pixel, 0).rgb : vec3(1.0);
+    if (!Finite(albedo)) {
+        albedo = vec3(0.0);
+    }
+    albedo = clamp(albedo, vec3(0.0), vec3(1.0));
+    float keep = 1.0;
+    if (glass_keep != 0u) {
+        const float k = texelFetch(keep_tex, pixel, 0).r;
+        // -(2 + under) marks a decal under water (rt_gi.comp): its under is the rest.
+        keep = isnan(k) ? 1.0 : clamp(k < -1.5 ? -k - 2.0 : abs(k), 0.0, 1.0);
+    }
+    float fog_t;
+    vec3 fog_k;
+    FogFactors(pixel, fog_t, fog_k);
+    vec3 result = current.rgb;
+    if (mode == 0u) {
+        vec3 gi = SpatialGi(pixel, history);
+        if (!Finite(gi)) {
+            gi = vec3(0.0);
+        }
+        const vec3 add = albedo * max(gi, vec3(0.0)) * (strength * keep);
+        result = min(current.rgb + add * fog_t + dot(add, FogLuma) * fog_k + HaloGlow(pixel),
+                     vec3(65504.0));
+    } else if (mode == 1u) {
+        result = raw.rgb;
+    } else if (mode == 2u) {
+        result = history.rgb;
+    } else if (mode == 3u) {
+        result = albedo;
+    } else if (mode == 4u) {
+        result = history.rgb;
+    } else if (mode == 5u) {
+        result = vec3(history.a / max(max_history, 1.0));
+    } else if (mode == 6u || mode == 7u) {
+        // BB_RT_DEBUG_THRESH > 0: red where the channel (red for 10+i, alpha for 20+i) is
+        // below the threshold, dim grey elsewhere, to find a per-pixel material mask.
+        const vec4 t = texelFetch(debug_tex, pixel, 0);
+        const float v = mode == 7u ? t.a : t.r;
+        result = mode == 7u ? vec3(t.a) : t.rgb;
+        if (debug_threshold > 0.0) {
+            result = v < debug_threshold ? vec3(1.0, 0.0, 0.0) : vec3(0.1 * v);
+        }
+    } else if (mode == 8u) {
+        result = vec3(clamp(fog_t, 0.0, 1.0));
+    }
+    if (glass_keep == 2u) {
+        result = vec3(keep);
+    }
+    if (!Finite(result)) {
+        result = current.rgb;
+    }
+    imageStore(scene_img, pixel, vec4(result, current.a));
+}

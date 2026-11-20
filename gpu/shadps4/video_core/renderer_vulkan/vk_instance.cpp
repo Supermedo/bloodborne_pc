@@ -17,6 +17,8 @@
 #include "video_core/renderer_vulkan/vk_fsr4vk.h"
 #include "video_core/renderer_vulkan/vk_low_latency.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/rt/rt_gi_pipeline.h"
+#include "video_core/renderer_vulkan/rt/rt_address_map.h"
 
 #include <vk_mem_alloc.h>
 
@@ -216,12 +218,68 @@ Instance::~Instance() {
     vmaDestroyAllocator(allocator);
 }
 
+void Instance::ReportCheckpoints() const {
+    if (!checkpoints) {
+        std::printf("GPU: no queue checkpoints (VK_NV_device_diagnostic_checkpoints unavailable)\n");
+        return;
+    }
+    std::vector<vk::Queue> queues{graphics_queue};
+    if (present_queue && present_queue != graphics_queue) {
+        queues.push_back(present_queue);
+    }
+    for (size_t q = 0; q < queues.size(); ++q) {
+        u32 count = 0;
+        queues[q].getCheckpointDataNV(&count, nullptr);
+        std::vector<vk::CheckpointDataNV> data(count);
+        if (count) {
+            queues[q].getCheckpointDataNV(&count, data.data());
+        }
+        if (data.empty()) {
+            std::printf("GPU: queue %zu: no checkpoints reached\n", q);
+            continue;
+        }
+        u32 done_serial = 0, started_serial = 0;
+        bool foreign = false;
+        for (const auto& item : data) {
+            const std::string stage = fmt::format("queue {} {}", q, vk::to_string(item.stage));
+            std::printf("%s\n", Checkpoint::DescribeCheckpoint(stage.c_str(), Checkpoint::ring,
+                                                               item.pCheckpointMarker)
+                                   .c_str());
+            if (!item.pCheckpointMarker) {
+                continue;
+            }
+            if (!Checkpoint::ring.Owns(item.pCheckpointMarker)) {
+                foreign = true;
+                continue;
+            }
+            const auto* mark = static_cast<const Checkpoint::Mark*>(item.pCheckpointMarker);
+            if (item.stage & vk::PipelineStageFlagBits::eBottomOfPipe) {
+                done_serial = mark->serial;
+            } else {
+                started_serial = std::max(started_serial, mark->serial);
+            }
+        }
+        if (foreign) {
+            std::printf("%s", Checkpoint::DescribeForeign(Checkpoint::ring, 24).c_str());
+            continue;
+        }
+        std::printf("%s", Checkpoint::DescribeWindow(Checkpoint::ring, done_serial, started_serial,
+                                                     24)
+                              .c_str());
+    }
+    std::fflush(stdout);
+}
+
 void Instance::ReportDeviceLost(const char* where) const {
     static std::atomic<bool> reported{false};
     if (reported.exchange(true)) {
         return;
     }
     std::printf("GPU: device lost (%s)\n", where);
+    if (lost_hook) {
+        lost_hook();
+    }
+    ReportCheckpoints();
     if (!device_fault) {
         std::printf("GPU: the driver gives no fault details (VK_EXT_device_fault unavailable)\n");
         std::fflush(stdout);
@@ -249,6 +307,7 @@ void Instance::ReportDeviceLost(const char* where) const {
                     vk::to_string(address.addressType).c_str(),
                     static_cast<unsigned long long>(address.reportedAddress),
                     static_cast<unsigned long long>(address.addressPrecision));
+        Rt::AddressMap::Describe(address.reportedAddress, address.addressPrecision);
     }
     for (const auto& item : vendor) {
         std::printf("GPU: fault vendor info: %s (code %#llx, data %#llx)\n", item.description.data(),
@@ -361,6 +420,7 @@ bool Instance::CreateDevice(bool presentation) {
     // bbport: after a device loss the driver says where the GPU faulted (ReportDeviceLost).
     device_fault = feature_chain.get<vk::PhysicalDeviceFaultFeaturesEXT>().deviceFault &&
                    add_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
     maintenance_8 = add_extension(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
     attachment_feedback_loop = add_extension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);
     if (attachment_feedback_loop) {
@@ -519,11 +579,105 @@ bool Instance::CreateDevice(bool presentation) {
     // bbport: GPU checkpoints (BB_GPU_CHECKPOINTS=1): NVIDIA's, else AMD's buffer markers. Only
     // enabled when asked for; see vk_checkpoints.cpp.
     if (Checkpoints::Wanted()) {
-        nv_checkpoints = add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+        nv_checkpoints = checkpoints || add_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME); // bbport-rt: already on for the RT checkpoints
         amd_buffer_marker = !nv_checkpoints && add_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
     }
     const bool calibrated_timestamps =
         TRACY_GPU_ENABLED ? add_extension(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) : false;
+    if (const char* rt_env = std::getenv("BB_RT"); rt_env && rt_env[0] == '1') {
+        const auto has_extension = [&](std::string_view extension) {
+            return std::find(available_extensions.begin(), available_extensions.end(),
+                             extension) != available_extensions.end();
+        };
+        const bool rt_extensions = has_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                                   has_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+                                   has_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        using RtFeatureChain =
+            vk::StructureChain<vk::PhysicalDeviceFeatures2,
+                               vk::PhysicalDeviceVulkan12Features,
+                               vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+                               vk::PhysicalDeviceRayQueryFeaturesKHR>;
+        const RtFeatureChain rt_features =
+            rt_extensions ? physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                                         vk::PhysicalDeviceVulkan12Features,
+                                                         vk::PhysicalDeviceAccelerationStructureFeaturesKHR,
+                                                         vk::PhysicalDeviceRayQueryFeaturesKHR>()
+                          : RtFeatureChain{};
+        ray_query = rt_extensions &&
+                    rt_features.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress &&
+                    rt_features.get<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>()
+                        .accelerationStructure &&
+                    rt_features.get<vk::PhysicalDeviceRayQueryFeaturesKHR>().rayQuery &&
+                    add_extension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                    add_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+                    add_extension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        if (!ray_query) {
+            std::printf("Ray tracing: off (VK_KHR_acceleration_structure, VK_KHR_ray_query, "
+                        "VK_KHR_deferred_host_operations or bufferDeviceAddress unavailable)\n");
+        }
+        if (ray_query) {
+            const char* omm_env = std::getenv("BB_RT_OMM");
+            const bool omm_wanted = !omm_env || omm_env[0] != '0';
+            if (omm_wanted && has_extension(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME)) {
+                const auto omm_features =
+                    physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                                 vk::PhysicalDeviceOpacityMicromapFeaturesEXT>();
+                opacity_micromap =
+                    omm_features.get<vk::PhysicalDeviceOpacityMicromapFeaturesEXT>().micromap &&
+                    add_extension(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
+            }
+            cluster_as_exposed = has_extension(VK_NV_CLUSTER_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+            const char* ptlas_env = std::getenv("BB_RT_PTLAS");
+            const bool ptlas_wanted = ptlas_env && ptlas_env[0] == '1';
+            if (!ptlas_wanted) {
+                ptlas_problem = "default off, BB_RT_PTLAS=1 to enable";
+            } else if (!has_extension(VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+                ptlas_problem = "VK_NV_partitioned_acceleration_structure not exposed";
+            } else if (!physical_device
+                            .getFeatures2<vk::PhysicalDeviceFeatures2,
+                                          vk::PhysicalDevicePartitionedAccelerationStructureFeaturesNV>()
+                            .get<vk::PhysicalDevicePartitionedAccelerationStructureFeaturesNV>()
+                            .partitionedAccelerationStructure) {
+                ptlas_problem = "partitionedAccelerationStructure feature not supported";
+            } else {
+                partitioned_as =
+                    add_extension(VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+                ptlas_problem = partitioned_as ? "" : "extension could not be enabled";
+            }
+            std::printf("Ray tracing: opacity micromaps %s (BB_RT_OMM), cluster acceleration "
+                        "structures %s (not used)\n",
+                        opacity_micromap ? "on" : omm_wanted ? "unavailable" : "off",
+                        cluster_as_exposed ? "exposed" : "not exposed");
+            ray_tracing_pipeline_exposed =
+                has_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+            ray_tracing_reorder_exposed =
+                has_extension(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+            const Rt::GiPipelineMode gi_mode = Rt::GiPipelineFromEnv(
+                std::getenv("BB_RT_GI_PIPELINE"), std::getenv("BB_RT_GI_SER"),
+                ray_tracing_pipeline_exposed, ray_tracing_reorder_exposed, GetVendorID());
+            if (gi_mode.pipeline) {
+                vk::StructureChain<vk::PhysicalDeviceFeatures2,
+                                   vk::PhysicalDeviceRayTracingPipelineFeaturesKHR,
+                                   vk::PhysicalDeviceRayTracingInvocationReorderFeaturesNV>
+                    pipeline_features;
+                if (!gi_mode.ser) {
+                    pipeline_features
+                        .unlink<vk::PhysicalDeviceRayTracingInvocationReorderFeaturesNV>();
+                }
+                physical_device.getFeatures2(
+                    &pipeline_features.get<vk::PhysicalDeviceFeatures2>());
+                ray_tracing_pipeline =
+                    pipeline_features.get<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>()
+                        .rayTracingPipeline &&
+                    add_extension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+                ray_tracing_reorder =
+                    ray_tracing_pipeline && gi_mode.ser &&
+                    pipeline_features.get<vk::PhysicalDeviceRayTracingInvocationReorderFeaturesNV>()
+                        .rayTracingInvocationReorder &&
+                    add_extension(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+            }
+        }
+    }
 
     const auto family_properties = physical_device.getQueueFamilyProperties();
     if (family_properties.empty()) {
@@ -706,9 +860,13 @@ bool Instance::CreateDevice(bool presentation) {
             .shaderSharedInt64Atomics = vk12_features.shaderSharedInt64Atomics,
             .shaderFloat16 = vk12_features.shaderFloat16,
             .shaderInt8 = vk12_features.shaderInt8,
-            .descriptorBindingPartiallyBound = sdk_partially_bound,
+            .shaderSampledImageArrayNonUniformIndexing =
+                vk12_features.shaderSampledImageArrayNonUniformIndexing,
+            // bbport RT binds its texture arrays partially on every GPU, not only for the FSR SDK.
+            .descriptorBindingPartiallyBound =
+                vk12_features.descriptorBindingPartiallyBound || sdk_partially_bound,
             .descriptorBindingVariableDescriptorCount = fsr4vk,
-            .runtimeDescriptorArray = fsr4vk,
+            .runtimeDescriptorArray = fsr4vk || vk12_features.runtimeDescriptorArray,
             .scalarBlockLayout = vk12_features.scalarBlockLayout,
             .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
             .separateDepthStencilLayouts = vk12_features.separateDepthStencilLayouts,
@@ -833,10 +991,45 @@ bool Instance::CreateDevice(bool presentation) {
         vk::PhysicalDeviceAntiLagFeaturesAMD{
             .antiLag = true,
         },
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR{
+            .accelerationStructure = true,
+        },
+        vk::PhysicalDeviceRayQueryFeaturesKHR{
+            .rayQuery = true,
+        },
+        vk::PhysicalDeviceOpacityMicromapFeaturesEXT{
+            .micromap = true,
+        },
+        vk::PhysicalDevicePartitionedAccelerationStructureFeaturesNV{
+            .partitionedAccelerationStructure = true,
+        },
+        vk::PhysicalDeviceRayTracingPipelineFeaturesKHR{
+            .rayTracingPipeline = true,
+        },
+        vk::PhysicalDeviceRayTracingInvocationReorderFeaturesNV{
+            .rayTracingInvocationReorder = true,
+        },
         vk::PhysicalDeviceFragmentShadingRateFeaturesKHR{
             .pipelineFragmentShadingRate = true,
         },
     };
+
+    if (!ray_query) {
+        device_chain.unlink<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>();
+        device_chain.unlink<vk::PhysicalDeviceRayQueryFeaturesKHR>();
+    }
+    if (!ray_query || !ray_tracing_pipeline) {
+        device_chain.unlink<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>();
+    }
+    if (!ray_query || !ray_tracing_pipeline || !ray_tracing_reorder) {
+        device_chain.unlink<vk::PhysicalDeviceRayTracingInvocationReorderFeaturesNV>();
+    }
+    if (!opacity_micromap) {
+        device_chain.unlink<vk::PhysicalDeviceOpacityMicromapFeaturesEXT>();
+    }
+    if (!partitioned_as) {
+        device_chain.unlink<vk::PhysicalDevicePartitionedAccelerationStructureFeaturesNV>();
+    }
 
 #ifdef _WIN32
     if (!sdk_cooperative) device_chain.unlink<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>();
@@ -942,6 +1135,7 @@ bool Instance::CreateDevice(bool presentation) {
     device = std::move(dev);
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
+    Checkpoint::enabled.store(checkpoints, std::memory_order_relaxed);
     LowLatency::Init(*this);
     if (Dlss* dlss = Dlss::Get()) {
         dlss->Initialize(*instance, physical_device, *device);

@@ -75,6 +75,8 @@ struct Dlss::Impl {
     std::vector<std::string> instance_extensions, device_extensions;
     std::optional<FeatureDesc> feature;
     std::optional<FrameGenDesc> frame_gen;
+    std::optional<FeatureDesc> rr_feature;
+    bool rr_available{};
     int frame_gen_max{};
     std::string problem;
     bool eligible{true}, instance_ready{}, device_ready{}, initialized{}, available{};
@@ -191,6 +193,15 @@ void Dlss::Initialize(vk::Instance instance, vk::PhysicalDevice physical, vk::De
         return impl->Disable("NVIDIA NGX initialization failed (update the GPU driver)");
     }
     impl->available = true;
+    if (impl->api->abi >= 3) {
+        impl->rr_available = impl->api->RayReconstructionAvailable() != 0;
+        if (!impl->rr_available) {
+            std::printf("DLSS: Ray Reconstruction unavailable (%s)\n",
+                        std::filesystem::is_regular_file(ExecutableDirectory() / L"nvngx_dlssd.dll")
+                            ? "NGX reports no support on this GPU or driver"
+                            : "nvngx_dlssd.dll is not next to the executable");
+        }
+    }
     if (impl->api->abi >= 2) {
         impl->frame_gen_max = std::max(0, impl->api->FrameGenMaxCount());
     } else {
@@ -310,10 +321,77 @@ void Dlss::ReleaseFrameGen() {
     }
 }
 
+bool Dlss::RayReconstructionAvailable() const {
+    return impl->available && impl->rr_available;
+}
+
+bool Dlss::HasRrFeature(const FeatureDesc& desc) const {
+    return impl->rr_feature && *impl->rr_feature == desc;
+}
+
+bool Dlss::CreateRrFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
+    if (!RayReconstructionAvailable()) {
+        return false;
+    }
+    impl->rr_feature.reset();
+    static const u32 preset = [] {
+        const char* text = std::getenv("BB_RT_DLSS_RR_PRESET");
+        const char c = text ? text[0] : '\0';
+        return c == 'D' || c == 'd' ? 4u : c == 'E' || c == 'e' ? 5u : c == 'F' || c == 'f' ? 6u : 0u;
+    }();
+    const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
+                                desc.output_height, desc.quality,      0,
+                                preset,             desc.hdr ? 1 : 0};
+    if (!impl->api->RayReconstructionCreate(command, &feature)) {
+        return false;
+    }
+    impl->rr_feature = desc;
+    return true;
+}
+
+bool Dlss::EvaluateRr(vk::CommandBuffer command, const RrFrame& frame) {
+    if (!impl->rr_feature) {
+        return false;
+    }
+    const auto image = [](const Resource& r) {
+        const vk::ImageSubresourceRange range{r.aspect, 0, 1, 0, 1};
+        return BbDlssImage{r.image,
+                           r.view,
+                           static_cast<VkImageSubresourceRange>(range),
+                           static_cast<VkFormat>(r.format),
+                           r.width,
+                           r.height};
+    };
+    const auto& base = frame.base;
+    BbDlssdEvaluate parameters{
+        {image(base.color), image(base.depth), image(base.motion), image(base.output),
+         base.jitter_x, base.jitter_y, base.reset ? 1 : 0, base.frame_ms, base.sharpness},
+        image(frame.guides.diffuse_albedo),
+        image(frame.guides.specular_albedo),
+        image(frame.guides.normal_roughness),
+        frame.guides.specular_hit.image ? image(frame.guides.specular_hit) : BbDlssImage{},
+        frame.has_matrices ? 1 : 0,
+        {},
+        {}};
+    std::memcpy(parameters.world_to_view, frame.world_to_view.data(),
+                sizeof(parameters.world_to_view));
+    std::memcpy(parameters.view_to_clip, frame.view_to_clip.data(),
+                sizeof(parameters.view_to_clip));
+    return impl->api->RayReconstructionEvaluate(command, &parameters) != 0;
+}
+
+void Dlss::ReleaseRrFeature() {
+    impl->rr_feature.reset();
+    if (impl->api && impl->api->abi >= 3) {
+        impl->api->RayReconstructionRelease();
+    }
+}
+
 void Dlss::Shutdown() {
     impl->available = false;
     impl->feature.reset();
     impl->frame_gen.reset();
+    impl->rr_feature.reset();
     if (impl->api && impl->initialized) {
         impl->api->Shutdown();
         impl->initialized = false;
@@ -362,6 +440,19 @@ bool Dlss::EvaluateFrameGen(vk::CommandBuffer, const FrameGenFrame&) {
     return false;
 }
 void Dlss::ReleaseFrameGen() {}
+bool Dlss::RayReconstructionAvailable() const {
+    return false;
+}
+bool Dlss::HasRrFeature(const FeatureDesc&) const {
+    return false;
+}
+bool Dlss::CreateRrFeature(vk::CommandBuffer, const FeatureDesc&) {
+    return false;
+}
+bool Dlss::EvaluateRr(vk::CommandBuffer, const RrFrame&) {
+    return false;
+}
+void Dlss::ReleaseRrFeature() {}
 
 #endif
 

@@ -29,6 +29,7 @@
 #include <SDL3/SDL.h>
 #include "bbport_process_memory.h"
 #include "bbport_settings.h"
+#include "bbport_stdout.h"
 #include "bbport_fsr41_ui.h"
 #include <filesystem>
 #include <cstring>
@@ -1958,7 +1959,7 @@ void NotePresent() {
         worst = std::max(worst, ms < 1000.0f ? ms : 0.0f);
         const float elapsed = std::chrono::duration<float>(now - window_start).count();
         if (elapsed >= 5.0f) {
-            std::printf("Frame rate: %.1f FPS, slowest frame %.1f ms\n", frames / elapsed, worst);
+            BbOut::Print("Frame rate: %.1f FPS, slowest frame %.1f ms\n", frames / elapsed, worst);
             window_start = now;
             frames = 0;
             worst = 0.0f;

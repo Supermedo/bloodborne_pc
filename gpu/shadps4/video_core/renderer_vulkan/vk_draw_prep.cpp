@@ -9,6 +9,7 @@
 
 #include "bbport_threads.h"
 #include "bbport_toggles.h"
+#include "bbport_stdout.h"
 #include "common/thread.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
@@ -507,7 +508,7 @@ void DrawPreparation::Count(bool was_used) {
         return;
     }
     window = now;
-    std::printf("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
+    BbOut::Print("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
                 "%llu scanner rebases)\n",
                 static_cast<unsigned long long>(used), static_cast<unsigned long long>(unused),
                 worker_count, static_cast<unsigned long long>(rebases));

@@ -1486,6 +1486,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             BbStats::gpu_vol_switches.store(usage.ru_nvcsw, std::memory_order_relaxed);
             BbStats::gpu_minor_faults.store(usage.ru_minflt, std::memory_order_relaxed);
         }
+#else
+        if (FILETIME created, exited, kernel, user;
+            GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) {
+            const auto us = [](const FILETIME& t) {
+                return ((u64(t.dwHighDateTime) << 32) | t.dwLowDateTime) / 10;
+            };
+            BbStats::gpu_user_us.store(us(user), std::memory_order_relaxed);
+            BbStats::gpu_sys_us.store(us(kernel), std::memory_order_relaxed);
+        }
 #endif
     }
 

@@ -87,6 +87,10 @@ int main() {
     assert(ClassifyBuffer(96) == BufferRole::SmallSkeleton &&
            ClassifyBuffer(384) == BufferRole::SmallSkeleton);
     assert(ClassifyBuffer(656) == BufferRole::Skeleton && ClassifyBuffer(64) == BufferRole::Other);
+    // A palette of 395 bones is still a skeleton; a large buffer that is no whole number of
+    // bones, or one past 64 KiB, is not.
+    assert(ClassifyBuffer(18960) == BufferRole::Skeleton && ClassifyBuffer(16384 + 16) == BufferRole::Other);
+    assert(ClassifyBuffer(16368) == BufferRole::Skeleton && ClassifyBuffer(65568) == BufferRole::Other);
 
     // Index ranges: reused between full scans, rescanned every Revalidate frames, trimmed.
     IndexRangeCache ranges;

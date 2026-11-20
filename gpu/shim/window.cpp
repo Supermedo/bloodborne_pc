@@ -9,6 +9,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
+#include "video_core/renderer_vulkan/rt/rt_toggle.h"
 #include "bbport_mouse.h"
 #include "bbport_overlay.h"
 #include "bbport_prompts.h"
@@ -276,6 +277,13 @@ bool WindowSDL::PollEvents() {
             }
             if (scancode == reload_scancode.load(std::memory_order_relaxed)) {
                 reload_requested.store(true, std::memory_order_relaxed);
+                continue;
+            }
+            if (scancode == SDL_SCANCODE_F9) {
+                static const bool recording = std::getenv("BB_PAD_RECORD") != nullptr;
+                if (!recording) {
+                    Vulkan::Rt::ToggleEffects();
+                }
                 continue;
             }
         }
