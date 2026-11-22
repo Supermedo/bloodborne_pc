@@ -237,6 +237,14 @@ analog_deadzone = leftjoystick, 1, 127   # device, inner, outer (1..127 each)
 `inner` to `outer` it ramps up linearly; at or above `outer` it is fully deflected. The default
 (`1, 127`) is effectively no deadzone, matching the behavior before this feature existed.
 
+## Text entry
+
+The game's text boxes (the character name, a password, a Chalice Glyph) are typed into a box drawn
+over the picture; Enter or Cross accepts, Esc or Circle cancels. **Ctrl+V** (Cmd+V) pastes the
+clipboard into it: SDL passes typed text only, never the clipboard's contents, so the port reads
+the clipboard itself. The box is one line long, so line breaks and control characters are dropped
+and the text arrives whole; the game's maximum length still applies when the box is accepted.
+
 ## Reserved keys
 
 **Insert** (the settings menu) and **F9** (`BB_PAD_RECORD`) can never be bound to a game output,
