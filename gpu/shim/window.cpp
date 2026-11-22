@@ -325,6 +325,19 @@ bool WindowSDL::PollEvents() {
                 text_editing.clear();
             } else if (event.type == SDL_EVENT_TEXT_EDITING) {
                 text_editing = event.edit.text ? event.edit.text : "";
+            } else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_V &&
+                       (event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI))) {
+                // bbport: SDL hands over typed text, never the clipboard's contents, so Ctrl+V (Cmd+V) pastes
+                // nothing by itself. The box is one line long: breaks and control characters are dropped, the
+                // rest (UTF-8 included) is kept, and the runtime cuts it to the game's max length on accept.
+                if (char* clip = SDL_GetClipboardText()) {
+                    for (const char* p = clip; *p && text.size() < 4096; ++p) {
+                        const unsigned char c = static_cast<unsigned char>(*p);
+                        if (c >= 0x20 && c != 0x7f) text += static_cast<char>(c);
+                    }
+                    SDL_free(clip);
+                    text_editing.clear();
+                }
             } else if (!text_editing.empty() && (event.key.key == SDLK_BACKSPACE ||
                                                  event.key.key == SDLK_RETURN ||
                                                  event.key.key == SDLK_KP_ENTER)) {
