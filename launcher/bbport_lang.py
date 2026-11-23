@@ -1248,6 +1248,7 @@ from bbport_fsr411 import TRANSLATIONS as FSR411_SUPPORT_TRANSLATIONS
 from bbport_lang_trophies import TRANSLATIONS as TROPHY_TRANSLATIONS
 from bbport_lang_exit import TRANSLATIONS as EXIT_TRANSLATIONS  # noqa: E402
 from bbport_lang_window import TRANSLATIONS as WINDOW_TRANSLATIONS  # noqa: E402
+from bbport_lang_appearance import TRANSLATIONS as APPEARANCE_TRANSLATIONS  # noqa: E402
 from bbport_lang_relay import TRANSLATIONS as RELAY_TRANSLATIONS  # noqa: E402
 from bbport_lang_lod import TRANSLATIONS as LOD_TRANSLATIONS  # noqa: E402
 
@@ -1301,4 +1302,5 @@ def table(language):
         _tables[language].update(WINDOW_TRANSLATIONS.get(language, {}))
         _tables[language].update(RELAY_TRANSLATIONS.get(language, {}))
         _tables[language].update(LOD_TRANSLATIONS.get(language, {}))
+        _tables[language].update(APPEARANCE_TRANSLATIONS.get(language, {}))
     return _tables[language]

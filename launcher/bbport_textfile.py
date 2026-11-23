@@ -6,7 +6,7 @@ Players open bbport.ini and input.ini in Notepad or another editor: some save th
 comment is then no UTF-8), with a BOM, or with a decimal comma (sharpness=0,5). Each of these kept the launcher
 from opening. A file that needed repairing is rewritten clean, its old bytes kept beside it as <name>.bad, and
 REPAIRS gets a line for the log of the next start (bbport_launcher_win writes them there). The other files the
-launcher writes (mods.json, patches.json, a respec's save, Steam's shortcuts.vdf) go through write() and
+launcher writes (mods.json, patches.json, an appearance change's save, Steam's shortcuts.vdf) go through write() and
 write_bytes() too.
 """
 import os

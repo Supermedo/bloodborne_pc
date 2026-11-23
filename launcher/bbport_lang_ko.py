@@ -59,7 +59,6 @@ KO_OVERRIDES = {
     # Table B: wrong in meaning, or not the game's word
     "Rebirth at the Doll: back to your origin's attributes for 5 Insight, levels regained free": '인형 앞에서 다시 태어나기: 계몽 5로 과거의 능력치로 돌아가며, 레벨은 피의 유지 없이 되찾습니다',
     '21:9 outputs: health, items and Blood Echoes at the screen edges, or in the centred 16:9 area as on a 16:9 screen.': '21:9 출력: 체력, 아이템, 피의 유지를 화면 가장자리에 두거나, 16:9 화면처럼 가운데 16:9 영역에 둡니다.',
-    "Spread a character's attribute points again: same level, same Blood Echoes. Changes the save while the game is closed; the saves from before go into your backups (Saves).": '캐릭터의 능력치 포인트를 다시 분배합니다. 레벨과 피의 유지는 그대로입니다. 게임이 꺼져 있을 때만 세이브를 고치며, 이전 세이브는 세이브 페이지의 백업에 남습니다.',
     'A shadNet server instead, and every option: the Online play page. Offline needs nothing: untick it.': '자세한 옵션은 온라인 플레이 페이지에 있습니다. 오프라인으로 플레이하려면 체크를 해제하세요.',
     'Off: the game stays offline, as before.': '끄면 게임을 오프라인으로 실행합니다.',
     "SuperMedo Server (recommended): supermedo.com's own servers, with a free account made below.": 'SuperMedo 서버: supermedo.com의 자체 서버입니다. 무료 계정은 아래에서 만들 수 있습니다.',
