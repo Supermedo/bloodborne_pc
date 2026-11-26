@@ -107,9 +107,72 @@ class IntegrationTests(unittest.TestCase):
             self.prepare()
         self.assertEqual((self.cache / 'keep').read_text(), 'mine')
         self.cache.rename(self.cache.with_name('recomplauncher.preparing'))
-        with self.assertRaisesRegex(ValueError, 'interrupted'):
+        with self.assertRaisesRegex(ValueError, 'not managed'):
             self.prepare()
         self.assertEqual((self.cache.with_name('recomplauncher.preparing') / 'keep').read_text(), 'mine')
+
+    def test_leftover_with_the_previous_cache_moved_aside_puts_it_back(self):
+        self.prepare()
+        (self.cache / 'keep').write_text('previous')
+        transaction = self.cache.with_name('recomplauncher.preparing')
+        (transaction / 'new').mkdir(parents=True)
+        (transaction / 'new' / 'boot.bin').write_bytes(b'half')
+        self.cache.rename(transaction / 'old')
+        def failed(*args, **kwargs):
+            # The previous cache is back before the new run starts.
+            self.assertEqual((self.cache / 'keep').read_text(), 'previous')
+            self.assertFalse((transaction / 'old').exists())
+            process = self.process(*args, **kwargs)
+            process.wait = lambda: 7
+            return process
+        with self.assertRaisesRegex(ValueError, 'exit 7'):
+            self.prepare(failed)
+        self.assertEqual((self.cache / 'keep').read_text(), 'previous')
+        self.assertFalse(transaction.exists())
+
+    def test_a_killed_setup_is_still_running_until_it_ends_then_runs_again(self):
+        """A real setup process tree killed partway, as RecompLauncher's Cancel does: no finally block runs."""
+        runner = self.root / 'runner.py'
+        runner.write_text('import os, sys, time\nfrom pathlib import Path\n'
+                          "out = Path(os.environ['BB_PREPARED_OUT'])\nout.mkdir(parents=True)\n"
+                          "(out / 'boot.bin').write_bytes(b'half')\nprint('started', flush=True)\ntime.sleep(600)\n",
+                          encoding='utf-8')
+        step = self.root / 'step.py'
+        step.write_text('import os, sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\n'
+                        'sys.path[:0] = sys.argv[1:3]\nimport bbport_recomplauncher as integration\n'
+                        'data, game, runner = map(Path, sys.argv[3:6])\n'
+                        "launcher = SimpleNamespace(DATA_DIR=data, PORT_DIR=data, NO_WINDOW=0, VERSION_TEXT='1',\n"
+                        '    INI_DEFAULTS={}, game_environment=lambda settings, graphics: dict(os.environ),\n'
+                        "    run_command=lambda: [sys.executable, '-S', str(runner)],\n"
+                        "    ini_path=lambda: data / 'bbport.ini')\n"
+                        "integration.prepare(launcher, {}, game, 'known hash')\n", encoding='utf-8')
+        command = [sys.executable, '-S', str(step), str(ROOT / 'launcher'), str(ROOT / 'scripts'),
+                   str(self.data), str(self.game), str(runner)]
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, start_new_session=os.name != 'nt')
+        transaction = self.cache.with_name('recomplauncher.preparing')
+        try:
+            lines = []
+            for raw in iter(process.stdout.readline, b''):
+                lines.append(raw.decode(errors='replace').strip())
+                if lines[-1] == 'started':
+                    break
+            self.assertEqual(lines[-1:], ['started'], lines)
+            with self.assertRaisesRegex(ValueError, 'still running'):
+                self.prepare()
+            self.assertTrue((transaction / 'new' / 'boot.bin').is_file())
+        finally:
+            if os.name == 'nt':
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True)
+            else:
+                import signal
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+            process.stdout.close()
+        self.assertTrue((transaction / 'new' / 'boot.bin').is_file())
+        self.prepare()
+        self.assertTrue(integration.owned(self.cache))
+        self.assertFalse(transaction.exists())
 
     def test_publish_failure_rolls_back_previous_cache(self):
         self.prepare()

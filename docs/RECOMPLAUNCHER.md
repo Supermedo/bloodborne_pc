@@ -43,9 +43,11 @@ Generated files live in `out/recomplauncher` under the data directory (the insta
 folder by default). Setup uses a separate `out/recomplauncher.preparing` transaction and
 only replaces a cache carrying this integration's ownership marker, which is written last
 with the release's version. A failed setup keeps the previous cache. Direct launch requires
-that preparation has created a managed cache. An interrupted transaction is preserved where
-necessary; keep it for recovery or move it aside before retrying, after all preparation
-processes have stopped. The cache must be separate from the source dump. Preparation does
+that preparation has created a managed cache. A setup holds `out/recomplauncher.lock` open
+while it runs; a second setup started meanwhile stops with "Another setup of Bloodborne is
+still running". A setup that was stopped (Cancel in RecompLauncher, or the launcher closing)
+is cleaned up by the next one: a previous cache it had moved aside is put back, and its
+staging copy is removed. The cache must be separate from the source dump. Preparation does
 not delete unrelated views beside the dump or in the system temporary directory.
 
 The native runner still refreshes settings-dependent patches, mods and links on launch.

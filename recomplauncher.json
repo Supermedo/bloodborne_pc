@@ -47,7 +47,7 @@
   "exit_codes": {
     "1": "Bloodborne could not start. Check its log and your selected game folder.",
     "2": "The launch command is invalid. Reinstall this build and try again.",
-    "130": "Preparation was interrupted. Keep the staging folder for recovery before retrying."
+    "130": "Preparation was interrupted. Press Set Up again to start it over."
   },
   "settings": [
     {

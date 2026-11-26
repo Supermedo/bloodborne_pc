@@ -93,15 +93,59 @@ def destination_for(launcher, game):
     return destination
 
 
+@contextmanager
+def setup_lock(path):
+    """Held open for the whole setup. The system lets go of it however the process ends (RecompLauncher's
+    Cancel or its silence rule kill the process tree), so a lock that can be taken means no setup runs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, 'a+b')
+    try:
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise ValueError('Another setup of Bloodborne is still running. Wait for it to finish, '
+                             'then try again.') from None
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        handle.close()
+
+
+def recover(destination, transaction):
+    """What a stopped setup left: the previous cache it had moved aside comes back, and the rest (`new` is only
+    a staging copy) is removed. Called with the setup lock held, so no setup is using them."""
+    if not transaction.exists() and not linked(transaction):
+        return
+    if (linked(transaction) or not transaction.is_dir()
+            or any(item.name not in ('new', 'old') or linked(item) for item in transaction.iterdir())):
+        raise ValueError(f'{transaction} is not managed by this integration. Move it aside before retrying.')
+    old = transaction / 'old'
+    if old.is_dir() and owned(old) and not destination.exists() and not linked(destination):
+        old.rename(destination)
+    shutil.rmtree(transaction)
+
+
 def prepare(launcher, settings, game, digest):
     destination = destination_for(launcher, game)
     transaction = destination.with_name(destination.name + '.preparing')
-    transaction.parent.mkdir(parents=True, exist_ok=True)
-    try:
+    with setup_lock(destination.with_name(destination.name + '.lock')):
+        recover(destination, transaction)
+        destination_for(launcher, game)  # the cache put back is checked like any other
         transaction.mkdir()
-    except FileExistsError:
-        raise ValueError('A setup is running or an interrupted setup remains in '
-                         f'{transaction}. Keep it for recovery or move it aside before retrying.') from None
+        prepare_locked(launcher, settings, game, digest, destination, transaction)
+
+
+def prepare_locked(launcher, settings, game, digest, destination, transaction):
     staged = transaction / 'new'
     moved_old = published = preserve = False
     try:
@@ -124,7 +168,7 @@ def prepare(launcher, settings, game, digest):
             preserve = True
             process.terminate()
             process.wait()
-            # A script subprocess may still be finishing; retain its isolated workspace.
+            # A script subprocess may still be finishing; its workspace stays until the next setup removes it.
             raise
         finally:
             process.stdout.close()
