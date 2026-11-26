@@ -18,6 +18,7 @@
 #include "shader_recompiler/params.h"
 #include "shader_recompiler/resource.h"
 #include "shader_recompiler/runtime_info.h"
+#include "bbport_guest_memory.h"
 
 namespace Serialization {
 struct Archive;
@@ -231,6 +232,11 @@ struct Info : InfoPersistent {
             if (VAddr(base) < 0x10000) {
                 return T{};
             }
+            // bbport: a non-null table can be unmapped since the shader was built; a fault
+            // reads as an empty descriptor (from SpartanPort a94665cd).
+            BbGuest::Read(&data, reinterpret_cast<std::uintptr_t>(base + dword_offset),
+                          sizeof(T));
+            return data;
         }
         std::memcpy(&data, base + dword_offset, sizeof(T));
         return data;
@@ -267,9 +273,8 @@ struct Info : InfoPersistent {
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
         VAddr tess_constants_addr = buf.base_address;
-        memcpy(&tess_constants,
-               reinterpret_cast<TessellationDataConstantBuffer*>(tess_constants_addr),
-               sizeof(tess_constants));
+        // bbport: a stale or null buffer reads as zeroed constants (from SpartanPort a94665cd).
+        BbGuest::Read(&tess_constants, tess_constants_addr, sizeof(tess_constants));
     }
 
     void Serialize(Serialization::Archive& ar) const;

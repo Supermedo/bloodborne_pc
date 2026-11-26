@@ -762,8 +762,7 @@ class Test:
 
     def environment(self):
         env = dict(self.base_env)
-        for key in [k for k in env if k.startswith(('BB_SHADNET', 'BB_THD', 'BB_COMMUNITY', 'BB_PAD_RECORD'))] + [
-                'BB_ONLINE', 'BB_NET_BACKEND']:
+        for key in [k for k in env if k.startswith(('BB_SHADNET', 'BB_COMMUNITY', 'BB_PAD_RECORD'))] + ['BB_ONLINE']:
             env.pop(key, None)
         env.update(BB_USER_DIR=str(self.work / 'user'), BB_CONFIG=str(self.work / 'bbport.ini'),
                    BB_PAD_FILE=str(self.work / 'pad'), BB_PAD_REPLAY=str(self.work / 'route.txt'),
@@ -884,7 +883,7 @@ class Test:
 DOWN = [('object_motion', False), ('effect_ssao+effect_dynamic_shadows', False), ('preset', '+1'),
         ('model_lod', '0'), ('preset', '+1'), ('model_lod', '1')]
 # Going up: the biggest gain first (Native AA cost ~3.5 % there).
-UP = [('preset', '-1'), ('preset', '-1'), ('object_motion', True), ('model_lod', '-2')]
+UP = [('preset', '-1'), ('preset', '-1'), ('object_motion', True)]
 PRESET_ORDER = ['0', '1', '2', '3', '4']  # Native AA .. Ultra Performance
 LOWEST = {'preset': '3', 'object_motion': False, 'effect_ssao': False, 'effect_dynamic_shadows': False,
           'model_lod': '0'}

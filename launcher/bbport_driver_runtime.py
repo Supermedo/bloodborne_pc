@@ -103,14 +103,3 @@ def discover():
         return locate(driver_packages(), repository)
     except (OSError, ValueError, KeyError):
         return {}
-
-
-def configure_environment(env, replace=False):
-    """Shared initialization for GUI, --run and run.py; CLI overrides stay explicit."""
-    paths = discover()
-    for api, variable in (('vulkan', 'BB_TEST_AMD_VK_RUNTIME'), ('dx12', 'BB_TEST_AMD_DX_RUNTIME')):
-        if replace:
-            env.pop(variable, None)
-        if paths.get(api):
-            env.setdefault(variable, paths[api])
-    return env

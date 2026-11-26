@@ -65,11 +65,23 @@ for module in argparse base64 bisect collections contextlib hashlib json re shut
               xml.etree.ElementTree urllib.request ctypes.wintypes; do
     hidden+=(--hidden-import "$module")
 done
+# Fail in a console-only frozen check before launching any windowed test. This
+# catches missing SSL data/native libraries that an unfrozen Python test misses.
+out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --console \
+    --name launcher-runtime-check --distpath out/pyi-check --workpath out/pyi-check-work \
+    --specpath out/pyi-check-work --paths "$(cygpath -w "$PWD/launcher")" \
+    "$(cygpath -w "$PWD/packaging/windows/check_launcher_runtime.py")"
+out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe
 out/pyenv/Scripts/python.exe -m PyInstaller --noconfirm --clean --log-level WARN --windowed \
     --name Bloodborne --icon "$(cygpath -w "$PWD/launcher/bloodborne.ico")" --distpath out/pyi-dist \
     --workpath out/pyi-work --specpath out/pyi-work --paths "$(cygpath -w "$PWD/scripts")" "${hidden[@]}" \
     --add-data "$(cygpath -w "$PWD/launcher/assets");assets" \
     "$(cygpath -w "$PWD/launcher/bbport_launcher_win.py")"
+# Compare native files/data first, then check Python imports in the actual bundle
+# through its existing --script role. The console runner limits it to 30 seconds.
+out/pyi-check/launcher-runtime-check/launcher-runtime-check.exe --launcher \
+    "$(cygpath -w "$PWD/out/pyi-dist/Bloodborne/Bloodborne.exe")" \
+    "$(cygpath -w "$PWD/packaging/windows/check_launcher_runtime.py")"
 
 # The package is assembled in a fresh staging folder and zipped from there; dist/bbport-windows
 # (a playable copy that may hold saves and settings) is only refreshed afterwards.
@@ -95,9 +107,17 @@ cp -r scripts patches "$dest/"
 # The first build downloads AMD's SDK archive; subsequent builds verify the cached DLL.
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr411_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_upscaler_dx12.dll "$dest/bin/"
+# SDK 2.4 is separate: retain the original FSR4.1.1 and FG libraries above/below.
+out/pyenv/Scripts/python.exe packaging/windows/fetch_fsr24_upscaling.py
+mkdir -p "$dest/bin/fsr24"
+cp out/fsr24/amd_fidelityfx_upscaler_dx12.dll out/fsr24/amd_fidelityfx_upscaler_vk.dll "$dest/bin/fsr24/"
 out/pyenv/Scripts/python.exe packaging/windows/fetch_fg401_dx12.py
 cp out/fsr411-dx12/amd_fidelityfx_framegeneration_dx12.dll \
    out/fsr411-dx12/amd_fidelityfx_loader_dx12.dll out/fsr411-dx12/D3D12Core.dll "$dest/bin/"
+# SDK 2.4 FG is independent from the retained upscaling and 4.0.1 libraries.
+out/pyenv/Scripts/python.exe packaging/windows/fetch_fg402_sdk24.py
+mkdir -p "$dest/bin/fsr24"
+cp out/fsr24/amd_fidelityfx_framegeneration_dx12.dll "$dest/bin/fsr24/"
 # Vulkan FSR 4.1.1: share the launcher's pinned provider and file checks. Cache the
 # provider and its corresponding source so subsequent package builds work offline.
 out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/fsr4vk"
@@ -105,8 +125,38 @@ out/pyenv/Scripts/python.exe packaging/windows/prepare_fsr4vk.py --stage "$dest/
 mkdir -p "$dest/tools" && cp tools/legacy-cpu-plan.json "$dest/tools/"
 cp run.py LICENSE README.md packaging/windows/README-Windows.txt "$dest/"
 cp recomplauncher.json "$dest/"
+# Offline Chalice Glyphs (docs/LOCAL_CHALICE.md): the glyph catalog beside bb-probe.exe.
+mkdir -p "$dest/bin/LocalChalice"
+cp data/local_chalice/catalog.bin "$dest/bin/LocalChalice/"
+# Player help only; technical validation stays in docs/development in the repository.
+mkdir -p "$dest/docs"
+cp docs/RX6000_OBJECT_MOTION.md "$dest/docs/"
 # The BB Report Tool the Discord helpers ask for: Help > Save a report runs it; a double-click does too.
 cp packaging/windows/BB-Report-Tool.bat "$dest/"
+# Seamless co-op (BBSC 1.0.0's co-op, github.com/CLSAMG22/BBSC, GPL-2.0) for the launcher's Seamless co-op page
+# (launcher/bbport_yharnam.py): this port's own engine built with BBSC's co-op and network code, a program of its
+# own (out/bb-probe-seamless.exe; the normal bb-probe.exe never changes), and from BBSC's release (out/seamless,
+# scripts/fetch_yharnam.py) only what the launcher uses: the event tool and its reference, the party HUD patcher
+# and its icons, BBSC's licences. Named files only: out/seamless may hold a launcher's game view (junctions into
+# the whole game, which cp -r follows: it filled the disk once).
+# Without them, 0.0.2's launcher and mod from out/bbsc, which run this port's engine; neither when both are missing.
+# BB_SEAMLESS_EXE names the seamless engine when it was built elsewhere (its own source copy).
+seamless_exe=${BB_SEAMLESS_EXE:-out/bb-probe-seamless.exe}
+if [[ -f $seamless_exe && -f out/seamless/tools/party_boss_events.py ]]; then
+    llvm-strip --strip-debug -o "$dest/bin/bb-probe-seamless.exe" "$seamless_exe"
+    # The CLANG64 DLLs it loads besides the normal engine's (BBSC's network code: abseil's logging).
+    ldd "$dest/bin/bb-probe-seamless.exe" | awk '/\/clang64\/bin\// && !/vulkan-1\.dll/ {print $3}' | sort -u |
+        while read -r dll; do cp -u "$dll" "$dest/bin/"; done
+    mkdir -p "$dest/seamless/tools" "$dest/seamless/scripts"
+    cp out/seamless/tools/party_boss_events.py "$dest/seamless/tools/"
+    cp out/seamless/scripts/hud_patch.py out/seamless/scripts/party_hud_icons.bin "$dest/seamless/scripts/"
+    for name in event-reference.json LICENSE CREDITS.txt VERSION.txt bbport-seamless.txt; do
+        if [[ -f out/seamless/$name ]]; then cp "out/seamless/$name" "$dest/seamless/"; fi
+    done
+    if [[ -d out/seamless/licenses ]]; then cp -r out/seamless/licenses "$dest/seamless/"; fi
+elif [[ -f out/bbsc/bbsc-launch.exe ]]; then
+    cp -r out/bbsc "$dest/bbsc"
+fi
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtime, next to bb-probe.exe
 # (packaging/windows/build_dlss.sh). Without them the DLSS option stays unavailable.
@@ -124,10 +174,13 @@ cp gpu/third_party/wepoll/LICENSE "$dest/licenses/wepoll-LICENSE.txt"
 cp gpu/third_party/httplib/LICENSE "$dest/licenses/cpp-httplib-LICENSE.txt"
 cp packaging/windows/licenses/*.txt "$dest/licenses/"
 cp packaging/windows/licenses/AMD-FSR-SDK-*.md "$dest/licenses/"
+cp data/local_chalice/LICENSE-BB.Chalices.Reborn.txt "$dest/licenses/"
 # Setup and provider requirements must be available in the downloaded package too.
 mkdir -p "$dest/docs"
 cp docs/FSR41_WINDOWS.md docs/FSR411_WINDOWS.md docs/OBJECT_MOTION_CACHE.md docs/ML_FRAME_GENERATION_WINDOWS.md "$dest/docs/"
 cp docs/RECOMPLAUNCHER.md "$dest/docs/"
+cp docs/FSR24_UPSCALING.md "$dest/docs/"
+cp docs/SDK24_ML_FG.md "$dest/docs/"
 mkdir -p "$dest/docs/benchmarks"
 cp docs/benchmarks/fsr411-vulkan-20261016.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/object-motion-cache-20261016.json docs/benchmarks/fsr-sewer-20261016.json "$dest/docs/benchmarks/"
@@ -137,7 +190,7 @@ cp docs/benchmarks/mlfg-sharpen-warehouse-20261020.json "$dest/docs/benchmarks/"
 cp docs/benchmarks/ml-fg401-profile.ini "$dest/docs/benchmarks/"
 cp launcher/assets/fonts/Cinzel-OFL.txt "$dest/licenses/Cinzel-OFL.txt"  # the launcher's fonts
 cp launcher/assets/fonts/Inter-LICENSE.txt "$dest/licenses/Inter-OFL.txt"
-# Where the online code comes from (shadPS4 0.20, Awaken's port, bbhost's protocol).
+# Where the online code comes from (shadPS4 0.20, Awaken's port).
 cp gpu/bbnet/SHADNET-PORT.md "$dest/licenses/online-code-NOTICE.md"
 for package in protobuf abseil-cpp openssl miniupnpc zlib; do
     license=/clang64/share/licenses/$package/LICENSE
@@ -171,7 +224,18 @@ if [[ ${running:-0} != 0 ]]; then
     echo "dist/bbport-windows is in use ($running processes): not refreshed; the zip is ready." >&2
 else
     mkdir -p "$play"
-    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini \
+    # BBSC writes its own data beside its program (the save backups before it changes a character, logs,
+    # its world state): kept too, only its program files are replaced.
+    if [[ -d $play/bbsc ]]; then
+        find "$play/bbsc" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
+    fi
+    # seamless\ holds the player's BBSC characters (user) and the co-op game view, junctions into the game that
+    # rm -rf walks into: only its program goes, link-safe (bbport_yharnam.clear_program).
+    if [[ -d $play/seamless ]]; then
+        out/pyenv/Scripts/python.exe -I -c 'import sys; sys.path.insert(0, "launcher"); import bbport_yharnam
+bbport_yharnam.clear_program(sys.argv[1])' "$play/seamless"
+    fi
+    find "$play" -mindepth 1 -maxdepth 1 ! -name user ! -name mods ! -name bbport.ini ! -name bbsc ! -name seamless \
         ! -name fsr4vk ! -name input.ini ! -name mods.json ! -name patches.json ! -name last_run.log -exec rm -rf {} +
     cp -r "$dest/." "$play/"
 fi

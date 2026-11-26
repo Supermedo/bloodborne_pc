@@ -91,6 +91,14 @@ def check(game_dir, progress=None, clean=None):
     return {'checked': len(clean), 'differ': sorted(differ), 'missing': missing}
 
 
+def write_result(result, path):
+    lines = [f"{result['checked']} files: {len(result['differ'])} differ, {len(result['missing'])} missing\n"]
+    lines += [f'differ\t{name}\n' for name in result['differ']]
+    lines += [f'missing\t{name}\n' for name in result['missing']]
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(''.join(lines), encoding='utf-8')
+
+
 def main(argv):
     if argv[:1] == ['--make'] and len(argv) == 2:
         print(f'{make(argv[1])} files written to {LIST}')

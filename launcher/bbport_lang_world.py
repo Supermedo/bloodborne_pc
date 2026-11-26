@@ -193,8 +193,10 @@ WORLD = {
             'Процессор',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Процессоры без AVX (многие модели Pentium/Celeron) вообще не могут его запустить.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: издание Game of the Year Edition с The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: издание Game of the Year Edition с The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: основная игра. The Old Hunters, если он у вас есть, берётся из папки DLC («Файлы игры»).',
         'Cache folder':
             'Папка кэша',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -211,8 +213,8 @@ WORLD = {
             'Отмена',
         'Cards with 6 GB or less, or the log says ErrorOutOfDeviceMemory or "memory pressure": textures no longer fit, the game stutters, shows broken faces or crashes.':
             'Видеокарты с 6 ГБ и меньше, или в журнале есть ErrorOutOfDeviceMemory или «memory pressure»: текстуры больше не помещаются, игра подтормаживает, показывает искажённые лица или вылетает.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Персонажи из shadPS4, порта от Awaken, bbhost или экспорта с PS4: лаунчер находит их на этом ПК и копирует в папку сохранений этого порта. Перед этим создаётся резервная копия ваших текущих сохранений.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Персонажи из shadPS4, порта от Awaken или экспорта с PS4: лаунчер находит их на этом ПК и копирует в папку сохранений этого порта. Перед этим создаётся резервная копия ваших текущих сохранений.',
         'Cheats on: {}':
             'Включены читы: {}',
         'Check again':
@@ -221,8 +223,8 @@ WORLD = {
             'Проверка игры',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Проверьте результат: eboot.bin (около 89 МБ), sce_module, sce_sys и dvdroot_ps4 (около 29 ГБ) лежат прямо в папке. The Old Hunters уже входит в издание GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Проверьте размер: eboot.bin из обновления — ровно 93\xa0825\xa0704 байт (89,4 МБ).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Проверьте размер: eboot.bin из обновления — ровно 93\xa0825\xa0704 байт (89,4 МБ) или 93\xa0667\xa0640 байт в виде обычного ELF-файла.',
         'Check this installation':
             'Проверить эту установку',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -274,8 +276,6 @@ WORLD = {
             'Во время игры закрывайте браузер и другие программы.',
         'Co-op pool':
             'Пул кооператива',
-        'Co-op service {0}':
-            'Сервис кооператива {0}',
         'Coming from another version, your characters are found in step IV.':
             'Если вы переходите с другой версии, ваши персонажи найдутся на шаге IV.',
         'Compare one setting: pictures and frame rate':
@@ -456,10 +456,6 @@ WORLD = {
             'В игре меню порта открывается клавишей Insert (клавиатура) или L3 + R3 (геймпад).',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'В игре «{}» загружает последнего персонажа, за которого вы играли; «{}» на титульном экране показывает всех.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'На открывшейся странице ({0}) войдите через Discord и введите этот код:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'На открывшейся странице войдите через Discord и введите этот код:',
         'Install guide and FAQ on bbport.de':
             'Руководство по установке и FAQ на bbport.de',
         'Integrated graphics share your RAM: 16 GB or more is a must.':
@@ -480,10 +476,10 @@ WORLD = {
             'Всё ли в порядке с папкой игры? Это проверяется на странице «Помощь».',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Файл повредился при распаковке (в журнале: «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Это не исходный файл (файл PS4 SELF): его преобразовала другая программа, или он не от '
-            'Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Это ни исходный файл (файл PS4 SELF), ни обычный ELF-файл: он всё ещё зашифрован, его '
+            'преобразовала другая программа, или он не от Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Порт может запуститься, но ожидайте низкую частоту кадров и проблемы.',
         'Its level, weapons and bosses cannot be read from this save.':
@@ -574,8 +570,8 @@ WORLD = {
             'Файлы игры не входят в комплект и не распространяются, и мы не помогаем их найти.',
         'No run finished; the report has the logs.':
             'Ни один прогон не завершился; журналы — в отчёте.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'На этом ПК не найдено сохранений shadPS4, порта от Awaken или bbhost. Если ваши лежат в другом месте (резервная копия, экспорт с PS4), выберите их папку.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'На этом ПК не найдено сохранений shadPS4 или порта от Awaken. Если ваши лежат в другом месте (резервная копия, экспорт с PS4), выберите их папку.',
         'No setting kept the goal; this one came closest.':
             'Ни один вариант не достиг цели; этот ближе всего.',
         'None beaten yet':
@@ -592,8 +588,6 @@ WORLD = {
             'Вход не выполнен',
         'Not signed in yet':
             'Вход ещё не выполнен',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Вход не выполнен: нажмите «Войти через Discord» выше.',
         'Not supported':
             'Не поддерживается',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -624,8 +618,6 @@ WORLD = {
             'OneDrive («Рабочий стол» и «Документы» часто синхронизируются) и Program Files блокируют или перемещают файлы, пока порт их записывает.',
         'Online (SuperMedo Server)':
             'Онлайн (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Онлайн (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Онлайн включён, но вход ещё не выполнен: войдите сейчас',
         'Online play':
@@ -756,8 +748,8 @@ WORLD = {
             'После установки перезагрузите ПК.',
         'Restore':
             'Восстановить',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Правый клик по eboot.bin > «Свойства»: чистый файл — ровно 93\xa0825\xa0704 байт.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Правый клик по eboot.bin > «Свойства»: чистый файл — ровно 93\xa0825\xa0704 байт (93\xa0667\xa0640, если программа для дампа сохранила его как обычный ELF-файл).',
         'Route':
             'Маршрут',
         'Run {}: the game is starting.':
@@ -810,8 +802,8 @@ WORLD = {
             'Экран',
         'Search again':
             'Искать снова',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Поиск сохранений shadPS4, порта от Awaken и bbhost на этом ПК…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Поиск сохранений shadPS4 и порта от Awaken на этом ПК…',
         'Search…':
             'Поиск…',
         'Set everything up again, step by step.':
@@ -840,8 +832,6 @@ WORLD = {
             'Показать меньше',
         'Show in folder':
             'Показать в папке',
-        'Show me on the live map':
-            'Показывать меня на карте в реальном времени',
         'Show the fix?':
             'Показать решение?',
         'Show the log':
@@ -950,14 +940,6 @@ WORLD = {
             'Папки DLC не существует.',
         'The Dream':
             'Сон охотника',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (с игроками bbhost)",
-        "The Hunter's Dream account":
-            "Учётная запись The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: кооператив вместе с игроками bbhost после бесплатного входа через Discord. shadNet: любой сервер shadNet и его учётная запись.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: сейчас в сети {} охотников ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Меню «Загрузить игру» пустое, персонажа нет или игра сообщает о повреждённом сохранении. Перед каждым запуском лаунчер делает копию сохранений, так что можно вернуть всё как было.',
         'The Old Hunters found ({}).':
@@ -976,8 +958,6 @@ WORLD = {
             'Проверка прервана: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Патчи сообщества (60 FPS и выше, параметры эффектов) есть только для 1.09; другие версии работают в 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "Подключение к The Hunter's Dream — это порт сетевого кода bbhost от Awaken; автор bbhost и The Hunter's Dream — droogie.",
         'The controller does nothing':
             'Геймпад не работает',
         'The controller test cannot start: {}':
@@ -1084,8 +1064,8 @@ WORLD = {
             'Рекомендация сайта для ожидаемой частоты кадров.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'В этой папке нет eboot.bin. Выберите папку, в которой прямо лежит eboot.bin, а не папку уровнем выше.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'В этой папке нет сохранений этого порта, shadPS4 или bbhost (SPRJ0005 с userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'В этой папке нет сохранений этого порта или shadPS4 (SPRJ0005 с userdata0000 …).',
         'There is no save to back up yet.':
             'Пока нет сохранения для копии.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -1118,8 +1098,6 @@ WORLD = {
             'Отметьте «Автоматически выбирать объем файла подкачки». Если игра всё ещё вылетает: снимите флажок, выберите диск со свободным местом, «Указать размер»: исходный 16384, максимальный 32768, затем «Задать».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Чтобы играть на SuperMedo Server, введите имя пользователя и пароль от supermedo.com на странице «Онлайн-игра» (если учётной записи нет, там же можно зарегистрироваться).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Чтобы играть онлайн на The Hunter's Dream, сначала войдите через Discord.",
         'Under 30 FPS':
             'Ниже 30 FPS',
         'Undo':
@@ -1130,8 +1108,8 @@ WORLD = {
             'Без ограничения, но не выше частоты монитора (максимум 120): ваш ПК, по оценке, выдаст больше 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Снова поместите обновление 1.09 в новую пустую папку.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Используйте eboot.bin из неизменённого обновления 1.09 (ровно 93 825 704 байта).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Используйте eboot.bin из неизменённого обновления 1.09 (ровно 93 825 704 байта или 93 667 640 в виде обычного ELF-файла).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Используйте eboot.bin из неизменённого обновления 1.09 в новой пустой папке. Не берите '
@@ -1198,8 +1176,6 @@ WORLD = {
             'Windows показывает это для программ, которые ещё не знает.',
         "Windows' title bar instead of the launcher's own":
             'Заголовок окна Windows вместо собственного заголовка лаунчера',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Через The Hunter's Dream, вместе с игроками bbhost. Нужен однократный бесплатный вход через Discord.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'С вашими собственными настройками. Вылет, зависание или постоянно растущее потребление памяти попадают в отчёт вместе с соседними строками журнала.',
         'Wrong graphics card?':
@@ -1235,8 +1211,8 @@ WORLD = {
             'пропатчить: игра работает в 30 FPS, параметры эффектов ничего не делают, а некоторые сцены '
             '(например, ролик после битвы с Ром) могут зависать.\n\nЗамените eboot.bin файлом из '
             'неизменённого обновления 1.09.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Ваше издание (Game of the Year, CUSA03173) уже содержит The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Ваше издание ({}) уже содержит The Old Hunters.',
         'Your game':
             'Ваша игра',
         'Your game and your PC':
@@ -1257,8 +1233,8 @@ WORLD = {
             'Предел задаёт ваша видеокарта.',
         'Your memory sets the limit.':
             'Предел задаёт ваша оперативная память.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Ваши собственные файлы Bloodborne (CUSA03173, Game of the Year Edition) с обновлением 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Ваши собственные файлы Bloodborne (любое издание) с обновлением 1.09.',
         'Your previous saves: {}':
             'Ваши прежние сохранения: {}',
         'Your processor sets the limit.':
@@ -1375,16 +1351,10 @@ WORLD = {
             'прервано: ваш ввод',
         'the settings for your PC':
             'настройки для вашего ПК',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map показывает, где находятся игроки и какие колокола звонят: для этого во время игры чаще отправляется ваше местоположение.',
         'twice, interleaved (more exact)':
             'дважды, с чередованием (точнее)',
         'up to 7 runs':
             'до 7 прогонов',
-        '{0}: not reachable ({1})':
-            '{0}: недоступен ({1})',
-        '{0}: reachable':
-            '{0}: доступен',
         '{} GB free on {}':
             'Свободно {} ГБ на {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -1407,16 +1377,14 @@ WORLD = {
             '{} снова в этом состоянии.',
         '{} minutes':
             '{} мин',
-        '{} online':
-            '{} в сети',
         '{} runs':
             'прогонов: {}',
         '{} settings differ from the recommendation.':
             'Настроек, отличающихся от рекомендуемых: {}.',
         '{} · version {}':
             '{} · версия {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: порт рассчитан на CUSA03173 — издание Game of the Year Edition. Другие издания могут не работать.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: это не розничное издание Bloodborne. Порт запускает Bloodborne любого региона, включая издания Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Нет файлов FSR 4: пока используется FSR 3.1. Нажмите, чтобы скачать (30 МБ)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -1761,8 +1729,10 @@ WORLD = {
             'المعالج',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'المعالجات التي لا تدعم AVX (كثير من طرازات Pentium/Celeron) لا يمكنها تشغيله إطلاقًا.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: إصدار Game of the Year Edition، مع The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: إصدار Game of the Year Edition، مع The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: اللعبة الأساسية. The Old Hunters، إن كنت تملكها، تأتي من مجلد المحتوى الإضافي (ملفات اللعبة).',
         'Cache folder':
             'مجلد الكاش',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -1795,8 +1765,8 @@ WORLD = {
             'في المنتصف (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'تُطبَّق التغييرات عند تشغيل اللعبة في المرة القادمة، أو اضغط F8 داخل اللعبة لإعادة تحميل input.ini دون إعادة التشغيل.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'شخصيات من shadPS4 أو منفذ Awaken أو bbhost أو من تصدير PS4: يُعثر عليها في هذا الحاسوب وتُنسخ إلى مجلد الحفظ الخاص بهذا المنفذ. تُنسخ ملفات حفظك الحالية احتياطيًا أولًا.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'شخصيات من shadPS4 أو منفذ Awaken أو من تصدير PS4: يُعثر عليها في هذا الحاسوب وتُنسخ إلى مجلد الحفظ الخاص بهذا المنفذ. تُنسخ ملفات حفظك الحالية احتياطيًا أولًا.',
         'Cheats on: {}':
             'الغش مفعّل: {}',
         'Check again':
@@ -1805,8 +1775,8 @@ WORLD = {
             'فحص اللعبة',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'تحقق من النتيجة: يجب أن تكون eboot.bin (نحو 89 MB) وsce_module وsce_sys وdvdroot_ps4 (نحو 29 GB) داخله مباشرةً. The Old Hunters جزء من إصدار GOTY أصلًا.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'تحقق من الحجم: حجم eboot.bin الخاص بالتحديث 93,825,704 بايت بالضبط (89.4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'تحقق من الحجم: حجم eboot.bin الخاص بالتحديث 93,825,704 بايت بالضبط (89.4 MB)، أو 93,667,640 بايت كملف ELF عادي.',
         'Check this installation':
             'فحص هذا التثبيت',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -1861,8 +1831,6 @@ WORLD = {
             'أغلق المتصفح والبرامج الأخرى أثناء اللعب.',
         'Co-op pool':
             'مجموعة اللعب التعاوني',
-        'Co-op service {0}':
-            'خدمة اللعب التعاوني {0}',
         'Combat':
             'القتال',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -2101,10 +2069,6 @@ WORLD = {
             'داخل اللعبة، يفتح Insert (لوحة المفاتيح) أو L3 + R3 (يد التحكم) قائمة المنفذ.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'في اللعبة، يحمّل «{}» آخر شخصية لعبت بها؛ ويعرض «{}» في شاشة العنوان جميع الشخصيات.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'في الصفحة التي فُتحت ({0})، سجّل الدخول باستخدام Discord وأدخل هذا الرمز:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'في الصفحة التي فُتحت، سجّل الدخول باستخدام Discord وأدخل هذا الرمز:',
         'Install':
             'تثبيت',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -2139,9 +2103,9 @@ WORLD = {
             'هل مجلد اللعبة سليم؟ «المساعدة» تفحصه.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'تلف أثناء فك الضغط (يذكر السجل «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'ليس الملف الأصلي (ملف PS4 SELF): حوّلته أداة أخرى، أو أنه ليس من Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'ليس الملف الأصلي (ملف PS4 SELF) ولا ملف ELF عاديًا: ما زال مشفّرًا، أو حوّلته أداة أخرى، أو أنه ليس من Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'قد يبدأ التشغيل، لكن توقّع معدلات إطارات منخفضة ومشكلات.',
         'Items and menus':
@@ -2282,8 +2246,8 @@ WORLD = {
             'بدون حد  ⚠',
         'No run finished; the report has the logs.':
             'لم تكتمل أي جولة؛ السجلات موجودة في التقرير.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'لم يُعثر على ملفات حفظ من shadPS4 أو منفذ Awaken أو bbhost على هذا الحاسوب. إن كانت ملفاتك في مكان آخر (نسخة احتياطية، تصدير من PS4)، فاختر مجلدها.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'لم يُعثر على ملفات حفظ من shadPS4 أو منفذ Awaken على هذا الحاسوب. إن كانت ملفاتك في مكان آخر (نسخة احتياطية، تصدير من PS4)، فاختر مجلدها.',
         'No setting kept the goal; this one came closest.':
             'لم يحقق أي إعداد الهدف؛ هذا هو الأقرب.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -2306,8 +2270,6 @@ WORLD = {
             'لم يتم تسجيل الدخول',
         'Not signed in yet':
             'لم يتم تسجيل الدخول بعد',
-        'Not signed in: use "Sign in with Discord" above.':
-            'لم يتم تسجيل الدخول: استخدم «تسجيل الدخول باستخدام Discord» أعلاه.',
         'Not supported':
             'غير مدعوم',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -2340,8 +2302,6 @@ WORLD = {
             'OneDrive (غالبًا ما تتم مزامنة «سطح المكتب» و«المستندات») ومجلد Program Files يقفلان الملفات أو ينقلانها أثناء كتابة المنفذ لها.',
         'Online (SuperMedo Server)':
             'عبر الإنترنت (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "عبر الإنترنت (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'اللعب عبر الإنترنت مفعّل، لكنك لم تسجّل الدخول بعد: سجّل الدخول الآن',
         'Online play':
@@ -2490,8 +2450,8 @@ WORLD = {
             'استرجاع',
         'Right half of the touchpad (debug menu)':
             'النصف الأيمن من لوحة اللمس (قائمة التصحيح)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'انقر بزر الماوس الأيمن على eboot.bin > خصائص: حجم الملف السليم 93,825,704 بايت بالضبط.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'انقر بزر الماوس الأيمن على eboot.bin > خصائص: حجم الملف السليم 93,825,704 بايت بالضبط (93,667,640 إذا حفظته أداة التفريغ كملف ELF عادي).',
         'Route':
             'المسار',
         'Run {}: the game is starting.':
@@ -2546,8 +2506,8 @@ WORLD = {
             'حواف الشاشة',
         'Search again':
             'البحث مجددًا',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'جارٍ البحث في هذا الحاسوب عن ملفات حفظ shadPS4 ومنفذ Awaken وbbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'جارٍ البحث في هذا الحاسوب عن ملفات حفظ shadPS4 ومنفذ Awaken…',
         'Search…':
             'بحث…',
         'Sensitivity (direct)':
@@ -2580,8 +2540,6 @@ WORLD = {
             'عرض أقل',
         'Show in folder':
             'إظهار في المجلد',
-        'Show me on the live map':
-            'إظهاري على الخريطة المباشرة',
         'Show the fix?':
             'عرض الحل؟',
         'Show the log':
@@ -2708,14 +2666,6 @@ WORLD = {
             'مجلد المحتوى الإضافي غير موجود.',
         'The Dream':
             'الحلم',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (مع لاعبي bbhost)",
-        "The Hunter's Dream account":
-            "حساب The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: لعب تعاوني مع لاعبي bbhost بعد تسجيل دخول مجاني عبر Discord. shadNet: خادم shadNet تختاره وحسابه.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} صيادًا متصلًا الآن ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'قائمة «تحميل اللعبة» فارغة، أو شخصية مفقودة، أو تقول اللعبة إن ملف الحفظ تالف. قبل كل تشغيل ينسخ المشغّل ملفات حفظك احتياطيًا، لذا يمكنك العودة إلى ما كانت عليه.',
         'The Old Hunters found ({}).':
@@ -2734,8 +2684,6 @@ WORLD = {
             'توقف الفحص: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'رقع المجتمع (60 FPS وأكثر، وخيارات المؤثرات) متاحة للإصدار 1.09 فقط؛ وتعمل الإصدارات الأخرى بـ 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "الاتصال بـ The Hunter's Dream هو منفذ Awaken لشيفرة الشبكة الخاصة بـ bbhost؛ وbbhost وThe Hunter's Dream من تطوير droogie.",
         'The controller does nothing':
             'وحدة التحكم لا تستجيب',
         'The controller test cannot start: {}':
@@ -2844,8 +2792,8 @@ WORLD = {
             'اقتراح الموقع لمعدل الإطارات المتوقع.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'لا يوجد eboot.bin في هذا المجلد. اختر المجلد الذي يحتوي eboot.bin مباشرةً، لا المجلد الذي فوقه.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'لا يوجد ملف حفظ لهذا المنفذ أو لـ shadPS4 أو bbhost في هذا المجلد (SPRJ0005 مع userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'لا يوجد ملف حفظ لهذا المنفذ أو لـ shadPS4 في هذا المجلد (SPRJ0005 مع userdata0000 …).',
         'There is no save to back up yet.':
             'لا يوجد ملف حفظ لنسخه بعد.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -2878,8 +2826,6 @@ WORLD = {
             'حدّد «إدارة حجم ملف ترحيل الصفحات تلقائيًا لكافة محركات الأقراص». إن استمر التعطل: ألغِ التحديد، واختر محرك أقراص به مساحة فارغة، ثم «حجم مخصص»: الحجم الأولي 16384، والحجم الأقصى 32768، ثم «تعيين».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'للعب على SuperMedo Server، أدخل اسم المستخدم وكلمة المرور الخاصين بـ supermedo.com في صفحة «اللعب عبر الإنترنت» (أنشئ حسابًا هناك إن لم يكن لديك حساب).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "للعب عبر الإنترنت مع The Hunter's Dream، سجّل الدخول باستخدام Discord أولًا.",
         'Transform weapon (L1)':
             'تحويل السلاح (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -2896,8 +2842,8 @@ WORLD = {
             'بدون حد، مقيّد بتردد الشاشة (بحد أقصى 120): يُتوقع أن يتجاوز حاسوبك 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'ضع تحديث 1.09 مجددًا في مجلد جديد فارغ.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'استخدم eboot.bin من تحديث 1.09 غير معدّل (93,825,704 بايت بالضبط).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'استخدم eboot.bin من تحديث 1.09 غير معدّل (93,825,704 بايت بالضبط، أو 93,667,640 كملف ELF عادي).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'استخدم eboot.bin من تحديث 1.09 غير معدّل في مجلد جديد فارغ. لا تستخدم ملف eboot.bin منفردًا '
@@ -2984,8 +2930,6 @@ WORLD = {
             'يعرض Windows هذا للبرامج التي لا يعرفها بعد.',
         "Windows' title bar instead of the launcher's own":
             'شريط عنوان Windows بدلًا من شريط المشغّل',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "مع The Hunter's Dream، جنبًا إلى جنب مع لاعبي bbhost. يتطلب تسجيل دخول مجانيًا باستخدام Discord، مرة واحدة.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'بإعداداتك الخاصة. أي تعطّل أو تجمّد أو ذاكرة تستمر في النمو يُسجَّل في التقرير مع أسطر السجل المحيطة به.',
         'Wrong graphics card?':
@@ -3020,8 +2964,8 @@ WORLD = {
         'it: the game runs at 30 FPS, the Game & effects options do nothing, and some scenes (like the '
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             'ملف eboot.bin لديك ليس ملف 1.09 السليم (معدّل، أو من نسخة أخرى). لا يستطيع المنفذ ترقيعه: تعمل اللعبة بـ 30 FPS، ولا تعمل خيارات «اللعبة والمؤثرات»، وقد تتجمد بعض المشاهد (مثل المشهد السينمائي بعد روم).\n\nاستبدل eboot.bin بالملف الموجود في تحديث 1.09 غير معدّل.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'إصدارك (Game of the Year، CUSA03173) يتضمن The Old Hunters بالفعل.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'إصدارك ({}) يتضمن The Old Hunters بالفعل.',
         'Your game':
             'لعبتك',
         'Your game and your PC':
@@ -3042,8 +2986,8 @@ WORLD = {
             'بطاقة الرسومات هي العامل المحدِّد.',
         'Your memory sets the limit.':
             'الذاكرة هي العامل المحدِّد.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'ملفات Bloodborne الخاصة بك (CUSA03173، إصدار Game of the Year) مع تحديث 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'ملفات Bloodborne الخاصة بك (أي إصدار) مع تحديث 1.09.',
         'Your previous saves: {}':
             'ملفات حفظك السابقة: {}',
         'Your processor sets the limit.':
@@ -3162,16 +3106,10 @@ WORLD = {
             'أُوقف: إدخالك',
         'the settings for your PC':
             'الإعدادات المناسبة لحاسوبك',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'يعرض thehuntersdream.com/map أماكن اللاعبين والأجراس التي تُقرع: ترسل اللعبة موقعك بشكل أكثر تكرارًا أثناء اللعب.',
         'twice, interleaved (more exact)':
             'مرتين بالتناوب (أدق)',
         'up to 7 runs':
             'حتى 7 جولات',
-        '{0}: not reachable ({1})':
-            '{0}: غير متاح ({1})',
-        '{0}: reachable':
-            '{0}: متاح',
         '{} GB free on {}':
             '{} GB متاحة على {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -3198,16 +3136,14 @@ WORLD = {
             '{} دقيقة',
         '{} of {} trophies earned':
             'تم الحصول على {} من {} جائزة',
-        '{} online':
-            '{} متصل',
         '{} runs':
             '{} جولات',
         '{} settings differ from the recommendation.':
             '{} إعدادات تختلف عن التوصية.',
         '{} · version {}':
             '{} · الإصدار {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: المنفذ مصمم لـ CUSA03173، أي Game of the Year Edition. قد لا تعمل الإصدارات الأخرى.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: ليس إصدارًا تجاريًا من Bloodborne. يشغّل المنفذ Bloodborne من أي منطقة، بما في ذلك إصدارات Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• ملفات FSR 4 غير موجودة: يُستخدم FSR 3.1 مؤقتًا. انقر للتنزيل (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -3431,8 +3367,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Las CPU sin AVX (muchos modelos Pentium/Celeron) no pueden ejecutarlo en absoluto.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: una Game of the Year Edition, con The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: el juego base. The Old Hunters, si lo tienes, viene de su carpeta de DLC (Archivos del juego).',
         'Cache folder':
             'Carpeta de caché',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -3465,8 +3403,8 @@ WORLD = {
             'Centrado (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Los cambios se aplican la próxima vez que se inicie el juego, o pulsa F8 en el juego para recargar input.ini sin reiniciar.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personajes de shadPS4, el port de Awaken, bbhost o una exportación de PS4: se buscan en este PC y se copian en la carpeta de partidas de este port. Antes se hace una copia de seguridad de tus partidas actuales.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personajes de shadPS4, el port de Awaken o una exportación de PS4: se buscan en este PC y se copian en la carpeta de partidas de este port. Antes se hace una copia de seguridad de tus partidas actuales.',
         'Cheats on: {}':
             'Trucos activados: {}',
         'Check again':
@@ -3475,8 +3413,8 @@ WORLD = {
             'Comprobar el juego',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Comprueba el resultado: eboot.bin (unos 89 MB), sce_module, sce_sys y dvdroot_ps4 (unos 29 GB) están directamente dentro. The Old Hunters ya forma parte de la edición GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Comprueba el tamaño: el eboot.bin de la actualización tiene exactamente 93.825.704 bytes (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Comprueba el tamaño: el eboot.bin de la actualización tiene exactamente 93.825.704 bytes (89,4 MB), o 93.667.640 bytes como archivo ELF simple.',
         'Check this installation':
             'Comprobar esta instalación',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -3532,8 +3470,6 @@ WORLD = {
             'Cierra el navegador y otros programas mientras juegas.',
         'Co-op pool':
             'Grupo cooperativo',
-        'Co-op service {0}':
-            'Servicio cooperativo {0}',
         'Combat':
             'Combate',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -3772,10 +3708,6 @@ WORLD = {
             'En el juego, Insert (teclado) o L3 + R3 (mando) abre el menú del port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'En el juego, «{}» carga el último personaje con el que jugaste; «{}» en la pantalla de título los muestra todos.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'En la página que se abrió ({0}), inicia sesión con Discord e introduce este código:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'En la página que se abrió, inicia sesión con Discord e introduce este código:',
         'Install':
             'Instalar',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -3810,10 +3742,10 @@ WORLD = {
             '¿Está bien la carpeta del juego? Ayuda la comprueba.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Se dañó al extraerlo (el registro dice «prepare failed: out of bounds»).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'No es el archivo original (un archivo SELF de PS4): otra herramienta lo ha convertido o no es '
-            'de Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'No es el archivo original (un archivo SELF de PS4) ni un archivo ELF simple: sigue cifrado, '
+            'otra herramienta lo ha convertido o no es de Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Puede que se inicie, pero espera FPS bajos y problemas.',
         'Items and menus':
@@ -3956,8 +3888,8 @@ WORLD = {
             'Sin límite  ⚠',
         'No run finished; the report has the logs.':
             'Ninguna pasada terminó; el informe contiene los registros.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'No se encontraron partidas de shadPS4, el port de Awaken ni bbhost en este PC. Si las tuyas están en otro sitio (una copia de seguridad, una exportación de PS4), elige su carpeta.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'No se encontraron partidas de shadPS4 ni el port de Awaken en este PC. Si las tuyas están en otro sitio (una copia de seguridad, una exportación de PS4), elige su carpeta.',
         'No setting kept the goal; this one came closest.':
             'Ningún ajuste alcanzó el objetivo; este fue el que más se acercó.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -3980,8 +3912,6 @@ WORLD = {
             'Sin iniciar sesión',
         'Not signed in yet':
             'Aún no has iniciado sesión',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Sin iniciar sesión: usa «Iniciar sesión con Discord» arriba.',
         'Not supported':
             'No compatible',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -4014,8 +3944,6 @@ WORLD = {
             'OneDrive (Escritorio y Documentos suelen estar sincronizados) y Archivos de programa bloquean o mueven archivos mientras el port los escribe.',
         'Online (SuperMedo Server)':
             'En línea (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "En línea (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'El juego en línea está activado, pero aún no has iniciado sesión: inicia sesión ahora',
         'Online play':
@@ -4164,8 +4092,8 @@ WORLD = {
             'Restaurar',
         'Right half of the touchpad (debug menu)':
             'Mitad derecha del touchpad (menú de depuración)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic derecho en eboot.bin > Propiedades: el archivo limpio tiene exactamente 93.825.704 bytes.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic derecho en eboot.bin > Propiedades: el archivo limpio tiene exactamente 93.825.704 bytes (93.667.640 si tu herramienta de volcado lo guardó como un archivo ELF simple).',
         'Route':
             'Ruta',
         'Run {}: the game is starting.':
@@ -4220,8 +4148,8 @@ WORLD = {
             'Bordes de la pantalla',
         'Search again':
             'Volver a buscar',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Buscando en este PC partidas de shadPS4, el port de Awaken y bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Buscando en este PC partidas de shadPS4 y el port de Awaken…',
         'Search…':
             'Buscar…',
         'Sensitivity (direct)':
@@ -4254,8 +4182,6 @@ WORLD = {
             'Mostrar menos',
         'Show in folder':
             'Mostrar en la carpeta',
-        'Show me on the live map':
-            'Mostrarme en el mapa en directo',
         'Show the fix?':
             '¿Mostrar la solución?',
         'Show the log':
@@ -4382,14 +4308,6 @@ WORLD = {
             'La carpeta de DLC no existe.',
         'The Dream':
             'El Sueño',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (con jugadores de bbhost)",
-        "The Hunter's Dream account":
-            "Cuenta de The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativo junto con jugadores de bbhost, tras un inicio de sesión gratuito con Discord. shadNet: un servidor shadNet de tu elección y su cuenta.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} cazadores en línea ahora mismo ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'El menú Cargar partida está vacío, falta un personaje o el juego dice que la partida está dañada. Antes de cada inicio el lanzador hace una copia de tus partidas, así que puedes volver a como estaban.',
         'The Old Hunters found ({}).':
@@ -4408,8 +4326,6 @@ WORLD = {
             'La comprobación se detuvo: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Los parches de la comunidad (60 FPS y más, las opciones de efectos) solo existen para la 1.09; las demás versiones van a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La conexión con The Hunter's Dream es el port de Awaken del código de red de bbhost; bbhost y The Hunter's Dream son obra de droogie.",
         'The controller does nothing':
             'El mando no hace nada',
         'The controller test cannot start: {}':
@@ -4519,8 +4435,8 @@ WORLD = {
             'La sugerencia del sitio web para los FPS esperados.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'No hay eboot.bin en esta carpeta. Elige la carpeta que tiene eboot.bin directamente dentro, no la que está por encima.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'No hay ninguna partida de este port, de shadPS4 ni de bbhost en esa carpeta (SPRJ0005 con userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'No hay ninguna partida de este port ni de shadPS4 en esa carpeta (SPRJ0005 con userdata0000 …).',
         'There is no save to back up yet.':
             'Aún no hay ninguna partida que copiar.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -4553,8 +4469,6 @@ WORLD = {
             'Marca «Administrar automáticamente el tamaño del archivo de paginación para todas las unidades». Si sigue cerrándose: desmárcala, elige una unidad con espacio libre, «Tamaño personalizado»: tamaño inicial 16384, tamaño máximo 32768, y luego «Establecer».',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Para jugar en SuperMedo Server, introduce tu nombre de usuario y tu contraseña de supermedo.com en la página Juego en línea (regístrate allí si no tienes cuenta).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Para jugar en línea con The Hunter's Dream, primero inicia sesión con Discord.",
         'Transform weapon (L1)':
             'Transformar arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -4571,8 +4485,8 @@ WORLD = {
             'Sin límite, con tope en la frecuencia de la pantalla (como máximo 120): se espera que tu PC supere los 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Vuelve a poner la actualización 1.09 en una carpeta nueva y vacía.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Usa el eboot.bin de una actualización 1.09 sin modificar (exactamente 93.825.704 bytes).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Usa el eboot.bin de una actualización 1.09 sin modificar (exactamente 93.825.704 bytes, o 93.667.640 como archivo ELF simple).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Usa el eboot.bin de una actualización 1.09 sin modificar, en una carpeta nueva y vacía. No uses '
@@ -4659,8 +4573,6 @@ WORLD = {
             'Windows muestra esto con los programas que aún no conoce.',
         "Windows' title bar instead of the launcher's own":
             'Barra de título de Windows en lugar de la del lanzador',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Con The Hunter's Dream, junto a jugadores de bbhost. Hay que iniciar sesión gratis con Discord una vez.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Con tus propios ajustes. Un cierre, una congelación o una memoria que no para de crecer acaban en el informe con las líneas del registro de alrededor.',
         'Wrong graphics card?':
@@ -4698,8 +4610,8 @@ WORLD = {
             'parchearlo: el juego va a 30 FPS, las opciones de Juego y efectos no hacen nada y algunas '
             'escenas (como la cinemática tras Rom) pueden congelarse.\n\nReemplaza eboot.bin por el de una '
             'actualización 1.09 sin modificar.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Tu edición (Game of the Year, CUSA03173) ya incluye The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Tu edición ({}) ya incluye The Old Hunters.',
         'Your game':
             'Tu juego',
         'Your game and your PC':
@@ -4721,9 +4633,8 @@ WORLD = {
             'El límite lo pone tu tarjeta gráfica.',
         'Your memory sets the limit.':
             'El límite lo pone tu memoria.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Tus propios archivos de Bloodborne (CUSA03173, Game of the Year Edition) con la actualización '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Tus propios archivos de Bloodborne (cualquier edición) con la actualización 1.09.',
         'Your previous saves: {}':
             'Tus partidas anteriores: {}',
         'Your processor sets the limit.':
@@ -4842,16 +4753,10 @@ WORLD = {
             'detenido: tu entrada',
         'the settings for your PC':
             'los ajustes para tu PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map muestra dónde están los jugadores y qué campanas suenan: el juego envía tu posición con más frecuencia mientras juegas.',
         'twice, interleaved (more exact)':
             'dos veces, alternadas (más preciso)',
         'up to 7 runs':
             'hasta 7 pasadas',
-        '{0}: not reachable ({1})':
-            '{0}: no accesible ({1})',
-        '{0}: reachable':
-            '{0}: accesible',
         '{} GB free on {}':
             '{} GB libres en {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -4878,16 +4783,14 @@ WORLD = {
             '{} minutos',
         '{} of {} trophies earned':
             '{} de {} trofeos obtenidos',
-        '{} online':
-            '{} en línea',
         '{} runs':
             '{} pasadas',
         '{} settings differ from the recommendation.':
             '{} ajustes difieren de la recomendación.',
         '{} · version {}':
             '{} · versión {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: el port está hecho para CUSA03173, la Game of the Year Edition. Puede que otras ediciones no funcionen.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: no es una edición comercial de Bloodborne. El port ejecuta Bloodborne de cualquier región, también las ediciones Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Faltan los archivos de FSR 4: mientras tanto se usa FSR 3.1. Haz clic para descargarlos (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -5109,8 +5012,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'CPUs sem AVX (muitos modelos Pentium/Celeron) não conseguem rodá-lo de jeito nenhum.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: a Game of the Year Edition, com The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: uma Game of the Year Edition, com The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: o jogo base. The Old Hunters, se você tiver, vem da pasta de DLC (Arquivos do jogo).',
         'Cache folder':
             'Pasta de cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -5143,8 +5048,8 @@ WORLD = {
             'Centralizado (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'As alterações valem na próxima vez que o jogo iniciar; ou pressione F8 no jogo para recarregar o input.ini sem reiniciar.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personagens do shadPS4, do port do Awaken, do bbhost ou de uma exportação do PS4: encontrados neste PC e copiados para a pasta de saves deste port. Antes, é feito um backup dos seus saves atuais.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personagens do shadPS4, do port do Awaken ou de uma exportação do PS4: encontrados neste PC e copiados para a pasta de saves deste port. Antes, é feito um backup dos seus saves atuais.',
         'Cheats on: {}':
             'Trapaças ativas: {}',
         'Check again':
@@ -5153,8 +5058,8 @@ WORLD = {
             'Verificar o jogo',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Confira o resultado: eboot.bin (cerca de 89 MB), sce_module, sce_sys e dvdroot_ps4 (cerca de 29 GB) ficam diretamente na pasta. The Old Hunters já faz parte da edição GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Confira o tamanho: o eboot.bin da atualização tem exatamente 93.825.704 bytes (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Confira o tamanho: o eboot.bin da atualização tem exatamente 93.825.704 bytes (89,4 MB), ou 93.667.640 bytes como arquivo ELF simples.',
         'Check this installation':
             'Verificar esta instalação',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -5210,8 +5115,6 @@ WORLD = {
             'Feche o navegador e outros programas enquanto joga.',
         'Co-op pool':
             'Grupo de jogadores',
-        'Co-op service {0}':
-            'Serviço cooperativo {0}',
         'Combat':
             'Combate',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -5450,10 +5353,6 @@ WORLD = {
             'No jogo, Insert (teclado) ou L3 + R3 (controle) abre o menu do port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'No jogo, "{}" carrega o último personagem que você jogou; "{}" na tela de título mostra todos.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Na página que abriu ({0}), entre com o Discord e digite este código:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Na página que abriu, entre com o Discord e digite este código:',
         'Install':
             'Instalar',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -5488,10 +5387,10 @@ WORLD = {
             'A pasta do jogo está certa? A Ajuda verifica.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Ele se corrompeu durante a extração (o registro diz "prepare failed: out of bounds").',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Não é o arquivo original (um arquivo SELF de PS4): outra ferramenta o converteu, ou ele não é '
-            'do Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Não é o arquivo original (um arquivo SELF de PS4) nem um arquivo ELF simples: ainda está '
+            'criptografado, outra ferramenta o converteu, ou ele não é do Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'O jogo pode até iniciar, mas espere taxas de quadros baixas e problemas.',
         'Items and menus':
@@ -5633,8 +5532,8 @@ WORLD = {
             'Sem limite  ⚠',
         'No run finished; the report has the logs.':
             'Nenhuma execução terminou; o relatório traz os registros.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nenhum save do shadPS4, do port do Awaken ou do bbhost foi encontrado neste PC. Se os seus estão em outro lugar (um backup, uma exportação do PS4), escolha a pasta deles.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nenhum save do shadPS4 ou do port do Awaken foi encontrado neste PC. Se os seus estão em outro lugar (um backup, uma exportação do PS4), escolha a pasta deles.',
         'No setting kept the goal; this one came closest.':
             'Nenhuma configuração manteve o objetivo; esta foi a que chegou mais perto.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -5657,8 +5556,6 @@ WORLD = {
             'Não conectado',
         'Not signed in yet':
             'Ainda não conectado',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Não conectado: use "Entrar com o Discord" acima.',
         'Not supported':
             'Não suportado',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -5691,8 +5588,6 @@ WORLD = {
             'O OneDrive (Área de Trabalho e Documentos costumam ser sincronizados) e Arquivos de Programas bloqueiam ou movem arquivos enquanto o port os grava.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'O online está ligado, mas você ainda não fez login: entrar agora',
         'Online play':
@@ -5841,8 +5736,8 @@ WORLD = {
             'Restaurar',
         'Right half of the touchpad (debug menu)':
             'Metade direita do touchpad (menu de depuração)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clique com o botão direito em eboot.bin > Propriedades: o arquivo limpo tem exatamente 93.825.704 bytes.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clique com o botão direito em eboot.bin > Propriedades: o arquivo limpo tem exatamente 93.825.704 bytes (93.667.640 se a sua ferramenta de dump o salvou como um arquivo ELF simples).',
         'Route':
             'Trajeto',
         'Run {}: the game is starting.':
@@ -5897,8 +5792,8 @@ WORLD = {
             'Bordas da tela',
         'Search again':
             'Pesquisar de novo',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Procurando neste PC saves do shadPS4, do port do Awaken e do bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Procurando neste PC saves do shadPS4 e do port do Awaken…',
         'Search…':
             'Pesquisar…',
         'Sensitivity (direct)':
@@ -5931,8 +5826,6 @@ WORLD = {
             'Mostrar menos',
         'Show in folder':
             'Mostrar na pasta',
-        'Show me on the live map':
-            'Mostrar-me no mapa ao vivo',
         'Show the fix?':
             'Mostrar a solução?',
         'Show the log':
@@ -6057,14 +5950,6 @@ WORLD = {
             'A pasta de DLC não existe.',
         'The Dream':
             'O Sonho',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (com jogadores do bbhost)",
-        "The Hunter's Dream account":
-            "Conta do The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativo junto com jogadores do bbhost, após um login gratuito com o Discord. shadNet: um servidor shadNet à sua escolha e a conta dele.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} caçadores online agora ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'O menu Carregar jogo está vazio, falta um personagem ou o jogo diz que o save está danificado. Antes de cada início o launcher faz backup dos seus saves, então você pode voltar ao que eram.',
         'The Old Hunters found ({}).':
@@ -6083,8 +5968,6 @@ WORLD = {
             'A verificação parou: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Os patches da comunidade (60 FPS e mais, as opções de efeitos) existem só para a 1.09; outras versões rodam a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "A conexão com o The Hunter's Dream é o port do Awaken do código de rede do bbhost; o bbhost e o The Hunter's Dream são de droogie.",
         'The controller does nothing':
             'O controle não faz nada',
         'The controller test cannot start: {}':
@@ -6193,8 +6076,8 @@ WORLD = {
             'A sugestão do site para a taxa de quadros esperada.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Não há eboot.bin nesta pasta. Escolha a pasta que tem o eboot.bin diretamente dentro, não a pasta acima dela.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Não há save deste port, do shadPS4 ou do bbhost nessa pasta (SPRJ0005 com userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Não há save deste port ou do shadPS4 nessa pasta (SPRJ0005 com userdata0000 …).',
         'There is no save to back up yet.':
             'Ainda não há save para fazer backup.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -6227,8 +6110,6 @@ WORLD = {
             'Marque Gerenciar automaticamente o tamanho do arquivo de paginação de todas as unidades. Se continuar travando: desmarque, selecione uma unidade com espaço livre, Tamanho personalizado: inicial 16384, máximo 32768 e depois Definir.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Para jogar no SuperMedo Server, digite o seu nome de usuário e a sua senha do supermedo.com na página Jogo online (crie uma conta lá se não tiver).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Para jogar online com o The Hunter's Dream, primeiro entre com o Discord.",
         'Transform weapon (L1)':
             'Transformar arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -6245,8 +6126,8 @@ WORLD = {
             'Sem limite, até a taxa da tela (no máximo 120): o seu PC deve passar de 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Coloque a atualização 1.09 de novo em uma pasta nova e vazia.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Use o eboot.bin de uma atualização 1.09 sem modificações (exatamente 93.825.704 bytes).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Use o eboot.bin de uma atualização 1.09 sem modificações (exatamente 93.825.704 bytes, ou 93.667.640 como arquivo ELF simples).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Use o eboot.bin de uma atualização 1.09 sem modificações, em uma pasta nova e vazia. Não use um '
@@ -6331,8 +6212,6 @@ WORLD = {
             'O Windows mostra isso para programas que ainda não conhece.',
         "Windows' title bar instead of the launcher's own":
             'Barra de título do Windows em vez da do launcher',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Com o The Hunter's Dream, junto com jogadores do bbhost. Precisa de um login gratuito com o Discord, uma vez só.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Com as suas próprias configurações. Um travamento, um congelamento ou uma memória que só cresce vão para o relatório com as linhas do registro ao redor.',
         'Wrong graphics card?':
@@ -6370,8 +6249,8 @@ WORLD = {
             'patches nele: o jogo roda a 30 FPS, as opções de efeitos não fazem nada e algumas cenas (como a '
             'cutscene depois de Rom) podem congelar.\n\nSubstitua o eboot.bin pelo de uma atualização 1.09 '
             'não modificada (a Ajuda mostra como).',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Sua edição (Game of the Year, CUSA03173) já inclui The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Sua edição ({}) já inclui The Old Hunters.',
         'Your game':
             'Seu jogo',
         'Your game and your PC':
@@ -6393,9 +6272,8 @@ WORLD = {
             'Sua placa de vídeo é o limite.',
         'Your memory sets the limit.':
             'Sua memória é o limite.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Seus próprios arquivos do Bloodborne (CUSA03173, Game of the Year Edition) com a atualização '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Seus próprios arquivos do Bloodborne (qualquer edição) com a atualização 1.09.',
         'Your previous saves: {}':
             'Seus saves anteriores: {}',
         'Your processor sets the limit.':
@@ -6514,16 +6392,10 @@ WORLD = {
             'parado: sua entrada',
         'the settings for your PC':
             'as configurações para o seu PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map mostra onde os jogadores estão e quais sinos estão tocando: o jogo envia a sua posição com mais frequência enquanto você joga.',
         'twice, interleaved (more exact)':
             'duas vezes, intercaladas (mais exato)',
         'up to 7 runs':
             'até 7 execuções',
-        '{0}: not reachable ({1})':
-            '{0}: inacessível ({1})',
-        '{0}: reachable':
-            '{0}: acessível',
         '{} GB free on {}':
             '{} GB livres em {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -6550,16 +6422,14 @@ WORLD = {
             '{} minutos',
         '{} of {} trophies earned':
             '{} de {} troféus obtidos',
-        '{} online':
-            '{} online',
         '{} runs':
             '{} execuções',
         '{} settings differ from the recommendation.':
             '{} configurações diferem da recomendação.',
         '{} · version {}':
             '{} · versão {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: o port foi feito para CUSA03173, a Game of the Year Edition. Outras edições podem não funcionar.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: não é uma edição comercial do Bloodborne. O port roda o Bloodborne de qualquer região, inclusive as edições Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Faltam os arquivos do FSR 4: por enquanto usa-se FSR 3.1. Clique para baixar (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -6783,8 +6653,10 @@ WORLD = {
             'Processeur',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Les processeurs sans AVX (beaucoup de modèles Pentium/Celeron) ne peuvent pas du tout le faire tourner.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173 : la Game of the Year Edition, avec The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{} : une Game of the Year Edition, avec The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{} : le jeu de base. The Old Hunters, si vous le possédez, vient de son dossier des DLC (Fichiers du jeu).',
         'Cache folder':
             'Dossier du cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -6817,8 +6689,8 @@ WORLD = {
             'Centré (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Les changements s’appliquent au prochain lancement du jeu ; vous pouvez aussi appuyer sur F8 en jeu pour recharger input.ini sans redémarrer.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personnages de shadPS4, du portage d’Awaken, de bbhost ou d’un export PS4 : trouvés sur ce PC et copiés dans le dossier des sauvegardes de ce portage. Vos sauvegardes actuelles sont d’abord mises à l’abri.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personnages de shadPS4, du portage d’Awaken ou d’un export PS4 : trouvés sur ce PC et copiés dans le dossier des sauvegardes de ce portage. Vos sauvegardes actuelles sont d’abord mises à l’abri.',
         'Cheats on: {}':
             'Triches activées : {}',
         'Check again':
@@ -6827,8 +6699,8 @@ WORLD = {
             'Vérifier le jeu',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Vérifiez le résultat : eboot.bin (environ 89 Mo), sce_module, sce_sys et dvdroot_ps4 (environ 29 Go) s’y trouvent directement. The Old Hunters fait déjà partie de l’édition GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Vérifiez la taille : l’eboot.bin de la mise à jour fait exactement 93 825 704 octets (89,4 Mo).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Vérifiez la taille : l’eboot.bin de la mise à jour fait exactement 93 825 704 octets (89,4 Mo), ou 93 667 640 octets en simple fichier ELF.',
         'Check this installation':
             'Vérifier cette installation',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -6884,8 +6756,6 @@ WORLD = {
             'Fermez votre navigateur et les autres programmes pendant que vous jouez.',
         'Co-op pool':
             'Pool de coopération',
-        'Co-op service {0}':
-            'Service de coopération {0}',
         'Combat':
             'Combat',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -7124,10 +6994,6 @@ WORLD = {
             'En jeu, Inser (clavier) ou L3 + R3 (manette) ouvre le menu du portage.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Dans le jeu, « {} » charge le dernier personnage joué ; « {} » sur l’écran titre les affiche tous.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Sur la page qui s’est ouverte ({0}), connectez-vous avec Discord et saisissez ce code :',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Sur la page qui s’est ouverte, connectez-vous avec Discord et saisissez ce code :',
         'Install':
             'Installer',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -7162,10 +7028,10 @@ WORLD = {
             'Le dossier du jeu est-il correct ? L’Aide le vérifie.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Le fichier a été endommagé lors de l’extraction (le journal indique « prepare failed: out of bounds »).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Ce n’est pas le fichier d’origine (un fichier SELF PS4) : un autre outil l’a converti, ou il ne '
-            'vient pas de Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Ce n’est ni le fichier d’origine (un fichier SELF PS4) ni un simple fichier ELF : il est encore '
+            'chiffré, un autre outil l’a converti, ou il ne vient pas de Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Le jeu peut démarrer, mais attendez-vous à des fréquences d’images basses et à des problèmes.',
         'Items and menus':
@@ -7308,8 +7174,8 @@ WORLD = {
             'Aucune limite  ⚠',
         'No run finished; the report has the logs.':
             'Aucun essai n’a abouti ; le rapport contient les journaux.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Aucune sauvegarde de shadPS4, du portage d’Awaken ou de bbhost trouvée sur ce PC. Si les vôtres sont ailleurs (une copie de sauvegarde, un export PS4), choisissez leur dossier.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Aucune sauvegarde de shadPS4 ou du portage d’Awaken trouvée sur ce PC. Si les vôtres sont ailleurs (une copie de sauvegarde, un export PS4), choisissez leur dossier.',
         'No setting kept the goal; this one came closest.':
             'Aucun réglage n’a tenu l’objectif ; celui-ci s’en est le plus approché.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -7332,8 +7198,6 @@ WORLD = {
             'Non connecté',
         'Not signed in yet':
             'Pas encore connecté',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Non connecté : utilisez « Se connecter avec Discord » ci-dessus.',
         'Not supported':
             'Non pris en charge',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -7366,8 +7230,6 @@ WORLD = {
             'OneDrive (le Bureau et les Documents sont souvent synchronisés) et Program Files verrouillent ou déplacent des fichiers pendant que le portage les écrit.',
         'Online (SuperMedo Server)':
             'En ligne (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "En ligne (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Le jeu en ligne est activé, mais vous n’êtes pas encore connecté : connectez-vous maintenant',
         'Online play':
@@ -7517,8 +7379,8 @@ WORLD = {
             'Restaurer',
         'Right half of the touchpad (debug menu)':
             'Moitié droite du touchpad (menu de débogage)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic droit sur eboot.bin > Propriétés : le fichier d’origine fait exactement 93 825 704 octets.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic droit sur eboot.bin > Propriétés : le fichier d’origine fait exactement 93 825 704 octets (93 667 640 si votre outil de dump l’a écrit sous forme de simple fichier ELF).',
         'Route':
             'Trajet',
         'Run {}: the game is starting.':
@@ -7573,8 +7435,8 @@ WORLD = {
             'Bords de l’écran',
         'Search again':
             'Rechercher à nouveau',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Recherche sur ce PC de sauvegardes de shadPS4, du portage d’Awaken et de bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Recherche sur ce PC de sauvegardes de shadPS4 et du portage d’Awaken…',
         'Search…':
             'Rechercher…',
         'Sensitivity (direct)':
@@ -7607,8 +7469,6 @@ WORLD = {
             'Afficher moins',
         'Show in folder':
             'Afficher dans le dossier',
-        'Show me on the live map':
-            'M’afficher sur la carte en direct',
         'Show the fix?':
             'Afficher la solution ?',
         'Show the log':
@@ -7735,14 +7595,6 @@ WORLD = {
             "Le dossier des DLC n'existe pas.",
         'The Dream':
             'Le Rêve',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (avec les joueurs bbhost)",
-        "The Hunter's Dream account":
-            "Compte The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream : coopération avec les joueurs bbhost, après une connexion gratuite avec Discord. shadNet : un serveur shadNet de votre choix et son compte.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream : {} chasseurs en ligne en ce moment ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             "Le menu « Charger une partie » est vide, un personnage manque ou le jeu dit que la sauvegarde est endommagée. Avant chaque lancement, le lanceur copie vos sauvegardes : vous pouvez revenir à leur état d'avant.",
         'The Old Hunters found ({}).':
@@ -7761,8 +7613,6 @@ WORLD = {
             'La vérification s’est arrêtée : {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Les patchs de la communauté (60 FPS et plus, les options d’effets) n’existent que pour la 1.09 ; les autres versions tournent à 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La connexion à The Hunter's Dream est le portage par Awaken du code réseau de bbhost ; bbhost et The Hunter's Dream sont l’œuvre de droogie.",
         'The controller does nothing':
             'La manette ne fait rien',
         'The controller test cannot start: {}':
@@ -7873,8 +7723,8 @@ WORLD = {
             'La suggestion du site pour la fréquence d’images attendue.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Il n’y a pas de eboot.bin dans ce dossier. Choisissez le dossier qui contient directement eboot.bin, pas celui du dessus.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Il n’y a aucune sauvegarde de ce portage, de shadPS4 ou de bbhost dans ce dossier (SPRJ0005 avec userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Il n’y a aucune sauvegarde de ce portage ou de shadPS4 dans ce dossier (SPRJ0005 avec userdata0000 …).',
         'There is no save to back up yet.':
             "Il n'y a pas encore de sauvegarde à copier.",
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -7907,8 +7757,6 @@ WORLD = {
             'Cochez Gestion automatique du fichier d’échange pour les lecteurs. Si le jeu plante encore : décochez-la, sélectionnez un lecteur avec de l’espace libre, Taille personnalisée : taille initiale 16384, taille maximale 32768, puis Définir.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Pour jouer sur SuperMedo Server, saisissez votre nom d’utilisateur et votre mot de passe supermedo.com sur la page Jeu en ligne (inscrivez-vous-y si vous n’avez pas de compte).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Pour jouer en ligne avec The Hunter's Dream, connectez-vous d’abord avec Discord.",
         'Transform weapon (L1)':
             'Transformer l’arme (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -7925,8 +7773,8 @@ WORLD = {
             'Illimité, plafonné à la fréquence de l’écran (120 au maximum) : votre PC devrait dépasser 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Remettez la mise à jour 1.09 dans un nouveau dossier vide.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée (exactement 93 825 704 octets).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée (exactement 93 825 704 octets, ou 93 667 640 en simple fichier ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Utilisez l’eboot.bin d’une mise à jour 1.09 non modifiée, dans un nouveau dossier vide. '
@@ -8013,8 +7861,6 @@ WORLD = {
             'Windows affiche ce message pour les programmes qu’il ne connaît pas encore.',
         "Windows' title bar instead of the launcher's own":
             'Barre de titre de Windows au lieu de celle du lanceur',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Avec The Hunter's Dream, aux côtés des joueurs bbhost. Nécessite une connexion gratuite avec Discord, une seule fois.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Avec vos propres réglages. Un plantage, un blocage ou une mémoire qui ne cesse d’augmenter apparaît dans le rapport avec les lignes du journal correspondantes.',
         'Wrong graphics card?':
@@ -8052,8 +7898,8 @@ WORLD = {
             'portage ne peut pas le patcher : le jeu tourne à 30 FPS, les options d’effets n’ont aucun '
             'effet, et certaines scènes (comme la cinématique après Rom) peuvent se figer.\n\nRemplacez '
             'eboot.bin par celui d’une mise à jour 1.09 non modifiée.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Votre édition (Game of the Year, CUSA03173) inclut déjà The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Votre édition ({}) inclut déjà The Old Hunters.',
         'Your game':
             'Votre jeu',
         'Your game and your PC':
@@ -8075,9 +7921,8 @@ WORLD = {
             'Votre carte graphique fixe la limite.',
         'Your memory sets the limit.':
             'Votre mémoire fixe la limite.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Vos propres fichiers de Bloodborne (CUSA03173, Game of the Year Edition) avec la mise à jour '
-            '1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Vos propres fichiers de Bloodborne (toute édition) avec la mise à jour 1.09.',
         'Your previous saves: {}':
             'Vos sauvegardes précédentes : {}',
         'Your processor sets the limit.':
@@ -8196,16 +8041,10 @@ WORLD = {
             'arrêté : votre saisie',
         'the settings for your PC':
             'les réglages pour votre PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map montre où se trouvent les joueurs et quelles cloches sonnent : le jeu envoie votre position plus souvent pendant que vous jouez.',
         'twice, interleaved (more exact)':
             'deux fois, en alternance (plus précis)',
         'up to 7 runs':
             'jusqu’à 7 essais',
-        '{0}: not reachable ({1})':
-            '{0} : inaccessible ({1})',
-        '{0}: reachable':
-            '{0} : accessible',
         '{} GB free on {}':
             '{} Go libres sur {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -8232,16 +8071,14 @@ WORLD = {
             '{} minutes',
         '{} of {} trophies earned':
             '{} trophées obtenus sur {}',
-        '{} online':
-            '{} en ligne',
         '{} runs':
             '{} essais',
         '{} settings differ from the recommendation.':
             '{} réglages diffèrent de la recommandation.',
         '{} · version {}':
             '{} · version {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{} : le portage est conçu pour CUSA03173, la Game of the Year Edition. Les autres éditions risquent de ne pas fonctionner.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{} : ce n’est pas une édition commerciale de Bloodborne. Le portage lance Bloodborne de toutes les régions, les éditions Game of the Year comprises.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Fichiers FSR 4 manquants : FSR 3.1 est utilisé en attendant. Cliquez pour télécharger (30 Mo)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -8465,8 +8302,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Le CPU senza AVX (molti modelli Pentium/Celeron) non possono eseguirlo affatto.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: la Game of the Year Edition, con The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: una Game of the Year Edition, con The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: il gioco base. The Old Hunters, se lo possiedi, arriva dalla sua cartella DLC (File del gioco).',
         'Cache folder':
             'Cartella della cache',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -8499,8 +8338,8 @@ WORLD = {
             'Centrato (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Le modifiche valgono dal prossimo avvio del gioco, oppure premi F8 nel gioco per ricaricare input.ini senza riavviare.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Personaggi da shadPS4, dal port di Awaken, da bbhost o da un’esportazione PS4: trovati su questo PC e copiati nella cartella dei salvataggi di questo port. Prima viene fatto un backup dei tuoi salvataggi attuali.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Personaggi da shadPS4, dal port di Awaken o da un’esportazione PS4: trovati su questo PC e copiati nella cartella dei salvataggi di questo port. Prima viene fatto un backup dei tuoi salvataggi attuali.',
         'Cheats on: {}':
             'Trucchi attivi: {}',
         'Check again':
@@ -8509,8 +8348,8 @@ WORLD = {
             'Verifica il gioco',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Controlla il risultato: eboot.bin (circa 89 MB), sce_module, sce_sys e dvdroot_ps4 (circa 29 GB) sono direttamente all’interno. The Old Hunters è già incluso nell’edizione GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Controlla la dimensione: l’eboot.bin dell’aggiornamento è esattamente di 93.825.704 byte (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Controlla la dimensione: l’eboot.bin dell’aggiornamento è esattamente di 93.825.704 byte (89,4 MB), o di 93.667.640 byte come semplice file ELF.',
         'Check this installation':
             'Verifica questa installazione',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -8566,8 +8405,6 @@ WORLD = {
             'Chiudi il browser e gli altri programmi mentre giochi.',
         'Co-op pool':
             'Pool cooperativo',
-        'Co-op service {0}':
-            'Servizio cooperativo {0}',
         'Combat':
             'Combattimento',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -8806,10 +8643,6 @@ WORLD = {
             'Nel gioco, Ins (tastiera) o L3 + R3 (controller) apre il menu del port.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Nel gioco, «{}» carica l’ultimo personaggio usato; «{}» nella schermata del titolo li mostra tutti.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Nella pagina che si è aperta ({0}), accedi con Discord e inserisci questo codice:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Nella pagina che si è aperta, accedi con Discord e inserisci questo codice:',
         'Install':
             'Installa',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -8844,10 +8677,10 @@ WORLD = {
             'La cartella del gioco è a posto? La pagina Aiuto la verifica.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Si è danneggiato durante l’estrazione (il registro riporta "prepare failed: out of bounds").',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Non è il file originale (un file SELF PS4): un altro strumento lo ha convertito, oppure non è '
-            'di Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Non è né il file originale (un file SELF PS4) né un semplice file ELF: è ancora cifrato, un '
+            'altro strumento lo ha convertito, oppure non è di Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Potrebbe avviarsi, ma aspettati frequenze fotogrammi basse e problemi.',
         'Items and menus':
@@ -8990,8 +8823,8 @@ WORLD = {
             'Nessun limite  ⚠',
         'No run finished; the report has the logs.':
             'Nessuna esecuzione completata; il rapporto contiene i registri.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nessun salvataggio di shadPS4, del port di Awaken o di bbhost trovato su questo PC. Se i tuoi sono altrove (un backup, un’esportazione PS4), scegli la loro cartella.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nessun salvataggio di shadPS4 o del port di Awaken trovato su questo PC. Se i tuoi sono altrove (un backup, un’esportazione PS4), scegli la loro cartella.',
         'No setting kept the goal; this one came closest.':
             'Nessuna impostazione ha raggiunto l’obiettivo; questa ci è andata più vicino.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -9014,8 +8847,6 @@ WORLD = {
             'Accesso non effettuato',
         'Not signed in yet':
             'Accesso non ancora effettuato',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Accesso non effettuato: usa "Accedi con Discord" qui sopra.',
         'Not supported':
             'Non supportato',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -9048,8 +8879,6 @@ WORLD = {
             'OneDrive (Desktop e Documenti sono spesso sincronizzati) e Programmi bloccano o spostano i file mentre il port li scrive.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Il gioco online è attivo, ma non hai ancora effettuato l’accesso: accedi ora',
         'Online play':
@@ -9198,8 +9027,8 @@ WORLD = {
             'Ripristina',
         'Right half of the touchpad (debug menu)':
             'Metà destra del touchpad (menu di debug)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Clic destro su eboot.bin > Proprietà: il file pulito è esattamente di 93.825.704 byte.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Clic destro su eboot.bin > Proprietà: il file pulito è esattamente di 93.825.704 byte (93.667.640 se lo strumento di dump lo ha salvato come semplice file ELF).',
         'Route':
             'Tragitto',
         'Run {}: the game is starting.':
@@ -9254,8 +9083,8 @@ WORLD = {
             'Bordi dello schermo',
         'Search again':
             'Cerca di nuovo',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Ricerca su questo PC dei salvataggi di shadPS4, del port di Awaken e di bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Ricerca su questo PC dei salvataggi di shadPS4 e del port di Awaken…',
         'Search…':
             'Cerca…',
         'Sensitivity (direct)':
@@ -9288,8 +9117,6 @@ WORLD = {
             'Mostra meno',
         'Show in folder':
             'Mostra nella cartella',
-        'Show me on the live map':
-            'Mostrami sulla mappa dal vivo',
         'Show the fix?':
             'Mostrare la soluzione?',
         'Show the log':
@@ -9416,14 +9243,6 @@ WORLD = {
             'La cartella DLC non esiste.',
         'The Dream':
             'Il Sogno',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (con i giocatori di bbhost)",
-        "The Hunter's Dream account":
-            "Account The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: cooperativa insieme ai giocatori bbhost, dopo un accesso gratuito con Discord. shadNet: un server shadNet a tua scelta e il suo account.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: {} cacciatori online adesso ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Il menu "Carica partita" è vuoto, manca un personaggio o il gioco dice che il salvataggio è danneggiato. Prima di ogni avvio il launcher fa un backup dei salvataggi, quindi puoi tornare a com\'erano.',
         'The Old Hunters found ({}).':
@@ -9442,8 +9261,6 @@ WORLD = {
             'La verifica si è interrotta: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Le patch della community (60 FPS e oltre, le opzioni degli effetti) esistono solo per la 1.09; le altre versioni girano a 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "La connessione a The Hunter's Dream è il port del codice di rete di bbhost realizzato da Awaken; bbhost e The Hunter's Dream sono di droogie.",
         'The controller does nothing':
             'Il controller non fa nulla',
         'The controller test cannot start: {}':
@@ -9553,8 +9370,8 @@ WORLD = {
             'Il suggerimento del sito per la frequenza fotogrammi prevista.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'In questa cartella non c’è eboot.bin. Scegli la cartella che contiene direttamente eboot.bin, non quella sopra.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'In quella cartella non c’è alcun salvataggio di questo port, di shadPS4 o di bbhost (SPRJ0005 con userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'In quella cartella non c’è alcun salvataggio di questo port o di shadPS4 (SPRJ0005 con userdata0000 …).',
         'There is no save to back up yet.':
             'Non c’è ancora un salvataggio di cui fare il backup.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -9587,8 +9404,6 @@ WORLD = {
             'Spunta Gestisci automaticamente dimensioni file di paging per tutte le unità. Se va ancora in crash: togli la spunta, seleziona un’unità con spazio libero, Dimensioni personalizzate: iniziali 16384, massime 32768, poi Imposta.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Per giocare su SuperMedo Server, inserisci nome utente e password di supermedo.com nella pagina Gioco online (lì puoi anche registrarti se non hai un account).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Per giocare online con The Hunter's Dream, accedi prima con Discord.",
         'Transform weapon (L1)':
             'Trasforma l’arma (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -9605,8 +9420,8 @@ WORLD = {
             'Senza limite, con tetto alla frequenza dello schermo (al massimo 120): il tuo PC dovrebbe superare i 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Rimetti l’aggiornamento 1.09 in una cartella nuova e vuota.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Usa l’eboot.bin di un aggiornamento 1.09 non modificato (esattamente 93.825.704 byte).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Usa l’eboot.bin di un aggiornamento 1.09 non modificato (esattamente 93.825.704 byte, o 93.667.640 come semplice file ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Usa l’eboot.bin di un aggiornamento 1.09 non modificato, in una cartella nuova e vuota. Non '
@@ -9693,8 +9508,6 @@ WORLD = {
             'Windows mostra questo messaggio per i programmi che non conosce ancora.',
         "Windows' title bar instead of the launcher's own":
             'Barra del titolo di Windows invece di quella del launcher',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Con The Hunter's Dream, insieme ai giocatori di bbhost. Richiede un accesso gratuito con Discord, una sola volta.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Con le tue impostazioni. Un crash, un blocco o una memoria che continua a crescere finiscono nel rapporto con le righe di registro circostanti.',
         'Wrong graphics card?':
@@ -9732,8 +9545,8 @@ WORLD = {
             'non può applicarvi le patch: il gioco gira a 30 FPS, le opzioni degli effetti non fanno nulla e '
             'alcune scene (come il filmato dopo Rom) possono bloccarsi.\n\nSostituisci eboot.bin con quello '
             'di un aggiornamento 1.09 non modificato.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'La tua edizione (Game of the Year, CUSA03173) include già The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'La tua edizione ({}) include già The Old Hunters.',
         'Your game':
             'Il tuo gioco',
         'Your game and your PC':
@@ -9755,8 +9568,8 @@ WORLD = {
             'Il limite è la tua scheda video.',
         'Your memory sets the limit.':
             'Il limite è la tua memoria.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'I tuoi file di Bloodborne (CUSA03173, Game of the Year Edition) con l’aggiornamento 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'I tuoi file di Bloodborne (qualsiasi edizione) con l’aggiornamento 1.09.',
         'Your previous saves: {}':
             'I tuoi salvataggi precedenti: {}',
         'Your processor sets the limit.':
@@ -9875,16 +9688,10 @@ WORLD = {
             'interrotto: tuo input',
         'the settings for your PC':
             'le impostazioni per il tuo PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map mostra dove sono i giocatori e quali campane suonano: il gioco invia la tua posizione più spesso mentre giochi.',
         'twice, interleaved (more exact)':
             'due volte, alternando i valori (più preciso)',
         'up to 7 runs':
             'fino a 7 esecuzioni',
-        '{0}: not reachable ({1})':
-            '{0}: non raggiungibile ({1})',
-        '{0}: reachable':
-            '{0}: raggiungibile',
         '{} GB free on {}':
             '{} GB liberi su {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -9911,16 +9718,14 @@ WORLD = {
             '{} minuti',
         '{} of {} trophies earned':
             '{} su {} trofei ottenuti',
-        '{} online':
-            '{} online',
         '{} runs':
             '{} esecuzioni',
         '{} settings differ from the recommendation.':
             '{} impostazioni differiscono da quelle consigliate.',
         '{} · version {}':
             '{} · versione {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: il port è fatto per CUSA03173, la Game of the Year Edition. Altre edizioni potrebbero non funzionare.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: non è un’edizione commerciale di Bloodborne. Il port avvia Bloodborne di ogni regione, anche le edizioni Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Mancano i file di FSR 4: nel frattempo si usa FSR 3.1. Fai clic per scaricarli (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -10144,8 +9949,10 @@ WORLD = {
             'Procesor',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'Procesory bez AVX (wiele modeli Pentium/Celeron) w ogóle go nie uruchomią.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: Game of the Year Edition, z The Old Hunters.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: Game of the Year Edition, z The Old Hunters.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: gra podstawowa. The Old Hunters, jeśli go masz, pochodzi z folderu DLC (Pliki gry).',
         'Cache folder':
             'Folder pamięci podręcznej',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -10178,8 +9985,8 @@ WORLD = {
             'Na środku (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Zmiany zadziałają przy następnym uruchomieniu gry; możesz też nacisnąć F8 w grze, aby ponownie wczytać input.ini bez restartu.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'Postacie z shadPS4, portu Awakena, bbhost lub eksportu z PS4: wyszukiwane na tym PC i kopiowane do folderu zapisów tego portu. Najpierw tworzona jest kopia zapasowa twoich obecnych zapisów.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'Postacie z shadPS4, portu Awakena lub eksportu z PS4: wyszukiwane na tym PC i kopiowane do folderu zapisów tego portu. Najpierw tworzona jest kopia zapasowa twoich obecnych zapisów.',
         'Cheats on: {}':
             'Włączone kody: {}',
         'Check again':
@@ -10188,8 +9995,8 @@ WORLD = {
             'Sprawdź grę',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Sprawdź wynik: eboot.bin (ok. 89 MB), sce_module, sce_sys i dvdroot_ps4 (ok. 29 GB) znajdują się bezpośrednio w środku. The Old Hunters jest już częścią edycji GOTY.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Sprawdź rozmiar: eboot.bin z aktualizacji ma dokładnie 93\xa0825\xa0704 bajty (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Sprawdź rozmiar: eboot.bin z aktualizacji ma dokładnie 93\xa0825\xa0704 bajty (89,4 MB) albo 93\xa0667\xa0640 bajtów jako zwykły plik ELF.',
         'Check this installation':
             'Sprawdź tę instalację',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -10245,8 +10052,6 @@ WORLD = {
             'Podczas gry zamknij przeglądarkę i inne programy.',
         'Co-op pool':
             'Pula kooperacji',
-        'Co-op service {0}':
-            'Serwis kooperacji {0}',
         'Combat':
             'Walka',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -10485,10 +10290,6 @@ WORLD = {
             'W grze Insert (klawiatura) lub L3 + R3 (kontroler) otwiera menu portu.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'W grze „{}” wczytuje postać, którą grano ostatnio; „{}” na ekranie tytułowym pokazuje wszystkie.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Na stronie, która się otworzyła ({0}), zaloguj się przez Discord i wpisz ten kod:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Na stronie, która się otworzyła, zaloguj się przez Discord i wpisz ten kod:',
         'Install':
             'Zainstaluj',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -10523,10 +10324,10 @@ WORLD = {
             'Czy folder gry jest w porządku? Sprawdzi to strona „Pomoc”.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Plik uszkodził się podczas rozpakowywania (w dzienniku jest „prepare failed: out of bounds”).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'To nie jest oryginalny plik (plik PS4 SELF): inne narzędzie go przekonwertowało albo nie '
-            'pochodzi z Bloodborne.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'To nie jest ani oryginalny plik (plik PS4 SELF), ani zwykły plik ELF: jest nadal '
+            'zaszyfrowany, inne narzędzie go przekonwertowało albo nie pochodzi z Bloodborne.',
         'It may start, but expect low frame rates and problems.':
             'Może się uruchomić, ale spodziewaj się niskiej liczby klatek i problemów.',
         'Items and menus':
@@ -10667,8 +10468,8 @@ WORLD = {
             'Bez limitu  ⚠',
         'No run finished; the report has the logs.':
             'Żaden przebieg się nie zakończył; raport zawiera dzienniki.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Nie znaleziono na tym PC zapisów z shadPS4, portu Awakena ani bbhost. Jeśli twoje są gdzie indziej (kopia zapasowa, eksport z PS4), wybierz ich folder.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Nie znaleziono na tym PC zapisów z shadPS4 ani portu Awakena. Jeśli twoje są gdzie indziej (kopia zapasowa, eksport z PS4), wybierz ich folder.',
         'No setting kept the goal; this one came closest.':
             'Żadne ustawienie nie utrzymało celu; to było najbliżej.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -10691,8 +10492,6 @@ WORLD = {
             'Nie zalogowano',
         'Not signed in yet':
             'Jeszcze nie zalogowano',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Nie zalogowano: użyj powyżej „Zaloguj się przez Discord”.',
         'Not supported':
             'Nieobsługiwane',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -10725,8 +10524,6 @@ WORLD = {
             'OneDrive (Pulpit i Dokumenty są często synchronizowane) oraz Program Files blokują lub przenoszą pliki, gdy port je zapisuje.',
         'Online (SuperMedo Server)':
             'Online (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Online (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Tryb online jest włączony, ale nie zalogowano: zaloguj się teraz',
         'Online play':
@@ -10875,8 +10672,8 @@ WORLD = {
             'Przywróć',
         'Right half of the touchpad (debug menu)':
             'Prawa połowa touchpada (menu debugowania)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'Kliknij prawym przyciskiem eboot.bin > Właściwości: czysty plik ma dokładnie 93\xa0825\xa0704 bajty.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'Kliknij prawym przyciskiem eboot.bin > Właściwości: czysty plik ma dokładnie 93\xa0825\xa0704 bajty (93\xa0667\xa0640, jeśli narzędzie do zrzutu zapisało go jako zwykły plik ELF).',
         'Route':
             'Trasa',
         'Run {}: the game is starting.':
@@ -10931,8 +10728,8 @@ WORLD = {
             'Krawędzie ekranu',
         'Search again':
             'Szukaj ponownie',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Szukanie na tym PC zapisów z shadPS4, portu Awakena i bbhost…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Szukanie na tym PC zapisów z shadPS4 i portu Awakena…',
         'Search…':
             'Szukaj…',
         'Sensitivity (direct)':
@@ -10965,8 +10762,6 @@ WORLD = {
             'Pokaż mniej',
         'Show in folder':
             'Pokaż w folderze',
-        'Show me on the live map':
-            'Pokazuj mnie na mapie na żywo',
         'Show the fix?':
             'Pokazać rozwiązanie?',
         'Show the log':
@@ -11093,14 +10888,6 @@ WORLD = {
             'Folder DLC nie istnieje.',
         'The Dream':
             'Sen',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (z graczami bbhost)",
-        "The Hunter's Dream account":
-            "Konto The Hunter's Dream",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: kooperacja razem z graczami bbhost po darmowym logowaniu przez Discord. shadNet: wybrany serwer shadNet i jego konto.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: teraz online {} łowców ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Menu „Wczytaj grę” jest puste, brakuje postaci albo gra zgłasza uszkodzony zapis. Przed każdym uruchomieniem launcher tworzy kopię zapisów, więc możesz wrócić do poprzedniego stanu.',
         'The Old Hunters found ({}).':
@@ -11119,8 +10906,6 @@ WORLD = {
             'Sprawdzanie przerwane: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Łatki społeczności (60 FPS i więcej, opcje efektów) istnieją tylko dla 1.09; inne wersje działają w 30 FPS.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "Połączenie z The Hunter's Dream to wykonany przez Awakena port kodu sieciowego bbhost; bbhost i The Hunter's Dream są autorstwa droogie.",
         'The controller does nothing':
             'Kontroler nie działa',
         'The controller test cannot start: {}':
@@ -11229,8 +11014,8 @@ WORLD = {
             'Sugestia witryny dotycząca oczekiwanej liczby klatek.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'W tym folderze nie ma eboot.bin. Wybierz folder, w którym bezpośrednio znajduje się eboot.bin, a nie folder nadrzędny.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'W tym folderze nie ma zapisu tego portu, shadPS4 ani bbhost (SPRJ0005 z userdata0000 …).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'W tym folderze nie ma zapisu tego portu ani shadPS4 (SPRJ0005 z userdata0000 …).',
         'There is no save to back up yet.':
             'Nie ma jeszcze zapisu do skopiowania.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -11263,8 +11048,6 @@ WORLD = {
             'Zaznacz „Automatycznie zarządzaj rozmiarem pliku stronicowania dla wszystkich dysków”. Jeśli awarie nadal występują: odznacz to, wybierz dysk z wolnym miejscem, „Rozmiar niestandardowy”: rozmiar początkowy 16384, rozmiar maksymalny 32768, potem „Ustaw”.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'Aby grać na SuperMedo Server, wpisz nazwę użytkownika i hasło z supermedo.com na stronie „Gra online” (jeśli nie masz konta, zarejestruj się tam).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "Aby grać online przez The Hunter's Dream, najpierw zaloguj się przez Discord.",
         'Transform weapon (L1)':
             'Przekształcenie broni (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -11281,8 +11064,8 @@ WORLD = {
             'Bez limitu, z ograniczeniem do odświeżania ekranu (maks. 120): twój PC powinien osiągać ponad 60 FPS.',
         'Put the 1.09 update into a new, empty folder again.':
             'Ponownie umieść aktualizację 1.09 w nowym, pustym folderze.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09 (dokładnie 93 825 704 bajty).',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09 (dokładnie 93 825 704 bajty albo 93 667 640 jako zwykły plik ELF).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Użyj eboot.bin z niezmodyfikowanej aktualizacji 1.09, w nowym, pustym folderze. Nie używaj '
@@ -11369,8 +11152,6 @@ WORLD = {
             'Windows pokazuje to przy programach, których jeszcze nie zna.',
         "Windows' title bar instead of the launcher's own":
             'Pasek tytułu Windows zamiast własnego paska launchera',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "Przez The Hunter's Dream, razem z graczami bbhost. Wymaga jednorazowego, darmowego logowania przez Discord.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Z twoimi własnymi ustawieniami. Awaria, zawieszenie lub stale rosnące zużycie pamięci trafią do raportu wraz z otaczającymi wierszami dziennika.',
         'Wrong graphics card?':
@@ -11408,8 +11189,8 @@ WORLD = {
             'może go załatać: gra działa w 30 FPS, opcje efektów nic nie robią, a niektóre sceny (np. '
             'przerywnik po Rom) mogą się zawiesić.\n\nZastąp eboot.bin plikiem z niezmodyfikowanej '
             'aktualizacji 1.09.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'Twoja edycja (Game of the Year, CUSA03173) już zawiera The Old Hunters.',
+        'Your edition ({}) already includes The Old Hunters.':
+            'Twoja edycja ({}) już zawiera The Old Hunters.',
         'Your game':
             'Twoja gra',
         'Your game and your PC':
@@ -11430,8 +11211,8 @@ WORLD = {
             'Limit wyznacza twoja karta graficzna.',
         'Your memory sets the limit.':
             'Limit wyznacza twoja pamięć.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Twoje własne pliki Bloodborne (CUSA03173, Game of the Year Edition) z aktualizacją 1.09.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Twoje własne pliki Bloodborne (dowolne wydanie) z aktualizacją 1.09.',
         'Your previous saves: {}':
             'Twoje poprzednie zapisy: {}',
         'Your processor sets the limit.':
@@ -11550,16 +11331,10 @@ WORLD = {
             'przerwano: twoje sterowanie',
         'the settings for your PC':
             'ustawienia dla twojego PC',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map pokazuje, gdzie są gracze i które dzwony rozbrzmiewają: podczas gry gra częściej wysyła twoją pozycję.',
         'twice, interleaved (more exact)':
             'dwa razy, naprzemiennie (dokładniej)',
         'up to 7 runs':
             'do 7 przebiegów',
-        '{0}: not reachable ({1})':
-            '{0}: niedostępny ({1})',
-        '{0}: reachable':
-            '{0}: dostępny',
         '{} GB free on {}':
             '{} GB wolnego miejsca na {}',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -11586,16 +11361,14 @@ WORLD = {
             '{} min',
         '{} of {} trophies earned':
             'Zdobyte trofea: {} z {}',
-        '{} online':
-            '{} online',
         '{} runs':
             'przebiegi: {}',
         '{} settings differ from the recommendation.':
             'Ustawienia odbiegające od zalecenia: {}.',
         '{} · version {}':
             '{} · wersja {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: port jest przeznaczony dla CUSA03173, Game of the Year Edition. Inne wydania mogą nie działać.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: to nie jest wydanie sklepowe Bloodborne. Port uruchamia Bloodborne z każdego regionu, także wydania Game of the Year.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• Brak plików FSR 4: do tego czasu używany jest FSR 3.1. Kliknij, aby pobrać (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -11819,8 +11592,10 @@ WORLD = {
             'İşlemci',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX desteği olmayan işlemciler (birçok Pentium/Celeron modeli) portu hiç çalıştıramaz.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: The Old Hunters’ı içeren Game of the Year Edition.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: The Old Hunters’ı içeren bir Game of the Year Edition.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: ana oyun. The Old Hunters, sahipseniz, DLC klasöründen gelir (Oyun dosyaları).',
         'Cache folder':
             'Önbellek klasörü',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -11853,8 +11628,8 @@ WORLD = {
             'Ortada (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             'Değişiklikler oyun bir sonraki başlatıldığında uygulanır; yeniden başlatmadan input.ini dosyasını yeniden yüklemek için oyunda F8’e de basabilirsiniz.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4, Awaken’ın portu, bbhost veya bir PS4 dışa aktarımından karakterler: bu bilgisayarda bulunur ve bu portun kayıt klasörüne kopyalanır. Mevcut kayıtlarınız önce yedeklenir.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4, Awaken’ın portu veya bir PS4 dışa aktarımından karakterler: bu bilgisayarda bulunur ve bu portun kayıt klasörüne kopyalanır. Mevcut kayıtlarınız önce yedeklenir.',
         'Cheats on: {}':
             'Açık hileler: {}',
         'Check again':
@@ -11863,8 +11638,8 @@ WORLD = {
             'Oyunu kontrol et',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             'Sonucu kontrol edin: eboot.bin (yaklaşık 89 MB), sce_module, sce_sys ve dvdroot_ps4 (yaklaşık 29 GB) doğrudan klasörün içinde olmalı. The Old Hunters, GOTY baskısında zaten mevcut.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'Boyutu kontrol edin: güncellemenin eboot.bin dosyası tam olarak 93.825.704 bayttır (89,4 MB).',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'Boyutu kontrol edin: güncellemenin eboot.bin dosyası tam olarak 93.825.704 bayttır (89,4 MB); düz bir ELF dosyası olarak 93.667.640 bayttır.',
         'Check this installation':
             'Bu kurulumu kontrol et',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -11920,8 +11695,6 @@ WORLD = {
             'Oynarken tarayıcınızı ve diğer programları kapatın.',
         'Co-op pool':
             'Ortak oyun havuzu',
-        'Co-op service {0}':
-            'Ortak oyun hizmeti {0}',
         'Combat':
             'Dövüş',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -12160,10 +11933,6 @@ WORLD = {
             'Oyunda Insert (klavye) veya L3 + R3 (kumanda) portun menüsünü açar.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'Oyunda “{}” en son oynadığın karakteri yükler; başlık ekranındaki “{}” hepsini listeler.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            'Açılan sayfada ({0}) Discord ile oturum açın ve şu kodu girin:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            'Açılan sayfada Discord ile oturum açın ve şu kodu girin:',
         'Install':
             'Kur',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -12198,10 +11967,10 @@ WORLD = {
             'Oyun klasörü sorunsuz mu? Yardım sayfası kontrol eder.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             'Çıkarma sırasında bozuldu (günlükte "prepare failed: out of bounds" yazar).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            'Orijinal dosya değil (bir PS4 SELF dosyası): başka bir araç dönüştürmüş ya da Bloodborne’a ait '
-            'değil.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            'Ne orijinal dosya (bir PS4 SELF dosyası) ne de düz bir ELF dosyası: hâlâ şifreli, başka bir '
+            'araç dönüştürmüş ya da Bloodborne’a ait değil.',
         'It may start, but expect low frame rates and problems.':
             'Başlayabilir ama düşük kare hızları ve sorunlar beklenebilir.',
         'Items and menus':
@@ -12343,8 +12112,8 @@ WORLD = {
             'Sınır yok  ⚠',
         'No run finished; the report has the logs.':
             'Hiçbir çalıştırma tamamlanmadı; günlükler raporda.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'Bu bilgisayarda shadPS4, Awaken’ın portu veya bbhost kaydı bulunamadı. Kayıtlarınız başka bir yerdeyse (bir yedek, bir PS4 dışa aktarımı) klasörlerini seçin.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'Bu bilgisayarda shadPS4 veya Awaken’ın portu kaydı bulunamadı. Kayıtlarınız başka bir yerdeyse (bir yedek, bir PS4 dışa aktarımı) klasörlerini seçin.',
         'No setting kept the goal; this one came closest.':
             'Hiçbir ayar hedefi tutturamadı; en yakın olan bu.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -12367,8 +12136,6 @@ WORLD = {
             'Oturum açılmadı',
         'Not signed in yet':
             'Henüz oturum açılmadı',
-        'Not signed in: use "Sign in with Discord" above.':
-            'Oturum açılmadı: yukarıdaki "Discord ile oturum aç" düğmesini kullanın.',
         'Not supported':
             'Desteklenmiyor',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -12401,8 +12168,6 @@ WORLD = {
             'OneDrive (Masaüstü ve Belgeler çoğu zaman eşitlenir) ve Program Files, port dosyaları yazarken onları kilitler veya taşır.',
         'Online (SuperMedo Server)':
             'Çevrim içi (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "Çevrim içi (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             'Çevrim içi açık ama henüz oturum açmadınız: şimdi oturum açın',
         'Online play':
@@ -12551,8 +12316,8 @@ WORLD = {
             'Geri yükle',
         'Right half of the touchpad (debug menu)':
             'Dokunmatik yüzeyin sağ yarısı (hata ayıklama menüsü)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin’e sağ tıklayın > Özellikler: temiz dosya tam olarak 93.825.704 bayttır.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin’e sağ tıklayın > Özellikler: temiz dosya tam olarak 93.825.704 bayttır (döküm aracınız onu düz bir ELF dosyası olarak yazdıysa 93.667.640).',
         'Route':
             'Rota',
         'Run {}: the game is starting.':
@@ -12607,8 +12372,8 @@ WORLD = {
             'Ekran kenarları',
         'Search again':
             'Yeniden ara',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'Bu bilgisayarda shadPS4, Awaken’ın portu ve bbhost kayıtları aranıyor…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'Bu bilgisayarda shadPS4 ve Awaken’ın portu kayıtları aranıyor…',
         'Search…':
             'Ara…',
         'Sensitivity (direct)':
@@ -12641,8 +12406,6 @@ WORLD = {
             'Daha az göster',
         'Show in folder':
             'Klasörde göster',
-        'Show me on the live map':
-            'Beni canlı haritada göster',
         'Show the fix?':
             'Çözüm gösterilsin mi?',
         'Show the log':
@@ -12769,14 +12532,6 @@ WORLD = {
             'DLC klasörü mevcut değil.',
         'The Dream':
             'Rüya',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (bbhost oyuncularıyla)",
-        "The Hunter's Dream account":
-            "The Hunter's Dream hesabı",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: Discord ile ücretsiz giriş yaptıktan sonra bbhost oyuncularıyla birlikte ortak oyun. shadNet: seçtiğin bir shadNet sunucusu ve hesabı.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: şu an {} avcı çevrimiçi ({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             'Load Game menüsü boş, bir karakter eksik ya da oyun kaydın bozuk olduğunu söylüyor. Başlatıcı her başlatmadan önce kayıtlarını yedekler; böylece eski haline dönebilirsin.',
         'The Old Hunters found ({}).':
@@ -12795,8 +12550,6 @@ WORLD = {
             'Kontrol durdu: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'Topluluk yamaları (60 FPS ve üzeri, efekt seçenekleri) yalnızca 1.09 için mevcut; diğer sürümler 30 FPS’te çalışır.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream bağlantısı, bbhost’un ağ kodunun Awaken tarafından yapılmış portudur; bbhost ve The Hunter's Dream droogie’ye aittir.",
         'The controller does nothing':
             'Kumanda hiçbir şey yapmıyor',
         'The controller test cannot start: {}':
@@ -12905,8 +12658,8 @@ WORLD = {
             'Web sitesinin beklenen kare hızı önerisi.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'Bu klasörde eboot.bin yok. Bir üst klasörü değil, eboot.bin’in doğrudan içinde bulunduğu klasörü seçin.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'Bu klasörde bu portun, shadPS4’ün veya bbhost’un kaydı yok (userdata0000 … içeren SPRJ0005).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'Bu klasörde bu portun veya shadPS4’ün kaydı yok (userdata0000 … içeren SPRJ0005).',
         'There is no save to back up yet.':
             'Henüz yedeklenecek bir kayıt yok.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -12939,8 +12692,6 @@ WORLD = {
             '"Tüm sürücüler için disk belleği dosyası boyutunu otomatik olarak yönet" seçeneğini işaretleyin. Hâlâ çöküyorsa: işareti kaldırın, boş alanı olan bir sürücü seçin, Özel boyut: başlangıç 16384, en büyük 32768, ardından Ayarla.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server’da oynamak için Çevrim içi oyun sayfasında supermedo.com kullanıcı adınızı ve parolanızı girin (hesabınız yoksa orada hesap oluşturun).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream ile çevrim içi oynamak için önce Discord ile oturum açın.",
         'Transform weapon (L1)':
             'Silahı dönüştür (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -12957,9 +12708,9 @@ WORLD = {
             'Sınırsız, ekran yenileme hızıyla sınırlı (en fazla 120): bilgisayarınızın 60 FPS’in üzerine çıkması bekleniyor.',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 güncellemesini yeniden yeni, boş bir klasöre koyun.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
             'Değiştirilmemiş bir 1.09 güncellemesinin eboot.bin dosyasını kullanın (tam olarak 93.825.704 '
-            'bayt).',
+            'bayt; düz bir ELF dosyası olarak 93.667.640).',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             'Değiştirilmemiş bir 1.09 güncellemesinin eboot.bin dosyasını yeni, boş bir klasörde kullanın. '
@@ -13046,8 +12797,6 @@ WORLD = {
             'Windows bunu henüz tanımadığı programlar için gösterir.',
         "Windows' title bar instead of the launcher's own":
             'Başlatıcının kendi başlık çubuğu yerine Windows başlık çubuğu',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream ile, bbhost oyuncularıyla birlikte. Bir kez ücretsiz olarak Discord ile oturum açmanız gerekir.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             'Kendi ayarlarınızla. Bir çökme, donma veya sürekli artan bellek kullanımı, etrafındaki günlük satırlarıyla birlikte rapora eklenir.',
         'Wrong graphics card?':
@@ -13085,8 +12834,8 @@ WORLD = {
             'yama uygulayamaz: oyun 30 FPS’te çalışır, efekt seçenekleri hiçbir şey yapmaz ve bazı sahneler '
             '(örneğin Rom’dan sonraki ara sahne) donabilir.\n\neboot.bin’i değiştirilmemiş bir 1.09 '
             'güncellemesindeki dosyayla değiştirin.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            "Sürümün (Game of the Year, CUSA03173) The Old Hunters'ı zaten içeriyor.",
+        'Your edition ({}) already includes The Old Hunters.':
+            "Sürümün ({}) The Old Hunters'ı zaten içeriyor.",
         'Your game':
             'Oyununuz',
         'Your game and your PC':
@@ -13107,8 +12856,8 @@ WORLD = {
             'Sınırı ekran kartınız belirliyor.',
         'Your memory sets the limit.':
             'Sınırı belleğiniz belirliyor.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'Kendi Bloodborne oyun dosyalarınız (CUSA03173, Game of the Year Edition) ve 1.09 güncellemesi.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'Kendi Bloodborne oyun dosyalarınız (herhangi bir baskı) ve 1.09 güncellemesi.',
         'Your previous saves: {}':
             'Önceki kayıtlarınız: {}',
         'Your processor sets the limit.':
@@ -13227,16 +12976,10 @@ WORLD = {
             'durduruldu: sizin girdiniz',
         'the settings for your PC':
             'bilgisayarınız için ayarlar',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map oyuncuların nerede olduğunu ve hangi çanların çaldığını gösterir: oyun, siz oynarken konumunuzu daha sık gönderir.',
         'twice, interleaved (more exact)':
             'iki kez, dönüşümlü (daha kesin)',
         'up to 7 runs':
             'en fazla 7 çalıştırma',
-        '{0}: not reachable ({1})':
-            '{0}: erişilemiyor ({1})',
-        '{0}: reachable':
-            '{0}: erişilebilir',
         '{} GB free on {}':
             '{} GB boş ({})',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -13263,16 +13006,14 @@ WORLD = {
             '{} dakika',
         '{} of {} trophies earned':
             '{}/{} kupa kazanıldı',
-        '{} online':
-            '{} çevrimiçi',
         '{} runs':
             '{} çalıştırma',
         '{} settings differ from the recommendation.':
             '{} ayar öneriden farklı.',
         '{} · version {}':
             '{} · sürüm {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: port, Game of the Year Edition olan CUSA03173 için yapıldı. Diğer baskılar çalışmayabilir.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: Bloodborne’un bir perakende baskısı değil. Port, Game of the Year baskıları dahil her bölgenin Bloodborne’unu çalıştırır.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 dosyaları eksik: bu arada FSR 3.1 kullanılıyor. İndirmek için tıklayın (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -13493,8 +13234,10 @@ WORLD = {
             '处理器',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             '不支持 AVX 的 CPU（许多 Pentium/Celeron 型号）完全无法运行。',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173：年度版，含“老猎人”DLC。',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}：年度版，含“老猎人”DLC。',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}：本体游戏。The Old Hunters（如果你拥有）来自它的 DLC 文件夹（游戏文件）。',
         'Cache folder':
             '缓存文件夹',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -13525,8 +13268,8 @@ WORLD = {
             '居中（16:9）',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '更改将在下次启动游戏时生效；也可以在游戏中按 F8，无需重启即可重新加载 input.ini。',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            '来自 shadPS4、Awaken 的移植版、bbhost 或 PS4 导出的角色：在这台电脑上找到后复制到本移植版的存档文件夹。你当前的存档会先被备份。',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            '来自 shadPS4、Awaken 的移植版或 PS4 导出的角色：在这台电脑上找到后复制到本移植版的存档文件夹。你当前的存档会先被备份。',
         'Cheats on: {}':
             '已开启作弊：{}',
         'Check again':
@@ -13535,8 +13278,8 @@ WORLD = {
             '检查游戏',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '检查结果：eboot.bin（约 89 MB）、sce_module、sce_sys 和 dvdroot_ps4（约 29 GB）应直接位于其中。“老猎人”DLC 已包含在年度版中。',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            '检查大小：更新中的 eboot.bin 正好为 93,825,704 字节（89.4 MB）。',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            '检查大小：更新中的 eboot.bin 正好为 93,825,704 字节（89.4 MB），若为普通 ELF 文件则为 93,667,640 字节。',
         'Check this installation':
             '检查此安装',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -13591,8 +13334,6 @@ WORLD = {
             '游玩时请关闭浏览器和其他程序。',
         'Co-op pool':
             '合作匹配池',
-        'Co-op service {0}':
-            '合作服务 {0}',
         'Combat':
             '战斗',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -13831,10 +13572,6 @@ WORLD = {
             '在游戏中，按 Insert（键盘）或 L3 + R3（手柄）可打开移植版菜单。',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             '在游戏中，“{}”会载入你上次游玩的角色；标题画面的“{}”会列出所有角色。',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '在已打开的页面（{0}）中使用 Discord 登录，并输入此代码：',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '在已打开的页面中使用 Discord 登录，并输入此代码：',
         'Install':
             '安装',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -13869,9 +13606,9 @@ WORLD = {
             '游戏文件夹是否正常？“帮助”页面会进行检查。',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '它在解包时损坏了（日志显示“prepare failed: out of bounds”）。',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '这不是原始文件（PS4 SELF 文件）：它已被其他工具转换过，或者并非来自 Bloodborne。',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '它既不是原始文件（PS4 SELF 文件），也不是普通的 ELF 文件：它仍是加密的、已被其他工具转换过，或者并非来自 Bloodborne。',
         'It may start, but expect low frame rates and problems.':
             '也许能启动，但帧率会很低，并可能出现问题。',
         'Items and menus':
@@ -14011,8 +13748,8 @@ WORLD = {
             '不限制  ⚠',
         'No run finished; the report has the logs.':
             '没有一次运行完成；日志见报告。',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            '在这台电脑上未找到 shadPS4、Awaken 的移植版或 bbhost 的存档。如果你的存档在其他位置（备份、PS4 导出），请选择其所在文件夹。',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            '在这台电脑上未找到 shadPS4、Awaken 的移植版的存档。如果你的存档在其他位置（备份、PS4 导出），请选择其所在文件夹。',
         'No setting kept the goal; this one came closest.':
             '没有任何设置达到目标；这个最接近。',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -14035,8 +13772,6 @@ WORLD = {
             '未登录',
         'Not signed in yet':
             '尚未登录',
-        'Not signed in: use "Sign in with Discord" above.':
-            '未登录：请使用上方的“使用 Discord 登录”。',
         'Not supported':
             '不支持',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -14069,8 +13804,6 @@ WORLD = {
             'OneDrive（桌面和文档通常会被同步）和 Program Files 会在移植版写入文件时锁定或移动文件。',
         'Online (SuperMedo Server)':
             '在线（SuperMedo 服务器）',
-        "Online (The Hunter's Dream)":
-            "在线（The Hunter's Dream）",
         'Online is on, but you are not signed in yet: sign in now':
             '在线已开启，但你尚未登录：立即登录',
         'Online play':
@@ -14219,8 +13952,8 @@ WORLD = {
             '恢复',
         'Right half of the touchpad (debug menu)':
             '触摸板右半部分（调试菜单）',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            '右键点击 eboot.bin > 属性：纯净的文件正好为 93,825,704 字节。',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            '右键点击 eboot.bin > 属性：纯净的文件正好为 93,825,704 字节（如果你的导出工具将其保存为普通 ELF 文件，则为 93,667,640 字节）。',
         'Route':
             '路线',
         'Run {}: the game is starting.':
@@ -14275,8 +14008,8 @@ WORLD = {
             '屏幕边缘',
         'Search again':
             '重新搜索',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            '正在这台电脑上搜索 shadPS4、Awaken 的移植版和 bbhost 的存档…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            '正在这台电脑上搜索 shadPS4、Awaken 的移植版的存档…',
         'Search…':
             '搜索…',
         'Sensitivity (direct)':
@@ -14309,8 +14042,6 @@ WORLD = {
             '收起',
         'Show in folder':
             '在文件夹中显示',
-        'Show me on the live map':
-            '在实时地图上显示我',
         'Show the fix?':
             '显示解决方法？',
         'Show the log':
@@ -14432,14 +14163,6 @@ WORLD = {
             'DLC 文件夹不存在。',
         'The Dream':
             '梦境',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream（与 bbhost 玩家一起）",
-        "The Hunter's Dream account":
-            "The Hunter's Dream 账户",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream：使用 Discord 免费登录后，与 bbhost 玩家一起联机合作。shadNet：你选择的 shadNet 服务器及其账号。",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream：当前 {} 名猎人在线（{} bbhost · {} shadNet）",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '“读取游戏”菜单为空、缺少角色，或游戏提示存档损坏。每次启动前启动器都会备份你的存档，所以你可以恢复到之前的状态。',
         'The Old Hunters found ({}).':
@@ -14458,8 +14181,6 @@ WORLD = {
             '检查已中止：{}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             '社区补丁（60 FPS 及以上、效果选项）仅适用于 1.09；其他版本以 30 FPS 运行。',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "与 The Hunter's Dream 的连接是 Awaken 对 bbhost 网络代码的移植；bbhost 和 The Hunter's Dream 的作者是 droogie。",
         'The controller does nothing':
             '手柄没有反应',
         'The controller test cannot start: {}':
@@ -14565,8 +14286,8 @@ WORLD = {
             '网站对预期帧率的建议。',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             '此文件夹中没有 eboot.bin。请选择直接包含 eboot.bin 的文件夹，而不是它的上一级文件夹。',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            '该文件夹中没有本移植版、shadPS4 或 bbhost 的存档（包含 userdata0000 … 的 SPRJ0005）。',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            '该文件夹中没有本移植版或 shadPS4 的存档（包含 userdata0000 … 的 SPRJ0005）。',
         'There is no save to back up yet.':
             '还没有可备份的存档。',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -14599,8 +14320,6 @@ WORLD = {
             '勾选“自动管理所有驱动器的分页文件大小”。如果仍然崩溃：取消勾选，选择一个有可用空间的驱动器，选择“自定义大小”：初始大小 16384，最大值 32768，然后点击“设置”。',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             '要在 SuperMedo 服务器上游玩，请在“在线游玩”页面输入你的 supermedo.com 用户名和密码（如果没有账户，可在那里注册）。',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "要通过 The Hunter's Dream 在线游玩，请先使用 Discord 登录。",
         'Transform weapon (L1)':
             '变形武器（L1）',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -14617,8 +14336,8 @@ WORLD = {
             '不限帧，上限为显示器刷新率（最高 120）：预计你的电脑可超过 60 FPS。',
         'Put the 1.09 update into a new, empty folder again.':
             '把 1.09 更新重新放进一个新的空文件夹。',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '使用未经修改的 1.09 更新中的 eboot.bin（正好 93,825,704 字节）。',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '使用未经修改的 1.09 更新中的 eboot.bin（正好 93,825,704 字节；若为普通 ELF 文件则为 93,667,640 字节）。',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '在新的空文件夹中使用未经修改的 1.09 更新的 eboot.bin。不要使用别人单独分享的 eboot.bin。',
@@ -14703,8 +14422,6 @@ WORLD = {
             'Windows 会对它尚不认识的程序显示此提示。',
         "Windows' title bar instead of the launcher's own":
             '使用 Windows 标题栏，而非启动器自带的标题栏',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "通过 The Hunter's Dream，与 bbhost 玩家一起。只需使用 Discord 免费登录一次。",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '使用你自己的设置。崩溃、卡死或持续增长的内存都会连同前后的日志行记录在报告中。',
         'Wrong graphics card?':
@@ -14740,8 +14457,8 @@ WORLD = {
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             '你的 eboot.bin 不是纯净的 1.09 版本（被修改过，或来自其他版本）。移植版无法为它打补丁：游戏将以 30 FPS '
             '运行，“游戏与效果”中的选项无效，某些场景（例如罗姆之后的过场动画）可能会卡死。\n\n请用未经修改的 1.09 更新中的 eboot.bin 替换它。',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            '你的版本（年度版，CUSA03173）已包含 The Old Hunters。',
+        'Your edition ({}) already includes The Old Hunters.':
+            '你的版本（{}）已包含 The Old Hunters。',
         'Your game':
             '你的游戏',
         'Your game and your PC':
@@ -14762,8 +14479,8 @@ WORLD = {
             '瓶颈在于你的显卡。',
         'Your memory sets the limit.':
             '瓶颈在于你的内存。',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            '你自己的 Bloodborne 游戏文件（CUSA03173，年度版），含 1.09 更新。',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            '你自己的 Bloodborne 游戏文件（任意发行版），含 1.09 更新。',
         'Your previous saves: {}':
             '你之前的存档：{}',
         'Your processor sets the limit.':
@@ -14882,16 +14599,10 @@ WORLD = {
             '已中止：你的操作',
         'the settings for your PC':
             '适合你电脑的设置',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map 会显示玩家所在位置以及哪些铃铛正在响起：游玩时，游戏会更频繁地发送你的位置。',
         'twice, interleaved (more exact)':
             '两次，交替进行（更精确）',
         'up to 7 runs':
             '最多 7 次运行',
-        '{0}: not reachable ({1})':
-            '{0}：无法连接 ({1})',
-        '{0}: reachable':
-            '{0}：可连接',
         '{} GB free on {}':
             '{1} 上有 {0} GB 可用空间',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -14918,16 +14629,14 @@ WORLD = {
             '{} 分钟',
         '{} of {} trophies earned':
             '已获得 {}/{} 个奖杯',
-        '{} online':
-            '{} 人在线',
         '{} runs':
             '{} 次运行',
         '{} settings differ from the recommendation.':
             '有 {} 项设置与推荐不一致。',
         '{} · version {}':
             '{} · 版本 {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}：本移植版是为 CUSA03173（年度版）制作的。其他版本可能无法运行。',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}：这不是 Bloodborne 的零售版本。本移植版可运行任何地区的 Bloodborne，包括年度版。',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• 缺少 FSR 4 文件：暂时使用 FSR 3.1。点击下载（30 MB）',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -15148,8 +14857,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX 非対応の CPU（Pentium/Celeron の多くのモデル）ではまったく動作しません。',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173：The Old Hunters を収録した Game of the Year Edition。',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}：The Old Hunters を収録した Game of the Year Edition。',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}：本編のみ。The Old Hunters をお持ちの場合は DLC フォルダー（ゲームファイル）から読み込みます。',
         'Cache folder':
             'キャッシュフォルダー',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -15180,8 +14891,8 @@ WORLD = {
             '中央（16:9）',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '変更はゲームの次回起動時に反映されます。ゲーム中に F8 を押すと、再起動せずに input.ini を再読み込みできます。',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4、Awaken の移植版、bbhost、または PS4 からエクスポートしたキャラクターを、この PC 上で見つけてこの移植版のセーブフォルダーにコピーします。現在のセーブデータは事前にバックアップされます。',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4、Awaken の移植版、または PS4 からエクスポートしたキャラクターを、この PC 上で見つけてこの移植版のセーブフォルダーにコピーします。現在のセーブデータは事前にバックアップされます。',
         'Cheats on: {}':
             'チート有効：{}',
         'Check again':
@@ -15190,8 +14901,8 @@ WORLD = {
             'ゲームの確認',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '結果を確認してください：eboot.bin（約 89 MB）、sce_module、sce_sys、dvdroot_ps4（約 29 GB）がフォルダーの直下にあること。The Old Hunters は GOTY 版にすでに含まれています。',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            'サイズを確認してください：アップデートの eboot.bin はちょうど 93,825,704 バイト（89.4 MB）です。',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            'サイズを確認してください：アップデートの eboot.bin はちょうど 93,825,704 バイト（89.4 MB）、プレーンな ELF ファイルなら 93,667,640 バイトです。',
         'Check this installation':
             'このインストールを確認',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -15246,8 +14957,6 @@ WORLD = {
             'プレイ中はブラウザーやその他のプログラムを閉じてください。',
         'Co-op pool':
             '協力プレイの接続先',
-        'Co-op service {0}':
-            '協力プレイサービス {0}',
         'Combat':
             '戦闘',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -15486,10 +15195,6 @@ WORLD = {
             'ゲーム中に Insert（キーボード）または L3 + R3（コントローラー）を押すと、移植版メニューが開きます。',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             'ゲーム内では「{}」で最後に遊んだキャラクターを読み込み、タイトル画面の「{}」ですべてのキャラクターを表示します。',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '開いたページ（{0}）で Discord でサインインし、次のコードを入力してください：',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '開いたページで Discord でサインインし、次のコードを入力してください：',
         'Install':
             'インストール',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -15524,9 +15229,9 @@ WORLD = {
             'ゲームフォルダーに問題はありませんか？「ヘルプ」で確認できます。',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '展開中に壊れています（ログに「prepare failed: out of bounds」と出ます）。',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '元のファイル（PS4 の SELF ファイル）ではありません。別のツールで変換されたか、Bloodborne のものではありません。',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '元のファイル（PS4 の SELF ファイル）でもプレーンな ELF ファイルでもありません。まだ暗号化されているか、別のツールで変換されたか、Bloodborne のものではありません。',
         'It may start, but expect low frame rates and problems.':
             '起動はするかもしれませんが、フレームレートが低く、問題が起きる可能性があります。',
         'Items and menus':
@@ -15666,8 +15371,8 @@ WORLD = {
             '上限なし  ⚠',
         'No run finished; the report has the logs.':
             '完了した実行はありません。ログはレポートにあります。',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            'この PC で shadPS4、Awaken の移植版、bbhost のセーブデータが見つかりませんでした。別の場所（バックアップや PS4 からのエクスポート）にある場合は、そのフォルダーを選択してください。',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            'この PC で shadPS4、Awaken の移植版のセーブデータが見つかりませんでした。別の場所（バックアップや PS4 からのエクスポート）にある場合は、そのフォルダーを選択してください。',
         'No setting kept the goal; this one came closest.':
             '目標を維持できた設定はありませんでした。これが最も近い結果です。',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -15690,8 +15395,6 @@ WORLD = {
             '未サインイン',
         'Not signed in yet':
             'まだサインインしていません',
-        'Not signed in: use "Sign in with Discord" above.':
-            '未サインイン：上の「Discord でサインイン」を使ってください。',
         'Not supported':
             '非対応',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -15724,8 +15427,6 @@ WORLD = {
             'OneDrive（デスクトップやドキュメントは同期されていることが多い）や Program Files は、移植版がファイルを書き込んでいる最中にロックしたり移動したりします。',
         'Online (SuperMedo Server)':
             'オンライン（SuperMedo Server）',
-        "Online (The Hunter's Dream)":
-            "オンライン（The Hunter's Dream）",
         'Online is on, but you are not signed in yet: sign in now':
             'オンラインがオンですが、まだサインインしていません：今すぐサインイン',
         'Online play':
@@ -15874,8 +15575,8 @@ WORLD = {
             '復元',
         'Right half of the touchpad (debug menu)':
             'タッチパッドの右半分（デバッグメニュー）',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin を右クリック > プロパティ：無改変のファイルはちょうど 93,825,704 バイトです。',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin を右クリック > プロパティ：無改変のファイルはちょうど 93,825,704 バイトです（ダンプツールがプレーンな ELF ファイルとして書き出した場合は 93,667,640 バイト）。',
         'Route':
             'ルート',
         'Run {}: the game is starting.':
@@ -15930,8 +15631,8 @@ WORLD = {
             '画面の端',
         'Search again':
             '再検索',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            'この PC で shadPS4、Awaken の移植版、bbhost のセーブデータを検索中…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            'この PC で shadPS4、Awaken の移植版のセーブデータを検索中…',
         'Search…':
             '検索…',
         'Sensitivity (direct)':
@@ -15964,8 +15665,6 @@ WORLD = {
             '表示を減らす',
         'Show in folder':
             'フォルダーで表示',
-        'Show me on the live map':
-            'ライブマップに自分を表示',
         'Show the fix?':
             '解決方法を表示しますか？',
         'Show the log':
@@ -16087,14 +15786,6 @@ WORLD = {
             'DLC フォルダーが存在しません。',
         'The Dream':
             '狩人の夢',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream（bbhost のプレイヤーと）",
-        "The Hunter's Dream account":
-            "The Hunter's Dream のアカウント",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream：Discord で無料サインインすると、bbhost のプレイヤーとも協力プレイできます。shadNet：選んだ shadNet サーバーとそのアカウント。",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream：現在 {} 人の狩人がオンライン（{} bbhost · {} shadNet）",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '「ロード」メニューが空、キャラクターがいない、またはセーブデータが破損しているとゲームが表示します。ランチャーは起動のたびにセーブデータをバックアップするので、元の状態に戻せます。',
         'The Old Hunters found ({}).':
@@ -16113,8 +15804,6 @@ WORLD = {
             '確認が中断されました：{}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             'コミュニティパッチ（60 FPS 以上、エフェクトのオプション）は 1.09 専用です。他のバージョンは 30 FPS で動作します。',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream への接続は、bbhost のネットワークコードを Awaken が移植したものです。bbhost と The Hunter's Dream は droogie によるものです。",
         'The controller does nothing':
             'コントローラーが反応しない',
         'The controller test cannot start: {}':
@@ -16221,8 +15910,8 @@ WORLD = {
             'ウェブサイトが示す予想フレームレート。',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             'このフォルダーには eboot.bin がありません。その上の階層ではなく、eboot.bin が直下にあるフォルダーを選択してください。',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            'そのフォルダーには、この移植版、shadPS4、bbhost のセーブデータがありません（userdata0000 … を含む SPRJ0005）。',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            'そのフォルダーには、この移植版、shadPS4 のセーブデータがありません（userdata0000 … を含む SPRJ0005）。',
         'There is no save to back up yet.':
             'バックアップするセーブデータがまだありません。',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -16255,8 +15944,6 @@ WORLD = {
             '「すべてのドライブのページング ファイルのサイズを自動的に管理する」にチェックを入れます。それでもクラッシュする場合：チェックを外し、空き容量のあるドライブを選んで「カスタム サイズ」を選択し、初期サイズ 16384、最大サイズ 32768 を入力して「設定」を押します。',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server でプレイするには、「オンラインプレイ」ページで supermedo.com のユーザー名とパスワードを入力してください（アカウントがない場合はそこで登録できます）。',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream でオンラインプレイするには、先に Discord でサインインしてください。",
         'Transform weapon (L1)':
             '武器の変形 (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -16273,8 +15960,8 @@ WORLD = {
             '無制限、ディスプレイのリフレッシュレートが上限（最大 120）：この PC は 60 FPS を超えると予想されます。',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 アップデートを新しい空のフォルダーに入れ直してください。',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '改変されていない 1.09 アップデートの eboot.bin（ちょうど 93,825,704 バイト）を使ってください。',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '改変されていない 1.09 アップデートの eboot.bin（ちょうど 93,825,704 バイト、プレーンな ELF ファイルなら 93,667,640 バイト）を使ってください。',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '改変されていない 1.09 アップデートの eboot.bin を、新しい空のフォルダーで使ってください。誰かが単体で共有した eboot.bin は使わないでください。',
@@ -16359,8 +16046,6 @@ WORLD = {
             'Windows は、まだ認識していないプログラムに対してこの表示を出します。',
         "Windows' title bar instead of the launcher's own":
             'ランチャー独自のタイトルバーの代わりに Windows のタイトルバーを使う',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream で、bbhost のプレイヤーと一緒に遊べます。Discord での無料サインインが一度だけ必要です。",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '自分の設定で実行します。クラッシュ、フリーズ、増え続けるメモリ使用量は、前後のログとともにレポートに記録されます。',
         'Wrong graphics card?':
@@ -16397,8 +16082,8 @@ WORLD = {
             'お使いの eboot.bin は無改変の 1.09 のものではありません（改変されているか、別の版のもの）。移植版はこれにパッチを当てられないため、ゲームは 30 FPS '
             'で動作し、「ゲームとエフェクト」のオプションは効かず、一部の場面（ロマ撃破後のムービーなど）でフリーズすることがあります。\n\neboot.bin を、改変されていない 1.09 '
             'アップデートのものに置き換えてください。',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            'お使いのエディション（Game of the Year、CUSA03173）には The Old Hunters が含まれています。',
+        'Your edition ({}) already includes The Old Hunters.':
+            'お使いのエディション（{}）には The Old Hunters が含まれています。',
         'Your game':
             'あなたのゲーム',
         'Your game and your PC':
@@ -16419,8 +16104,8 @@ WORLD = {
             'グラフィックカードが上限を決めています。',
         'Your memory sets the limit.':
             'メモリが上限を決めています。',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            'ご自身の Bloodborne のゲームファイル（CUSA03173、Game of the Year Edition）と 1.09 アップデート。',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            'ご自身の Bloodborne のゲームファイル（どのエディションでも可）と 1.09 アップデート。',
         'Your previous saves: {}':
             '以前のセーブデータ：{}',
         'Your processor sets the limit.':
@@ -16539,16 +16224,10 @@ WORLD = {
             '中断：あなたの入力',
         'the settings for your PC':
             'この PC 向けの設定',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map では、プレイヤーの居場所と鳴らされている鐘を確認できます。プレイ中、ゲームはあなたの位置をより頻繁に送信します。',
         'twice, interleaved (more exact)':
             '2 回、交互に（より正確）',
         'up to 7 runs':
             '最大 7 回の実行',
-        '{0}: not reachable ({1})':
-            '{0}：接続できません ({1})',
-        '{0}: reachable':
-            '{0}：接続可能',
         '{} GB free on {}':
             '{} GB の空き（{}）',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -16575,16 +16254,14 @@ WORLD = {
             '{} 分',
         '{} of {} trophies earned':
             '{} / {} 個のトロフィーを獲得',
-        '{} online':
-            '{} 人オンライン',
         '{} runs':
             '{} 回の実行',
         '{} settings differ from the recommendation.':
             '{} 項目の設定が推奨と異なります。',
         '{} · version {}':
             '{} · バージョン {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}：移植版は CUSA03173（Game of the Year Edition）向けに作られています。他のエディションでは動作しない可能性があります。',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}：Bloodborne の製品版ではありません。移植版はすべての地域の Bloodborne（Game of the Year Edition を含む）を実行できます。',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 ファイルがありません：当面は FSR 3.1 を使用します。クリックでダウンロード（30 MB）',
         '• No saves yet: bring your character from another version, or the game creates them':
@@ -16806,8 +16483,10 @@ WORLD = {
             'CPU',
         'CPUs without AVX (many Pentium/Celeron models) can’t run it at all.':
             'AVX가 없는 CPU (여러 Pentium/Celeron 모델)에서는 아예 실행할 수 없습니다.',
-        'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-            'CUSA03173: The Old Hunters가 포함된 Game of the Year Edition.',
+        '{}: a Game of the Year Edition, with The Old Hunters.':
+            '{}: The Old Hunters가 포함된 Game of the Year Edition.',
+        '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+            '{}: 기본 게임입니다. The Old Hunters를 보유하고 있다면 DLC 폴더(게임 파일)에서 가져옵니다.',
         'Cache folder':
             '캐시 폴더',
         'Your saves folder is in another installation of the port: this one keeps its shaders in its own folder, '
@@ -16838,8 +16517,8 @@ WORLD = {
             '가운데 (16:9)',
         'Changes apply the next time the game starts, or press F8 in-game to reload input.ini without restarting.':
             '변경 사항은 다음에 게임을 시작할 때 적용됩니다. 게임 중에 F8을 누르면 재시작 없이 input.ini를 다시 불러옵니다.',
-        "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
-            'shadPS4, Awaken의 포트, bbhost 또는 PS4에서 내보낸 캐릭터: 이 PC에서 찾아 이 포트의 세이브 폴더로 복사합니다. 현재 세이브는 먼저 백업됩니다.',
+        "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's saves folder. Your current saves are backed up first.":
+            'shadPS4, Awaken의 포트 또는 PS4에서 내보낸 캐릭터: 이 PC에서 찾아 이 포트의 세이브 폴더로 복사합니다. 현재 세이브는 먼저 백업됩니다.',
         'Cheats on: {}':
             '치트 켜짐: {}',
         'Check again':
@@ -16848,8 +16527,8 @@ WORLD = {
             '게임 확인',
         'Check the result: eboot.bin (about 89 MB), sce_module, sce_sys and dvdroot_ps4 (about 29 GB) are directly inside. The Old Hunters is already part of the GOTY edition.':
             '결과를 확인하세요: eboot.bin (약 89 MB), sce_module, sce_sys, dvdroot_ps4 (약 29 GB)가 폴더 바로 안에 있어야 합니다. The Old Hunters는 GOTY 에디션에 이미 포함되어 있습니다.',
-        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB).':
-            '크기를 확인하세요: 업데이트의 eboot.bin은 정확히 93,825,704바이트 (89.4 MB)입니다.',
+        'Check the size: eboot.bin of the update is exactly 93,825,704 bytes (89.4 MB), or 93,667,640 bytes as a plain ELF file.':
+            '크기를 확인하세요: 업데이트의 eboot.bin은 정확히 93,825,704바이트 (89.4 MB)이며, 일반 ELF 파일이라면 93,667,640바이트입니다.',
         'Check this installation':
             '이 설치 확인',
         'Checked before the first start, so that it does not fail on something you can fix now. Nothing leaves your PC.':
@@ -16904,8 +16583,6 @@ WORLD = {
             '플레이하는 동안에는 브라우저와 다른 프로그램을 닫으세요.',
         'Co-op pool':
             '플레이어 풀',
-        'Co-op service {0}':
-            '협동 서비스 {0}',
         'Combat':
             '전투',
         'Combinations: hold Shift, Ctrl or Alt while pressing the key or mouse button (up to three inputs, such as Shift + left click). A held combination wins over the bindings on its parts, so left click and Shift + left click can be two actions. ⚠ marks an input another action uses too. A key that is both an action of its own and part of a combination is pressed on the way into it: with Shift on Circle, Shift + left click starts a sprint that ends as a dodge.':
@@ -17144,10 +16821,6 @@ WORLD = {
             '게임 중에 Insert (키보드) 또는 L3 + R3 (컨트롤러)를 누르면 포트 메뉴가 열립니다.',
         'In the game, {} loads the character you played last; {} on the title screen lists all of them.':
             '게임에서 "{}"는 마지막으로 플레이한 캐릭터를 불러오고, 타이틀 화면의 "{}"는 모든 캐릭터를 보여 줍니다.',
-        'In the page that opened ({0}), sign in with Discord and enter this code:':
-            '열린 페이지 ({0})에서 Discord로 로그인하고 이 코드를 입력하세요:',
-        'In the page that opened, sign in with Discord and enter this code:':
-            '열린 페이지에서 Discord로 로그인하고 이 코드를 입력하세요:',
         'Install':
             '설치',
         'Install another version of the port, newer or older (back to {}). Saves, settings and mods are kept.':
@@ -17182,9 +16855,9 @@ WORLD = {
             '게임 폴더에 문제가 없나요? 도움말에서 확인할 수 있습니다.',
         'It broke while unpacking (the log says "prepare failed: out of bounds").':
             '압축 해제 중에 손상되었습니다 (로그에 "prepare failed: out of bounds"가 표시됨).',
-        'It is not the original file (a PS4 SELF file): another tool has converted it, or it is not from '
-        'Bloodborne.':
-            '원본 파일(PS4 SELF 파일)이 아닙니다. 다른 도구로 변환되었거나 Bloodborne의 파일이 아닙니다.',
+        'It is neither the original file (a PS4 SELF file) nor a plain ELF file: it is still encrypted, '
+        'another tool has converted it, or it is not from Bloodborne.':
+            '원본 파일(PS4 SELF 파일)도 일반 ELF 파일도 아닙니다. 아직 암호화되어 있거나, 다른 도구로 변환되었거나, Bloodborne의 파일이 아닙니다.',
         'It may start, but expect low frame rates and problems.':
             '시작은 될 수 있지만 낮은 프레임 속도와 여러 문제를 각오하세요.',
         'Items and menus':
@@ -17325,8 +16998,8 @@ WORLD = {
             '제한 없음  ⚠',
         'No run finished; the report has the logs.':
             '완료된 실행이 없습니다. 보고서에 로그가 있습니다.',
-        "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
-            '이 PC에서 shadPS4, Awaken의 포트, bbhost의 세이브를 찾지 못했습니다. 세이브가 다른 곳 (백업, PS4에서 내보낸 파일)에 있다면 그 폴더를 선택하세요.',
+        "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 export), choose their folder.":
+            '이 PC에서 shadPS4, Awaken의 포트의 세이브를 찾지 못했습니다. 세이브가 다른 곳 (백업, PS4에서 내보낸 파일)에 있다면 그 폴더를 선택하세요.',
         'No setting kept the goal; this one came closest.':
             '목표를 유지한 설정이 없습니다. 이 설정이 가장 근접했습니다.',
         'No trophies yet. They appear here as soon as the game unlocks them.':
@@ -17349,8 +17022,6 @@ WORLD = {
             '로그인 안 됨',
         'Not signed in yet':
             '아직 로그인 안 됨',
-        'Not signed in: use "Sign in with Discord" above.':
-            '로그인 안 됨: 위의 "Discord로 로그인"을 사용하세요.',
         'Not supported':
             '지원되지 않음',
         'Not supported: no Vulkan 1.3 driver for this card.':
@@ -17383,8 +17054,6 @@ WORLD = {
             'OneDrive (바탕 화면과 문서가 동기화되는 경우가 많음)와 Program Files는 포트가 파일을 쓰는 동안 파일을 잠그거나 옮깁니다.',
         'Online (SuperMedo Server)':
             '온라인 (SuperMedo Server)',
-        "Online (The Hunter's Dream)":
-            "온라인 (The Hunter's Dream)",
         'Online is on, but you are not signed in yet: sign in now':
             '온라인이 켜져 있지만 아직 로그인하지 않았습니다: 지금 로그인',
         'Online play':
@@ -17533,8 +17202,8 @@ WORLD = {
             '복원',
         'Right half of the touchpad (debug menu)':
             '터치패드 오른쪽 절반 (디버그 메뉴)',
-        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes.':
-            'eboot.bin을 마우스 오른쪽 버튼으로 클릭 > 속성: 원본 파일은 정확히 93,825,704바이트입니다.',
+        'Right-click eboot.bin > Properties: the clean file is exactly 93,825,704 bytes (93,667,640 if your dump tool wrote it as a plain ELF file).':
+            'eboot.bin을 마우스 오른쪽 버튼으로 클릭 > 속성: 원본 파일은 정확히 93,825,704바이트입니다(덤프 도구가 일반 ELF 파일로 저장했다면 93,667,640바이트).',
         'Route':
             '경로',
         'Run {}: the game is starting.':
@@ -17589,8 +17258,8 @@ WORLD = {
             '화면 가장자리',
         'Search again':
             '다시 검색',
-        "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-            '이 PC에서 shadPS4, Awaken의 포트, bbhost의 세이브를 찾는 중…',
+        "Searching this PC for saves of shadPS4 and Awaken's port…":
+            '이 PC에서 shadPS4, Awaken의 포트의 세이브를 찾는 중…',
         'Search…':
             '검색…',
         'Sensitivity (direct)':
@@ -17623,8 +17292,6 @@ WORLD = {
             '간단히 보기',
         'Show in folder':
             '폴더에서 보기',
-        'Show me on the live map':
-            '실시간 지도에 내 위치 표시',
         'Show the fix?':
             '해결 방법을 볼까요?',
         'Show the log':
@@ -17746,14 +17413,6 @@ WORLD = {
             'DLC 폴더가 없습니다.',
         'The Dream':
             '꿈',
-        "The Hunter's Dream (with bbhost players)":
-            "The Hunter's Dream (bbhost 플레이어와 함께)",
-        "The Hunter's Dream account":
-            "The Hunter's Dream 계정",
-        "The Hunter's Dream: co-op together with bbhost players, after a free sign-in with Discord. shadNet: a shadNet server of your choice and its account.":
-            "The Hunter's Dream: Discord로 무료 로그인한 뒤 bbhost 플레이어와 함께 협동 플레이. shadNet: 원하는 shadNet 서버와 그 계정.",
-        "The Hunter's Dream: {} hunters online right now ({} bbhost · {} shadNet)":
-            "The Hunter's Dream: 지금 {}명의 사냥꾼이 온라인({} bbhost · {} shadNet)",
         'The Load Game menu is empty, a character is missing, or the game says the save is damaged. Before every start the launcher backs up your saves, so you can go back to how they were.':
             '불러오기 메뉴가 비어 있거나, 캐릭터가 없거나, 게임이 세이브가 손상되었다고 합니다. 런처는 시작할 때마다 세이브를 백업하므로 이전 상태로 되돌릴 수 있습니다.',
         'The Old Hunters found ({}).':
@@ -17772,8 +17431,6 @@ WORLD = {
             '검사 중단: {}',
         'The community patches (60 FPS and more, the effect options) exist for 1.09 only; other versions run at 30 FPS.':
             '커뮤니티 패치 (60 FPS 등과 효과 옵션)는 1.09 전용입니다. 다른 버전은 30 FPS로 실행됩니다.',
-        "The connection to The Hunter's Dream is Awaken's port of bbhost's network code; bbhost and The Hunter's Dream are by droogie.":
-            "The Hunter's Dream 연결 기능은 Awaken이 bbhost의 네트워크 코드를 이식한 것입니다. bbhost와 The Hunter's Dream은 droogie가 만들었습니다.",
         'The controller does nothing':
             '컨트롤러가 반응하지 않음',
         'The controller test cannot start: {}':
@@ -17880,8 +17537,8 @@ WORLD = {
             '예상 프레임 속도에 대한 웹사이트의 제안.',
         'There is no eboot.bin in this folder. Choose the folder that has eboot.bin directly inside, not the one above it.':
             '이 폴더에 eboot.bin이 없습니다. 상위 폴더가 아니라 eboot.bin이 바로 안에 있는 폴더를 선택하세요.',
-        'There is no save of this port, shadPS4 or bbhost in that folder (SPRJ0005 with userdata0000 …).':
-            '이 폴더에 이 포트, shadPS4 또는 bbhost의 세이브가 없습니다 (userdata0000 … 이 들어 있는 SPRJ0005).',
+        'There is no save of this port or shadPS4 in that folder (SPRJ0005 with userdata0000 …).':
+            '이 폴더에 이 포트 또는 shadPS4의 세이브가 없습니다 (userdata0000 … 이 들어 있는 SPRJ0005).',
         'There is no save to back up yet.':
             '아직 백업할 세이브가 없습니다.',
         "These are a PS4's own encrypted backups (sdimg_…); they cannot be used. Export the save with Apollo Save Tool on the PS4 instead.":
@@ -17914,8 +17571,6 @@ WORLD = {
             '"모든 드라이브에 대한 페이징 파일 크기 자동 관리"를 체크하세요. 그래도 충돌하면: 체크를 해제하고 여유 공간이 있는 드라이브를 선택한 뒤 "사용자 지정 크기"에 처음 크기 16384, 최대 크기 32768을 입력하고 "설정"을 누르세요.',
         'To play on SuperMedo Server, enter your supermedo.com username and password on the Online co-op page (Sign up there if you have no account).':
             'SuperMedo Server에서 플레이하려면 온라인 플레이 페이지에서 supermedo.com 사용자 이름과 비밀번호를 입력하세요 (계정이 없으면 그곳에서 가입하세요).',
-        "To play online with The Hunter's Dream, sign in with Discord first.":
-            "The Hunter's Dream에서 온라인으로 플레이하려면 먼저 Discord로 로그인하세요.",
         'Transform weapon (L1)':
             '무기 변형 (L1)',
         'Trophies the game unlocks while you play; updated live, kept with your saves.':
@@ -17932,8 +17587,8 @@ WORLD = {
             '제한 없음, 디스플레이 주사율로 상한 (최대 120): 이 PC는 60 FPS 이상이 예상됩니다.',
         'Put the 1.09 update into a new, empty folder again.':
             '1.09 업데이트를 새 빈 폴더에 다시 넣으세요.',
-        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes).':
-            '수정되지 않은 1.09 업데이트의 eboot.bin(정확히 93,825,704바이트)을 사용하세요.',
+        'Use the eboot.bin of an unmodified 1.09 update (exactly 93,825,704 bytes, or 93,667,640 as a plain ELF file).':
+            '수정되지 않은 1.09 업데이트의 eboot.bin(정확히 93,825,704바이트, 일반 ELF 파일이라면 93,667,640바이트)을 사용하세요.',
         "Use the eboot.bin of an unmodified 1.09 update, in a new, empty folder. Don't use a loose eboot.bin "
         'someone shared.':
             '수정되지 않은 1.09 업데이트의 eboot.bin을 새 빈 폴더에서 사용하세요. 누군가 따로 공유한 eboot.bin은 쓰지 마세요.',
@@ -18018,8 +17673,6 @@ WORLD = {
             'Windows는 아직 모르는 프로그램에 대해 이 메시지를 표시합니다.',
         "Windows' title bar instead of the launcher's own":
             '런처 자체 제목 표시줄 대신 Windows 제목 표시줄 사용',
-        "With The Hunter's Dream, together with bbhost players. It needs a free sign-in with Discord, once.":
-            "The Hunter's Dream에서 bbhost 플레이어와 함께. 한 번만 Discord로 무료 로그인하면 됩니다.",
         'With your own settings. A crash, a freeze or memory that keeps growing ends up in the report with the log lines around it.':
             '직접 정한 설정으로 실행합니다. 충돌, 멈춤, 계속 늘어나는 메모리는 그 전후의 로그와 함께 보고서에 기록됩니다.',
         'Wrong graphics card?':
@@ -18055,8 +17708,8 @@ WORLD = {
         'cutscene after Rom) can freeze.\n\nReplace eboot.bin with the one from an unmodified 1.09 update.':
             'eboot.bin이 원본 1.09 파일이 아닙니다 (수정되었거나 다른 버전의 파일). 포트가 패치할 수 없어 게임이 30 FPS로 실행되고, 효과 옵션이 작동하지 않으며, '
             '일부 장면 (롬 이후의 컷신 등)에서 멈출 수 있습니다.\n\neboot.bin을 수정되지 않은 1.09 업데이트의 파일로 바꾸세요.',
-        'Your edition (Game of the Year, CUSA03173) already includes The Old Hunters.':
-            '이 에디션(Game of the Year, CUSA03173)에는 The Old Hunters가 이미 포함되어 있습니다.',
+        'Your edition ({}) already includes The Old Hunters.':
+            '이 에디션({})에는 The Old Hunters가 이미 포함되어 있습니다.',
         'Your game':
             '내 게임',
         'Your game and your PC':
@@ -18077,8 +17730,8 @@ WORLD = {
             '그래픽 카드가 성능의 한계입니다.',
         'Your memory sets the limit.':
             '메모리가 성능의 한계입니다.',
-        'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-            '본인의 Bloodborne 게임 파일(CUSA03173, Game of the Year Edition)과 1.09 업데이트.',
+        'Your own Bloodborne game files (any edition) with the 1.09 update.':
+            '본인의 Bloodborne 게임 파일(모든 에디션)과 1.09 업데이트.',
         'Your previous saves: {}':
             '이전 세이브: {}',
         'Your processor sets the limit.':
@@ -18197,16 +17850,10 @@ WORLD = {
             '중단됨: 사용자 입력',
         'the settings for your PC':
             'PC에 맞는 설정',
-        'thehuntersdream.com/map shows where players are and which bells ring: the game sends your position more often while you play.':
-            'thehuntersdream.com/map에서 플레이어 위치와 울리는 종을 볼 수 있습니다: 플레이 중에는 게임이 위치를 더 자주 보냅니다.',
         'twice, interleaved (more exact)':
             '두 번, 번갈아 (더 정확)',
         'up to 7 runs':
             '최대 7회 실행',
-        '{0}: not reachable ({1})':
-            '{0}: 연결 불가 ({1})',
-        '{0}: reachable':
-            '{0}: 연결 가능',
         '{} GB free on {}':
             '여유 공간 {} GB ({})',
         '{} GB is below the minimum of 16 GB: the game may close right after PLAY (code 3).':
@@ -18233,16 +17880,14 @@ WORLD = {
             '{}분',
         '{} of {} trophies earned':
             '트로피 {}/{}개 획득',
-        '{} online':
-            '{}명 온라인',
         '{} runs':
             '{}회 실행',
         '{} settings differ from the recommendation.':
             '설정 {}개가 권장값과 다릅니다.',
         '{} · version {}':
             '{} · 버전 {}',
-        '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-            '{}: 이 포트는 Game of the Year Edition인 CUSA03173용으로 만들어졌습니다. 다른 에디션은 작동하지 않을 수 있습니다.',
+        '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+            '{}: Bloodborne의 정식 발매판이 아닙니다. 이 포트는 Game of the Year Edition을 포함해 모든 지역의 Bloodborne을 실행합니다.',
         '• FSR 4 files missing: FSR 3.1 is used meanwhile. Click to download (30 MB)':
             '• FSR 4 파일 없음: 그동안 FSR 3.1 사용. 클릭하여 다운로드 (30 MB)',
         '• No saves yet: bring your character from another version, or the game creates them':

@@ -3,6 +3,7 @@
 import bbport_lang
 import bbport_fsr411
 import bbport_fsr412
+import bbport_driver_runtime
 import bbport_lang_motion_cache as motion_cache
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -12,12 +13,13 @@ def query(port, env=None, refresh=False):
     """Return one complete snapshot; provider results never enter the base-probe cache."""
     base = bbport_fsr411.query(port, env, refresh=refresh)
     result = deepcopy(base)
-    result['fsr412_vulkan'] = bbport_fsr412.query_vulkan(port, env=env, refresh=refresh)
-    result['fsr412_dx12'] = bbport_fsr412.query_dx12(port, env=env, refresh=refresh)
+    paths = bbport_driver_runtime.discover()
+    result['fsr412_vulkan'] = bbport_fsr412.query_vulkan(port, paths=paths, env=env, refresh=refresh)
+    result['fsr412_dx12'] = bbport_fsr412.query_dx12(port, paths=paths, env=env, refresh=refresh)
     result['checked_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
     return result
 
-ROUTES = (('fsr412', 'vk', 'FSR 4.1.2 – AMD Vulkan', 'Recommended'),
+ROUTES = (('fsr412', 'vk', 'FSR 4.1.2 – AMD Vulkan', 'Alternative'),
           ('fsr412', 'dx12', 'FSR 4.1.2 – AMD DX12', 'Alternative'),
           ('fsr411', 'dx12', 'FSR 4.1.1 – AMD DX12', 'Compatibility'),
           ('fsr411', 'vk', 'FSR 4.1.1 – Vulkan (fsr4vk)', 'Compatibility'))
@@ -96,68 +98,159 @@ TEXTS = {
         '지원되는 방식을 선택하세요.', 'fsr4vk 다운로드', '다시 확인',
         '닫기', '선택됨', 'FSR 4.1 사용 불가', '버전 / 방식', '지원 상태'),
 }
-# Keep the help beside its method in both frontends. These are recommendations
-# from our tests, separate from each provider's hardware/software availability.
-HINTS = ('Recommended. Best performance in our tests.',
-         'Alternative if AMD Vulkan causes issues.',
-         'Recommended if FSR 4.1.2 is unavailable or causes issues.',
-         'Alternative with lower performance. Use if the AMD methods cause issues.')
+# Shared selection advice, separate from hardware/software availability.
+HINTS = (
+    'Experimental Vulkan path. If issues occur, use AMD DX12.',
+    'Alternative if AMD Vulkan causes issues.',
+    'Recommended if FSR 4.1.2 is unavailable or causes issues.',
+    'Alternative if the AMD methods cause issues. May be slower.',
+)
 COMPACT_KEYS = ('Support', 'Details', *HINTS)
 COMPACT_TEXTS = {
- 'en': COMPACT_KEYS,
- 'de': ('Unterstützung', 'Details', 'Empfohlen. Beste Performance im Test.',
+    'en': COMPACT_KEYS,
+    'de': (
+        'Unterstützung',
+        'Details',
+        'Experimenteller Vulkan-Pfad. Bei Problemen AMD DX12 wählen.',
         'Alternative bei Problemen mit AMD Vulkan.',
         'Empfohlen, wenn FSR 4.1.2 nicht verfügbar ist oder Probleme verursacht.',
-        'Alternative mit geringerer Performance. Wenn die AMD-Methoden Probleme verursachen.'),
- 'ru': ('Поддержка', 'Подробнее', 'Рекомендуется. Лучшая производительность в наших тестах.',
+        'Alternative bei Problemen mit den AMD-Methoden. Kann langsamer sein.',
+    ),
+    'ru': (
+        'Поддержка',
+        'Подробнее',
+        'Экспериментальный путь Vulkan. При проблемах выберите AMD DX12.',
         'Альтернатива при проблемах с AMD Vulkan.',
         'Рекомендуется, если FSR 4.1.2 недоступна или вызывает проблемы.',
-        'Альтернатива с меньшей производительностью. При проблемах с методами AMD.'),
- 'ar': ('الدعم', 'التفاصيل', 'موصى به. أفضل أداء في اختباراتنا.',
+        'Альтернатива при проблемах с методами AMD. Может работать медленнее.',
+    ),
+    'ar': (
+        'الدعم',
+        'التفاصيل',
+        'مسار Vulkan تجريبي. عند حدوث مشاكل، اختر AMD DX12.',
         'بديل عند حدوث مشاكل مع AMD Vulkan.',
         'موصى به إذا كان FSR 4.1.2 غير متاح أو يسبب مشاكل.',
-        'بديل بأداء أقل. عند حدوث مشاكل مع طرق AMD.'),
- 'es': ('Compatibilidad', 'Detalles', 'Recomendado. Mejor rendimiento en nuestras pruebas.',
+        'بديل عند حدوث مشاكل مع طرق AMD. قد يكون أبطأ.',
+    ),
+    'es': (
+        'Compatibilidad',
+        'Detalles',
+        'Ruta Vulkan experimental. Si hay problemas, usa AMD DX12.',
         'Alternativa si AMD Vulkan causa problemas.',
         'Recomendado si FSR 4.1.2 no está disponible o causa problemas.',
-        'Alternativa con menor rendimiento. Si los métodos de AMD causan problemas.'),
- 'pt': ('Suporte', 'Detalhes', 'Recomendado. Melhor desempenho nos nossos testes.',
+        'Alternativa si los métodos de AMD causan problemas. Puede ser más lenta.',
+    ),
+    'pt': (
+        'Suporte',
+        'Detalhes',
+        'Caminho Vulkan experimental. Se houver problemas, use AMD DX12.',
         'Alternativa se o AMD Vulkan causar problemas.',
         'Recomendado se o FSR 4.1.2 estiver indisponível ou causar problemas.',
-        'Alternativa com menor desempenho. Se os métodos da AMD causarem problemas.'),
- 'fr': ('Compatibilité', 'Détails', 'Recommandé. Meilleures performances lors de nos tests.',
+        'Alternativa se os métodos da AMD causarem problemas. Pode ser mais lenta.',
+    ),
+    'fr': (
+        'Compatibilité',
+        'Détails',
+        'Voie Vulkan expérimentale. En cas de problème, choisissez AMD DX12.',
         'Alternative si AMD Vulkan pose problème.',
         'Recommandé si FSR 4.1.2 est indisponible ou pose problème.',
-        'Alternative moins performante. Si les méthodes AMD posent problème.'),
- 'it': ('Supporto', 'Dettagli', 'Consigliato. Prestazioni migliori nei nostri test.',
+        'Alternative si les méthodes AMD posent problème. Peut être plus lente.',
+    ),
+    'it': (
+        'Supporto',
+        'Dettagli',
+        'Percorso Vulkan sperimentale. In caso di problemi, usa AMD DX12.',
         'Alternativa in caso di problemi con AMD Vulkan.',
         'Consigliato se FSR 4.1.2 non è disponibile o causa problemi.',
-        'Alternativa con prestazioni inferiori. In caso di problemi con i metodi AMD.'),
- 'pl': ('Obsługa', 'Szczegóły', 'Zalecane. Najlepsza wydajność w naszych testach.',
+        'Alternativa in caso di problemi con i metodi AMD. Può essere più lenta.',
+    ),
+    'pl': (
+        'Obsługa',
+        'Szczegóły',
+        'Eksperymentalna ścieżka Vulkan. W razie problemów wybierz AMD DX12.',
         'Alternatywa w razie problemów z AMD Vulkan.',
         'Zalecane, gdy FSR 4.1.2 jest niedostępne lub powoduje problemy.',
-        'Alternatywa o niższej wydajności. W razie problemów z metodami AMD.'),
- 'tr': ('Destek', 'Ayrıntılar', 'Önerilen. Testlerimizde en iyi performans.',
+        'Alternatywa w razie problemów z metodami AMD. Może być wolniejsza.',
+    ),
+    'tr': (
+        'Destek',
+        'Ayrıntılar',
+        'Deneysel Vulkan yolu. Sorun yaşarsanız AMD DX12 seçin.',
         'AMD Vulkan sorun çıkarırsa alternatif.',
         'FSR 4.1.2 kullanılamıyorsa veya sorun çıkarırsa önerilir.',
-        'Daha düşük performanslı alternatif. AMD yöntemleri sorun çıkarırsa kullanın.'),
- 'zh': ('支持状态', '详情', '推荐。在我们的测试中性能最佳。',
+        'AMD yöntemleri sorun çıkarırsa alternatif. Daha yavaş olabilir.',
+    ),
+    'zh': (
+        '支持状态',
+        '详情',
+        '实验性 Vulkan 方式。如有问题，请选择 AMD DX12。',
         'AMD Vulkan 出现问题时的备选方式。',
         'FSR 4.1.2 不可用或出现问题时推荐使用。',
-        '性能较低的备选方式。AMD 方式出现问题时使用。'),
- 'ja': ('対応状況', '詳細', '推奨。テストで最も高い性能。',
+        'AMD 方式出现问题时的备选方式。性能可能较低。',
+    ),
+    'ja': (
+        '対応状況',
+        '詳細',
+        '実験的な Vulkan 方式。問題がある場合は AMD DX12 を選択してください。',
         'AMD Vulkan に問題がある場合の代替。',
         'FSR 4.1.2 が利用できない、または問題がある場合に推奨。',
-        '性能が低い代替方式。AMD の方式に問題がある場合に使用。'),
- 'ko': ('지원 상태', '세부 정보', '권장. 테스트에서 가장 좋은 성능.',
+        'AMD の方式に問題がある場合の代替。性能が低下する場合があります。',
+    ),
+    'ko': (
+        '지원 상태',
+        '세부 정보',
+        '실험적 Vulkan 방식. 문제가 발생하면 AMD DX12를 선택하세요.',
         'AMD Vulkan에 문제가 있을 때 대체 방식.',
         'FSR 4.1.2를 사용할 수 없거나 문제가 있을 때 권장.',
-        '성능이 낮은 대체 방식. AMD 방식에 문제가 있을 때 사용하세요.'),
+        'AMD 방식에 문제가 있을 때 대체 방식. 성능이 낮을 수 있습니다.',
+    ),
 }
 KEYS += COMPACT_KEYS
 TEXTS = {language: texts + COMPACT_TEXTS[language] for language, texts in TEXTS.items()}
 KEYS += motion_cache.KEYS
 TEXTS = {language: texts + motion_cache.TEXTS[language] for language, texts in TEXTS.items()}
+FALLBACK_KEYS = ('FSR 3.1 active; saved selection retained.', 'Retry')
+FALLBACK_TEXTS = {
+    'en': FALLBACK_KEYS,
+    'de': ('FSR 3.1 aktiv; Auswahl bleibt gespeichert.', 'Erneut versuchen'),
+    'ru': ('FSR 3.1 активен; выбор сохранён.', 'Повторить'),
+    'ar': ('FSR 3.1 نشط؛ الاختيار المحفوظ لم يتغير.', 'إعادة المحاولة'),
+    'es': ('FSR 3.1 activo; se conserva la selección.', 'Reintentar'),
+    'pt': ('FSR 3.1 ativo; seleção mantida.', 'Tentar novamente'),
+    'fr': ('FSR 3.1 actif ; sélection conservée.', 'Réessayer'),
+    'it': ('FSR 3.1 attivo; selezione conservata.', 'Riprova'),
+    'pl': ('FSR 3.1 aktywny; wybór pozostaje zapisany.', 'Spróbuj ponownie'),
+    'tr': ('FSR 3.1 etkin; kayıtlı seçim korundu.', 'Yeniden dene'),
+    'zh': ('FSR 3.1 已启用；保留已保存的选择。', '重试'),
+    'ja': ('FSR 3.1 が動作中。保存済みの選択は維持されます。', '再試行'),
+    'ko': ('FSR 3.1 사용 중. 저장된 선택은 유지됩니다.', '다시 시도'),
+}
+KEYS += FALLBACK_KEYS
+TEXTS = {language: texts + FALLBACK_TEXTS[language] for language, texts in TEXTS.items()}
+RESTART = 9
+STATUS_KEYS += ('Restart required',)
+COLORS += ('#d9a441',)
+RESTART_TEXTS = {
+    'en': 'Restart required', 'de': 'Neustart erforderlich',
+    'ru': 'Требуется перезапуск', 'ar': 'إعادة التشغيل مطلوبة',
+    'es': 'Reinicio necesario', 'pt': 'Reinício necessário',
+    'fr': 'Redémarrage requis', 'it': 'Riavvio necessario',
+    'pl': 'Wymagane ponowne uruchomienie', 'tr': 'Yeniden başlatma gerekli',
+    'zh': '需要重启', 'ja': '再起動が必要', 'ko': '재시작 필요',
+}
+KEYS += ('Restart required',)
+TEXTS = {language: texts + (RESTART_TEXTS[language],) for language, texts in TEXTS.items()}
+AUTO_EXPOSURE_KEY = 'Always enabled for this method.'
+AUTO_EXPOSURE_TEXTS = {
+    'en': AUTO_EXPOSURE_KEY, 'de': 'Für diese Methode immer aktiv.',
+    'ru': 'Всегда включено для этого метода.', 'ar': 'مفعّل دائمًا لهذه الطريقة.',
+    'es': 'Siempre activada con este método.', 'pt': 'Sempre ativa neste método.',
+    'fr': 'Toujours activée pour cette méthode.', 'it': 'Sempre attiva per questo metodo.',
+    'pl': 'Zawsze włączona dla tej metody.', 'tr': 'Bu yöntemde her zaman etkin.',
+    'zh': '此方式始终启用。', 'ja': 'この方式では常に有効。', 'ko': '이 방식에서는 항상 활성화됩니다.',
+}
+KEYS += (AUTO_EXPOSURE_KEY,)
+TEXTS = {language: texts + (AUTO_EXPOSURE_TEXTS[language],) for language, texts in TEXTS.items()}
 for language, texts in TEXTS.items():
     assert len(texts) == len(KEYS), language
     # Register without constructing a cached language table before the launcher's
@@ -175,7 +268,7 @@ def code(status):
         return GPU if 'AMD GPU required' in detail or 'unsupported by selected GPU' in detail else CAPABILITY
     return {'driver': DRIVER, 'provider': CAPABILITY, 'files': FILES, 'download': FILES,
             'interop': INTEROP, 'adapter': INTEROP, 'disabled': DISABLED,
-            'checking': CHECKING}.get(reason, CHECK)
+            'checking': CHECKING, 'restart': RESTART}.get(reason, CHECK)
 
 
 def route_index(upscaler, backend):

@@ -20,8 +20,8 @@ import bbport_search as search  # noqa: E402
 QUESTIONS = [
     ('where is clear shader cache', {'button:shader_cache'}), ('how do i clear shader cache', {'button:shader_cache'}),
     ('how to update', {'button:updates'}), ('update launcher', {'button:updates'}),
-    ('sign in', {'button:signin_supermedo', 'button:signin_thd'}),
-    ('login', {'button:signin_supermedo', 'button:signin_thd'}), ('create account', {'button:create_account'}),
+    ('sign in', {'button:signin_supermedo'}),
+    ('login', {'button:signin_supermedo'}), ('create account', {'button:create_account'}),
     ('test connection', {'button:test_connection'}), ('seamless', {'online', 'online_pool'}),
     ('co-op password', {'online', 'online_pool'}), ('fps limit 30', {'frame_cap', 'fps_mode'}),
     ('restore save', {'button:restore', 'button:backup'}), ('where are my saves', {'user_dir', 'page:saves'}),
@@ -35,12 +35,13 @@ MORE_QUESTIONS = [
     # on the German pages "Spiel" is in many hints: there the stutter entries with both words (the video memory
     # topic, "Neue Shader beim Spielen") come before the shader cache topic
     ('ruckeln im spiel', {'topic:shader_cache', 'topic:vram', 'async_pipelines'}),
-    ('wie melde ich mich an', {'button:signin_supermedo', 'button:signin_thd'}),
-    ('wie melde ich mich ab', {'button:signout'}), ('sign-in', {'button:signin_supermedo', 'button:signin_thd'}),
+    ('wie melde ich mich an', {'button:signin_supermedo'}),
+    ('wie melde ich mich ab', {'button:signout'}), ('sign-in', {'button:signin_supermedo'}),
     ('wo sind meine spielstände', {'user_dir', 'page:saves'}),
     ('wo sind die spielstände', {'user_dir', 'page:saves'}),
     ('why is my game stuttering', {'topic:shader_cache', 'frames_ahead'}),
-    ('how do i play with friends', {'online', 'online_pool', 'page:online'}),
+    ('how do i play with friends', {'online', 'online_pool', 'page:online', 'topic:play_together'}),
+    ('wie spiele ich mit freunden', {'topic:play_together', 'party_key', 'page:online'}),
     ('how do i add mods', {'mods_enabled', 'page:mods'}), ('install mods', {'page:mods'}),
     ('how to install', {'button:site'}),
 ]
@@ -50,10 +51,9 @@ SOURCES = ('bbport_launcher_win.py', 'bbport_setup.py', 'bbport_help.py', 'bbpor
 PAGE_OF = {'build': 'side', 'build_play': 'play', 'build_mouse_look': 'controls',
            'build_controller_bindings': 'controls', 'readouts_section': 'graphics', 'motion_cache_check': 'graphics',
            'settings_button': 'graphics', 'appearance_check': 'language'}
-# What the pages hide at their defaults (SuperMedo Server, FSR 3.1): The Hunter's Dream's rows and fsr4vk with a
-# note, an own server's rows (only when Seamless co-op starts the launcher) not at all.
-ONLY = {'thd_online_id': 'online_pool', 'bridge_live_map': 'online_pool', 'button:signin_thd': 'online_pool',
-        'button:fsr4vk': 'upscaler'}
+# What the pages hide at their defaults (SuperMedo Server, FSR 3.1): fsr4vk with a note, an own server's rows
+# (only when Seamless co-op starts the launcher) not at all.
+ONLY = {'button:fsr4vk': 'upscaler'}
 HIDDEN = {'online_npid', 'online_password', 'online_community', 'online_server', 'online_webapi'}
 
 
@@ -187,7 +187,6 @@ class QuestionTests(unittest.TestCase):
 
     def test_what_the_page_shows_comes_before_another_choice(self):
         self.assertEqual(self.found('sign in', 1), ['button:signin_supermedo'])
-        self.assertIn('button:signin_thd', self.found('sign in hunters dream', 1))
         self.assertNotIn('online_password', self.found('password', 7))  # an own server's: not offered
 
     def test_the_words_moved_to_their_pages(self):

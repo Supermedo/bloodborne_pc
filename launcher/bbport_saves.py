@@ -9,7 +9,6 @@ folder and the metadata beside it differ (checked against their source, 2026-10)
   this port, Awaken's port   <user>/savedata/1/<save title>/SPRJ0005 + SPRJ0005.sce_sys/param.bin
   shadPS4 0.16 and later     %APPDATA%/shadPS4/home/<1000..>/savedata/<save title>/SPRJ0005/sce_sys/param.sfo
   shadPS4 0.3 to 0.15        %APPDATA%/shadPS4/savedata/1/<title>/SPRJ0005 (or a portable user/ folder)
-  bbhost                     <data>/saves/SPRJ0005 (sce_param.bin inside), data in %LOCALAPPDATA%/bbhost
   Apollo Save Tool (PS4)     PS4/APOLLO/<user>_CUSA00207_SPRJ0005 (sce_sys/param.sfo)
 
 This port reads one folder only: <saves folder>/savedata/1/<the dump's INSTALL_DIR_SAVEDATA or
@@ -44,11 +43,30 @@ SKIP = {'dvdroot_ps4', 'sce_module', 'cache', 'shader', 'shader_cache', 'fsr4_sh
         'mods', 'patches', 'licenses', 'tools', 'scripts', 'out', 'node_modules', '.git', 'windows', 'program files',
         # a benchmark's own character (an old build's benchmark/ folder, the game tests' scenarios in
         # assets, recorded routes): not a player's save
-        'benchmark', 'recordings', 'assets'}
+        'benchmark', 'recordings', 'assets',
+        # Seamless co-op's own characters (run.py COOP_SAVES): BBSC's items in them, which the game without it
+        # cannot name; never offered to the normal saves
+        'seamless-coop'}
+# run.py COOP_SAVES: Seamless co-op's own user folder inside the saves folder.
+COOP_SAVES = 'seamless-coop'
 # The save the route benchmark of the 1.9.3 test builds left in place of the player's, put aside when the
 # player's came back (bbport_launcher_win.restore_benchmark_backup): savedata.benchmark, or with the time after a
 # space when that is taken. Kept but never offered as a save.
 BENCHMARK_SAVE = 'savedata.benchmark'
+
+
+LANGUAGE = ''  # the launcher's language (Launcher.__init__), for the dates it shows
+
+
+def date_format(clock=True):
+    """The strftime format of a date the player reads, in a dialog or on a page. Never for a file name or a text
+    that is read back: those keep %Y-%m-%d."""
+    day = '%Y. %m. %d.' if LANGUAGE == 'ko' else '%d.%m.%Y'
+    return f'{day} %H:%M' if clock else day
+
+
+def date_text(moment, clock=True):
+    return moment.strftime(date_format(clock))
 
 
 def benchmark_save(name):
@@ -83,7 +101,7 @@ class SaveSet:
         self.source, self.folder = source, Path(folder)
         self.files = sorted(p for p in self.folder.iterdir() if p.is_file() and SAVE_FILES.match(p.name))
         self.modified = max((p.stat().st_mtime for p in self.files), default=0)
-        self.slots = [name for name in SLOTS if used(self.folder / name)]
+        self.slots = slots_in_use(self.folder)
         self.names = [n for n in (character_name(self.folder / slot) for slot in self.slots) if n]
 
     @property
@@ -93,7 +111,7 @@ class SaveSet:
         return PROFILE in names and any(slot in names for slot in SLOTS)
 
     def when(self):
-        return datetime.datetime.fromtimestamp(self.modified).strftime('%d.%m.%Y %H:%M') if self.modified else '?'
+        return date_text(datetime.datetime.fromtimestamp(self.modified)) if self.modified else '?'
 
 
 def used(path):
@@ -103,6 +121,33 @@ def used(path):
             return any(stream.read(4096))
     except OSError:
         return False
+
+
+# The profile's byte per slot just before the Load Game blocks (0x1096): 1 while the game lists that
+# character. Deleting one in the game sets its byte to 0 and leaves its slot file as it was (checked in
+# the game, 2026-10-29), so a used slot file alone is no character.
+PROFILE_LISTED = 0x108c
+
+
+def listed_slots(profile):
+    """The slots the profile (its first bytes are enough) marks as the game's characters; None when it
+    cannot tell: too short, or not 0 or 1 there (another layout)."""
+    flags = bytes(profile[PROFILE_LISTED:PROFILE_LISTED + len(SLOTS)])
+    if len(flags) < len(SLOTS) or any(flag > 1 for flag in flags):
+        return None
+    return {slot for slot, flag in zip(SLOTS, flags) if flag}
+
+
+def slots_in_use(folder):
+    """The slots of a save folder with a character the game lists: a used slot file, and not deleted in
+    the game when the profile can tell."""
+    folder = Path(folder)
+    try:
+        with open(folder / PROFILE, 'rb') as stream:
+            listed = listed_slots(stream.read(PROFILE_LISTED + len(SLOTS)))
+    except OSError:
+        listed = None
+    return [slot for slot in SLOTS if used(folder / slot) and (listed is None or slot in listed)]
 
 
 # A character's name in its slot: UTF-16 after eight zero bytes, ending in a zero character.
@@ -165,8 +210,6 @@ def _toml_value(path, section, key):
 def label_for(folder):
     """Which version a save folder belongs to, from where it is."""
     parts = [p.lower() for p in Path(folder).parts]
-    if 'saves' in parts and parts[-1] == SAVE_DIR.lower():
-        return 'bbhost'
     if 'apollo' in parts:
         return 'PS4 (Apollo Save Tool)'
     if 'home' in parts and 'savedata' in parts:
@@ -199,7 +242,7 @@ def label_for(folder):
 def sources(port_dir, game_dir=''):
     """Folder globs where other versions keep Bloodborne saves on this PC (see the module text)."""
     port_dir = Path(port_dir)
-    appdata, local = os.environ.get('APPDATA', ''), os.environ.get('LOCALAPPDATA', '')
+    appdata = os.environ.get('APPDATA', '')
     globs = []
     if appdata:
         shad = Path(appdata) / 'shadPS4'
@@ -215,13 +258,6 @@ def sources(port_dir, game_dir=''):
         if other:
             globs += [Path(other) / 'user' / 'savedata' / '1' / '*' / SAVE_DIR,
                       Path(other) / 'profiles' / '*' / 'savedata' / '1' / '*' / SAVE_DIR]
-        data = _toml_value(Path(appdata) / 'bbhost' / 'bbhost.toml', 'paths', 'data')
-        if data:
-            globs.append(Path(data) / 'saves' / SAVE_DIR)
-    if local:
-        globs.append(Path(local) / 'bbhost' / 'data' / 'saves' / SAVE_DIR)
-    if game_dir:
-        globs.append(Path(game_dir) / 'data' / 'saves' / SAVE_DIR)  # bbhost beside the dump
     return [str(g) for g in globs]
 
 
@@ -251,8 +287,18 @@ def walk(roots, depth=9, limit=30000):
     return found
 
 
-def scan(port_dir, game_dir='', exclude=()):
-    """[SaveSet] of every complete save on this PC that is not this port's own, newest first."""
+def from_seamless(folder):
+    """A save of Seamless co-op's own: its characters (run.py COOP_SAVES) or a copy BBSC made in bbsc/save-backups
+    before it changed a character. BBSC's items are in them, which the game without it cannot name ("?GoodsName?"),
+    and the bells are gone: never for the normal saves."""
+    parts = [part.lower() for part in Path(folder).parts]
+    return COOP_SAVES in parts or any(a == 'bbsc' and b == 'save-backups' for a, b in zip(parts, parts[1:]))
+
+
+def scan(port_dir, game_dir='', exclude=(), extra=(), seamless=False):
+    """[SaveSet] of every complete save on this PC that is not this port's own, newest first, and the
+    (label, folder) pairs in `extra` (Seamless co-op's: the normal characters). `seamless`: for Seamless co-op's
+    characters; else Seamless co-op's own saves and copies are left out (from_seamless)."""
     seen = set()
     for path in exclude:
         try:
@@ -261,6 +307,10 @@ def scan(port_dir, game_dir='', exclude=()):
             pass
     folders = [Path(name) for pattern in sources(port_dir, game_dir) for name in glob.glob(pattern)]
     folders += walk([Path(port_dir).parent] + ([Path(game_dir).parent] if game_dir else []))
+    labels = {}
+    for label, folder in extra:
+        folders.insert(0, Path(folder))
+        labels[Path(folder)] = label
     sets = []
     for folder in folders:
         try:
@@ -269,14 +319,16 @@ def scan(port_dir, game_dir='', exclude=()):
             continue
         if key in seen or not folder.is_dir():
             continue
+        if not seamless and from_seamless(folder):
+            continue  # for the normal saves: Seamless co-op's characters and copies are not offered
         seen.add(key)
         try:
-            save = SaveSet(label_for(folder), folder)
+            save = SaveSet(labels.get(folder) or label_for(folder), folder)
         except OSError:
             continue
         if save.complete:
             sets.append(save)
-    return sorted(sets, key=lambda s: -s.modified)
+    return sorted(sets, key=lambda s: (s.folder not in labels, -s.modified))
 
 
 def find_in(root, depth=6):
@@ -381,6 +433,64 @@ def backup_dir(user_dir):
     return Path(user_dir) / BACKUP_DIR
 
 
+# R86: the saves and their backups live in the port folder, so a port extracted into a new folder (or a folder
+# deleted for a reinstall) started without them. Every backup is also kept in OUTSIDE (%APPDATA%\bbport-launcher\
+# save_backups, beside the launcher's settings), under the same file name, and backups() lists those with the port
+# folder's own: the new folder restores from them. A backup written, renamed or removed in the port folder is
+# written, renamed or removed there too. The launcher and run.py set OUTSIDE (outside_dir()); None (tests) keeps
+# everything in the port folder.
+OUTSIDE = None
+
+
+def outside_dir():
+    appdata = os.environ.get('APPDATA')
+    return Path(appdata) / 'bbport-launcher' / BACKUP_DIR if appdata else None
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def outside_copy(path):
+    """Where the copy of a port folder's backup goes outside it; None when there is none (OUTSIDE unset, or the
+    backup is itself one of those copies)."""
+    if OUTSIDE is None or _same(Path(path).parent, OUTSIDE):
+        return None
+    return Path(OUTSIDE) / Path(path).name
+
+
+def keep_outside(path):
+    """The backup copied outside the port folder; a failure (a full or locked drive) costs only the copy."""
+    copy = outside_copy(path)
+    if copy:
+        try:
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, copy)
+        except OSError:
+            pass
+
+
+def drop_outside(path):
+    """The copy outside the port folder of a backup removed from it."""
+    copy = outside_copy(path)
+    if copy:
+        try:
+            copy.unlink()
+        except OSError:
+            pass
+
+
+def copy_outside(user_dir):
+    """The port folder's backups without a copy outside it yet (those from before R86) copied there."""
+    folder = backup_dir(user_dir)
+    if OUTSIDE is None or not folder.is_dir():
+        return
+    for path in folder.glob('*.zip'):
+        copy = outside_copy(path)
+        if copy and not copy.exists():
+            keep_outside(path)
+
+
 def backup_file_name(created, reason, label='', detail='', names=()):
     """'2026-10-20 15.32 - Before playing - Nick, Maria.zip', safe for Windows, at most 120 characters."""
     words = label or WORDS.get(reason, REASONS.get(reason, reason))
@@ -415,6 +525,7 @@ def write_backup(target, files, meta):
     finally:
         if staging.exists():
             staging.unlink()
+    keep_outside(target)
     return target
 
 
@@ -502,8 +613,9 @@ class Backup:
                 if BACKUP_META in zipped.namelist():
                     meta = json.loads(zipped.read(BACKUP_META).decode('utf-8'))
                 if not meta.get('characters'):
+                    listed = listed_slots(zipped.read(files['save'][PROFILE])) if PROFILE in files['save'] else None
                     for slot in SLOTS:
-                        if slot in files['save']:
+                        if slot in files['save'] and (listed is None or slot in listed):
                             with zipped.open(files['save'][slot]) as stream:
                                 data = stream.read(0x20000)
                             name = name_in(data) if any(data[:4096]) else ''
@@ -527,7 +639,7 @@ class Backup:
 
 def characters(folder):
     """{slot: Character} of a save folder's readable characters."""
-    found = {slot: character.read_file(Path(folder) / slot) for slot in SLOTS if used(Path(folder) / slot)}
+    found = {slot: character.read_file(Path(folder) / slot) for slot in slots_in_use(folder)}
     return {slot: info for slot, info in found.items() if info}
 
 
@@ -542,8 +654,9 @@ def backup_characters(item):
         try:
             members = archive_files(item.path)['save']
             with zipfile.ZipFile(item.path) as zipped:
+                listed = listed_slots(zipped.read(members[PROFILE])) if PROFILE in members else None
                 for slot in SLOTS:
-                    if slot in members:
+                    if slot in members and (listed is None or slot in listed):
                         info = character.read(zipped.read(members[slot]))
                         if info:
                             found[slot] = info
@@ -554,10 +667,14 @@ def backup_characters(item):
 
 
 def backups(user_dir):
-    """The backups in save_backups, newest first."""
+    """The backups in save_backups and those kept outside the port folder (OUTSIDE) that it does not have,
+    newest first."""
     folder = backup_dir(user_dir)
-    found = [Backup(p) for p in folder.glob('*.zip')] if folder.is_dir() else []
-    return sorted(found, key=lambda b: b.created, reverse=True)
+    paths = list(folder.glob('*.zip')) if folder.is_dir() else []
+    if OUTSIDE is not None and Path(OUTSIDE).is_dir() and not _same(OUTSIDE, folder):
+        here = {p.name for p in paths}
+        paths += [p for p in Path(OUTSIDE).glob('*.zip') if p.name not in here]
+    return sorted((Backup(p) for p in paths), key=lambda b: b.created, reverse=True)
 
 
 def rename_backup(path, label):
@@ -575,6 +692,7 @@ def rename_backup(path, label):
     write_backup(target, files, meta)
     if target != item.path:
         item.path.unlink()
+        drop_outside(item.path)
     return target
 
 
@@ -593,24 +711,35 @@ def auto_backup(user_dir, game_dir='', keep=AUTO_KEEP, notes=None):
     ones beyond `keep` go. Returns the new backup or None. A backup dated more than a day ahead was made
     while the PC's clock was wrong: it is not taken for the newest (it stopped every automatic backup
     until its date), and `notes` gets a line for the log."""
+    copy_outside(user_dir)
     changed = latest_change(user_dir, game_dir)
     if not changed:
         return None
     ahead = time.time() + 86400
-    existing = [b for b in backups(user_dir) if b.created.timestamp() <= ahead]
-    future = len(backups(user_dir)) - len(existing)
+    every = backups(user_dir)
+    existing = [b for b in every if b.created.timestamp() <= ahead]
+    future = len(every) - len(existing)
     if future and notes is not None:
         notes.append(f'Saves: {future} backup(s) dated in the future (the PC\'s clock was wrong when they were '
                      'made) are not taken for the newest')
-    if existing and existing[0].created.timestamp() >= int(changed):
+    # "Nothing played since" only by a readable copy of this save (not one added from a file, dated now but holding
+    # another save; not a broken zip): such a backup cancelled the next automatic one, and the session played before
+    # it was in no backup (2026-11-02).
+    copies = [b for b in existing if b.ok and b.reason not in ('file', 'old')]
+    if copies and copies[0].created.timestamp() >= int(changed):
         return None  # nothing played since
     made = backup(user_dir, game_dir, reason='auto')
-    automatic = [b for b in backups(user_dir) if b.reason == 'auto']
-    for old in automatic[keep:]:
+    # Only unnamed automatic ones go, the oldest first: one the player named is theirs (it went after ten starts).
+    # Those dated in the future count as the oldest.
+    automatic = [b for b in backups(user_dir) if b.reason == 'auto' and not b.label]
+    dated = [b for b in automatic if b.created.timestamp() <= ahead] + \
+            [b for b in automatic if b.created.timestamp() > ahead]
+    for old in dated[keep:]:
         try:
             old.path.unlink()
         except OSError:
             pass
+        drop_outside(old.path)
     return made
 
 
@@ -626,8 +755,10 @@ def add_backup_file(path, user_dir):
         packed += [(f'savedata/1/{title}/{SAVE_DIR}.sce_sys/{name}', zipped.read(member)) for name, member in
                    sorted(files['meta'].items())]
     names = []
+    listed = listed_slots(next((data for member, data in packed if member.endswith(f'{SAVE_DIR}/{PROFILE}')), b''))
     for member, data in packed:
-        if member.rsplit('/', 1)[-1] in SLOTS and any(data[:4096]):
+        slot = member.rsplit('/', 1)[-1]
+        if slot in SLOTS and any(data[:4096]) and (listed is None or slot in listed):
             name = name_in(data[:0x20000])
             names += [name] if name else []
     created = datetime.datetime.now()
@@ -805,7 +936,7 @@ def import_set(save, user_dir, game_dir=''):
     source_meta = [save.folder / 'sce_sys', save.folder.with_name(save.folder.name + '.sce_sys'), save.folder]
     if not (meta / 'param.bin').is_file():
         for folder in source_meta:
-            if (folder / 'param.bin').is_file() or (folder / 'sce_param.bin').is_file():  # bbport, bbhost
+            if (folder / 'param.bin').is_file() or (folder / 'sce_param.bin').is_file():  # bbport
                 shutil.copyfile(folder / ('param.bin' if (folder / 'param.bin').is_file() else 'sce_param.bin'),
                                 meta / 'param.bin')
                 break
@@ -833,7 +964,7 @@ def saves_root(folder):
 def bring_trophies(save, user_dir):
     """The achievements of the saves folder `save` lies in (another installation's trophies.log) added to this
     one's, so a character brought over keeps them; how many were new here. Saves from elsewhere (shadPS4,
-    bbhost, a backup) have none."""
+    a backup) have none."""
     root = saves_root(save.folder)
     if root is None:
         return 0

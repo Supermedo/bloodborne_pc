@@ -413,9 +413,18 @@ int32_t FrameGenEvaluate(VkCommandBuffer command, const BbDlssgEvaluate* evaluat
         Identity(options.prevClipToClip);
     }
     Inverse(options.clipToCameraView, options.cameraViewToClip);
-    options.jitterOffset[0] = evaluate->jitter_x;
-    options.jitterOffset[1] = evaluate->jitter_y;
-    options.mvecScale[0] = options.mvecScale[1] = 1.0f;
+    // bbport: units. nvsdk_ngx_params_dlssg.h asks for the jitter in clip space and for scales
+    // that bring the vectors into [-1, 1] of the screen; this bridge gets both in render
+    // pixels (bbport_dlss_bridge.h). The renderer shifts each vertex by jitter / (render size
+    // / 2) in Vulkan's y-down NDC (SetProjectionJitter), so in the y-up clip space of the
+    // matrices above the shift is 2 * jitter / size with y negated. Fed as pixels, half a
+    // pixel of jitter read as a quarter of the screen and a vector of one pixel as a whole one.
+    const float render_w = float(state.fg_desc.render_width);
+    const float render_h = float(state.fg_desc.render_height);
+    options.jitterOffset[0] = 2.0f * evaluate->jitter_x / render_w;
+    options.jitterOffset[1] = -2.0f * evaluate->jitter_y / render_h;
+    options.mvecScale[0] = 1.0f / render_w;
+    options.mvecScale[1] = 1.0f / render_h;
     options.cameraUp[1] = 1.0f;
     options.cameraRight[0] = 1.0f;
     options.cameraFwd[2] = 1.0f;

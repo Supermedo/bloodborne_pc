@@ -30,7 +30,7 @@ if _prepare_spec is None or _prepare_spec.loader is None:
 _prepare = importlib.util.module_from_spec(_prepare_spec)
 sys.modules['prepare'] = _prepare
 _prepare_spec.loader.exec_module(_prepare)
-parse_self, span, unpack = _prepare.parse_self, _prepare.span, _prepare.unpack
+image_sha256, parse_self, span, unpack = _prepare.image_sha256, _prepare.parse_self, _prepare.span, _prepare.unpack
 from link_libc import encode_id
 from cpu_compat import atomic_output, patch_image, patch_libc
 
@@ -91,7 +91,8 @@ def module(path):
             relocations.append((target, info & 0xffffffff, info >> 32, addend))
     return dict(elf=elf, header=header, ph=ph, tags=tags, symbols=symbols, relocs=relocations,
                 identity=identity, libraries=libraries, modules=modules,
-                sha256=hashlib.sha256(source).hexdigest(), missing=missing)
+                sha256=hashlib.sha256(source).hexdigest(), image_sha256=image_sha256(elf, ph),
+                missing=missing)
 
 
 def patch_fs_loads(image, ph, base):
@@ -284,7 +285,8 @@ def link(game, out, module_names=DEFAULT_MODULES):
         table.append(dict(file=filename, base=base, size=modsize, init=base + m['tags'].get(12, 0),
                           tls_address=base + tls['vaddr'] if tls else 0, tls_memsz=tls['memsz'] if tls else 0,
                           tls_filesz=tls['filesz'] if tls else 0, tls_module=module_id,
-                          tls_relocations=tls_relocations, exports=count, sha256=m['sha256']))
+                          tls_relocations=tls_relocations, exports=count, sha256=m['sha256'],
+                          image_sha256=m['image_sha256']))
         base = (base + modsize + 65535) & ~65535
 
     bindings, unresolved = [], []

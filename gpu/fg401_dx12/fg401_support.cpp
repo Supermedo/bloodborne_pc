@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "fg401_support.h"
+#include "sdk24_fg.h"
 #include "ffx_api.h"
 #include "ffx_api_loader.h"
 #include "ffx_framegeneration.h"
@@ -20,6 +21,7 @@ bool Fg401WindowsSupported() {
     return rtl && !rtl(&v) && v.dwMajorVersion >= 10 && v.dwBuildNumber >= 22000;
 }
 Fg401Support ProbeFg401(const uint8_t bytes[8], uint32_t version) {
+    if (version != Fg401Version && version != Fg402Version) return {false, "check"};
     struct Resources {
         IDXGIFactory4 *factory{};
         IDXGIAdapter1 *adapter{};
@@ -61,10 +63,18 @@ Fg401Support ProbeFg401(const uint8_t bytes[8], uint32_t version) {
     auto n = GetModuleFileNameW(nullptr, path.data(), DWORD(path.size()));
     path.resize(n);
     const auto directory = std::filesystem::path(path).parent_path();
-    const auto dll = directory / L"amd_fidelityfx_framegeneration_dx12.dll";
+    std::filesystem::path dll;
+    try {
+        dll = version == Fg402Version ? FgSdk24::Directory() / L"amd_fidelityfx_framegeneration_dx12.dll"
+                                      : directory / L"amd_fidelityfx_framegeneration_dx12.dll";
+    } catch (const FgSdk24::Error& error) {
+        return {false, error.reason, error.what()};
+    } catch (const std::exception&) {
+        return {false, "check"};
+    }
     std::error_code error;
     if (!std::filesystem::is_regular_file(dll, error))
-        return {false, "files", "amd_fidelityfx_framegeneration_dx12.dll"};
+        return {false, "files", version == Fg402Version ? "fsr24/amd_fidelityfx_framegeneration_dx12.dll" : "amd_fidelityfx_framegeneration_dx12.dll"};
     if (GetProcAddress(GetModuleHandleW(nullptr), "D3D12SDKVersion") &&
         !std::filesystem::is_regular_file(directory / L"D3D12Core.dll", error))
         return {false, "files", "D3D12Core.dll"};
@@ -74,6 +84,16 @@ Fg401Support ProbeFg401(const uint8_t bytes[8], uint32_t version) {
     if (FAILED(r.device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm, sizeof(sm))) ||
         sm.HighestShaderModel < D3D_SHADER_MODEL_6_6)
         return {false, "dx12", "Shader Model 6.6"};
+    if (version == Fg402Version) {
+        try {
+            FgSdk24::Select(FgSdk24::Runtime(), r.device);
+            return {true, "ready"};
+        } catch (const FgSdk24::Error& error) {
+            return {false, error.reason, error.what()};
+        } catch (const std::exception&) {
+            return {false, "check"};
+        }
+    }
     r.module = LoadLibraryExW(dll.c_str(), nullptr,
                               LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!r.module)

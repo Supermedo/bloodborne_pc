@@ -35,5 +35,7 @@ void StartMatching2(NpMatching2::ContextObject& ctx);
 void StopMatching2(NpMatching2::ContextObject& ctx, s32 error_code);
 void StopMatching2(NpMatching2::ContextObject& ctx, NpMatching2::OrbisNpMatching2RoomId room_id,
                    s32 error_code);
+// bbport: the connection to a room member that left, closed (its Sig1 connections too).
+void StopMatching2Peer(s32 transport_id);
 
 } // namespace Libraries::Np::SignalingHandler

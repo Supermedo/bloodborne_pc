@@ -83,6 +83,7 @@ EmitContext::EmitContext(const Profile& profile_, const RuntimeInfo& runtime_inf
     DefineArithmeticTypes();
     DefineInterfaces();
     DefineSharedMemory();
+    DefineMotionParameters();
     DefineBuffers();
     DefineImagesAndSamplers();
     DefineFunctions();
@@ -645,8 +646,12 @@ void EmitContext::DefineOutputs() {
             }
 
             if (VertexMotion()) {
-                motion_out_cur = DefineOutput(F32[4], MotionVectors::CurrentLocation);
-                motion_out_prev = DefineOutput(F32[4], MotionVectors::PreviousLocation);
+                motion_out_cur = DefineOutput(F32[4], (MotionVectors::storage_buffers
+                                                           ? MotionVectors::SafeCurrentLocation
+                                                           : MotionVectors::CurrentLocation));
+                motion_out_prev = DefineOutput(F32[4], (MotionVectors::storage_buffers
+                                                            ? MotionVectors::SafePreviousLocation
+                                                            : MotionVectors::PreviousLocation));
                 Name(motion_out_cur, "motion_cur");
                 Name(motion_out_prev, "motion_prev");
             }
@@ -745,8 +750,12 @@ void EmitContext::DefineOutputs() {
         }
         if (FragmentMotion() && !Sirit::ValidId(frag_outputs[MotionVectors::Output].id)) {
             motion_frag_out = DefineOutput(F32[4], MotionVectors::Output);
-            motion_in_cur = DefineInput(F32[4], MotionVectors::CurrentLocation);
-            motion_in_prev = DefineInput(F32[4], MotionVectors::PreviousLocation);
+            motion_in_cur = DefineInput(F32[4], (MotionVectors::storage_buffers
+                                                     ? MotionVectors::SafeCurrentLocation
+                                                     : MotionVectors::CurrentLocation));
+            motion_in_prev = DefineInput(F32[4], (MotionVectors::storage_buffers
+                                                      ? MotionVectors::SafePreviousLocation
+                                                      : MotionVectors::PreviousLocation));
             Name(motion_frag_out, "motion_vector");
         }
         // Dual source blending allows at most 2 render targets, one for each source.
@@ -863,6 +872,39 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_written, bool is_cohere
     interfaces.push_back(id);
     return {id, pointer_type};
 };
+
+void EmitContext::DefineMotionParameters() {
+    if (!VertexMotion() || !MotionVectors::storage_buffers)
+        return;
+    // A separate normal descriptor set leaves all game-resource bindings untouched.
+    const Id array = TypeRuntimeArray(U32[4]);
+    const Id block = TypeStruct(array);
+    if (std::ranges::find(buf_type_ids, array.value, &Id::value) == buf_type_ids.end()) {
+        Decorate(array, spv::Decoration::ArrayStride, 16U);
+        Decorate(block, spv::Decoration::Block);
+        MemberDecorate(block, 0, spv::Decoration::Offset, 0U);
+        buf_type_ids.push_back(array);
+    }
+    motion_params_ssbo = AddGlobalVariable(TypePointer(spv::StorageClass::StorageBuffer, block),
+                                           spv::StorageClass::StorageBuffer);
+    Decorate(motion_params_ssbo, spv::Decoration::DescriptorSet, MotionVectors::ParamDescriptorSet);
+    Decorate(motion_params_ssbo, spv::Decoration::Binding, MotionVectors::ParamBinding);
+    Decorate(motion_params_ssbo, spv::Decoration::NonWritable);
+    Name(motion_params_ssbo, "omv_parameters");
+    interfaces.push_back(motion_params_ssbo);
+    {
+        for (u32 i = 0; i < 2; ++i) {
+            motion_history_ssbo[i] =
+                AddGlobalVariable(TypePointer(spv::StorageClass::StorageBuffer, block),
+                                  spv::StorageClass::StorageBuffer);
+            Decorate(motion_history_ssbo[i], spv::Decoration::DescriptorSet,
+                     MotionVectors::ParamDescriptorSet);
+            Decorate(motion_history_ssbo[i], spv::Decoration::Binding, i + 1);
+            Name(motion_history_ssbo[i], i ? "omv_history_half1" : "omv_history_half0");
+            interfaces.push_back(motion_history_ssbo[i]);
+        }
+    }
+}
 
 void EmitContext::DefineBuffers() {
     for (const auto& desc : info.buffers) {

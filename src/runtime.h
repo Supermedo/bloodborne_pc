@@ -21,6 +21,11 @@ void runtime_quit_on_open(const char *guest);
 void runtime_quit_on_save_done(void);
 int runtime_savedata_mounted(void);
 #define ABI __attribute__((sysv_abi))
+/* Statistics on hot paths (mutex and rwlock calls): each thread counts on its own and adds to
+ * the shared total every 256 events, so threads don't all write one cache line on every lock.
+ * Reports can be up to 255 per thread short. */
+#define RUNTIME_COUNT(total) do { static _Thread_local unsigned pending_; \
+    if (++pending_==256) { __atomic_fetch_add(&(total),256,__ATOMIC_RELAXED); pending_=0; } } while (0)
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *name, int is_data);

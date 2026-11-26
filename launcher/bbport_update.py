@@ -340,10 +340,14 @@ def link_again(link, there, notes):
                      'the folder it points to is unchanged')
 
 
+VIEW_MARK = '.yharnam-view'  # bbport_yharnam.VIEW_MARK
+
+
 def carry_over(old, new, notes):
     """The files an older version's folder holds and the new one's lacks, copied into the new one: a player's own
     patches in patches\\, FSR 4 shaders the launcher downloaded (an update copied over them before, so they stayed).
-    Links stay links (link_again)."""
+    Links stay links (link_again); a seamless co-op game view (VIEW_MARK: links and hard links into the game) stays
+    behind, made again from the game at its next start."""
     old, new = Path(old), Path(new)
     for folder, dirs, files in os.walk(old):
         folder = Path(folder)
@@ -353,6 +357,8 @@ def carry_over(old, new, notes):
                 dirs.remove(name)
                 if name != '__pycache__' and not os.path.lexists(here / name):
                     link_again(folder / name, here / name, notes)
+            elif (folder / name / VIEW_MARK).is_file():
+                dirs.remove(name)
         for name in files:
             if not os.path.lexists(here / name):
                 here.mkdir(parents=True, exist_ok=True)

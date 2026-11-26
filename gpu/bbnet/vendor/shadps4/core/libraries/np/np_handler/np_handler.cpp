@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <iterator>
 #include <fmt/format.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -327,14 +328,24 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
     }
 
     ShadNet::ShadNetState auth_state = client->WaitForAuthenticated();
-    // bbport: the session of the game this one replaces (the in-game restart) can still be open on
-    // the server for a moment; its login is then refused as already logged in. Asked again a few
-    // times before the game plays offline for the whole session.
-    for (int retry = 1; auth_state == ShadNet::ShadNetState::FailureAlreadyIn && retry <= 4; ++retry) {
-        LOG_WARNING(NpHandler, "user_id={} already signed in elsewhere; asking again in 5 s ({}/4)",
-                    user_id, retry);
+    // bbport: the session of the game this one replaces (the in-game restart), or the one a network
+    // drop left behind, can still be open on the server; its login is then refused as already
+    // logged in (code 6). Asked again with growing pauses for about 2 minutes, long enough for a
+    // server that closes a silent session after ~30 s (R92); 4 x 5 s gave up before that. Shutdown
+    // ends the wait.
+    constexpr int kPauses[] = {5, 10, 15, 20, 30, 40};
+    constexpr int kRetries = static_cast<int>(std::size(kPauses));
+    for (int retry = 1; auth_state == ShadNet::ShadNetState::FailureAlreadyIn && retry <= kRetries;
+         ++retry) {
+        const int pause = kPauses[retry - 1];
+        LOG_WARNING(NpHandler, "user_id={} already signed in elsewhere; asking again in {} s ({}/{})",
+                    user_id, pause, retry, kRetries);
         client->Stop();
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(pause);
+        while (m_initialized && std::chrono::steady_clock::now() < until)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (!m_initialized)
+            return false;
         client = make_client();
         client->Start(host, port, npid, password, token);
         auth_state = client->WaitForConnection();
@@ -786,6 +797,7 @@ void NpHandler::ResolveOnlineId(
         std::lock_guard lock(m_mutex_pending_lookup);
         PendingLookupRequest pending;
         pending.user_id = user_id;
+        pending.online_id = online_id;
         pending.on_result = std::move(on_result);
         m_pending_lookup.emplace(pkt_id, std::move(pending));
     }
@@ -795,12 +807,14 @@ void NpHandler::ResolveOnlineId(
 void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt_id,
                               ShadNet::ErrorType error, const std::vector<u8>& body) {
     std::function<void(s32, u64, const std::string&)> on_result;
+    std::string online_id;
     {
         std::lock_guard lock(m_mutex_pending_lookup);
         auto it = m_pending_lookup.find(pkt_id);
         if (it == m_pending_lookup.end()) {
             return; // no waiter (already flushed by a disconnect, or a stray reply)
         }
+        online_id = std::move(it->second.online_id);
         on_result = std::move(it->second.on_result);
         m_pending_lookup.erase(it);
     }
@@ -815,6 +829,13 @@ void NpHandler::OnLookupReply(s32 user_id, ShadNet::CommandType /*cmd*/, u64 pkt
     }
     if (error == ShadNet::ErrorType::InvalidInput) {
         on_result(ORBIS_NP_COMMUNITY_ERROR_INVALID_ARGUMENT, 0, {});
+        return;
+    }
+    if (error == ShadNet::ErrorType::Invalid && !online_id.empty()) {
+        // bbport: SuperMedo's shadNet has no lookup (an unknown command: every lookup failed,
+        // 2026-11-01). An Online ID is its own NpId there, so it is answered from the ID itself,
+        // as BBSC's build of the port did (no account id).
+        on_result(ORBIS_OK, 0, online_id);
         return;
     }
     if (error != ShadNet::ErrorType::NoError) {

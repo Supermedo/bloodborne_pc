@@ -29,6 +29,7 @@
 namespace VideoCore {
 
 static constexpr size_t GDS_BUFFER_SIZE = 64_KB;
+static constexpr size_t NULL_INDEX_BUFFER_SIZE = 16;
 static constexpr size_t STREAM_BUFFER_SIZE = 128_MB;
 // bbport: game memory backing comes from slabs of this size; its use is tracked per 2 MiB chunk.
 static constexpr u64 SLAB_SIZE = 32_MB;
@@ -156,6 +157,13 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     bda_pagetable_buffer = std::make_unique<Buffer>(
         instance, 0, bda_pagetable_size, MemoryType::DeviceLocal, "BDA Page Table Buffer");
     runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
+    // bbport: bound for draws without index memory when VK_KHR_maintenance6 cannot bind none
+    // (from Jgamrot/yharnam-pc f62b114e).
+    if (!instance.IsMaintenance6Supported()) {
+        null_index_buffer = std::make_unique<Buffer>(instance, 0, NULL_INDEX_BUFFER_SIZE,
+                                                     MemoryType::DeviceLocal, "Null Index Buffer");
+        runtime.FillBuffer(null_index_buffer.get(), 0u, NULL_INDEX_BUFFER_SIZE, 0u);
+    }
 }
 
 BufferCache::~BufferCache() = default;
@@ -184,22 +192,35 @@ void BufferCache::RunGuestCopy(const BbCopy::Item& item) {
 // idle most of the time); PoolSmallCopies (toggle 524288) batches them for the copy threads.
 void BufferCache::SmallGuestCopy(const BbCopy::Item& item) {
     if (scheduler.IsRecordingDeferred() && !BbToggle::Disabled(BbToggle::PoolSmallCopies)) {
-        scheduler.RecordHostCopy([item] { item.run(item); });
+        scheduler.RecordHostCopy(item);
         return;
     }
     BbCopy::QueueCopy(item);
 }
 
-void BufferCache::ExtendWriteFault(VAddr device_addr) {
+u64 BufferCache::FaultWindow() {
     static const u64 window = [] {
         const char* env = std::getenv("BB_FAULT_WINDOW");
         const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
         return std::bit_ceil(std::clamp<u64>(kib, 4, 1024)) * 1024;
     }();
     if (window <= TRACKER_BYTES_PER_PAGE || BbToggle::Disabled(BbToggle::FaultWindow)) {
-        return;
+        return 0;
     }
-    memory_tracker->ExtendWriteFault(Common::AlignDown(device_addr, window), window);
+    return window;
+}
+
+void BufferCache::ExtendWriteFault(VAddr device_addr) {
+    if (const u64 window = FaultWindow()) {
+        memory_tracker->ExtendWriteFault(Common::AlignDown(device_addr, window), window);
+    }
+}
+
+void BufferCache::InvalidateWriteFault(VAddr device_addr, u64 size, bool assume_locks) {
+    memory_tracker->InvalidateWriteFault(device_addr, size, FaultWindow(),
+                                         [this, device_addr, size, assume_locks] {
+                                             ReadMemory(device_addr, size, true, assume_locks);
+                                         });
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {

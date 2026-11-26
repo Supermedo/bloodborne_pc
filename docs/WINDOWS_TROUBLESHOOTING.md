@@ -9,7 +9,7 @@ in the launcher (**Advanced**, **Graphics**) or in **Advanced → Extra variable
 
 | `last_run.log` | When | Cause | What helped |
 |---|---|---|---|
-| `Unimplemented PM4 type 0, base reg: 16384, size: 15810` then `STOP: GPU library assertion failed` | Right after a save loads | The GPU thread decoded a command buffer the game had already reused: the size is garbage | `BB_COPY_GPU_BUFFERS=1` (copy command buffers at submit) and **Two-stage GPU pipeline: Off** |
+| `Unimplemented PM4 type 0, base reg: 16384, size: 15810` then `STOP: GPU library assertion failed` | Right after a save loads | The GPU thread decoded a command buffer the game had already reused: the size is garbage | `BB_COPY_GPU_BUFFERS=1` (copy command buffers at submit; the default since 1.9.8.5, `=0` turns it off) and **Two-stage GPU pipeline: Off**. A milder form, `PM4 header 0x00000000 ... rest of the buffer dropped` and a smeared picture until the game restarts, has the same cause and the same fix |
 | `vk_scheduler.cpp: SubmitExecution: Device lost during submit` | When the world appears | GPU hang/reset (TDR) | `BB_PREP_WORKERS=0` (no draw-preparation workers) and **Object motion vectors** off |
 | `Fault: read access to 0000005300000000 at guest offset 0x263b8e7` | Title screen, Two-stage GPU pipeline on | The game read a pointer before the GPU-side write it waits for had landed | **Two-stage GPU pipeline: Off**. Keeping it on with only its fence and memory-write stages off (`BB_TOGGLE_FILE` with bits 38–42) was not tested to the end |
 | `vk_graphics_pipeline.cpp: Failed to create graphics pipeline: ErrorUnknown` | At start, after the crashes above | Pipeline cache written by crashed runs (`WarmUp: N stale pipelines were found` the run before) | **Advanced → Clear shader cache** |
@@ -51,7 +51,7 @@ Object motion vectors: off
 
 - `HandleLoginReply: Login rejected error code 8`: shadNet error 8 is `LoginInvalidPassword`
   (7 would be an unknown account name). Re-enter the password under **Online co-op**.
-- `cpp-httplib failed for GET https://thehuntersdream.com:20443/bb-eu/ss.info: error=10
+- `cpp-httplib failed for GET https://<game server>:20443/bb-eu/ss.info: error=10
   (SSL server verification failed)`, shown in the game as a failure to get server
   information. The server's certificate is valid (Let's Encrypt `YE2` → `Root YE` →
   `ISRG Root X2` → `ISRG Root X1`). cpp-httplib checks it twice on Windows: with OpenSSL

@@ -752,8 +752,6 @@ def profile(rating, res, output, current=None, goal='smooth'):
         lod, why = '0', 'The website\'s settings for 4 GB cards: model detail as in the game.'
     elif goal == 'quiet' and picture >= 3 and not g.igpu:
         lod, why = '0', 'Goal "Quiet": model detail as in the game.'
-    elif (picture >= 5 or (goal == 'balanced' and picture >= 4)) and g.vram >= 8 and rating.ram >= 16:
-        lod, why = '-2', 'Highest model detail: your card has room to spare at this resolution.'
     elif picture >= 3 and not g.igpu:
         lod, why = '0', 'Model detail as in the game.'
     else:

@@ -16,6 +16,8 @@
 static int restarts = 0;
 // Keep the restart observable while linking the renderer's actual runtime dependencies.
 extern "C" void overlay_test_restart() { ++restarts; }
+// The PC System menu lives in another translation unit and keeps the real name.
+extern "C" void runtime_restart() { overlay_test_restart(); }
 
 static std::string Frame(ImGuiID activate = 0, ImGuiWindow* target = nullptr) {
     ImGui::GetIO().DeltaTime = 1.0f / 60;
@@ -65,7 +67,7 @@ int main() {
     assert(text.find("Selected: FSR 4.1.1 - Vulkan (fsr4vk)") != std::string::npos);
     assert(text.find("Advanced FSR options") == std::string::npos);
     assert(text.find("FSR 4.1 backend") == std::string::npos);
-    ImGuiWindow* window = ImGui::FindWindowByName("Bloodborne - Settings (Insert / L3+R3)");
+    ImGuiWindow* window = ImGui::FindWindowByName("###settings");
     assert(window);
     const ImGuiID settings = window->GetID("FSR 4.1 Settings##FSR41SettingsButton");
     const ImGuiID cache = window->GetID("Motion-vector cache (experimental)");
@@ -129,6 +131,15 @@ int main() {
         text = Frame();
         assert(text.find(Fsr41Ui::Text(Fsr41Ui::Files)) != std::string::npos);
         assert(text.find(Fsr41Ui::Text(Fsr41Ui::Driver)) != std::string::npos);
+        const int kept_version = s.upscaler, kept_backend = s.fsr411_backend;
+        for (const auto& route : BbOverlay::Fsr41Routes) {
+            g.NavWindow = popup;
+            g.NavId = ImHashStr("(i)", 0, ImHashStr(route.title, 0, popup->GetID("FSR41Methods")));
+            text = Frame();
+            assert(text.find(Fsr41Ui::Text(route.hint)) != std::string::npos);
+            assert(s.upscaler == kept_version && s.fsr411_backend == kept_backend);
+        }
+        g.NavId = 0;
         Frame(popup->GetID(Fsr41Ui::Text(Fsr41Ui::Close)), popup);
     }
     _putenv_s("BB_UI_LANGUAGE", "en");

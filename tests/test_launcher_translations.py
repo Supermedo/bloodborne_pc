@@ -47,8 +47,10 @@ class TranslationTests(unittest.TestCase):
                 if text and '{' in en:
                     with self.subTest(language=language, text=en):
                         values = sample(en)
-                        en.format(*values)
-                        text.format(*values)
+                        # Named fields ({expert}) as the texts that use them pass them.
+                        names = {name: 'x' for _l, name, _s, _c in FORMAT.parse(en) if name and not name.isdigit()}
+                        en.format(*values, **names)
+                        text.format(*values, **names)
 
     def test_status_symbols(self):
         for language in LANGUAGES:
@@ -116,8 +118,8 @@ class TranslationTests(unittest.TestCase):
         for language in ['en'] + LANGUAGES:
             for name, facts in (('clock', clock), ('issuer', issuer)):
                 with self.subTest(language=language, text=name), mock.patch.object(L, 'LANG', language), \
-                        mock.patch.object(bbport_tls, 'certificate_facts', return_value=facts):
-                    text = bbport_tls.explain([b'leaf'], 'thehuntersdream.com', now=now)
+                        mock.patch.object(bbport_tls, 'certificate_facts', return_value=facts),                         mock.patch.dict(bbport_tls.EXPECTED_ISSUERS, {'game.supermedo.com': "Let's Encrypt"}):
+                    text = bbport_tls.explain([b'leaf'], 'game.supermedo.com', now=now)
                     if language == 'en':
                         english[name] = text
                     else:

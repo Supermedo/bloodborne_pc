@@ -48,6 +48,16 @@ class PickerTests(unittest.TestCase):
                 self.assertTrue(ui.select(app,index))
                 self.assertEqual((app.var('upscaler','ini').get(),app.var('fsr411_backend','ini').get()),row[:2])
 
+    def test_hints_give_neutral_selection_advice_in_all_languages(self):
+        self.assertEqual(model.HINTS[0], 'Experimental Vulkan path. If issues occur, use AMD DX12.')
+        self.assertEqual(model.HINTS[3], 'Alternative if the AMD methods cause issues. May be slower.')
+        self.assertNotIn('Best performance', ' '.join(model.HINTS))
+        self.assertEqual(model.ROUTES[0][:2], ('fsr412', 'vk'))
+        for language, values in model.TEXTS.items():
+            self.assertTrue(all(values[model.KEYS.index(key)] for key in model.HINTS), language)
+        self.assertEqual(model.TEXTS['de'][model.KEYS.index(model.HINTS[0])],
+                         'Experimenteller Vulkan-Pfad. Bei Problemen AMD DX12 wählen.')
+
     def test_dx12_provider_needs_exact_driver_and_bridge_support(self):
         caps={'vendor_id':0x1002,'dx12_interop':dict(supported=True,reason='ready',detail=''),
               'fsr412_dx12':dict(supported=False,reason='driver',detail='provider unavailable')}

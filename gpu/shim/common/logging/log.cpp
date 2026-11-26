@@ -4,6 +4,11 @@
 #include <cstring>
 #include <mutex>
 #include "common/logging/log.h"
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace Common::Log {
 static Level threshold() {
@@ -23,8 +28,19 @@ void Write(std::string_view log_class, Level level, const char* file, int line, 
     static std::mutex mutex;
     static const char* names[] = {"Trace", "Debug", "Info", "Warning", "Error", "Critical"};
     const char* base = std::strrchr(file, '/');
+#ifdef _WIN32
+    // bbport: one write for the line. stderr has no buffer, so on the launcher's pipe the C runtime
+    // wrote it a character at a time, a system call each and mixed with other threads' output: about
+    // 1 ms a line on the GPU thread, and a run with 118 warnings a second spent a tenth of its time so.
+    const std::string text = fmt::format("GPU [{}] <{}> {}:{} {}: {}\r\n", log_class, names[int(level)],
+                                         base ? base + 1 : file, line, function, message);
+    DWORD written = 0;
+    std::scoped_lock lock{mutex};
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.data(), DWORD(text.size()), &written, nullptr);
+#else
     std::scoped_lock lock{mutex};
     std::fprintf(stderr, "GPU [%.*s] <%s> %s:%d %s: %s\n", int(log_class.size()), log_class.data(),
                  names[int(level)], base ? base + 1 : file, line, function, message.c_str());
+#endif
 }
 } // namespace Common::Log

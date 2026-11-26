@@ -57,7 +57,9 @@ int main() {
                 ConfigureUpscalerSupport(fsr4, fsr411);
                 const bool unsupported = (requested == UpscalerFsr4 && !fsr4) ||
                     (requested == UpscalerFsr411 && !fsr411);
-                assert(s.upscaler == (unsupported ? UpscalerFsr3 : requested));
+                // The choice stays (Save() keeps it); this session runs FSR 3.1 instead.
+                assert(s.upscaler == requested);
+                assert(s.ActiveUpscaler() == (unsupported ? UpscalerFsr3 : requested));
                 assert(s.fsr4_supported == fsr4);
                 assert(s.fsr411_supported == fsr411);
                 assert(bool(s.fsr4_problem.load()) == unsupported);
@@ -65,7 +67,8 @@ int main() {
                 // Startup patch settings still describe the already applied guest patches.
                 assert(s.startup_upscaler == requested);
                 ConfigureUpscalerSupport(fsr4, fsr411);
-                assert(s.upscaler == (unsupported ? UpscalerFsr3 : requested));
+                assert(s.upscaler == requested);
+                assert(s.ActiveUpscaler() == (unsupported ? UpscalerFsr3 : requested));
             }
         }
     }
@@ -73,8 +76,9 @@ int main() {
                               "Vulkan (fsr4vk): GPU/driver lacks VK_EXT_descriptor_buffer",
                               "AMD DX12: runtime load failure - Windows error 126"}) {
         s.upscaler = UpscalerFsr411;
+        s.fsr4_fallback_source = -1;
         ConfigureUpscalerSupport(true, false, reason);
-        assert(s.upscaler == UpscalerFsr3);
+        assert(s.upscaler == UpscalerFsr411 && s.ActiveUpscaler() == UpscalerFsr3);
         assert(std::string(s.fsr4_problem.load()).find(reason) == 0);
         assert(std::string(s.fsr411_problem.load()) == reason);
         assert(std::string(s.fsr4_problem.load()).find("using FSR 3.1") != std::string::npos);

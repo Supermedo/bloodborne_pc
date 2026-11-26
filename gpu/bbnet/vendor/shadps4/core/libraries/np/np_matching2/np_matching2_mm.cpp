@@ -485,6 +485,7 @@ void HandleRoomEvent(const ShadNet::NotifyRoomEvent& n) {
 
     auto payload_owner = std::make_shared<CallbackPayload>();
     CallbackPayload& p = *payload_owner;
+    s32 left_transport = 0; // bbport: a leaving member's connection, closed after the event
 
     {
         auto cache = NpHandler::GetInstance().LockMatching2Cache(ctx->ctx_id);
@@ -536,6 +537,9 @@ void HandleRoomEvent(const ShadNet::NotifyRoomEvent& n) {
             QueueMatching2SignalingEvent(*ctx, room_id, member_id,
                                          ORBIS_NP_MATCHING2_SIGNALING_EVENT_DEAD,
                                          ORBIS_NP_MATCHING2_SIGNALING_ERROR_TERMINATED_BY_PEER);
+            if (const auto peer_it = cache->peers.find(member_id); peer_it != cache->peers.end()) {
+                left_transport = peer_it->second.conn_id;
+            }
             room_it->second.members.erase(mem_it);
             cache->peers.erase(member_id);
             break;
@@ -734,6 +738,11 @@ void HandleRoomEvent(const ShadNet::NotifyRoomEvent& n) {
 
     if (event == ORBIS_NP_MATCHING2_ROOM_EVENT_MEMBER_JOINED) {
         SignalingHandler::StartMatching2(*ctx);
+    }
+    if (left_transport != 0) {
+        LOG_INFO(Lib_NpMatching2, "room {}: member {} left, its connection {} closed", room_id,
+                 member_id, left_transport);
+        SignalingHandler::StopMatching2Peer(left_transport);
     }
 }
 

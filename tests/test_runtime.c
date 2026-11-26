@@ -325,6 +325,56 @@ static void rw_timeouts(void) {
     assert(rw_unlock(&f.lock)==0);
     fixture_destroy(&f);
 }
+/* A thread that reads a lock reads it again while a writer waits: FreeBSD allows it, and the
+   host lock (which lets a waiting writer go first) would otherwise deadlock both threads. */
+static void *waiting_writer(void *context) {
+    RwFixture *f=context;
+    barrier(&f->writer_ready);
+    assert(rw_write(&f->lock)==0);
+    atomic_store(&f->value,2);
+    assert(rw_unlock(&f->lock)==0); return NULL;
+}
+static void rw_nested_read(void) {
+    rw_setup();
+    RwFixture f={0}; fixture_init(&f);
+    assert(rw_read(&f.lock)==0);
+    pthread_t writer; assert(pthread_create(&writer,NULL,waiting_writer,&f)==0);
+    barrier(&f.writer_ready);
+    const struct timespec nap={0,20000000}; nanosleep(&nap,NULL); /* the writer is waiting now */
+    assert(rw_read(&f.lock)==0);
+    assert(atomic_load(&f.value)==0);
+    assert(rw_unlock(&f.lock)==0 && rw_unlock(&f.lock)==0);
+    assert(pthread_join(writer,NULL)==0 && atomic_load(&f.value)==2);
+    fixture_destroy(&f);
+}
+/* sceNpTrophyUnlockTrophy: every trophy goes into <user>/trophies.log once, a repeat or another
+ * call leaves it alone, and the platinum (0) follows the last of the 33 base-game trophies (the
+ * DLC's 34-39 do not count). */
+typedef int32_t (ABI *TrophyUnlock)(int32_t,int32_t,int32_t,int32_t *);
+static void trophy_unlocks(const char *user) {
+    runtime_file_configure(user,user);
+    char path[600]; snprintf(path,sizeof(path),"%s/trophies.log",user);
+    remove(path);
+    TrophyUnlock unlock=GET(TrophyUnlock,"28xmRUFao68#l#m");
+    assert(unlock);
+    int32_t platinum=7;
+    for (int id=33;id>=2;--id) { assert(unlock(1,1,id,&platinum)==0); assert(platinum==-1); }
+    assert(unlock(1,1,5,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,34,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,1,&platinum)==0 && platinum==0);
+    assert(unlock(1,1,1,&platinum)==0 && platinum==-1);
+    assert(unlock(1,1,0,&platinum)==0 && platinum==-1);
+    int count[64]={0}, lines=0, last=-1, id; long long when;
+    FILE *log=fopen(path,"r"); assert(log);
+    char line[64];
+    while (fgets(line,sizeof(line),log)) {
+        assert(sscanf(line,"%d %lld",&id,&when)==2 && id>=0 && id<64 && when>0);
+        ++count[id]; ++lines; last=id;
+    }
+    fclose(log);
+    for (int t=0;t<=34;++t) assert(count[t]==1);
+    assert(lines==35 && last==0);
+}
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -350,8 +400,10 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--rwlock-lifecycle")) { rw_lifecycle(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-concurrency")) { rw_concurrency(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }
+    if (argc>1 && !strcmp(argv[1],"--rwlock-nested-read")) { rw_nested_read(); return 0; }
+    if (argc>2 && !strcmp(argv[1],"--trophy-unlock")) { trophy_unlocks(argv[2]); return 0; }
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); direct_memory(); memory_primitives();
-    rw_lifecycle(); rw_concurrency(); rw_timeouts();
+    rw_lifecycle(); rw_concurrency(); rw_timeouts(); rw_nested_read();
     puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope");
     return 0;
 }

@@ -1,5 +1,6 @@
 from paths import ROOT
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 import struct
@@ -7,7 +8,7 @@ import unittest
 from unittest import mock
 import tempfile
 from pathlib import Path
-from prepare import parse_self, inspect_libc, nid, entries, segment, prepare
+from prepare import parse_self, image_sha256, inspect_libc, nid, entries, segment, prepare
 
 
 def fixture():
@@ -161,6 +162,26 @@ class SelfTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r'^sce_module/libc\.prx is not the original file: its dynamic section'):
             segment([{'type': 1}], 2, 'sce_module/libc.prx')
         self.assertEqual(entries({1: 8, 2: 16}, 1, 2, 'eboot.bin'), (8, 16))
+
+
+class ImageHashTests(unittest.TestCase):
+    """The loaded image's hash: the same for every dump of the same code (US CUSA00900 comes as plain ELF)."""
+
+    def test_a_self_and_its_plain_elf_have_one_image_hash(self):
+        elf, _header, ph, _segments, _missing = parse_self(fixture())
+        plain, _header, plain_ph, _segments, _missing = parse_self(bytes(elf))
+        self.assertNotEqual(hashlib.sha256(fixture()).digest(), hashlib.sha256(elf).digest())
+        self.assertEqual(image_sha256(plain, plain_ph), image_sha256(elf, ph))
+
+    def test_image_hash_is_the_loaded_images(self):
+        elf, _header, ph, _segments, _missing = parse_self(fixture())
+        image = bytes(range(16)) + bytes(16)  # filesz 16, memsz 32
+        self.assertEqual(image_sha256(elf, ph), hashlib.sha256(image).hexdigest())
+        # Two segments with a gap: zeros between them, as prepare() builds the image.
+        two = [dict(type=1, offset=0, vaddr=0, filesz=4, memsz=4), dict(type=1, offset=4, vaddr=8, filesz=4, memsz=6)]
+        self.assertEqual(image_sha256(b'abcdefgh', two), hashlib.sha256(b'abcd\0\0\0\0efgh\0\0').hexdigest())
+        two[1]['vaddr'] = 2
+        self.assertIsNone(image_sha256(b'abcdefgh', two))  # overlapping
 
 
 if __name__ == '__main__':

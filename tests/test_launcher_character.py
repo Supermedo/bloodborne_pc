@@ -162,6 +162,7 @@ def make_profile(names, played=0):
     data = bytearray(PROFILE)
     data[:4] = b'\x1a\0\0\0'
     for slot, name in names.items():
+        data[saves.PROFILE_LISTED + slot] = 1
         start = saves.PROFILE_SLOTS + slot * saves.PROFILE_SLOT_SIZE
         data[start:start + 2 * len(name)] = name.encode('utf-16-le')
         struct.pack_into('<I', data, start + 0x26, played)
@@ -240,12 +241,19 @@ class BackupTests(unittest.TestCase):
             folder.mkdir(parents=True)
             for i in range(10):
                 (folder / f'userdata{i:04d}').write_bytes(make_slot() if i == 2 else bytes(SLOT))
-            (folder / 'userdata0010').write_bytes(b'\x1a' + bytes(PROFILE - 1))
+            (folder / 'userdata0010').write_bytes(make_profile({2: 'Gehrmanling'}))
             self.assertEqual(list(saves.characters(folder)), ['userdata0002'])
             item = saves.Backup(saves.backup(user))
             found = saves.backup_characters(item)
             self.assertEqual(list(found), ['userdata0002'])
             self.assertEqual(found['userdata0002'].level, 18)
+
+    def test_a_character_deleted_in_the_game_is_neither_here_nor_in_backups(self):
+        """The game keeps the slot file of a deleted character and clears its byte in the profile."""
+        with tempfile.TemporaryDirectory() as user:
+            folder = make_folder(user, {0: make_slot('Maria'), 2: make_slot()}, make_profile({0: 'Maria'}))
+            self.assertEqual(list(saves.characters(folder)), ['userdata0000'])
+            self.assertEqual(list(saves.backup_characters(saves.Backup(saves.backup(user)))), ['userdata0000'])
 
 
 if __name__ == '__main__':

@@ -42,10 +42,23 @@ bool CapturesInput();
 /// `active` is false; typing goes to the window (sdl_window), the box only displays it.
 void SetTextEntry(bool active, const std::string& prompt, const std::string& text);
 
+/// bbport: the text dialog's typed line in the presented image's pixels (cursor: where the next
+/// character goes, from x), and that image's size. The IME's candidate list (Hanja, kanji) goes
+/// next to it.
+struct TextArea {
+    float x, y, w, h, cursor, display_w, display_h;
+};
+/// Window thread: false while no text dialog has been drawn.
+bool TextEntryArea(TextArea& area);
+
 /// Any thread: an amber banner at the top of the screen for ten seconds: `headline` in the
 /// highlight colour, a bar filled to `used_fraction` (0..1; negative draws no bar) and `detail`
 /// under it. Drawn by the present thread; replaces a banner still showing.
 void Warn(const std::string& headline, const std::string& detail, float used_fraction);
+
+/// Any thread, also before Init: a trophy unlocked for the first time (0 = platinum). Queued,
+/// then shown for a few seconds in the top-left corner as the console does, one after another.
+void TrophyUnlocked(int id);
 
 /// Any thread: video memory in use, the limit it is compared against (0: no limit known), the
 /// collector's pressure and critical marks (0: none) and what the card can still give this

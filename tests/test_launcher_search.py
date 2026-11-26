@@ -68,26 +68,26 @@ class Root:
 
 
 class Online(Fake):
-    """The Online page with SuperMedo Server chosen: The Hunter's Dream's part is hidden; the jump records
+    """The Online page with SuperMedo Server chosen: Seamless co-op's part is hidden; the jump records
     where it goes."""
     def __init__(self):
         super().__init__()
         self.page = Widget('pack')
         self.pages, self.page_titles = {'online': self.page}, {'online': 'Online play'}
         self.vars = {'online_pool': 'supermedo'}
-        self.thd = Widget('', self.page)  # The Hunter's Dream's rows, hidden
+        self.seamless = Widget('', self.page)  # Seamless co-op's rows, hidden
         self.pool = Widget('grid', self.page)
-        self.signin, self.test = Widget('grid', self.thd), Widget('grid', self.page)
+        self.signin, self.test = Widget('grid', self.seamless), Widget('grid', self.page)
         self.search_settings = [
             {'kind': 'setting', 'widget': self.pool, 'mark': self.pool, 'title': 'Play with', 'hint': '',
              'key': 'online_pool'},
-            {'kind': 'setting', 'widget': self.signin, 'mark': self.signin, 'title': 'Sign in with Discord',
-             'hint': '', 'key': 'button:signin_thd'},
+            {'kind': 'setting', 'widget': self.signin, 'mark': self.signin, 'title': 'Enemy health per guest',
+             'hint': '', 'key': 'bbsc_difficulty'},
             {'kind': 'setting', 'widget': self.test, 'mark': self.test, 'title': 'Test connection', 'hint': '',
              'key': 'button:test_connection'}]
         for entry in self.search_settings:
             entry.update(page='online', haystack=(search.fold(entry['title']), '',
-                                                  search.fold(search.WORDS[entry['key']])))
+                                                  search.fold(search.WORDS.get(entry['key'], ''))))
         self.search_entries += self.search_settings
         self.root, self.shown_pages, self.marked, self.scrolled = Root(), [], [], []
 
@@ -171,26 +171,26 @@ class SearchTests(unittest.TestCase):
         fake.pages, fake.page_titles = {'online': page}, {'online': 'Online play'}
         for title, key, widget, only in (
                 ('Sign in with Discord', 'button:signin_supermedo', Widget('grid', page), None),
-                ('Sign in with Discord', 'button:signin_thd', Widget('', page),
-                 ("only with The Hunter's Dream", 'online_pool')),
-                ('Account', 'thd_online_id', Widget('', page), None)):
+                ('Enemy health per guest', 'bbsc_difficulty', Widget('', page),
+                 ('only with SuperMedo Seamless co-op', 'online_pool')),
+                ('Account', 'online_npid', Widget('', page), None)):
             fake.search_entries.append({'kind': 'setting', 'page': 'online', 'title': title, 'hint': '', 'key': key,
                                         'widget': widget, 'only': only,
-                                        'haystack': (search.fold(title), '', search.fold(search.WORDS[key]))})
-        found = [e['key'] for e in fake.search('discord thd')]
-        self.assertEqual(found[0], 'button:signin_thd')
-        self.assertEqual(fake.search_where(fake.search('discord thd')[0]),
-                         "Online play · only with The Hunter's Dream")
+                                        'haystack': (search.fold(title), '', search.fold(search.WORDS.get(key, '')))})
+        found = [e['key'] for e in fake.search('enemy health')]
+        self.assertEqual(found[0], 'bbsc_difficulty')
+        self.assertEqual(fake.search_where(fake.search('enemy health')[0]),
+                         'Online play · only with SuperMedo Seamless co-op')
         self.assertEqual(fake.search('sign in')[0]['key'], 'button:signin_supermedo')  # the shown one first
-        self.assertNotIn('thd_online_id', [e['key'] for e in fake.search('account')])  # hidden, no note: out
+        self.assertNotIn('online_npid', [e['key'] for e in fake.search('account')])  # hidden, no note: out
         side = {'kind': 'side', 'page': 'side', 'title': 'Expert view', 'hint': '', 'key': 'button:expert'}
         self.assertEqual(fake.search_where(side), 'Side bar')
 
     def test_index_only_marks_what_is_below_the_widgets(self):
         online = Online()
-        online.index_only([online.thd], "only with The Hunter's Dream", 'online_pool')
+        online.index_only([online.seamless], 'only with SuperMedo Seamless co-op', 'online_pool')
         only = {e['key']: e.get('only') for e in online.search_settings}
-        self.assertEqual(only['button:signin_thd'], ("only with The Hunter's Dream", 'online_pool'))
+        self.assertEqual(only['bbsc_difficulty'], ('only with SuperMedo Seamless co-op', 'online_pool'))
         self.assertIsNone(only['online_pool'])  # beside the hidden part, not in it
         self.assertIsNone(only['button:test_connection'])
 
@@ -198,8 +198,8 @@ class SearchTests(unittest.TestCase):
         """A row of the pool not chosen: the jump marks "Play with" and leaves the pool as the player chose it;
         once that pool is chosen, the row itself."""
         online = Online()
-        online.index_only([online.thd], "only with The Hunter's Dream", 'online_pool')
-        entry = next(e for e in online.search_entries if e.get('key') == 'button:signin_thd')
+        online.index_only([online.seamless], 'only with SuperMedo Seamless co-op', 'online_pool')
+        entry = next(e for e in online.search_entries if e.get('key') == 'bbsc_difficulty')
         online.jump(entry)
         for call in online.root.later:
             call()
@@ -207,7 +207,7 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(online.marked, [online.pool])
         self.assertEqual(online.scrolled, [online.pool])
         self.assertEqual(online.vars, {'online_pool': 'supermedo'})
-        online.thd.manager = 'grid'  # The Hunter's Dream chosen: its rows show
+        online.seamless.manager = 'grid'  # Seamless co-op chosen: its rows show
         online.root.later, online.marked = [], []
         online.jump(entry)
         for call in online.root.later:

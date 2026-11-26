@@ -479,6 +479,7 @@ private:
     // Callbacks awaiting a LookupOnlineId reply, keyed by packet id.
     struct PendingLookupRequest {
         s32 user_id = -1; // submitting user, for flushing on disconnect
+        std::string online_id; // bbport: answered from it when the server has no lookup
         std::function<void(s32 result, u64 account_id, const std::string& canonical_online_id)>
             on_result;
     };

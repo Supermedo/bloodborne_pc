@@ -19,7 +19,7 @@ QUICK = ('bin/bb-probe.exe', 'run.py')  # with scripts\: what has to match at ev
 
 def program_files(port):
     port = Path(port)
-    files = [port / 'run.py', *sorted((port / 'bin').glob('*')),
+    files = [port / 'run.py', *sorted((port / 'bin').rglob('*')),
              *sorted(p for p in (port / 'scripts').rglob('*.py') if '__pycache__' not in p.parts)]
     return [p for p in files if p.is_file() and not p.name.lower().startswith(SKIP)]
 

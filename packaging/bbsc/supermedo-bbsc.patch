@@ -1,0 +1,119 @@
+diff --git a/emulator/src/core/bloodborne_re.cpp b/emulator/src/core/bloodborne_re.cpp
+index 6c278c3..0b0691d 100644
+--- a/emulator/src/core/bloodborne_re.cpp
++++ b/emulator/src/core/bloodborne_re.cpp
+@@ -4198,8 +4198,13 @@ void NoteBbscBossBar() {
+ 
+ // A boss fight was on when the player died: a bar is up now, or was up moments ago and no boss
+ // has been killed since.
++bool BbscHostInBossFight(); // below, with the host's boss packets
++
+ bool BbscBossFightAtDeath() {
+-    if (BossFightActive()) {
++    // SuperMedo (2026-11-02): a guest whose own boss bar never came up (in the arena late, or the
++    // bar not shown on its copy) died "outside a boss fight" and woke at its lamp while the others
++    // fought on. The host's boss bar, sent once a second, counts too.
++    if (BossFightActive() || BbscHostInBossFight()) {
+         return true;
+     }
+     return bbsc_boss_bar_seen_ms != 0 && bbsc_boss_killed_ms < bbsc_boss_bar_seen_ms &&
+@@ -11638,6 +11643,66 @@ std::vector<u64> BbscWatchTargets() {
+     return out;
+ }
+ 
++// SuperMedo (2026-11-02): while dead and watching a hunter, our unseen body goes with them. The game
++// keeps the map loaded around our own character, so far from where we fell the watched hunter's
++// area was half there and they had no body (and the streaming cost frames). Moved with the
++// character's own warp, as the join teleport does, once a second when more than 25 m away; not
++// farther than 2 km (another map block's coordinates), not while loading, not in free flight.
++constexpr float BbscSpectateFollowMinMetres = 25.0f;
++constexpr float BbscSpectateFollowMaxMetres = 2000.0f;
++
++void TickBbscSpectateFollow() {
++    static s64 last_ms = 0;
++    static int moves = 0;
++    if (!bbsc_spectate_active || bbsc_spectate_releasing) {
++        moves = 0;
++        return;
++    }
++    if (!bbsc_watch.on || bbsc_watch.free || bbsc_watch.target == 0) {
++        return;
++    }
++    const s64 now = SteadyNowMs();
++    if (now - last_ms < 1'000) {
++        return;
++    }
++    last_ms = now;
++    const u64 global = GetGlobalState();
++    if (!ReadablePointer(global, 0x1598) || ReadValue<u8>(global, 0x08) != 0) {
++        return; // loading
++    }
++    const u64 player = GetLocalPlayerCharacter();
++    const auto own = player != 0 ? ReadCharacterTransform(player) : std::nullopt;
++    const auto them = ReadCharacterTransform(bbsc_watch.target);
++    if (!own || !them) {
++        return;
++    }
++    const float dx = them->position[0] - own->position[0];
++    const float dy = them->position[1] - own->position[1];
++    const float dz = them->position[2] - own->position[2];
++    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
++    if (distance < BbscSpectateFollowMinMetres || distance > BbscSpectateFollowMaxMetres) {
++        return;
++    }
++    const u64 vtable = ReadablePointer(player, 0x08) ? ReadValue<u64>(player, 0) : 0;
++    const u64 warp = ReadablePointer(vtable, 0x600) ? ReadValue<u64>(vtable, 0x5F8) : 0;
++    if (!IsEbootCodeAddress(warp)) {
++        return;
++    }
++    alignas(16) std::array<float, 4> position = them->position;
++    alignas(16) std::array<float, 4> rotation = own->rotation;
++    position[3] = 1.0f;
++    rotation[3] = 0.0f;
++    using Warp = void PS4_SYSV_ABI (*)(u64 chr, float* position, float* rotation, u32 flag);
++    reinterpret_cast<Warp>(warp)(player, position.data(), rotation.data(), 1);
++    WriteValue<u8>(player, 0x1E1, static_cast<u8>(ReadValue<u8>(player, 0x1E1) | 0x02));
++    if (++moves <= 3 || moves % 30 == 0) {
++        LOG_INFO(Debug,
++                 "BBSC spectate follow: our unseen body moved {:.0f} m to the watched hunter at "
++                 "({:.2f}, {:.2f}, {:.2f}) (move {})",
++                 distance, position[0], position[1], position[2], moves);
++    }
++}
++
+ // The co-op banner, at most every 1.5 s (switching fast would queue one banner per press).
+ void BbscWatchNotice(std::string_view text, std::string_view what, s64 now) {
+     if (now - bbsc_watch.notice_ms < 1'500) {
+@@ -12818,6 +12883,12 @@ std::atomic<s32> bbsc_host_boss_id{-1};
+ std::atomic<s64> bbsc_host_boss_ms{0};
+ const char* BbscBossNameById(s32 id); // see "Discord status"
+ 
++// A guest: the host's boss bar is up, as its last packet (fresh) says.
++bool BbscHostInBossFight() {
++    return GetSessionState() == 6 && SteadyNowMs() - bbsc_host_boss_ms.load() < BbscHostBossFreshMs &&
++           bbsc_host_boss_id.load() != -1;
++}
++
+ // The name id on our own boss bar, or -1.
+ s32 BbscGaugeBossId() {
+     const u64 gauge = ReadValue<u64>(image_base + BossGaugePointerOffset, 0);
+@@ -14476,6 +14547,11 @@ void TickBbscDuelBellGive() {
+         ReadValue<u8>(global, 0x08) != 0) {
+         return; // not in the game yet, dead, or loading
+     }
++    // SuperMedo (2026-11-01): the kit comes in the Hunter's Dream, not at the start - a new hunter gets
++    // the first weapons there, and the kit changed the carried items before that.
++    if (GetCurrentPackedMap() != BbscHuntersDreamMap) {
++        return;
++    }
+     const u64 carried = BbscCarriedInventory();
+     const u64 storage = BbscStorageInventory();
+     if (carried == 0 || storage == 0) {
+@@ -16060,6 +16136,7 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
+         TickBbscEchoCounter();
+         TickBbscSharedProgress();
+         TickBbscSpectate();
++        TickBbscSpectateFollow();
+         TickBbscFollowBroadcast();
+         TickBbscWorldFlagsBroadcast();
+         TickBbscFollowHost();

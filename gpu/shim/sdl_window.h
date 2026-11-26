@@ -53,6 +53,8 @@ public:
     void BeginTextInput(const std::string& initial, const std::string& prompt);
     /// 0 while typing, 1 confirmed (Enter), 2 cancelled (Escape); text is UTF-8.
     int PollTextInput(std::string& text);
+    /// bbport, any thread: the game closed the dialog itself; the box closes at the next poll.
+    void CancelTextInput();
 
     /// Any thread (API-002): copies the accumulated mouse state out and resets dx/dy/buttons/
     /// wheel to zero (captured is left as-is: it reflects the window's current state, not
@@ -72,9 +74,16 @@ private:
     std::atomic<bool> on_hdr_display{false};
     std::mutex text_mutex;
     bool text_requested{}, text_active{};
+    bool text_cancel_requested{}; // bbport: CancelTextInput, handled by the window thread
     int text_state{};
     std::string text, text_prompt, base_title;
+    std::string text_editing; // the IME's composition not yet committed (a Hangul syllable being typed)
     void UpdateTextTitle();
+    /// bbport, window thread: hands SDL the text dialog's typed line, next to which the IME
+    /// shows its candidate list (Hanja, kanji); text_area is the last one handed (x, y, w, h,
+    /// cursor).
+    void UpdateTextInputArea();
+    int text_area[5]{};
     SDL_Window* window{};
     WindowSystemInfo window_info{};
 

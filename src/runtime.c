@@ -187,7 +187,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
         if (!strcmp(name, "ZT4ODD2Ts9o#libSceLibcInternal")) return (uintptr_t)&need_libc_internal;
         return 0;
     }
-    /* Exact scoped imports for CUSA03173; the suffix identifies library/module. */
+    /* Exact scoped imports of the 1.09 eboot (the same in every retail release); the suffix
+     * identifies library/module. */
     if (!strcmp(name, "bzQExy189ZI#q#q")) return (uintptr_t)init_env;
     if (!strcmp(name, "8G2LB+A3rzg#q#q")) return (uintptr_t)guest_atexit;
     if (!strcmp(name, "tsvEmnenz48#q#q")) return (uintptr_t)guest_cxa_atexit;

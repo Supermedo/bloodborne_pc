@@ -10,18 +10,7 @@ index a78e1eb..f8588d9 100644
  #include "http_error.h"
  
  #if __has_include(<httplib.h>)
-@@ -365,6 +366,10 @@ static const HostOverrideState& GetHostOverrideState() {
-     return s;
- }
- 
-+// bbport: The Hunter's Dream backend (gpu/bbnet/thd).
-+extern "C" bool bbthd_enabled();
-+extern "C" void bbthd_add_game_headers(std::vector<std::pair<std::string, std::string>>* headers);
-+
- bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool& is_secure) {
-     const auto& state = GetHostOverrideState();
-     if (state.entries.empty()) {
-@@ -385,6 +390,17 @@ bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool&
+@@ -385,6 +386,17 @@ bool ApplyHostOverride(std::string& scheme, std::string& host, u16& port, bool&
      if (it == state.entries.end()) {
          it = state.entries.find(host);
      }
@@ -39,7 +28,7 @@ index a78e1eb..f8588d9 100644
      if (it == state.entries.end()) {
          it = state.entries.find("*");
      }
-@@ -440,7 +455,12 @@
+@@ -440,7 +452,12 @@
 -// Extract the path-and-query portion from a full URL
 +// Extract the path-and-query portion from a full URL or an origin-form target.
  static std::string ExtractPathFromUrl(const std::string& url) {
@@ -53,7 +42,7 @@ index a78e1eb..f8588d9 100644
          return "/";
      }
      auto authority_start = scheme_end + 3;
-@@ -875,6 +891,9 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
+@@ -875,6 +892,9 @@ static s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_
                           plan.scheme, plan.host);
              }
              cli.enable_server_certificate_verification(verify_server);
@@ -63,7 +52,7 @@ index a78e1eb..f8588d9 100644
              if (config_disabled_verify) {
                  LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled by configuration",
                           plan.scheme, plan.host);
-@@ -1509,7 +1524,10 @@ int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char* url,
+@@ -1509,7 +1529,10 @@ int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char* url,
      auto req = std::make_shared<HttpRequest>();
      req->conn_id = connId;
      req->method = method;
@@ -75,17 +64,6 @@ index a78e1eb..f8588d9 100644
      req->content_length = contentLength;
      req->settings = conn_it->second.settings;
      req->epoll_id = conn_it->second.epoll_id;
-@@ -1745,6 +1768,10 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
-                                                         ? tmpl_user_agent
-                                                         : BuildLibhttpUserAgent(""));
-         }
-+        // bbport: The Hunter's Dream binds the game's requests to the account and its ruleset.
-+        if (bbthd_enabled()) {
-+            bbthd_add_game_headers(&plan.headers);
-+        }
-         // Pull Content-Type out of headers
-         for (const auto& [k, v] : plan.headers) {
-             if (HeaderNameMatches(k, "Content-Type")) {
 diff --git a/a/core/libraries/np/np_manager.cpp b/b/core/libraries/np/np_manager.cpp
 index 4591814..0759787 100644
 --- a/a/core/libraries/np/np_manager.cpp

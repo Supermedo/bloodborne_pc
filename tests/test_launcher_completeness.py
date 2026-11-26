@@ -190,9 +190,9 @@ class LiveTests(unittest.TestCase):
                     self.pump(0.3)
                     self.assertEqual(self.app.current_page, name)
 
-    def test_only_supermedo_and_the_hunters_dream(self):
-        """Since 1.9.5 beta 10 the Online page offers SuperMedo Server and The Hunter's Dream only: no own server
-        (Seamless co-op's own start keeps one: settled_pool), and a saved own server shows SuperMedo Server's."""
+    def test_only_supermedo_server(self):
+        """Since 1.9.5 beta 10 the Online page offers SuperMedo Server only: no own server (Seamless co-op's own
+        start keeps one: settled_pool), and a saved own server shows SuperMedo Server's."""
         self.app.expert_var.set(True)
         self.app.toggle_mode()
         self.app.show('online')

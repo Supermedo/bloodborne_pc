@@ -236,7 +236,9 @@ void ShadNetClient::ReaderThread() {
     while (!m_terminate) {
         u8 hdr[SHAD_HEADER_SIZE];
         if (!RecvN(hdr, SHAD_HEADER_SIZE)) {
-            if (!m_terminate)
+            // bbport: a refused login closes the socket on this thread (HandleLoginReply); that
+            // read failing is no lost connection (error 10038 in reports).
+            if (!m_terminate && m_sock != SHAD_INVALID_SOCK)
                 LOG_WARNING(ShadNet, "Reader header recv failed (recv {}, error {}), disconnecting",
                             m_last_recv_result, m_last_recv_error);
             break;

@@ -150,8 +150,8 @@ SETUP = {'de': {
         'Hardware, in etwa zwei Minuten. Nichts wird versteckt: Jede Seite des Launchers bleibt, um alles von Hand '
         'einzustellen.',
     'What you need': 'Was du brauchst',
-    'Your own Bloodborne game files (CUSA03173, Game of the Year Edition) with the 1.09 update.':
-        'Deine eigenen Bloodborne-Spieldateien (CUSA03173, Game of the Year Edition) mit Update 1.09.',
+    'Your own Bloodborne game files (any edition) with the 1.09 update.':
+        'Deine eigenen Bloodborne-Spieldateien (jede Ausgabe) mit Update 1.09.',
     'Windows 10 or 11 (64-bit) and a graphics card with Vulkan 1.3 and at least 4 GB of video memory.':
         'Windows 10 oder 11 (64 Bit) und eine Grafikkarte mit Vulkan 1.3 und mindestens 4 GB Grafikspeicher.',
     'About 35 GB for the game files and 1 GB for the port, best on an SSD.':
@@ -179,11 +179,13 @@ SETUP = {'de': {
     'above it.':
         'In diesem Ordner liegt kein eboot.bin. Wähle den Ordner, in dem eboot.bin direkt liegt, nicht den darüber.',
     'eboot.bin found.': 'eboot.bin gefunden.',
-    'CUSA03173: the Game of the Year Edition, with The Old Hunters.':
-        'CUSA03173: die Game of the Year Edition, mit The Old Hunters.',
-    '{}: the port is made for CUSA03173, the Game of the Year Edition. Other editions may not work.':
-        '{}: Der Port ist für CUSA03173 gemacht, die Game of the Year Edition. Andere Ausgaben laufen '
-        'möglicherweise nicht.',
+    '{}: a Game of the Year Edition, with The Old Hunters.':
+        '{}: eine Game of the Year Edition, mit The Old Hunters.',
+    '{}: the base game. The Old Hunters, if you own it, comes from its DLC folder (Game files).':
+        '{}: das Grundspiel. The Old Hunters kommt, wenn du es besitzt, aus seinem DLC-Ordner (Spieldateien).',
+    '{}: not a retail release of Bloodborne. The port runs Bloodborne of every region, the Game of the Year editions too.':
+        '{}: keine Verkaufsversion von Bloodborne. Der Port startet Bloodborne aus jeder Region, auch '
+        'die Game of the Year Editions.',
     'Version 01.09: every community patch is available.': 'Version 01.09: Alle Community-Patches sind verfügbar.',
     'Version {}: the game runs at 30 FPS only. Copy everything from the 1.09 update into this folder and replace '
     'the files.':
@@ -236,18 +238,18 @@ SETUP = {'de': {
         'Beim nächsten Mal startet Play Bloodborne.exe das Spiel direkt mit diesen Einstellungen.',
     # ---- saves from other versions ----
     'Saves from other versions': 'Spielstände aus anderen Versionen',
-    "Characters from shadPS4, Awaken's port, bbhost or a PS4 export: found on this PC and copied into this port's "
+    "Characters from shadPS4, Awaken's port or a PS4 export: found on this PC and copied into this port's "
     "saves folder. Your current saves are backed up first.":
-        'Charaktere aus shadPS4, Awakens Port, bbhost oder einem PS4-Export: auf diesem PC gefunden und in den '
+        'Charaktere aus shadPS4, Awakens Port oder einem PS4-Export: auf diesem PC gefunden und in den '
         'Spielstand-Ordner dieses Ports kopiert. Deine aktuellen Spielstände werden vorher gesichert.',
     'Played before?': 'Schon woanders gespielt?',
     'This port: {}, last played {}': 'Dieser Port: {}, zuletzt gespielt {}',
     'This port has no saves yet.': 'Dieser Port hat noch keine Spielstände.',
-    "Searching this PC for saves of shadPS4, Awaken's port and bbhost…":
-        'Suche auf diesem PC nach Spielständen von shadPS4, Awakens Port und bbhost…',
-    "No saves from shadPS4, Awaken's port or bbhost found on this PC. If yours are somewhere else (a backup, a PS4 "
+    "Searching this PC for saves of shadPS4 and Awaken's port…":
+        'Suche auf diesem PC nach Spielständen von shadPS4 und Awakens Port…',
+    "No saves from shadPS4 or Awaken's port found on this PC. If yours are somewhere else (a backup, a PS4 "
     "export), choose their folder.":
-        'Keine Spielstände von shadPS4, Awakens Port oder bbhost auf diesem PC gefunden. Liegen deine woanders '
+        'Keine Spielstände von shadPS4 oder Awakens Port auf diesem PC gefunden. Liegen deine woanders '
         '(ein Backup, ein PS4-Export), wähle ihren Ordner.',
     'no characters': 'keine Charaktere', '1 character': '1 Charakter', '{} characters': '{} Charaktere',
     'last played {}': 'zuletzt gespielt {}', 'Import': 'Importieren', 'Search again': 'Erneut suchen',

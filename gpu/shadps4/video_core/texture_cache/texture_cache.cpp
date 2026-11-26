@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 #include <xxhash.h>
 
@@ -32,6 +37,69 @@ namespace VideoCore {
 
 static constexpr u64 PageShift = 12;
 static constexpr u64 NumFramesBeforeRemoval = 32;
+
+/// bbport: BB_REFRESH_LOG=<MiB> (e.g. 1): every 5 seconds, the images uploaded again from guest
+/// memory with at least that many MiB in the 5 s, by guest address, with why they were dirty:
+/// cpu = a CPU write to their pages, maybe = a write to a page they share (contents hashed and
+/// changed), gpu = the GPU wrote their memory through a buffer. Finds textures that cost the GPU
+/// thread the same upload again and again (a stutter that repeats).
+static void NoteRefresh(const Image& image, ImageFlagBits why, u64 bytes) {
+    static const double min_mib = [] {
+        const char* env = std::getenv("BB_REFRESH_LOG");
+        return env && env[0] ? std::atof(env) : 0.0;
+    }();
+    if (min_mib <= 0.0) {
+        return;
+    }
+    // The image's fields are copied: it may be gone (or moved) by the time the window ends.
+    struct Entry {
+        u64 uploads = 0, bytes = 0;
+        u32 why = 0, width = 0, height = 0, layers = 0, mips = 0;
+        vk::Format format{};
+        bool tiled = false, target = false, storage = false, texture = false;
+    };
+    static std::mutex mutex;
+    static std::unordered_map<VAddr, Entry> entries;
+    static auto window_start = std::chrono::steady_clock::now();
+    std::scoped_lock lock{mutex};
+    Entry& entry = entries[image.info.guest_address];
+    ++entry.uploads;
+    entry.bytes += bytes;
+    entry.why |= static_cast<u32>(why);
+    entry.width = image.info.size.width;
+    entry.height = image.info.size.height;
+    entry.layers = image.info.resources.layers;
+    entry.mips = image.info.resources.levels;
+    entry.format = image.info.pixel_format;
+    entry.tiled = image.info.IsTiled();
+    entry.target = image.usage.render_target || image.usage.depth_target;
+    entry.storage = image.usage.storage;
+    entry.texture = image.usage.texture;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - window_start < std::chrono::seconds(5)) {
+        return;
+    }
+    window_start = now;
+    std::vector<std::pair<VAddr, Entry>> sorted(entries.begin(), entries.end());
+    entries.clear();
+    std::ranges::sort(sorted, [](const auto& a, const auto& b) { return a.second.bytes > b.second.bytes; });
+    for (size_t i = 0; i < std::min<size_t>(sorted.size(), 8); ++i) {
+        const auto& [address, e] = sorted[i];
+        if (e.bytes < min_mib * 1048576.0) {
+            break;
+        }
+        std::printf("Refresh: 0x%llx %ux%u, %u layers, %u mips, %s%s%s%s%s: %llu uploads, "
+                    "%.1f MiB in 5 s (%s%s%s)\n",
+                    static_cast<unsigned long long>(address), e.width, e.height, e.layers, e.mips,
+                    vk::to_string(e.format).c_str(), e.tiled ? " tiled" : "",
+                    e.target ? " target" : "", e.storage ? " storage" : "",
+                    e.texture ? " texture" : "", static_cast<unsigned long long>(e.uploads),
+                    e.bytes / 1048576.0,
+                    e.why & static_cast<u32>(ImageFlagBits::CpuDirty) ? "cpu " : "",
+                    e.why & static_cast<u32>(ImageFlagBits::MaybeCpuDirty) ? "maybe " : "",
+                    e.why & static_cast<u32>(ImageFlagBits::GpuDirty) ? "gpu" : "");
+    }
+}
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                            Vulkan::Runtime& runtime_, AmdGpu::Liverpool* liverpool_,
@@ -157,9 +225,28 @@ void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
 }
 
 void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
-    std::scoped_lock lock{mutex};
     const auto pages_start = PageManager::GetPageAddr(addr);
     const auto pages_end = PageManager::GetNextPageAddr(addr + size - 1);
+    // bbport: the guest's write faults come here, most on pages no image is on (constants,
+    // skinning output), and each took this lock: held by the GPU thread while it registers or
+    // refreshes images, a fault then waited up to milliseconds (Linux stall frames: 90 faults
+    // in 61 ms while 67 images were registered). With no image on the pages there is nothing to
+    // do. An image registered meanwhile is counted before it is tracked; its own protection
+    // keeps the page protected, so the write faults again and comes here with the count set.
+    static const bool skip_empty = [] {
+        const char* env = std::getenv("BB_FAULT_TEX_SKIP");
+        return !env || env[0] != '0';
+    }();
+    if (skip_empty && !AnyImageOnPages(pages_start, pages_end - pages_start)) {
+        BbStats::fault_tex_skips.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    std::unique_lock lock{mutex, std::defer_lock};
+    {
+        BbStats::Timer wait{BbStats::t_fault_tex_wait};
+        lock.lock();
+    }
+    BbStats::Timer held{BbStats::t_fault_tex};
     ForEachImageInRegion(pages_start, pages_end - pages_start, [&](ImageId image_id, Image& image) {
         const auto image_begin = image.info.guest_address;
         const auto image_end = image.info.guest_address + image.info.guest_size;
@@ -665,9 +752,35 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
             image_id = {};
         } else if (image_resolved.info.resources < info.resources) {
             // The image was clearly picked up wrong.
-            FreeImage(image_id);
-            image_id = {};
-            LOG_WARNING(Render_Vulkan, "Image overlap resolve failed");
+            // bbport: it may hold what the GPU drew into it (rainbow tiles on enemies being hit, once
+            // it was freed and made again empty). When the GPU's copy is the current one
+            // (SafeToDownload), with the same size, type and sample count in a compatible format,
+            // resolved at its first level and layer, the new image gets its levels and layers copied
+            // (ExpandImage, as ResolveOverlap does for larger images). Otherwise it is made empty
+            // and takes what is in guest memory, also what the CPU wrote since. Either way the new
+            // image is made for this request, so it is viewed from its first level and layer.
+            const auto& old = image_resolved.info;
+            const bool keep = image_resolved.SafeToDownload() && old.size == info.size &&
+                              old.type == info.type &&
+                              old.num_samples == info.num_samples &&
+                              IsVulkanFormatCompatible(old.pixel_format, info.pixel_format) &&
+                              view_mip <= 0 && view_slice <= 0;
+            LOG_WARNING(Render_Vulkan,
+                        "Image overlap resolve failed: {} {}x{}x{}, {} levels, {} layers (view at "
+                        "level {}, layer {}) -> {} {}x{}x{}, {} levels, {} layers: {}",
+                        vk::to_string(old.pixel_format), old.size.width, old.size.height,
+                        old.size.depth, old.resources.levels, old.resources.layers, view_mip,
+                        view_slice, vk::to_string(info.pixel_format), info.size.width, info.size.height,
+                        info.size.depth, info.resources.levels, info.resources.layers,
+                        keep ? "copied into the new image" : "new image made empty");
+            if (keep) {
+                image_id = ExpandImage(info, image_id); // looks the old image up again itself
+            } else {
+                FreeImage(image_id);
+                image_id = {};
+            }
+            view_mip = -1;
+            view_slice = -1;
         }
     }
     // Create and register a new image
@@ -730,9 +843,15 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
                 return image_ids[i];
             }
         }
-        LOG_WARNING(Render_Vulkan,
-                    "Failed to find exact image match for copy addr={:#x}, size={:#x}", address,
-                    size);
+        // bbport: the first ones and then every 1024th (118 a second in some places of one run,
+        // 87% of all the logs' bytes): nothing reads them one by one.
+        static std::atomic<u64> reported{0};
+        if (const u64 n = reported.fetch_add(1, std::memory_order_relaxed); n < 32 || n % 1024 == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Failed to find exact image match for copy addr={:#x}, size={:#x} "
+                        "({} so far)",
+                        address, size, n + 1);
+        }
     }
     return {};
 }
@@ -848,6 +967,7 @@ void TextureCache::RefreshImage(Image& image) {
     BbPrompts::OnUpload(image.info.guest_address, image.info.mips_layout[0].size, image.info.size.width,
                         image.info.size.height, image.info.resources.levels, image.info.num_bits);
 
+    const ImageFlagBits dirty_why = image.flags & ImageFlagBits::Dirty;
     if (True(image.flags & ImageFlagBits::MaybeCpuDirty) &&
         False(image.flags & ImageFlagBits::CpuDirty)) {
         const u64 hash = MaybeDirtyHash(image);
@@ -919,6 +1039,8 @@ void TextureCache::RefreshImage(Image& image) {
         image.flags &= ~ImageFlagBits::Dirty;
         return;
     }
+    // The whole guest size goes through the buffer cache below, whichever mips are copied.
+    NoteRefresh(image, dirty_why, image.info.guest_size);
 
     scheduler.EndRendering();
 
@@ -963,8 +1085,13 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image_bytes += image.info.guest_size;
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
-    ForEachPage(image.info.guest_address, image.info.guest_size,
-                [this, image_id](u64 page) { page_table[page].push_back(image_id); });
+    ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
+        page_table[page].push_back(image_id);
+        if (page < NumImagePages) {
+            // Before the image is tracked: a fault its protection causes sees the count.
+            std::atomic_ref<u32>(image_page_counts[page]).fetch_add(1, std::memory_order_release);
+        }
+    });
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
@@ -990,6 +1117,9 @@ void TextureCache::UnregisterImage(ImageId image_id) {
             return;
         }
         image_ids.erase(vector_it);
+        if (page < NumImagePages) {
+            std::atomic_ref<u32>(image_page_counts[page]).fetch_sub(1, std::memory_order_release);
+        }
     });
 }
 
@@ -1421,8 +1551,13 @@ void TextureCache::GarbageCollectSamplers() {
         pressured = total_used_samplers >= pressure_gc_samplers;
         aggresive = allow_aggressive && total_used_samplers >= critical_gc_samplers;
         ticks_to_destroy = aggresive ? 160 : pressured ? 80 : 16;
-        ticks_to_destroy = std::min(ticks_to_destroy, gc_tick);
         num_deletions = aggresive ? 40 : pressured ? 20 : 10;
+        // bbport: before the counter has run that long nothing is old enough. The cut-off was
+        // tick 0 then, which took samplers looked up at tick 0 (deadinside28/bloodborne_pc#441).
+        if (gc_tick < ticks_to_destroy) {
+            ticks_to_destroy = gc_tick;
+            num_deletions = 0;
+        }
     };
     const auto clean_up = [&](u64 hash) {
         if (num_deletions == 0) {
@@ -1430,6 +1565,9 @@ void TextureCache::GarbageCollectSamplers() {
         }
         --num_deletions;
         const size_t lru_id = samplers.at(hash).lru_id;
+        // bbport: commands recorded or submitted may still use it: destroyed once the GPU is
+        // done with them (it was destroyed here, at once).
+        scheduler.DeferOperation([dead = std::move(samplers.at(hash))] {});
         samplers.erase(hash);
         sampler_lru_cache.Free(lru_id);
         return false;

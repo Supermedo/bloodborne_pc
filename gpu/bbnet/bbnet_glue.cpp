@@ -58,7 +58,6 @@
 #include "core/libraries/np/np_utility/np_utility.h"
 #include "core/libraries/np/np_web_api/np_web_api.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
-#include "thd/thd.h"
 
 extern "C" {
 int32_t runtime_thread_spawn(void** out, void* PS4_SYSV_ABI (*entry)(void*), void* argument,
@@ -67,18 +66,6 @@ int32_t runtime_thread_join_spawned(void* thread, void** result);
 [[noreturn]] void runtime_thread_exit(void* value);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 }
-
-// The Hunter's Dream backend reads game structures (the player's position for the live map):
-// only from mapped guest memory (bbport).
-namespace BbEngine {
-bool host_read_safe(const void* p, void* out, std::size_t n) {
-    if (!runtime_memory_is_mapped(reinterpret_cast<uintptr_t>(p), n)) {
-        return false;
-    }
-    std::memcpy(out, p, n);
-    return true;
-}
-} // namespace BbEngine
 
 // ---- Kernel ---------------------------------------------------------------------------------
 
@@ -451,28 +438,12 @@ extern "C" void bbnet_configure(const char* app0, const char* serial, const char
 
 namespace Libraries::Np::NpManager { void InitializeRuntime(); }
 extern "C" void bbnet_initialize(void) {
-    if (BbThd::Enabled()) {
-        BbThd::Initialize();
-        return;
-    }
     Libraries::Np::NpManager::InitializeRuntime();
-}
-
-extern "C" void bbnet_set_image(unsigned char* image, uint64_t size) {
-    BbThd::SetImage(image, size);
 }
 
 extern "C" void bbnet_register(void) {
     Core::Loader::SymbolsResolver resolver;
     Core::Loader::SymbolsResolver* sym = &resolver;
-    if (BbThd::Enabled()) {
-        // The Hunter's Dream: its NP and sceNet imports; the game's HTTP stays sceHttp's.
-        BbThd::Register(sym);
-        Libraries::Http::RegisterLib(sym);
-        Libraries::Http2::RegisterLib(sym);
-        Libraries::Ssl2::RegisterLib(sym);
-        return;
-    }
     // The P2P transport's hooks: without them its UDP port was never forwarded by UPnP (a guest
     // could not connect to a host behind a router) and the router's public address went unused.
     Libraries::Net::InstallSystemHooks();

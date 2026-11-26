@@ -3,6 +3,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/image.h"
 #include "vk_fg401_native.h"
+#include "bbport_settings.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -16,9 +17,12 @@
 using namespace Vulkan;
 extern "C" void runtime_restart() { std::abort(); }
 static uint16_t half(float v) { return std::bit_cast<uint16_t>(static_cast<_Float16>(v)); }
-int main() {
+int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     try {
+        if (argc > 2 || (argc == 2 && std::strcmp(argv[1], "4.0.2")))
+            throw std::runtime_error("Optional provider must be 4.0.2");
+        if (argc == 2) BbSettings::SelectFrameGen(BbSettings::FrameGenFsr402);
         constexpr u32 rw = 64, rh = 32, ow = 128, oh = 64, N = 256, Slots = 3;
         constexpr size_t cp = size_t(ow) * oh, ip = size_t(rw) * rh;
         const std::array<size_t, 4> offsets{0, cp * 4, cp * 4 + ip * 4, cp * 8 + ip * 8};

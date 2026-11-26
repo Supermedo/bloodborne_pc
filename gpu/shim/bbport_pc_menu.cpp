@@ -12,6 +12,7 @@
 // calling convention.
 
 #include "bbport_settings.h"
+#include "bbport_pc_fsr.h"
 #include "../bbgpu.h"
 
 #include <algorithm>
@@ -56,12 +57,17 @@ constexpr int ON = 40300, OFF = 40301;        // the game's own On / Off
 // Text ids (scripts/pc_menu.py writes the same): the pages (System line, title, help), each
 // line (name and help), then each line's choice labels.
 constexpr int PAGE_TEXT = 119001, LINE_BASE = 119010;
+constexpr int RETRY_UPSCALER_TEXT = 119109;
+constexpr int RetryUpscaler = BbSettings::UpscalerCount;
 // The opener's Defaults button and its question (the game's), Restart Game on the PC page.
 constexpr int DEFAULTS = 40330, DEFAULTS_QUESTION = 40300, RESTART = 119009;
 constexpr int UPSCALER_TEXT = 119100, PRESET_TEXT = 119110, SHARPNESS_TEXT = 119120,
               FRAME_GEN_TEXT = 119140, MULTIPLIER_TEXT = 119150, OUTPUT_TEXT = 119160,
               FRAME_RATE_TEXT = 119180, FRAME_CAP_TEXT = 119190, FOV_TEXT = 119200,
               LOD_TEXT = 119220, HUD_TEXT = 119230, PROMPTS_TEXT = 119250, RESTART_TEXT = 119260;
+static_assert(UPSCALER_TEXT + BbSettings::UpscalerCount <= RETRY_UPSCALER_TEXT &&
+              RETRY_UPSCALER_TEXT < PRESET_TEXT,
+              "Upscaler/retry text IDs overlap the PC-menu choice blocks");
 
 enum Line : int {
     Upscaler, Quality, Sharpness, FrameGen, Multiplier, Output, FrameRate, FrameCap,
@@ -226,6 +232,16 @@ int NearestFov(int value) {
     return FovSteps[best];
 }
 
+static_assert(FRAME_GEN_TEXT + BbSettings::FrameGenCount <= MULTIPLIER_TEXT,
+              "Frame-generation text IDs overlap the multiplier choice block");
+
+bool FrameGenSupported(int provider) {
+    const auto& s = BbSettings::Get();
+    if (provider == BbSettings::FrameGenDlss) return s.dlssg_max_multiplier > 1;
+    if (BbSettings::IsMlFrameGen(provider)) return s.MlFgSupported(provider);
+    return provider == BbSettings::FrameGenOff || provider == BbSettings::FrameGenFsr3;
+}
+
 // The port's settings as the lines show them.
 void ReadSettings(int32_t* out) {
     const auto& s = BbSettings::Get();
@@ -272,17 +288,57 @@ void DefaultSettings(int32_t* out) {
     out[Restart] = 0;
 }
 
+bool UpscalerSupported(int upscaler) {
+    const auto& s = BbSettings::Get();
+    switch (upscaler) {
+    case BbSettings::UpscalerFsr4: return s.fsr4_supported.load();
+    case BbSettings::UpscalerFsr411:
+    case BbSettings::UpscalerFsr412: return BbPcFsr::Supported(s, upscaler);
+    case BbSettings::UpscalerDlss: return s.dlss_supported.load();
+    default: return true;
+    }
+}
+
 // One changed line to the port's settings. Returns true when bbport.ini should be written.
 bool Apply(Line line, int32_t v) {
     auto& s = BbSettings::Get();
     switch (line) {
-    case Upscaler: s.upscaler = std::clamp(v, 0, BbSettings::UpscalerCount - 1); return true;
+    case Upscaler:
+        if (v == RetryUpscaler) {
+            const int selected = s.upscaler.load();
+            if (s.UpscalerFallbackActive()) BbSettings::SelectUpscaler(selected);
+            // The retry is an action, never an INI value or a repeating selection.
+            SetValue(Upscaler, selected);
+            applied[Upscaler] = selected;
+            return false;
+        }
+        v = std::clamp(v, 0, BbSettings::UpscalerCount - 1);
+        if ((v == BbSettings::UpscalerFsr411 || v == BbSettings::UpscalerFsr412) &&
+            v != s.upscaler) {
+            if (!BbPcFsr::Select(s, v)) {
+                // A stale open list must not replace the saved choice with an unavailable route.
+                const int selected = s.upscaler.load();
+                SetValue(Upscaler, selected);
+                applied[Upscaler] = selected;
+                return false;
+            }
+        }
+        BbSettings::SelectUpscaler(v);
+        return true;
     case Quality: s.preset = std::clamp(v, 0, BbSettings::PresetCount - 1); return true;
     case Sharpness:
         s.sharpen = v > 0;
         if (v > 0) s.sharpness = SharpnessSteps[std::clamp(v, 1, SharpnessCount - 1)];
         return true;
-    case FrameGen: BbSettings::SelectFrameGen(std::clamp(v, 0, BbSettings::FrameGenCount - 1)); return true;
+    case FrameGen:
+        v = std::clamp(v, 0, BbSettings::FrameGenCount - 1);
+        if (v != s.frame_gen && !FrameGenSupported(v)) {
+            SetValue(FrameGen, s.frame_gen);
+            applied[FrameGen] = s.frame_gen;
+            return false;
+        }
+        BbSettings::SelectFrameGen(v);
+        return true;
     case Multiplier: s.frame_gen_multiplier = std::clamp(v, 2, 4); return true;
     case Output: s.output_res = std::clamp(v, 0, BbSettings::OutputCount - 1); return true;
     case FrameRate: s.fps_mode = std::clamp(v, 0, BbSettings::FpsModeCount - 1); return true;
@@ -315,9 +371,21 @@ bool Apply(Line line, int32_t v) {
 // dropdown writes its value as its cursor moves, before it is confirmed (and back on cancel):
 // a value is applied once it has stayed for a while, else browsing the frame generation list
 // created and destroyed providers frame by frame and crashed the driver.
+using Clock = std::chrono::steady_clock;
+constexpr auto Settle = std::chrono::milliseconds(800);
+
+bool ApplySettled(Line line, int32_t value, Clock::time_point now,
+                  int32_t& seen, Clock::time_point& seen_since) {
+    if (value != seen) {
+        seen = value;
+        seen_since = now;
+    }
+    if (value == applied[line] || now - seen_since < Settle) return false;
+    applied[line] = value;
+    return Apply(line, value);
+}
+
 void Applier() {
-    using Clock = std::chrono::steady_clock;
-    constexpr auto Settle = std::chrono::milliseconds(800);
     bool dirty = false;
     auto last_change = Clock::now();
     int32_t seen[LineCount];
@@ -331,13 +399,7 @@ void Applier() {
         const auto now = Clock::now();
         for (int line = 0; line < LineCount; ++line) {
             const int32_t v = Value(line);
-            if (v != seen[line]) {
-                seen[line] = v;
-                seen_since[line] = now;
-            }
-            if (v == applied[line] || now - seen_since[line] < Settle) continue;
-            applied[line] = v;
-            if (Apply(Line(line), v)) {
+            if (ApplySettled(Line(line), v, now, seen[line], seen_since[line])) {
                 dirty = true;
                 last_change = now;
             }
@@ -355,11 +417,10 @@ void LineChoices(Line line, const int32_t* now, Choices& c) {
     switch (line) {
     case Upscaler:
         for (int u = 0; u < BbSettings::UpscalerCount; ++u) {
-            const bool supported = u == BbSettings::UpscalerFsr4 ? s.fsr4_supported.load()
-                                 : u == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                 : u == BbSettings::UpscalerDlss ? s.dlss_supported.load() : true;
+            const bool supported = UpscalerSupported(u);
             if (supported || u == now[Upscaler]) c.Add(u, UPSCALER_TEXT + u);
         }
+        if (s.UpscalerFallbackActive()) c.Add(RetryUpscaler, RETRY_UPSCALER_TEXT);
         break;
     case Quality:
         for (int p = 0; p < BbSettings::PresetCount; ++p) c.Add(p, PRESET_TEXT + p);
@@ -369,8 +430,7 @@ void LineChoices(Line line, const int32_t* now, Choices& c) {
         break;
     case FrameGen:
         for (int f = 0; f < BbSettings::FrameGenCount; ++f) {
-            const bool supported = f == BbSettings::FrameGenDlss ? s.dlssg_max_multiplier > 1
-                                 : f == BbSettings::FrameGenFsr401 ? s.fg401_supported.load() : true;
+            const bool supported = FrameGenSupported(f);
             if (supported || f == now[FrameGen]) c.Add(f, FRAME_GEN_TEXT + f);
         }
         break;

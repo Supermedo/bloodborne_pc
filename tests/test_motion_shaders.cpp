@@ -7,14 +7,16 @@
 #include <setjmp.h>
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "test_motion_varyings.h"
 
+int MotionGpuTest(const std::filesystem::path& dir);
 
-int main(int argc, char** argv) {
+void WriteMotionShaders(const std::filesystem::path& dir, uint64_t params_address,
+                        uint64_t positions_address) {
     using namespace Shader;
-    const std::filesystem::path dir = argc > 1 ? argv[1] : ".";
     std::filesystem::create_directories(dir);
-    MotionVectors::params_address = 0x10000;
-    MotionVectors::positions_address = 0x20000;
+    MotionVectors::params_address = params_address;
+    MotionVectors::positions_address = positions_address;
     for (bool vertex : {true, false}) {
         for (bool motion : {false, true}) {
             Info info{};
@@ -34,7 +36,17 @@ int main(int argc, char** argv) {
             const auto output = vertex ? IR::Attribute::Position0 : IR::Attribute::RenderTarget0;
             for (u32 component = 0; component < 4; ++component) {
                 info.stores.Set(output, component);
-                if (!vertex && component < 2) {
+                if (vertex && component < 2) {
+                    info.loads.Set(IR::Attribute::VertexId, 0);
+                    const auto id = ir.GetAttributeU32(IR::Attribute::VertexId);
+                    const IR::U32 bit = component == 0
+                                            ? IR::U32{ir.BitwiseAnd(id, ir.Imm32(1u))}
+                                            : IR::U32{ir.ShiftRightLogical(id, ir.Imm32(1u))};
+                    const IR::F32 coordinate{ir.ConvertUToF(32, 32, bit)};
+                    ir.SetAttribute(output,
+                                    ir.FPSub(ir.FPMul(coordinate, ir.Imm32(4.0f)), ir.Imm32(1.0f)),
+                                    component);
+                } else if (!vertex && component < 2) {
                     info.loads.Set(IR::Attribute::FragCoord, component);
                     ir.SetAttribute(output, ir.GetAttribute(IR::Attribute::FragCoord, component), component);
                 } else {
@@ -56,7 +68,18 @@ int main(int argc, char** argv) {
                                       (motion ? "-motion.spv" : "-plain.spv"));
             std::ofstream out(path, std::ios::binary);
             out.write(reinterpret_cast<const char*>(code.data()), code.size() * sizeof(u32));
-            if (!out) { return 1; }
+            if (!out) {
+                throw std::runtime_error("shader output failed");
+            }
         }
     }
+}
+
+int main(int argc, char** argv) {
+    TestMotionVaryings();
+    const std::filesystem::path dir = argc > 1 ? argv[1] : ".";
+    if (argc > 2 && std::string(argv[2]) == "--gpu")
+        return MotionGpuTest(dir);
+    Shader::MotionVectors::storage_buffers = std::getenv("BB_OMV_TEST_BDA") == nullptr;
+    WriteMotionShaders(dir, 0x10000, 0x20000);
 }

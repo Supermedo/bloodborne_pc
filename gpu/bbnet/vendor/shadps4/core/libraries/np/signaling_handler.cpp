@@ -37,6 +37,10 @@ constexpr auto kMatching2EstablishDelay = std::chrono::milliseconds(1000);
 constexpr auto kStunPingInterval = std::chrono::seconds(5);
 constexpr s64 kHandshakeConnectTimeoutMs = 30'000;
 constexpr s64 kRelayAfterUs = 4'000'000; // no answer by then: use the shadNet relay
+// An established connection whose peer answered none of our echo pings (1 a second) for this
+// long is dead: the game reusing it for a new summon reached nobody (bbport, 2026-11-07: a dungeon
+// host summoning the same friend again on the next layer, 22 of 31 failed dungeon summons in 16 h).
+constexpr s64 kStaleAfterUs = 5'000'000;
 constexpr s64 kHandshakeRetransmitMs = 500;
 constexpr s64 kKeepaliveIntervalMs = 45'000;
 
@@ -151,6 +155,7 @@ void ProcessSignalingPacket(const void* data, u32 len, u32 from_addr, u16 from_p
             static_cast<s32>(pong.conn_id));
         if (transport_it != NpHandler::GetInstance().GetSignalingState().peer_transports.end()) {
             auto& transport = transport_it->second;
+            transport.last_peer_rx_us = NpSignaling::NowUs();
             const u32 idx =
                 transport.probe_sample_write_index % NpSignaling::PeerTransport::kProbeSampleCount;
             transport.probe_rtt_samples[idx] = rtt_us;
@@ -324,6 +329,29 @@ void SetTransportStateLocked(NpSignaling::PeerTransport& transport,
         new_state == NpSignaling::ConnState::Inactive) {
         transport.handshake_start_us = 0;
     }
+}
+
+// An established connection the peer stopped answering is connected again from the start: the
+// server is asked for the peer's address (it also tells the peer to connect back), a new
+// handshake, and the relay after kRelayAfterUs. True when it was stale.
+bool RestartIfStaleLocked(NpSignaling::PeerTransport& transport, std::string_view peer) {
+    const s64 now = NpSignaling::NowUs();
+    if (transport.state != NpSignaling::ConnState::Established || transport.last_peer_rx_us == 0 ||
+        now - transport.last_peer_rx_us <= kStaleAfterUs) {
+        return false;
+    }
+    LOG_INFO(Lib_NpSignaling,
+             "No answer from '{}' for {} s on the old connection: connecting to them again", peer,
+             (now - transport.last_peer_rx_us) / 1'000'000);
+    SetTransportStateLocked(transport, NpSignaling::ConnState::SendingOffer);
+    transport.transport_established_fired = false;
+    transport.peer_established = false;
+    transport.peer_activated = false;
+    transport.relayed = false;
+    transport.last_handshake_send_us = 0;
+    transport.handshake_start_us = 0;
+    transport.last_echo_ping_us = 0;
+    return true;
 }
 
 s32 AllocateTransportIdLocked() {
@@ -1259,8 +1287,11 @@ void StepPendingConnections() {
 
             // Nothing from the peer a few seconds in: routers block the direct way, so go
             // through the relay on the shadNet server from now on.
+            // bbport (2026-11-02): also when the peer's packets do arrive. Behind a carrier's NAT
+            // (Shiza, local 100.65.x.x) only one way gets through: we heard them, so the relay was
+            // never used, the handshake never finished and the join failed. Not up by now is
+            // reason enough.
             if (!transport.relayed && transport.addr != 0 && transport.handshake_start_us != 0 &&
-                transport.last_peer_rx_us < transport.handshake_start_us &&
                 now - transport.handshake_start_us > kRelayAfterUs) {
                 transport.relayed = true;
                 relay.emplace_back(transport_id, transport.addr);
@@ -1482,6 +1513,7 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
         }
         auto& transport =
             NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+        const bool restarted = RestartIfStaleLocked(transport, peer_online_id_str);
         if (conn_id == 0) {
             conn_id = NpSignaling::AllocateConnectionIdLocked();
             if (conn_id < 0) {
@@ -1521,7 +1553,12 @@ s32 ActivateSig1(NpSignaling::OrbisNpSignalingContextId ctx_id, const OrbisNpId&
                 }
                 start_handshake = true;
             }
-            queue_activation = !was_locally_activated;
+            queue_activation = !was_locally_activated || restarted;
+            if (restarted) {
+                // The game is told again when the new connection is up.
+                ci.sig1_established_event_fired = false;
+                ci.mutual_fired = false;
+            }
         }
 
         NpHandler::GetInstance().GetSignalingState().npid_to_conn[lookup_key] = conn_id;
@@ -1672,6 +1709,7 @@ void StartMatching2(NpMatching2::ContextObject& ctx) {
             }
             auto& transport =
                 NpHandler::GetInstance().GetSignalingState().peer_transports[transport_id];
+            RestartIfStaleLocked(transport, OnlineIdString(member.np_id.handle));
             if (transport.state == NpSignaling::ConnState::WaitOffer) {
                 SetTransportStateLocked(transport, NpSignaling::ConnState::SendingOffer);
             }
@@ -1737,6 +1775,18 @@ void StopMatching2(NpMatching2::ContextObject& ctx, s32 error_code) {
     }
     for (const auto room_id : rooms) {
         StopMatching2(ctx, room_id, error_code);
+    }
+}
+
+// bbport (2026-11-02): a member's connection was kept when it left the room. A transport is found by
+// the peer's Online ID and nothing times out an established one, so a player whose game dropped
+// stayed "connected" for good, and when it joined again the host's game reused the dead
+// connection and kicked the newcomer (rowl666, 9 kicks in 9 minutes, 1.3 s after each join). Its
+// Sig1 connections die with it, so the game is told and a rejoin starts a fresh handshake.
+void StopMatching2Peer(s32 transport_id) {
+    if (transport_id != 0) {
+        CloseTransportAndDispatchDead(transport_id, ORBIS_NP_SIGNALING_ERROR_TERMINATED_BY_PEER,
+                                      ORBIS_NP_MATCHING2_SIGNALING_ERROR_TERMINATED_BY_PEER);
     }
 }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "native_fg401.h"
 #include "fg401_support.h"
+#include "sdk24_fg.h"
 #include "dx12/ffx_api_dx12.h"
 #include "ffx_api.h"
 #include "ffx_api_loader.h"
@@ -80,6 +81,8 @@ struct NativeFg401::Impl {
     HMODULE module{};
     ffxFunctions ffx{};
     ffxContext context{};
+    const FgSdk24::Api* sdk24{};
+    FgSdk24::Version sdk_selected{};
     uint64_t frame_id{};
     ffxCreateBackendDX12Desc backend{};
     ffxOverrideVersion override{};
@@ -197,17 +200,25 @@ struct NativeFg401::Impl {
         Check(list->Reset(allocator, nullptr), "Reset command list");
     }
     void Initialize() {
-        const auto dll = ModuleDirectory() / L"amd_fidelityfx_framegeneration_dx12.dll";
-        module =
-            LoadLibraryExW(dll.c_str(), nullptr,
-                           LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!module)
-            throw std::runtime_error("amd_fidelityfx_framegeneration_dx12.dll is "
-                                     "missing or cannot be loaded");
-        ffxLoadFunctions(&ffx, module);
-        if (!ffx.CreateContext || !ffx.DestroyContext || !ffx.Query || !ffx.Dispatch ||
-            !ffx.Configure)
-            throw std::runtime_error("AMD FG DLL does not export the FidelityFX API");
+        if (config.provider_version != Fg401Version && config.provider_version != Fg402Version)
+            throw std::runtime_error("Invalid ML-FG provider version");
+        const bool use_sdk24 = config.provider_version == Fg402Version;
+        if (use_sdk24) {
+            sdk24 = &FgSdk24::Runtime();
+            ffx = sdk24->functions;
+        } else {
+            const auto dll = ModuleDirectory() / L"amd_fidelityfx_framegeneration_dx12.dll";
+            module =
+                LoadLibraryExW(dll.c_str(), nullptr,
+                               LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+            if (!module)
+                throw std::runtime_error("amd_fidelityfx_framegeneration_dx12.dll is "
+                                         "missing or cannot be loaded");
+            ffxLoadFunctions(&ffx, module);
+            if (!ffx.CreateContext || !ffx.DestroyContext || !ffx.Query || !ffx.Dispatch ||
+                !ffx.Configure)
+                throw std::runtime_error("AMD FG DLL does not export the FidelityFX API");
+        }
         Check(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "Create DXGI factory");
         LUID luid{};
         std::memcpy(&luid, config.adapter_luid, sizeof(luid));
@@ -250,31 +261,35 @@ struct NativeFg401::Impl {
         event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!event)
             throw std::runtime_error("Create fence event failed");
-        uint64_t count{};
-        ffxQueryDescGetVersions versions{};
-        versions.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
-        versions.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
-        versions.device = device;
-        versions.outputCount = &count;
-        if (ffx.Query(nullptr, &versions.header) != FFX_API_RETURN_OK || !count || count > 64)
-            throw std::runtime_error("AMD provider enumeration failed");
-        std::vector<uint64_t> ids(count);
-        std::vector<const char *> names(count);
-        versions.versionIds = ids.data();
-        versions.versionNames = names.data();
-        if (ffx.Query(nullptr, &versions.header) != FFX_API_RETURN_OK)
-            throw std::runtime_error("AMD provider enumeration failed");
         uint64_t chosen{};
-        if (config.provider_version != Fg401Version && config.provider_version != Fg402Version)
-            throw std::runtime_error("Invalid ML-FG provider version");
-        const char *requested = Fg401VersionName(config.provider_version);
-        for (size_t i = 0; i < count; ++i) {
-            std::printf("AMD FG native: provider %s\n", names[i] ? names[i] : "null");
-            if (Fg401ProviderMatches(ids[i], config.provider_version))
-                chosen = ids[i];
+        if (use_sdk24) {
+            sdk_selected = FgSdk24::Select(*sdk24, device);
+            chosen = sdk_selected.id;
+        } else {
+            uint64_t count{};
+            ffxQueryDescGetVersions versions{};
+            versions.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
+            versions.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
+            versions.device = device;
+            versions.outputCount = &count;
+            if (ffx.Query(nullptr, &versions.header) != FFX_API_RETURN_OK || !count || count > 64)
+                throw std::runtime_error("AMD provider enumeration failed");
+            std::vector<uint64_t> ids(count);
+            std::vector<const char *> names(count);
+            versions.versionIds = ids.data();
+            versions.versionNames = names.data();
+            if (ffx.Query(nullptr, &versions.header) != FFX_API_RETURN_OK)
+                throw std::runtime_error("AMD provider enumeration failed");
+            const char *requested = Fg401VersionName(config.provider_version);
+            if (count > ids.size()) throw std::runtime_error("AMD FG provider enumeration changed");
+            for (size_t i = 0; i < count; ++i) {
+                std::printf("AMD FG native: provider %s\n", names[i] ? names[i] : "null");
+                if (Fg401ProviderMatches(ids[i], config.provider_version))
+                    chosen = ids[i];
+            }
+            if (!chosen)
+                throw std::runtime_error(std::string("Required FG provider unavailable: ") + requested);
         }
-        if (!chosen)
-            throw std::runtime_error(std::string("Required FG provider unavailable: ") + requested);
         backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
         backend.device = device;
         override.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
@@ -282,7 +297,8 @@ struct NativeFg401::Impl {
         override.versionId = chosen;
         api_version.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION_VERSION;
         api_version.header.pNext = &override.header;
-        api_version.version = FFX_FRAMEGENERATION_VERSION;
+        // The retained 4.0.1 DLL keeps its original interface version.
+        api_version.version = config.provider_version;
         create.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION;
         create.header.pNext = &api_version.header;
         if (config.async_compute)
@@ -290,6 +306,7 @@ struct NativeFg401::Impl {
         create.displaySize = {config.output_width, config.output_height};
         create.maxRenderSize = {config.render_width, config.render_height};
         create.backBufferFormat = ApiFormat(DXGI_FORMAT(config.color_format));
+        if (use_sdk24) FgSdk24::ConfigureDiagnostics(*sdk24, create);
         const auto rc = ffx.CreateContext(&context, &create.header, nullptr);
         if (rc)
             throw std::runtime_error("FG context creation returned " + std::to_string(rc));
@@ -297,6 +314,11 @@ struct NativeFg401::Impl {
         provider.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
         if (ffx.Query(&context, &provider.header) || !provider.versionName || provider.versionId != chosen)
             throw std::runtime_error("FG context selected an unexpected provider");
+        if (use_sdk24) {
+            FgSdk24::Verify(*sdk24, &context, sdk_selected);
+            FgSdk24::LogMemory(*sdk24, &context);
+            std::printf("AMD FG native: SDK 2.4 public API; runtime fsr24/amd_fidelityfx_framegeneration_dx12.dll\n");
+        }
         std::printf("AMD FG native: ACTIVE %s, %ux%u output, %ux%u depth/motion\n",
                     provider.versionName, config.output_width, config.output_height,
                     config.render_width, config.render_height);

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""UI preflight for the experimental AMD driver routes.
+"""UI preflight for the AMD SDK 2.4 upscaling routes.
 
 The renderer verifies the actual 4.1.2 provider when creating its context.
 fsr4vk files and its Vulkan feature contract apply only to FSR 4.1.1.
@@ -15,24 +15,27 @@ _cache = {}
 
 
 def query_method(port, method, paths=None, env=None, refresh=False):
-    """Check the exact driver provider on the selected GPU without creating FSR buffers."""
+    """Query SDK providers on the selected GPU without creating FSR buffers."""
     port = Path(port)
-    paths = bbport_driver_runtime.discover() if paths is None else paths
-    api = 'vulkan' if method == 'vk' else 'dx12'
-    if not paths.get(api):
-        name = bbport_driver_runtime.DLLS[api]
-        return dict(supported=False, reason='driver', detail=name,
-                    checks=[dict(id='runtime_file', state='fail', detail=name)])
+    api = 'vk' if method == 'vk' else 'dx12'
     exe = port/'bin/bb-gpu-capabilities.exe'
     if not exe.is_file(): exe = port/'out/bb-gpu-capabilities.exe'
+    if not exe.is_file(): exe = port/'out/gpu/bb-gpu-capabilities.exe'
+    environment = dict(os.environ if env is None else env)
+    runtime_dir = Path(environment.get('BB_TEST_FSR24_DIR') or exe.parent/'fsr24')
+    runtime = runtime_dir/('amd_fidelityfx_upscaler_'+api+'.dll')
+    if not runtime.is_file():
+        return dict(supported=False, reason='files', detail=str(runtime.name),
+                    checks=[dict(id='runtime_file', state='fail', detail='SDK 2.4 / '+runtime.name)])
     def stamp(path):
         try:
             value = Path(path).stat()
             return value.st_size, value.st_mtime_ns
         except OSError: return None
-    environment = dict(os.environ if env is None else env)
-    environment['BB_TEST_AMD_VK_RUNTIME' if method == 'vk' else 'BB_TEST_AMD_DX_RUNTIME'] = paths[api]
-    key = (str(exe), stamp(exe), method, paths[api], stamp(paths[api]), environment.get('BB_GPU_ID'))
+    paths = bbport_driver_runtime.discover() if paths is None else paths
+    driver_path = paths.get('vulkan' if method == 'vk' else 'dx12', '')
+    key = (str(exe), stamp(exe), method, str(runtime), stamp(runtime),
+           driver_path, stamp(driver_path) if driver_path else None, environment.get('BB_GPU_ID'))
     if key in _cache and not refresh: return dict(_cache[key])
     try:
         result = subprocess.run([str(exe), '--fsr412-'+('vulkan' if method == 'vk' else 'dx12')], cwd=port, env=environment,
@@ -46,7 +49,7 @@ def query_method(port, method, paths=None, env=None, refresh=False):
             raise ValueError('invalid provider response')
         data = dict(data)
         if isinstance(response.get('gpu'), dict): data['gpu'] = response['gpu']
-        data['checks'] = [dict(id='runtime_file', state='pass', detail=Path(paths[api]).name),
+        data['checks'] = [dict(id='runtime_file', state='pass', detail='SDK 2.4 / '+runtime.name),
                           *data.get('checks', [])]
         _cache[key] = data
         return dict(data)
@@ -83,16 +86,15 @@ def method_status(method, capabilities, paths=None):
             if not interop['supported']:
                 return dict(interop)
         return status
-    paths = bbport_driver_runtime.discover() if paths is None else paths
-    api = 'vulkan' if method == 'vk' else 'dx12'
-    if not paths.get(api):
-        return dict(supported=False, reason='driver', detail=bbport_driver_runtime.DLLS[api])
-    # DLL presence does not establish the provider version or GPU support.
-    return dict(supported=False, reason='check', detail='FSR 4.1.2 provider check missing')
+    # Only a complete native SDK query establishes support; files alone do not.
+    return dict(supported=False, reason='check', detail='FSR 4.1.2 SDK provider check missing')
+
 
 
 def message(status, translate):
     if status['supported']: return ''
+    if status['reason'] == 'files': return translate('Files missing') + ': SDK 2.4'
+    if status['reason'] in ('runtime', 'check'): return translate('Check failed') + ': SDK 2.4'
     key = {'checking': 'FSR 4.1.2: checking support…',
            'hardware': 'FSR 4.1.2 requires an AMD GPU.',
            'driver': 'FSR 4.1.2: update the AMD driver.'}.get(status['reason'], 'FSR 4.1.2: update the AMD driver.')

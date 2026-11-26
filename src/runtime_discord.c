@@ -1,6 +1,7 @@
 /* Discord status (bbport.ini-independent; the launcher's "Show what I'm doing on Discord",
- * BB_DISCORD=0 turns it off): "Playing Bloodborne - Cathedral Ward - Level 34", or the boss during
- * a boss fight, with the time since the game (or the fight) started. It talks to the Discord app's
+ * BB_DISCORD=0 turns it off): "Playing Bloodborne - Cathedral Ward - Level 34 - 12,345 Echoes -
+ * Insight 7", or the boss during a boss fight, with the time since the game (or the fight) started.
+ * BB_DISCORD_STATS=0 leaves the numbers out (the launcher's stats switch). It talks to the Discord app's
  * local pipe (\\.\pipe\discord-ipc-N) itself, no Discord library: a frame is {u32 opcode, u32
  * length, JSON}; opcode 0 is the handshake with the application id, opcode 1 a command
  * (SET_ACTIVITY), opcode 2 Discord closing. No Discord running: nothing happens, another try every
@@ -23,7 +24,7 @@
 #define GAME_DATA_MAN 0x553B130u            /* -> +8 player data (runtime_rebirth.c) */
 #define CURRENT_MAP_LIST 0x553B148u         /* -> +0x10 maps, +0x20 index; entries 0xA0 apart */
 #define BOSS_GAUGE 0x5562878u               /* -> slots 0x14 apart: +0x1658 name id, +0x165C handle */
-enum { LEVEL = 0x90, MAX_NAMES = 512 };
+enum { INSIGHT = 0x84, LEVEL = 0x90, ECHOES = 0x94, MAX_NAMES = 512 };
 
 static unsigned char *image;
 typedef struct { int32_t id; char text[96]; } Name;
@@ -95,10 +96,38 @@ static int32_t current_boss(void) {
         if (read32(gauge + 0x165C + slot * 0x14) != -1) return read32(gauge + 0x1658 + slot * 0x14);
     return -1;
 }
-static int32_t player_level(void) {
+typedef struct { int32_t level, echoes, insight; } Stats;
+
+/* The player's numbers, validated as bloodborne-rpc-main does: every attribute 1-99 and
+ * level = sum - 50, so a half-loaded player or a menu is not shown as stats. */
+static int player_stats(Stats *out) {
+    static const int attribute[] = {0x40, 0x48, 0x58, 0x60, 0x68, 0x70};
     const uint64_t manager = read64((uintptr_t)image + GAME_DATA_MAN);
     const uint64_t player = manager ? read64(manager + 8) : 0;
-    return player ? read32(player + LEVEL) : -1;
+    if (!player) return 0;
+    int sum = 0;
+    for (size_t i = 0; i < sizeof(attribute) / sizeof(attribute[0]); ++i) {
+        const int32_t value = read32(player + attribute[i]);
+        if (value < 1 || value > 99) return 0;
+        sum += value;
+    }
+    out->level = read32(player + LEVEL);
+    if (out->level != sum - 50) return 0;
+    out->echoes = read32(player + ECHOES);
+    out->insight = read32(player + INSIGHT);
+    return out->echoes >= 0 && out->echoes <= 999999999 && out->insight >= 0 && out->insight <= 999;
+}
+
+/* 12345 -> "12,345": a Discord line, not a locale's number format. */
+static void grouped(char *out, size_t size, int32_t value) {
+    char digits[16];
+    const int length = snprintf(digits, sizeof(digits), "%d", value);
+    size_t used = 0;
+    for (int i = 0; i < length && used + 2 < size; ++i) {
+        if (i && (length - i) % 3 == 0) out[used++] = ',';
+        out[used++] = digits[i];
+    }
+    out[used] = 0;
 }
 
 static void json_text(char *out, size_t size, const char *text) {
@@ -169,6 +198,8 @@ static DWORD WINAPI discord_thread(LPVOID application_arg) {
     uint64_t nonce = 0, next_try = 0;
     int said = 0;
     load_names();
+    const char *stats_off = getenv("BB_DISCORD_STATS");
+    const int show_stats = !(stats_off && stats_off[0] == '0');
     char logged[384] = "";
     for (;;) {
         Sleep(2000);
@@ -182,10 +213,12 @@ static DWORD WINAPI discord_thread(LPVOID application_arg) {
         const char *boss_name = boss != -1 ? find(bosses, boss_count, boss) : NULL;
         if (boss != -1) json_text(details, sizeof(details), boss_name ? boss_name : area);
         else if (map) json_text(details, sizeof(details), area);
-        const int32_t level = map ? player_level() : -1;
-        if (level > 0 && level < 1000) {
-            char text[80];
-            snprintf(text, sizeof(text), "%s %d", level_word, (int)level);
+        Stats stats;
+        if (show_stats && map && player_stats(&stats)) {
+            char text[96], echoes[16];
+            grouped(echoes, sizeof(echoes), stats.echoes);
+            snprintf(text, sizeof(text), "%s %d \xE2\x80\xA2 %s Echoes \xE2\x80\xA2 Insight %d",
+                     level_word, (int)stats.level, echoes, (int)stats.insight);
             json_text(state, sizeof(state), text);
         }
         json_text(large, sizeof(large), boss != -1 && map ? area : "Bloodborne");

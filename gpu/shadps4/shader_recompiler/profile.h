@@ -54,6 +54,13 @@ struct Profile {
     bool needs_unorm_fixup{};
     bool needs_clip_distance_emulation{};
     bool supports_shader_stencil_export{};
+    /// bbport: the PS4 GPU's float rules where Vulkan leaves NaN and infinity open (min/max,
+    /// med3, the clamp modifier, legacy multiplies, clamped rcp/rsq, N* compares); BB_GCN_FLOAT=0
+    /// translates without them.
+    bool gcn_float_rules{};
+    /// bbport: float render-target guard (export.cpp, BB_NAN_GUARD): exports to float targets
+    /// turn NaN into 0 and infinities into the format's largest finite value.
+    bool rt_nan_guard{};
 
     bool operator==(const Profile&) const = default;
 };

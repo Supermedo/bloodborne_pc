@@ -2,21 +2,81 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <string_view>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 
+#include "bbport_settings.h"
 #include "common/assert.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_motion_parameters.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Vulkan {
 
 using Shader::Backend::SPIRV::AuxShaderType;
+
+// bbport: the game's screen-space reflections (bbport.ini effect_ssr: a community patch turns on
+// FromSoftware's unfinished effect) march a fixed number of steps (its constants, dword 72) for
+// every pixel of a target half the scene's size, and the march costs more per pixel the larger
+// the scene: on an RTX 5080 the pass took 0.83 ms at a 1080p scene, 1.68 ms at 1440p and 5.0 ms
+// at 4K, most of the frame-rate loss SSR is known for (2026-11-13). The pass then shades blocks of
+// pixels once (VK_KHR_fragment_shading_rate): with SSR on, by the scene's size at start
+// (BB_RENDER_RES, run.py's startup patch), 2x2 from 6 megapixels (a 4K scene's pass shades as
+// often as a 1080p scene's: 82-84 FPS instead of 61-63 in Cathedral Ward on that card, SSR off
+// 96), 2x1 from 3 megapixels (1440p, 3440x1440), every pixel below. BB_SSR_SHADING_RATE=2x2,
+// 2x1, 1x2 or 1x1 (every pixel) chooses instead.
+constexpr u64 ReflectionFragmentShader = 0x6c2323c2;
+
+vk::Extent2D ReflectionShadingRate() {
+    static const vk::Extent2D rate = [] {
+        const char* env = std::getenv("BB_SSR_SHADING_RATE");
+        const std::string_view text = env ? env : "auto";
+        if (text == "2x2") {
+            return vk::Extent2D{2, 2};
+        }
+        if (text == "2x1") {
+            return vk::Extent2D{2, 1};
+        }
+        if (text == "1x2") {
+            return vk::Extent2D{1, 2};
+        }
+        if (text != "auto") {
+            return vk::Extent2D{1, 1};
+        }
+        const auto& settings = BbSettings::Get();
+        bool ssr = false;
+        for (int e = 0; e < BbSettings::EffectCount; ++e) {
+            if (std::string_view{BbSettings::Effects[e].key} == "effect_ssr") {
+                ssr = settings.startup_effects[e];
+            }
+        }
+        const char* scene = std::getenv("BB_RENDER_RES");
+        int width = 0, height = 0;
+        if (!ssr || !scene || std::sscanf(scene, "%dx%d", &width, &height) != 2) {
+            return vk::Extent2D{1, 1};
+        }
+        const double pixels = double(width) * double(height);
+        const vk::Extent2D chosen = pixels >= 6.0e6   ? vk::Extent2D{2, 2}
+                                    : pixels >= 3.0e6 ? vk::Extent2D{2, 1}
+                                                      : vk::Extent2D{1, 1};
+        if (chosen.width > 1) {
+            std::printf("Reflections (SSR): scene %dx%d, the reflection pass shades %ux%u pixel "
+                        "blocks once (BB_SSR_SHADING_RATE=1x1: every pixel)\n",
+                        width, height, chosen.width, chosen.height);
+        }
+        return chosen;
+    }();
+    return rate;
+}
 
 static constexpr std::array LogicalStageToStageBit = {
     vk::ShaderStageFlagBits::eFragment,
@@ -26,6 +86,20 @@ static constexpr std::array LogicalStageToStageBit = {
     vk::ShaderStageFlagBits::eGeometry,
     vk::ShaderStageFlagBits::eCompute,
 };
+
+// bbport: whether the vertex stage hands its clip distances to the fragment stage, at output
+// location 0 (the profile emulates them there: SPIR-V emitter, DefineVertexBlock/DefineOutputs).
+// The emitter's own test, so the answer always matches the compiled vertex shader. Without a
+// pixel shader the pipeline then needs the discard shader; the fragment runtime info it was
+// read from before belonged to whichever draw last had a pixel shader, and is empty when
+// preloading, so the discard shader went missing (geometry past the clip planes drawn) or read
+// a location the vertex shader filled with something else (pixels cut out at random).
+static bool VertexStageEmulatesClipDistances(const Shader::Info* vs,
+                                             const Shader::Profile& profile) {
+    return vs && profile.needs_clip_distance_emulation &&
+           vs->hw_stage == Shader::HwStage::Vertex &&
+           vs->stores.GetAny(Shader::IR::Attribute::ClipDistance);
+}
 
 GraphicsPipeline::GraphicsPipeline(
     const Instance& instance, Scheduler& scheduler, DescriptorHeap& desc_heap,
@@ -51,10 +125,14 @@ GraphicsPipeline::GraphicsPipeline(
         .size = sizeof(Shader::PushData),
     };
 
-    const vk::DescriptorSetLayout set_layout = *desc_layout;
+    std::array<vk::DescriptorSetLayout, 2> set_layouts{*desc_layout, {}};
+    if (key.motion_vectors && Shader::MotionVectors::storage_buffers) {
+        motion_param_layout = CreateMotionParameterLayout(device);
+        set_layouts[1] = *motion_param_layout;
+    }
     const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 1U,
-        .pSetLayouts = &set_layout,
+        .setLayoutCount = motion_param_layout ? 2U : 1U,
+        .pSetLayouts = set_layouts.data(),
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     };
@@ -77,7 +155,7 @@ GraphicsPipeline::GraphicsPipeline(
     const bool is_quad_list = key.prim_type == AmdGpu::PrimitiveType::QuadList;
     const bool clip_discard =
         !infos[u32(Shader::SwStage::Fragment)] &&
-        runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs.clip_distance_emulation;
+        VertexStageEmulatesClipDistances(infos[u32(Shader::SwStage::Vertex)], profile);
     if (!preloading) {
         const auto& fs_info = runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs;
         sdata.multisampling = {
@@ -97,10 +175,12 @@ GraphicsPipeline::GraphicsPipeline(
                     AuxShaderType::PassthroughTES, fs_info);
             }
         }
-        if (clip_discard) {
-            const auto& vs = runtime_infos[static_cast<u32>(Shader::SwStage::Vertex)].hw.vs;
-            sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
-        }
+    }
+    // bbport: preloaded pipelines too. The discard shader is not saved; LoadPipelineStage
+    // restores the vertex stage's runtime info, whose output map it is made from.
+    if (clip_discard) {
+        const auto& vs = runtime_infos[static_cast<u32>(Shader::SwStage::Vertex)].hw.vs;
+        sdata.fragment = Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs.outputs);
     }
 
     if (deferred) {
@@ -433,8 +513,29 @@ void GraphicsPipeline::Build(vk::PipelineCache pipeline_cache, const Serializati
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
-    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+    // bbport: the reflection pass shades blocks of pixels once (ReflectionShadingRate).
+    const Shader::Info* fragment = stages[u32(Shader::SwStage::Fragment)];
+    const vk::Extent2D shading_rate = ReflectionShadingRate();
+    const bool coarse = instance.IsPipelineShadingRateEnabled() && fragment &&
+                        fragment->pgm_hash == ReflectionFragmentShader &&
+                        (shading_rate.width > 1 || shading_rate.height > 1);
+    const vk::PipelineFragmentShadingRateStateCreateInfoKHR shading_rate_ci = {
         .pNext = &pipeline_rendering_ci,
+        .fragmentSize = shading_rate,
+        .combinerOps = std::array{vk::FragmentShadingRateCombinerOpKHR::eKeep,
+                                  vk::FragmentShadingRateCombinerOpKHR::eKeep},
+    };
+    if (coarse) {
+        static std::atomic_flag said = ATOMIC_FLAG_INIT;
+        if (!said.test_and_set()) {
+            std::printf("Reflections (SSR): pass built with %ux%u blocks\n", shading_rate.width,
+                        shading_rate.height);
+        }
+    }
+
+    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+        .pNext = coarse ? static_cast<const void*>(&shading_rate_ci)
+                        : static_cast<const void*>(&pipeline_rendering_ci),
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = !instance.IsVertexInputDynamicState() ? &vertex_input_info : nullptr,
@@ -481,12 +582,12 @@ void GraphicsPipeline::GetVertexInputs(
         attributes.push_back(Attribute{
             .location = attrib.semantic,
             .binding = attrib.semantic,
-            .format = LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt()),
+            .format = LiverpoolToVK::VertexInputFormat(buffer),
             .offset = 0,
         });
         bindings.push_back(Binding{
             .binding = attrib.semantic,
-            .stride = buffer.GetStride(),
+            .stride = LiverpoolToVK::VertexInputStride(buffer),
             .inputRate = step_rate == InstanceIdType::None ? vk::VertexInputRate::eVertex
                                                            : vk::VertexInputRate::eInstance,
         });

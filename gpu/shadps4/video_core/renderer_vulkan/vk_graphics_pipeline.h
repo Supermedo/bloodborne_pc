@@ -44,20 +44,34 @@ struct GraphicsPipelineKey {
     u8 num_samples;
     u8 depth_samples;
     std::array<u8, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
+    // bbport: every byte of the key is a member. The key is hashed, compared and saved as raw
+    // bytes, but a C++ copy need not keep padding: the pipeline cache's own copies of a key
+    // (background build queue, preload jobs, map entries) lost the 4 bytes of tail padding and
+    // took stack bytes there. Such a copy missed its entry, was saved with those bytes, and
+    // the next start could leave the real key with an empty entry: that draw skipped for the
+    // whole session (Bloodborne's motion blur scene copy: a smeared, frozen picture).
+    std::array<u8, 2> unused0;
     u32 mrt_mask;
     u32 motion_vectors = 0;
-    struct {
-        AmdGpu::DepthBuffer::ZFormat z_format : 2;
-        AmdGpu::DepthBuffer::StencilFormat stencil_format : 1;
-        u32 depth_clamp_enable : 1;
+    union { // the u32 makes all 4 bytes part of every copy, unused bits included
+        struct {
+            AmdGpu::DepthBuffer::ZFormat z_format : 2;
+            AmdGpu::DepthBuffer::StencilFormat stencil_format : 1;
+            u32 depth_clamp_enable : 1;
+        };
+        u32 depth_bits;
     };
-    struct {
-        AmdGpu::PrimitiveType prim_type : 5;
-        AmdGpu::PolygonMode polygon_mode : 2;
-        AmdGpu::ClipSpace clip_space : 1;
-        AmdGpu::ProvokingVtxLast provoking_vtx_last : 1;
-        u32 depth_clip_enable : 1;
+    union {
+        struct {
+            AmdGpu::PrimitiveType prim_type : 5;
+            AmdGpu::PolygonMode polygon_mode : 2;
+            AmdGpu::ClipSpace clip_space : 1;
+            AmdGpu::ProvokingVtxLast provoking_vtx_last : 1;
+            u32 depth_clip_enable : 1;
+        };
+        u32 raster_bits;
     };
+    u32 unused1;
 
     GraphicsPipelineKey() {
         std::memset(this, 0, sizeof(*this));
@@ -70,6 +84,13 @@ struct GraphicsPipelineKey {
     void Serialize(Serialization::Archive& ar) const;
     bool Deserialize(Serialization::Archive& ar);
 };
+// No padding anywhere: the members end where the next begins, and the last ends at the end.
+static_assert(offsetof(GraphicsPipelineKey, unused0) ==
+                  offsetof(GraphicsPipelineKey, color_samples) + AmdGpu::NUM_COLOR_BUFFERS &&
+              offsetof(GraphicsPipelineKey, mrt_mask) == offsetof(GraphicsPipelineKey, unused0) + 2 &&
+              offsetof(GraphicsPipelineKey, unused1) + sizeof(u32) == sizeof(GraphicsPipelineKey) &&
+              sizeof(GraphicsPipelineKey) == 352,
+              "GraphicsPipelineKey has padding: hash, compare and save would read it");
 
 class GraphicsPipeline : public Pipeline {
 public:
@@ -127,6 +148,7 @@ private:
 
 private:
     GraphicsPipelineKey key;
+    vk::UniqueDescriptorSetLayout motion_param_layout;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
     std::array<vk::ShaderModule, MaxShaderStages> stage_modules{};
     struct DeferredBuild {

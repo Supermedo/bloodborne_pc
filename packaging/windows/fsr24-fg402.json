@@ -1,0 +1,12 @@
+{
+  "tag": "v2.4.0",
+  "commit": "7539ae8b6568ad29ed78a753404351daf3b5cca7",
+  "files": [
+    {
+      "path": "Kits/FidelityFX/signedbin/amd_fidelityfx_framegeneration_dx12.dll",
+      "bytes": 29679376,
+      "sha256": "e6843252f58b0341a0d80f6a20bc0d840643ee95bc48c22cac08745344577bb6",
+      "blob": "445674331676665f18b5acd1b3c8621629cb0e75"
+    }
+  ]
+}

@@ -18,10 +18,13 @@ typedef struct {
 void bbgpu_register_kernel(void);
 /* Co-op: the game folder and param.sfo identity for the network and PSN libraries. */
 void bbnet_configure(const char *app0, const char *serial, const char *title, const char *app_ver);
-/* The game's code before the patches (The Hunter's Dream backend), then the online session's
- * start (bbnet/bbnet_glue.cpp). */
-void bbnet_set_image(unsigned char *image, uint64_t size);
+/* The online session's start (bbnet/bbnet_glue.cpp). */
 void bbnet_initialize(void);
+/* bbport: the game's image, for the thread snapshots of shim/bbport_hang.cpp. */
+void bbgpu_hang_set_image(unsigned char *image, uint64_t size);
+/* bbport: the game's per-frame constants read values that follow each frame's time
+ * (shim/bbport_frame_rate.cpp). After the patches, while the image is writable. */
+void bbgpu_frame_rate_patch(unsigned char *image, uint64_t size);
 /* Creates window, Vulkan device, presenter and GPU command processor. */
 int bbgpu_init(const BbGpuConfig *config);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
@@ -34,6 +37,8 @@ void bbgpu_dump_guest_writes(void *ucontext);
  * no window exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
 int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
+/* bbport: the game closed the dialog itself (sceImeDialogAbort): the box on screen closes. */
+void bbgpu_text_input_cancel(void);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
 /* PC Settings in the game's System menu (gpu/shim/bbport_pc_menu.cpp, scripts/pc_menu.py): the
@@ -52,6 +57,9 @@ int bbgpu_pc_menu_yes(void *page);
 /* 1 while the game should be silent: bbport.ini mute_unfocused is on and the window does not
  * have focus. Safe from any thread (the audio ports read it for every buffer). */
 int bbgpu_audio_muted(void);
+/* A trophy the game just unlocked for the first time (0 = platinum): the in-game notice, as the
+ * console shows it (gpu/shim/bbport_overlay.cpp). Safe from any thread, also without a window. */
+void bbgpu_trophy_unlocked(int id);
 /* Button prompts (gpu/shim/bbport_prompts.cpp): what each of the game's key-guide icons shows
  * on keyboard and mouse, one string per icon in bbport_prompt_icons.h's order ("e",
  * "lshift+leftbutton", "w a s d", "mouse", "" for nothing). Draws them; safe from any thread. */

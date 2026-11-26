@@ -178,9 +178,17 @@ class ProfileTests(unittest.TestCase):
         settings = profile(rate('amd-rx-9070-xt', 'AMD Ryzen 7 5800X 8-Core Processor', 32))
         self.assertEqual(settings['output_res'], '2560x1440')
         self.assertEqual((settings['upscaler'], settings['preset'], settings['fps_mode']), ('fsr4', '1', 'uncap'))
-        self.assertEqual(settings['model_lod'], '-2')
+        self.assertEqual(settings['model_lod'], '0')
         self.assertTrue(settings['object_motion'] and settings['effect_ssao'])
         self.assertFalse(settings['effect_game_aa'])
+
+    def test_highest_model_detail_is_never_chosen_automatically(self):
+        for card in hardware.GPU_LIST:
+            for display in ((1920, 1080), (2560, 1440), (3840, 2160)):
+                for goal in hardware.GOALS:
+                    settings = profile(hardware.assess(card, hardware.cpu_from_name('AMD Ryzen 7 9800X3D'), 64),
+                                       display, goal=goal)
+                    self.assertNotEqual(settings['model_lod'], '-2', (card.label, display, goal))
 
     def test_four_gigabyte_cards_follow_the_website(self):
         settings = profile(rate('nvidia-gtx-1650', 'Intel(R) Core(TM) i5-9400F CPU @ 2.90GHz', 16), (1920, 1080))
@@ -268,8 +276,8 @@ class GoalTests(unittest.TestCase):
     def test_a_strong_pc(self):
         r = rate('amd-rx-9070-xt', 'AMD Ryzen 7 5800X 8-Core Processor', 32)
         smooth, balanced, quiet = (profile(r, goal=g) for g in hardware.GOALS)
-        self.assertEqual((smooth['preset'], smooth['fps_mode'], smooth['model_lod']), ('1', 'uncap', '-2'))
-        self.assertEqual((balanced['preset'], balanced['fps_mode'], balanced['model_lod']), ('0', '60', '-2'))
+        self.assertEqual((smooth['preset'], smooth['fps_mode'], smooth['model_lod']), ('1', 'uncap', '0'))
+        self.assertEqual((balanced['preset'], balanced['fps_mode'], balanced['model_lod']), ('0', '60', '0'))
         self.assertEqual((quiet['preset'], quiet['fps_mode'], quiet['model_lod']), ('2', '60', '0'))
         self.assertTrue(smooth['object_motion'] and balanced['object_motion'])
         self.assertFalse(quiet['object_motion'])

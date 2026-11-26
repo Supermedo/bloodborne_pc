@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/fsr_support_cache.h"
 
 #define TRACY_VK_USE_SYMBOL_TABLE
 #include <tracy/TracyVulkan.hpp>
@@ -23,6 +24,14 @@ namespace Vulkan {
 /// bbport: an allocation the VRAM budget refused, made past it instead (system memory if need
 /// be). Logged once per kind ("image", "buffer").
 void NoteOverBudget(const char* what);
+
+/// bbport: the shading rate of the game's screen-space reflection pass (vk_graphics_pipeline.cpp);
+/// {1, 1} = every pixel.
+vk::Extent2D ReflectionShadingRate();
+inline bool ReflectionShadingRateWanted() {
+    const vk::Extent2D rate = ReflectionShadingRate();
+    return rate.width > 1 || rate.height > 1;
+}
 
 class Instance {
 public:
@@ -139,6 +148,16 @@ public:
 
     /// bbport: prints the driver's fault report after a device loss (VK_EXT_device_fault), once.
     void ReportDeviceLost(const char* where) const;
+
+    /// Returns true if VK_KHR_maintenance5 is supported
+    bool IsMaintenance5Supported() const {
+        return maintenance_5;
+    }
+
+    /// Returns true if VK_KHR_maintenance6 is supported
+    bool IsMaintenance6Supported() const {
+        return maintenance_6;
+    }
 
     /// Returns true if VK_KHR_maintenance8 is supported
     bool IsMaintenance8Supported() const {
@@ -311,6 +330,8 @@ public:
     int Fsr411NativeStatus() const { return native_fsr411_status; }
     int FsrDx12InteropStatus() const { return fsr_dx12_interop_status; }
     int Fsr4VkStatus() const { return fsr4vk_status; }
+    bool IsFsr412VulkanDeviceReady() const { return fsr412_vulkan_device_ready; }
+    FsrSupportCache& Fsr412SupportCache() const { return fsr412_support_cache; }
     bool IsFg401InteropSupported() const { return fg401_interop; }
     bool IsFsr4VkSupported() const { return fsr4vk; }
     bool IsRobustBufferAccessEnabled() const { return features.robustBufferAccess; }
@@ -325,6 +346,13 @@ public:
         return present_id;
     }
 
+    /// bbport: a pipeline may shade blocks of pixels once (VK_KHR_fragment_shading_rate,
+    /// pipelineFragmentShadingRate); enabled only when the reflection pass asks for it
+    /// (vk_graphics_pipeline.cpp ReflectionShadingRate).
+    bool IsPipelineShadingRateEnabled() const {
+        return pipeline_shading_rate;
+    }
+
     /// bbport: NVIDIA Reflex (VK_NV_low_latency2) is enabled.
     bool IsNvLowLatencyEnabled() const {
         return nv_low_latency;
@@ -333,6 +361,16 @@ public:
     /// bbport: AMD Anti-Lag 2 (VK_AMD_anti_lag) is enabled.
     bool IsAmdAntiLagEnabled() const {
         return amd_anti_lag;
+    }
+
+    /// bbport: GPU checkpoints (vk_checkpoints.cpp): NVIDIA's diagnostic checkpoints are enabled.
+    bool HasNvCheckpoints() const {
+        return nv_checkpoints;
+    }
+
+    /// bbport: GPU checkpoints: AMD's buffer markers are enabled.
+    bool HasAmdBufferMarker() const {
+        return amd_buffer_marker;
     }
 
     /// Returns the vendor ID of the physical device
@@ -536,7 +574,7 @@ public:
 private:
     Instance(const Frontend::WindowSystemInfo&, s32, bool, bool);
     /// Creates the logical device opportunistically enabling extensions
-    bool CreateDevice();
+    bool CreateDevice(bool presentation);
 
     /// Creates the VMA allocator handle
     void CreateAllocator();
@@ -602,15 +640,19 @@ private:
     bool shader_atomic_float2{};
     bool workgroup_memory_explicit_layout{};
     bool maintenance_5{};
+    bool maintenance_6{};
     bool device_fault{};
     bool maintenance_8{};
     bool attachment_feedback_loop{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};
+    bool pipeline_shading_rate{};
     bool present_id{};
     bool nv_low_latency{};
     bool amd_anti_lag{};
+    bool nv_checkpoints{};
+    bool amd_buffer_marker{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
     bool fsr4vk{};
@@ -620,6 +662,8 @@ private:
     bool native_fsr411_async{};
     bool native_fsr411{}; // Windows: AMD's DX12 runtime through shared GPU memory
     int native_fsr411_status{5}, fsr_dx12_interop_status{5}, fsr4vk_status{5};
+    bool fsr412_vulkan_device_ready{};
+    mutable FsrSupportCache fsr412_support_cache;
     bool supports_memory_budget{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""How the launcher opens HTTPS: The Hunter's Dream (sign-in, Test connection, players online),
+"""How the launcher opens HTTPS: the online server (sign-in, Test connection, parties),
 GitHub (updates, Other versions) and the downloads all go through urlopen() here.
 
 1.9.5 beta 2: "Sign in with Discord" and "Test connection" failed on players' PCs with "certificate
-verify failed: certificate has expired" although thehuntersdream.com sends a valid chain (up to ISRG
+verify failed: certificate has expired" although the server sends a valid chain (up to ISRG
 Root X1) and other PCs connected. Python's default context on Windows loads the certificates of the
 Windows ROOT and CA stores as they are, and OpenSSL always takes an issuer from those before the one the
 server sends (X509_V_FLAG_TRUSTED_FIRST, which cannot be turned off since OpenSSL 1.1.0). Windows adds
@@ -45,13 +45,40 @@ from datetime import datetime, timezone
 L = None  # bbport_launcher_win, set by bind()
 
 # Hosts whose certificates come from one authority: a certificate from another one means something on
-# the PC answers in the server's place.
-EXPECTED_ISSUERS = {'thehuntersdream.com': "Let's Encrypt"}
+# the PC answers in the server's place. None listed at present.
+EXPECTED_ISSUERS = {}
 
 
 def bind(module):
     global L
     L = module
+
+
+# ---- routes: a host reached through another address ---------------------------------------------
+# The Russia route (Online page): the launcher's connections to the SuperMedo hosts go to a relay that
+# forwards them to the server, for players whose network blocks the server's own address. Only the
+# address changes: TLS still names the host and checks its certificate, HTTP still sends its Host.
+_routes = {}
+_create_connection = socket.create_connection
+
+
+def set_routes(routes):
+    """{host: address} from now on; {} for none."""
+    global _routes
+    _routes = {str(host).lower(): str(address) for host, address in (routes or {}).items()}
+
+
+def routed(address):
+    """(host, port) as it is connected to: a routed host's address in its place."""
+    host, port = address[0], address[1]
+    return (_routes.get(str(host).lower(), host), port) + tuple(address[2:])
+
+
+def _routed_connection(address, *args, **kwargs):
+    return _create_connection(routed(address), *args, **kwargs)
+
+
+socket.create_connection = _routed_connection
 
 
 def _(*texts):

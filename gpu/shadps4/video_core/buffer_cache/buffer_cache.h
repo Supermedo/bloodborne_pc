@@ -64,6 +64,12 @@ public:
         return &gds_buffer;
     }
 
+    /// bbport: 16 zero bytes for draws without index memory (null without VK_KHR_maintenance6
+    /// support only).
+    [[nodiscard]] const Buffer* GetNullIndexBuffer() const noexcept {
+        return null_index_buffer.get();
+    }
+
     /// Retrieves the device local DBA page table buffer.
     [[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept {
         return bda_pagetable_buffer.get();
@@ -89,6 +95,13 @@ public:
 
     /// bbport: a guest write fault at `device_addr` was handled; unprotect its neighbourhood.
     void ExtendWriteFault(VAddr device_addr);
+
+    /// bbport: a guest write fault: invalidates the range and unprotects its neighbourhood with
+    /// it in one protection change (MemoryTracker::InvalidateWriteFault).
+    void InvalidateWriteFault(VAddr device_addr, u64 size, bool assume_locks);
+
+    /// bbport: bytes unprotected around a guest write fault (BB_FAULT_WINDOW KiB; 0 when off).
+    static u64 FaultWindow();
 
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool assume_locks = false);
@@ -232,6 +245,7 @@ private:
 
     StreamBuffer stream_buffer;
     Buffer gds_buffer;
+    std::unique_ptr<Buffer> null_index_buffer;
     RangeSet gpu_modified_ranges;
 
     std::unique_ptr<FaultManager> fault_manager;

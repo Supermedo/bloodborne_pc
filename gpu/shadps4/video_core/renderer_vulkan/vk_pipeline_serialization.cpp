@@ -24,9 +24,11 @@ namespace Serialization {
 // GPU rollback to 1.8.2's code took them back to 7, 7, 5, and a cache another build wrote into
 // the same folder then passed as this build's.
 // Projection jitter needs recompiled vertex shaders, including for existing caches.
-static constexpr u32 ShaderBinaryVersion = 13u;
-static constexpr u32 ShaderMetaVersion = 9u;
-static constexpr u32 PipelineKeyVersion = 7u;
+// 1.9.8.5 beta 2 used 15, 9, 8. Now: GCN float rules and the float render-target guard in the
+// shaders, vertex shaders paired only with the same binding base (StageSpecialization).
+static constexpr u32 ShaderBinaryVersion = 16u;
+static constexpr u32 ShaderMetaVersion = 10u;
+static constexpr u32 PipelineKeyVersion = 9u;
 
 // bbport: shader binaries carry no version of their own, so their names do: a build with another
 // version writes its binaries beside these instead of over them (where a shader's metadata
@@ -140,7 +142,12 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
         return false;
     }
 
-    fetch_shader_data = spec.fetch_shader_data;
+    // bbport: only a stage with a fetch shader sets it, as the run-time path does
+    // (PipelineCache::RefreshGraphicsStages). The geometry stage loads after the vertex stage and
+    // has none, so it cleared the vertex stage's: preloaded geometry pipelines read no vertices.
+    if (spec.fetch_shader_data) {
+        fetch_shader_data = spec.fetch_shader_data;
+    }
     return true;
 }
 
@@ -387,6 +394,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         }
     }
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+    // bbport: the stage's runtime info, as the draw that compiled it had it. The preload left
+    // it empty, and the discard shader of a pipeline without a pixel shader is made from the
+    // vertex stage's output map (GraphicsPipeline).
+    sel.runtime_infos[stage] = it_pgm.value()->modules[perm_idx].spec.runtime_info;
 
     sel.infos[stage] = &it_pgm.value()->info;
     sel.modules[stage] = module;
@@ -472,24 +483,33 @@ void PipelineCache::WarmUp() {
             Serialization::Archive ar{std::move(data)};
             Serialization::Reader pldata{ar};
 
-            u32 version{};
-            pldata.Read(version);
-            if (version != Serialization::PipelineKeyVersion) {
-                return;
-            }
+            // bbport: a damaged key or shader record (Serialization::CorruptData) is skipped
+            // like a stale one; the pipeline is compiled again when the game uses it (from
+            // Jgamrot/yharnam-pc a19f1545).
+            try {
+                u32 version{};
+                pldata.Read(version);
+                if (version != Serialization::PipelineKeyVersion) {
+                    return;
+                }
 
-            u32 is_compute{};
-            pldata.Read(is_compute);
+                u32 is_compute{};
+                pldata.Read(is_compute);
 
-            bool result{};
-            if (is_compute) {
-                result = LoadComputePipeline(ar);
-            } else {
-                result = LoadGraphicsPipeline(ar);
-            }
+                bool result{};
+                if (is_compute) {
+                    result = LoadComputePipeline(ar);
+                } else {
+                    result = LoadGraphicsPipeline(ar);
+                }
 
-            if (result) {
-                ++num_pipelines;
+                if (result) {
+                    ++num_pipelines;
+                }
+            } catch (const std::exception&) {
+                sel.infos.fill(nullptr);
+                sel.modules.fill(nullptr);
+                sel.fetch_shader.reset();
             }
         });
 
@@ -630,6 +650,12 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
     srt.Read(this, sizeof(*this));
 
     if (walker_func_size) {
+        // bbport: a size from a damaged record: never look at bytes past its end (from
+        // Jgamrot/yharnam-pc a19f1545).
+        if (walker_func_size > ar.Remaining()) {
+            walker_func = nullptr;
+            throw Serialization::CorruptData{};
+        }
         walker_func = RegisterWalkerCode(ar.CurrPtr(), walker_func_size);
         ar.Advance(walker_func_size);
     }

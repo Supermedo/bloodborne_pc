@@ -116,7 +116,9 @@ int CheckP2PBindAddress(const OrbisNetSockaddr& addr, P2PKind kind) {
         return ORBIS_NET_EADDRNOTAVAIL;
     }
     if (kind == P2PKind::Datagram) {
-        return in.sin_port == 0 ? ORBIS_NET_EADDRNOTAVAIL : 0;
+        // The UDP port is the shared transport's, so 0 means that one: BBSC's P2P channel binds its vport
+        // with sin_port 0, and refused here (EADDRNOTAVAIL) it gave up and sent everything through its relay.
+        return 0;
     }
     // TODO: the PS4 only accepts 3658. The configured port is accepted too, for tests and setups
     // that change it.

@@ -234,8 +234,8 @@ std::array<std::array<float, 4>, 3> CameraMotion::TaaDepthParameters() const noe
             {transform[8], transform[9], transform[10], transform[11]}};
 }
 
-vk::ImageView CameraMotion::ObjectMotionView() const noexcept {
-    return object_motion && object_motion->Enabled() ? object_motion->View() : vk::ImageView{};
+vk::ImageView CameraMotion::ObjectMotionView(u32 width, u32 height) const noexcept {
+    return object_motion ? object_motion->CurrentView(width, height) : vk::ImageView{};
 }
 
 vk::Image CameraMotion::ObjectMotionImage(u32 width, u32 height) const noexcept {

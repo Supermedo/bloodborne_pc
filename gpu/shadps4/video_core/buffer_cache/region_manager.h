@@ -126,6 +126,35 @@ public:
         UpdateProtection<false, false>();
     }
 
+    /// bbport: a guest write fault on pages holding no GPU-modified data: marks them, and the
+    /// other pages of the window that are protected for CPU writes and hold no GPU-modified
+    /// data, CPU-modified and unprotects them all in one protection change. Faulting the page
+    /// and then extending the window took the lock twice and changed the protection two or
+    /// three times (the page, then the window on either side of it), and other faults in the
+    /// region waited for each. The access lies within the window, inside this region.
+    void OnWriteFault(VAddr addr, u64 size, VAddr window_addr, u64 window_size) {
+        const size_t offset = addr - cpu_addr;
+        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page =
+            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
+            return;
+        }
+        CountWriteFaults(start_page, end_page);
+        cpu.SetRange(start_page, end_page);
+        if (window_size != 0) {
+            const size_t window_offset = window_addr - cpu_addr;
+            const size_t window_start = window_offset / TRACKER_BYTES_PER_PAGE;
+            const size_t window_end =
+                std::min<size_t>(NUM_PAGES_PER_REGION,
+                                 Common::DivCeil(window_offset + window_size, TRACKER_BYTES_PER_PAGE));
+            if (window_start < window_end) {
+                cpu |= RegionBits(~(gpu | writeable), window_start, window_end);
+            }
+        }
+        UpdateProtection<false, false>();
+    }
+
     /**
      * Loop over each page in the given range, turn off those bits and notify the tracker if
      * needed. Call the given function on each turned off range.

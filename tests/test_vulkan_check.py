@@ -152,7 +152,7 @@ class RunLogTests(unittest.TestCase):
                          r'Vulkan: the drivers it loads are limited by VK_ICD_FILENAMES=C:\amd\amd-vulkan64.json; '
                          'VK_LOADER_DRIVERS_DISABLE=*nvidia*')
         source = (ROOT / 'run.py').read_text(encoding='utf-8')
-        self.assertLess(source.index('prepare_driver_environment(env)\n    note = vulkan_driver_note(env)'),
+        self.assertLess(source.index('note = vulkan_driver_note(env)'),
                         source.index('probe = Path('))  # before anything can stop the start
         sys.path.insert(0, str(ROOT / 'launcher'))
         import bbport_help

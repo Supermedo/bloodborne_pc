@@ -82,6 +82,13 @@ struct SwVertexRuntimeInfo {
 /// clip-space positions per referenced vertex and read the previous frame's; the
 /// fragment shader writes the screen-space difference to an extra color attachment.
 struct MotionVectors {
+    static constexpr u32 ParamSlots = 1 + 4 * 8192;
+    static constexpr u32 PositionsPerHalf = 4u << 20;
+    static constexpr u32 PositionSlots = 1 + 2 * PositionsPerHalf;
+    static constexpr u32 ParamDescriptorSet = 1, ParamBinding = 0;
+    static constexpr u32 SafeCurrentLocation = 24, SafePreviousLocation = 25;
+    // Fixed before motion pipelines are compiled; the ordinary setting still enables OMV.
+    static inline bool storage_buffers = false;
     static constexpr u32 CurrentLocation = 30;  ///< varying: current clip position
     static constexpr u32 PreviousLocation = 31; ///< varying: previous clip position, z = valid
     static constexpr u32 Output = 7;            ///< color attachment index

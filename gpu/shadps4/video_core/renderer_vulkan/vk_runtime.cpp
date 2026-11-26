@@ -392,12 +392,14 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
     const u32 num_layers = std::min(src->info.resources.layers, dst->info.resources.layers);
-    ASSERT(src->info.resources.layers == dst->info.resources.layers && num_mips == 1);
+    // bbport: every level is copied (asserted one level before; from Jgamrot/yharnam-pc
+    // f62b114e, upstream shadPS4).
+    ASSERT(src->info.resources.layers == dst->info.resources.layers);
 
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
 
-    vk::BufferImageCopy buffer_copy = {
+    const vk::BufferImageCopy buffer_copy = {
         .bufferOffset = offset,
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
@@ -410,7 +412,20 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         .imageOffset = {0, 0, 0},
         .imageExtent = {src->info.size.width, src->info.size.height, src->info.size.depth},
     };
-    const auto copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
+    u64 copy_size = BufferImageCopySize(buffer_copy, src->info.pixel_format);
+    boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
+    buffer_copies.push_back(buffer_copy);
+    for (u32 mip = 1; mip < num_mips; ++mip) {
+        auto mip_copy = buffer_copy;
+        mip_copy.bufferOffset = Common::AlignUp(offset + copy_size, 16);
+        mip_copy.imageSubresource.mipLevel = mip;
+        mip_copy.imageExtent = vk::Extent3D{std::max(src->info.size.width >> mip, 1u),
+                                            std::max(src->info.size.height >> mip, 1u),
+                                            std::max(src->info.size.depth >> mip, 1u)};
+        copy_size =
+            mip_copy.bufferOffset - offset + BufferImageCopySize(mip_copy, src->info.pixel_format);
+        buffer_copies.push_back(mip_copy);
+    }
 
     scheduler.EndRendering();
 
@@ -424,13 +439,15 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
         FlushBarriers();
     }
 
-    const auto download_copy = buffer_copy;
-    buffer_copy.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    const auto download_copies = buffer_copies;
+    for (auto& copy : buffer_copies) {
+        copy.imageSubresource.aspectMask = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    }
     scheduler.Record([src_image = src->GetImage(), dst_image = dst->GetImage(),
-                      handle = buffer->Handle(), download_copy,
-                      upload_copy = buffer_copy](vk::CommandBuffer cmdbuf) {
+                      handle = buffer->Handle(), download_copies,
+                      upload_copies = buffer_copies](vk::CommandBuffer cmdbuf) {
         cmdbuf.copyImageToBuffer(src_image, vk::ImageLayout::eTransferSrcOptimal, handle,
-                                 download_copy);
+                                 download_copies);
         const vk::MemoryBarrier2 post_copy_barrier = {
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
             .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -443,7 +460,7 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
             .pMemoryBarriers = &post_copy_barrier,
         });
         cmdbuf.copyBufferToImage(handle, dst_image, vk::ImageLayout::eTransferDstOptimal,
-                                 upload_copy);
+                                 upload_copies);
     });
 
     dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
@@ -511,7 +528,7 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
             CopyImage(src, dst);
         } else {
             // Perform depth from/to color copy using the intermediate copy buffer.
-            // bbport: sized for these images (one level of the source; an image's allocation
+            // bbport: sized for these images (every level of the source; an image's allocation
             // is at least that) instead of 128 MiB, which then stayed in VRAM for a minute.
             const u64 copy_buffer_size = Common::AlignUp(
                 std::max<u64>(src->GetHostImageSize(), dst->GetHostImageSize()), 1_MB);

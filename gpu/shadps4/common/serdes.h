@@ -7,9 +7,18 @@
 #include "common/types.h"
 
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace Serialization {
+
+/// bbport: a damaged cache record (a file cut short or overwritten) used to stop the game at
+/// start-up, either through the assertion here or through a length read from it that asked for
+/// gigabytes (an uncaught C++ exception). Reading past the end of a record now throws this
+/// instead, and the cache preload skips that record (from Jgamrot/yharnam-pc a19f1545).
+struct CorruptData : std::runtime_error {
+    CorruptData() : std::runtime_error{"Invalid or corrupted deserialization container/shader cache"} {}
+};
 
 template <typename T>
 concept Container = requires(T t) {
@@ -41,9 +50,15 @@ struct Archive {
         return container.data() + offset;
     }
 
+    /// Bytes left to read.
+    [[nodiscard]] size_t Remaining() const {
+        return container.size() - offset;
+    }
+
     void Advance(size_t size) {
-        ASSERT_MSG(offset + size <= container.size(),
-                   "Invalid or corrupted deserialization container/shader cache");
+        if (size > Remaining()) {
+            throw CorruptData{};
+        }
         offset += size;
     }
 
@@ -105,8 +120,9 @@ struct Writer {
 struct Reader {
     template <typename T>
     void Read(T* ptr, size_t size) {
-        ASSERT_MSG(ar.offset + size <= ar.container.size(),
-                   "Invalid or corrupted deserialization container/shader cache");
+        if (size > ar.Remaining()) {
+            throw CorruptData{};
+        }
         std::memcpy(reinterpret_cast<void*>(ptr), ar.CurrPtr(), size);
         ar.Advance(size);
     }
@@ -121,7 +137,11 @@ struct Reader {
     void Read(auto& v) {
         size_t num_elements{};
         Read(num_elements);
-        for (int i = 0; i < num_elements; ++i) {
+        // Every element takes at least one byte: a larger count is a damaged record.
+        if (num_elements > ar.Remaining()) {
+            throw CorruptData{};
+        }
+        for (size_t i = 0; i < num_elements; ++i) {
             v.emplace_back();
             Read(v.back());
         }
@@ -130,6 +150,9 @@ struct Reader {
     void Read(std::string& s) {
         size_t length{};
         Read(length);
+        if (length > ar.Remaining()) {
+            throw CorruptData{};
+        }
         s.resize(length);
         Read(s.data(), length);
     }

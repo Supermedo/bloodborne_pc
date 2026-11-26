@@ -785,6 +785,35 @@ vk::Format TrySurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat
     return surface_format_table[GetSurfaceFormatTableIndex(data_format, num_format)];
 }
 
+// bbport: vertex attributes whose V# has the invalid data format: a zeroed V#, or the null one
+// GetSharp hands out when it can read none. The guest's shader reads nothing through them (a V#
+// without records, its components swizzled to zero), but the attribute became a
+// VK_FORMAT_UNDEFINED vertex input, which Vulkan does not allow; NVIDIA lost the device on such
+// draws. It gets a four-component 32-bit format of its own number class instead, the type the
+// shader declares the input with (GetAttributeType), and stride 0: a draw then reads one
+// harmless element (zeros from the null buffer such a V# is bound to) for every vertex.
+static bool DescribesNoData(const AmdGpu::Buffer& buffer) {
+    return buffer.GetDataFmt() == AmdGpu::DataFormat::FormatInvalid;
+}
+
+vk::Format VertexInputFormat(const AmdGpu::Buffer& buffer) {
+    if (!DescribesNoData(buffer)) {
+        return SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
+    }
+    switch (AmdGpu::GetNumberClass(buffer.GetNumberFmt())) {
+    case AmdGpu::NumberClass::Uint:
+        return vk::Format::eR32G32B32A32Uint;
+    case AmdGpu::NumberClass::Sint:
+        return vk::Format::eR32G32B32A32Sint;
+    default:
+        return vk::Format::eR32G32B32A32Sfloat;
+    }
+}
+
+u32 VertexInputStride(const AmdGpu::Buffer& buffer) {
+    return DescribesNoData(buffer) ? 0u : buffer.GetStride();
+}
+
 vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat num_format) {
     const auto index = GetSurfaceFormatTableIndex(data_format, num_format);
     vk::Format result = surface_format_table[index];

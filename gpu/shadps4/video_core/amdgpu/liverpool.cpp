@@ -8,6 +8,7 @@
 #endif
 #include <time.h>
 #include "bbport_copy.h"
+#include "bbport_flip_tail.h"
 #include "bbport_toggles.h"
 #include <cstdio>
 #include <boost/preprocessor/stringize.hpp>
@@ -103,6 +104,9 @@ void Liverpool::ProcessCommands() {
             callback = std::move(command_queue.front());
             command_queue.pop();
             --num_commands;
+        }
+        if (BbStats::enabled) {
+            BbStats::gpu_commands.fetch_add(1, std::memory_order_relaxed);
         }
         callback();
     }
@@ -427,6 +431,11 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
 
 Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
     FIBER_ENTER(ccb_task_name);
+    // bbport: a garbage header ends the constant buffer like the draw engine's (see
+    // ProcessGraphics). The draw engine stops waiting once this task is done, and it costs the
+    // constants of one submission.
+    const auto base_addr = reinterpret_cast<uintptr_t>(ccb.data());
+    static int reported = 0;
 
     while (!ccb.empty()) {
         ProcessCommands();
@@ -435,7 +444,14 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         const u32 type = header->type;
         if (type != 3) {
             // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", type);
+            if (reported < 16) {
+                ++reported;
+                LOG_WARNING(Render, "PM4 header {:#010x} (type {}) at +{:#x} of a constant buffer: "
+                                    "rest of the buffer dropped",
+                            header->raw, type, reinterpret_cast<uintptr_t>(ccb.data()) - base_addr);
+            }
+            ccb = {};
+            continue;
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
@@ -467,9 +483,14 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         case PM4ItOpcode::WaitOnDeCounterDiff: {
             const auto diff = it_body[0];
-            while ((cblock.de_count - cblock.ce_count) >= diff) {
+            cblock.ce_waits_for_de = true; // bbport: ProcessGraphics's cleanup looks at it
+            // bbport: ce_count - de_count, which cannot wrap below zero (upstream #5406, from
+            // SpartanPort 61e307d1): de_count - ce_count wrapped when the CE was ahead.
+            while (cblock.ce_waits_for_de && cblock.ce_count >= cblock.de_count &&
+                   (cblock.ce_count - cblock.de_count) >= diff) {
                 YIELD_CE();
             }
+            cblock.ce_waits_for_de = false;
             break;
         }
         case PM4ItOpcode::IndirectBufferConst: {
@@ -485,9 +506,14 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             break;
         }
         default:
-            const u32 count = header->type3.NumWords();
-            UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
-                            static_cast<u32>(opcode), count);
+            if (reported < 16) {
+                ++reported;
+                LOG_WARNING(Render, "PM4 header {:#010x} (type 3) at +{:#x} of a constant buffer: "
+                                    "rest of the buffer dropped",
+                            header->raw, reinterpret_cast<uintptr_t>(ccb.data()) - base_addr);
+            }
+            ccb = {};
+            continue;
         }
         ccb = NextPacket(ccb, header->type3.NumWords() + 1);
     }
@@ -762,27 +788,52 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
 
     const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
+    const auto whole = dcb;
+    // bbport: BB_DCB_CHECK=1: a snapshot made at submission (not the buffer read below).
+    const BbCommandBufferCopy* snapshot =
+        command_copy && command_copy->Draw().data() != dcb.data() ? command_copy.get() : nullptr;
+    if (snapshot) {
+        BbDcbCompare(*snapshot, whole, "start");
+    }
+    const auto submitted_as = [&](const u32* at) -> u32 {
+        const auto offset = static_cast<size_t>(at - whole.data());
+        return snapshot && offset < snapshot->Draw().size() ? snapshot->Draw()[offset] : 0u;
+    };
     while (!dcb.empty()) {
         ProcessCommands();
+        if (BbStats::enabled) {
+            BbStats::pm4_packets.fetch_add(1, std::memory_order_relaxed);
+        }
 
         const auto* header = reinterpret_cast<const PM4Header*>(dcb.data());
         const u32 type = header->type;
 
         switch (type) {
         default:
-        case 0:
+        case 0: {
             // bbport: a garbage dword read as a packet header (a command buffer the game was
             // already reusing: "Unimplemented PM4 type 0 ... size: 15810") stopped the whole
             // game. The rest of this buffer is dropped instead; the loop ends normally, so the
             // submission's cleanup below still runs. Idea from parsifal295 (PR #57).
+            // bbport: a flip buffer keeps its flip (bbport_flip_tail.h).
+            const auto kept = BbKeepAfterGarbage(whole, dcb.data());
             if (static int reported = 0; reported < 16) {
                 ++reported;
                 LOG_WARNING(Render, "PM4 header {:#010x} (type {}) at +{:#x}: rest of the buffer "
-                                    "dropped",
-                            header->raw, type, reinterpret_cast<uintptr_t>(dcb.data()) - base_addr);
+                                    "dropped{}",
+                            header->raw, type, reinterpret_cast<uintptr_t>(dcb.data()) - base_addr,
+                            kept.empty() ? "" : ", its flip kept");
+                if (snapshot) {
+                    std::printf("DCB check: dropped at +%#llx of %p: %#010x when submitted\n",
+                                static_cast<unsigned long long>(
+                                    reinterpret_cast<uintptr_t>(dcb.data()) - base_addr),
+                                static_cast<const void*>(whole.data()), submitted_as(dcb.data()));
+                    std::fflush(stdout);
+                }
             }
-            dcb = {};
+            dcb = kept;
             continue;
+        }
         case 2:
             // Type-2 packet are used for padding purposes
             dcb = NextPacket(dcb, 1);
@@ -1322,7 +1373,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::WaitOnCeCounter: {
-                while (cblock.ce_count <= cblock.de_count && !ce_task.handle.done()) {
+                // bbport: a submission without a constant-engine buffer has no task to resume
+                // (upstream #5406, from SpartanPort 61e307d1).
+                while (cblock.ce_count <= cblock.de_count && ce_task.handle &&
+                       !ce_task.handle.done()) {
                     RESUME_GFX(ce_task);
                 }
                 break;
@@ -1357,9 +1411,39 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 }
                 break;
             }
-            default:
-                UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
-                                static_cast<u32>(opcode), count);
+            default: {
+                // bbport: a garbage dword can also read as a type-3 header with an opcode this
+                // switch does not know ("Unknown PM4 type 3 opcode 0x0 with count 9329" stopped
+                // the game). The rest of the buffer is dropped, as for the other types above.
+                const auto kept = BbKeepAfterGarbage(whole, dcb.data());
+                if (static int reported = 0; reported < 16) {
+                    ++reported;
+                    LOG_WARNING(Render,
+                                "PM4 header {:#010x} (type {}) at +{:#x}: rest of the buffer "
+                                "dropped{}",
+                                header->raw, type,
+                                reinterpret_cast<uintptr_t>(dcb.data()) - base_addr,
+                                kept.empty() ? "" : ", its flip kept");
+                    if (snapshot) {
+                        std::printf("DCB check: dropped at +%#llx of %p: %#010x when submitted\n",
+                                    static_cast<unsigned long long>(
+                                        reinterpret_cast<uintptr_t>(dcb.data()) - base_addr),
+                                    static_cast<const void*>(whole.data()),
+                                    submitted_as(dcb.data()));
+                        std::fflush(stdout);
+                    }
+                }
+                dcb = kept;
+                continue;
+            }
+            }
+            // bbport: a length past the buffer's end is a garbage header too. NextPacket logs it and
+            // ends the buffer; a flip buffer keeps its flip, as above.
+            if (const size_t words = header->type3.NumWords() + 1; words > dcb.size()) {
+                const auto kept = BbKeepAfterGarbage(whole, dcb.data());
+                NextPacket(dcb, words);
+                dcb = kept;
+                continue;
             }
             dcb = NextPacket(dcb, header->type3.NumWords() + 1);
             break;
@@ -1368,11 +1452,22 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
     if (ce_task.handle) {
         while (!ce_task.handle.done()) {
+            // bbport: the draw engine is done, so the increments the constant engine waits for
+            // (WaitOnDeCounterDiff) were in a part a garbage header cut off, here or in an indirect
+            // buffer; without this the loop never ends. The flag ends the wait outright, also for a
+            // garbage difference of 0, which no count can satisfy.
+            if (cblock.ce_waits_for_de) {
+                cblock.de_count = cblock.ce_count;
+                cblock.ce_waits_for_de = false;
+            }
             RESUME_GFX(ce_task);
         }
         ce_task.handle.destroy();
     }
 
+    if (snapshot) {
+        BbDcbCompare(*snapshot, whole, "end");
+    }
     if (rasterizer && seq != NoSeq) {
         rasterizer->RetireSubmission(); // prepared draws live until the recording thread is past
     }
@@ -1686,17 +1781,32 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
 
-    std::shared_ptr<const BbCommandBufferCopy> command_copy;
-    if (EmulatorSettings.IsCopyGpuBuffers()) {
-        command_copy = std::make_shared<BbCommandBufferCopy>(dcb, ccb);
-        dcb = command_copy->Draw();
-        ccb = command_copy->Constant();
-    }
-
     // The copy for the draw preparation workers is made before taking the queue lock, which
     // the GPU thread needs to pick up work.
     auto* draw_prep = rasterizer ? &rasterizer->GetDrawPreparation() : nullptr;
     auto prep_submission = draw_prep ? draw_prep->Build(dcb) : nullptr;
+
+    // bbport: the GPU thread reads the commands as they were submitted (the default since
+    // 1.9.8.5; BB_COPY_GPU_BUFFERS=0: the game's memory when it gets to them, as before).
+    // Bloodborne reuses one command buffer (3720 or 7668 dwords) without waiting for the GPU:
+    // 28-84 ms after submitting it, with 7-56 submissions still queued ahead (a save loading,
+    // a burst of new shaders), it wrote a later frame's commands over it (BB_DCB_CHECK). Read
+    // half-written, a zero dword ended it ("PM4 header 0x00000000 ... rest of the buffer
+    // dropped") and the picture stayed smeared for the rest of the session. The game uses no
+    // nested command buffers, so the top-level copy covers all it submits; the draw
+    // preparation's copy is of this same submission and is shared, not made again.
+    std::shared_ptr<BbCommandBufferCopy> command_copy;
+    static const bool dcb_check = EmulatorSettingsImpl::Flag("BB_DCB_CHECK", false);
+    if (EmulatorSettings.IsCopyGpuBuffers()) {
+        command_copy = prep_submission ? std::make_shared<BbCommandBufferCopy>(
+                                             prep_submission,
+                                             std::span<const u32>{prep_submission->commands}, ccb)
+                                       : std::make_shared<BbCommandBufferCopy>(dcb, ccb);
+        dcb = command_copy->Draw();
+        ccb = command_copy->Constant();
+    } else if (dcb_check) {
+        command_copy = std::make_shared<BbCommandBufferCopy>(dcb, ccb); // snapshot only
+    }
     {
         // Numbering, enqueueing and queueing under one lock keep the three orders identical.
         std::scoped_lock lock{queue.m_access};
@@ -1704,6 +1814,9 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
         if (draw_prep) {
             seq = gfx_submit_seq++;
             draw_prep->Enqueue(seq, std::move(prep_submission));
+        }
+        if (command_copy) {
+            command_copy->queued_ahead = static_cast<u32>(queue.submits.size());
         }
         auto task = ProcessGraphics(dcb, ccb, seq, std::move(command_copy));
         queue.submits.emplace(task.handle);
