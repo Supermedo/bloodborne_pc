@@ -1,0 +1,39 @@
+name: RecompLauncher integration
+
+on:
+  push:
+    paths:
+      - launcher/bbport_recomplauncher.py
+      - launcher/bbport_launcher_win.py
+      - run.py
+      - scripts/**
+      - tests/test_recomplauncher.py
+      - tests/paths.py
+      - recomplauncher.json
+      - .github/workflows/recomplauncher.yml
+  pull_request:
+    paths:
+      - launcher/bbport_recomplauncher.py
+      - launcher/bbport_launcher_win.py
+      - run.py
+      - scripts/**
+      - tests/test_recomplauncher.py
+      - tests/paths.py
+      - recomplauncher.json
+      - .github/workflows/recomplauncher.yml
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -S -m unittest discover -s tests -p test_recomplauncher.py

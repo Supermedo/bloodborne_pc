@@ -1,0 +1,267 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+"""RecompLauncher entry points. No GUI, source repair or persistent setting overrides."""
+import argparse
+from contextlib import contextmanager
+import json
+import os
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import sys
+
+OWNER = '.bbport-prepared.json'
+REQUIRED = ('boot.bin', 'boot-linked.bin', 'content.bin', 'patches.bin', 'link.json')
+
+
+def progress(value, message):
+    print(f'progress {value:.3f} {message}', flush=True)
+
+
+def cache_folder(launcher):
+    return Path(launcher.DATA_DIR).resolve() / 'out' / 'recomplauncher'
+
+
+def validate_game(game):
+    """Accept the supported title/update, without searching for or repairing another dump."""
+    from prepare import sfo, system_folder
+    from clean_eboot import CLEAN_IMAGE, image_hash
+    if not Path(game).is_dir():
+        raise ValueError(f'The game folder {game} is not there. Pick your Bloodborne game folder again.')
+    game = Path(game).resolve(strict=True)
+    for item in ('eboot.bin', 'sce_module/libc.prx', 'dvdroot_ps4'):
+        if not (game / item).exists():
+            raise ValueError(f'The game folder is incomplete: missing {item}.')
+    from patches import BLOODBORNE_IDS
+    metadata = sfo((system_folder(game) / 'param.sfo').read_bytes())
+    if metadata.get('TITLE_ID') not in BLOODBORNE_IDS:
+        raise ValueError('This is not a retail release of Bloodborne. Pick your own Bloodborne game folder.')
+    # Every retail release runs the same 1.09 executable; Game of the Year dumps say APP_VER 01.00 over it.
+    digest = image_hash(game / 'eboot.bin')
+    if digest != CLEAN_IMAGE:
+        raise ValueError('The executable is not the clean 1.09 version. Apply the 1.09 update, or restore '
+                         'eboot.bin from your own dump; RecompLauncher setup does not modify or repair it.')
+    return game, digest
+
+
+def read_marker(path):
+    try:
+        marker = json.loads((path / OWNER).read_text(encoding='utf-8'))
+        return marker if isinstance(marker, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def already_prepared(launcher, game):
+    """This release prepared the cache from `game` and it is complete."""
+    cache = cache_folder(launcher)
+    marker = read_marker(cache)
+    if not owned(cache) or marker.get('version') != launcher.VERSION_TEXT:
+        return False
+    if marker.get('game') != str(Path(game).resolve()):
+        return False
+    return all((cache / name).is_file() for name in REQUIRED)
+
+
+def owned(path):
+    try:
+        marker = json.loads((path / OWNER).read_text(encoding='utf-8'))
+        return marker.get('format') == 1 and marker.get('owner') == 'bbport-recomplauncher'
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def linked(path):
+    return path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction())
+
+
+def overlaps(a, b):
+    """Use filesystem identity for case-insensitive paths and directory aliases too."""
+    for parent, child in ((a, b), (b, a)):
+        for at in (child, *child.parents):
+            if parent == at or (parent.exists() and at.exists() and parent.samefile(at)):
+                return True
+    return False
+
+
+def destination_for(launcher, game):
+    destination = cache_folder(launcher)
+    if overlaps(game, destination):
+        raise ValueError('The game dump and the preparation cache must be in separate folders.')
+    if linked(destination) or (destination.exists() and not owned(destination)):
+        raise ValueError('The preparation destination exists and is not managed by this integration.')
+    return destination
+
+
+@contextmanager
+def setup_lock(path):
+    """Held open for the whole setup. The system lets go of it however the process ends (RecompLauncher's
+    Cancel or its silence rule kill the process tree), so a lock that can be taken means no setup runs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, 'a+b')
+    try:
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise ValueError('Another setup of Bloodborne is still running. Wait for it to finish, '
+                             'then try again.') from None
+        try:
+            yield
+        finally:
+            if os.name == 'nt':
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        handle.close()
+
+
+def recover(destination, transaction):
+    """What a stopped setup left: the previous cache it had moved aside comes back, and the rest (`new` is only
+    a staging copy) is removed. Called with the setup lock held, so no setup is using them."""
+    if not transaction.exists() and not linked(transaction):
+        return
+    if (linked(transaction) or not transaction.is_dir()
+            or any(item.name not in ('new', 'old') or linked(item) for item in transaction.iterdir())):
+        raise ValueError(f'{transaction} is not managed by this integration. Move it aside before retrying.')
+    old = transaction / 'old'
+    if old.is_dir() and owned(old) and not destination.exists() and not linked(destination):
+        old.rename(destination)
+    shutil.rmtree(transaction)
+
+
+def prepare(launcher, settings, game, digest):
+    destination = destination_for(launcher, game)
+    transaction = destination.with_name(destination.name + '.preparing')
+    with setup_lock(destination.with_name(destination.name + '.lock')):
+        recover(destination, transaction)
+        destination_for(launcher, game)  # the cache put back is checked like any other
+        transaction.mkdir()
+        prepare_locked(launcher, settings, game, digest, destination, transaction)
+
+
+def prepare_locked(launcher, settings, game, digest, destination, transaction):
+    staged = transaction / 'new'
+    moved_old = published = preserve = False
+    try:
+        # Preparing files needs no GPU discovery or first-run graphics selection.
+        from patches import read_settings
+        graphics = {**launcher.INI_DEFAULTS, **read_settings(launcher.ini_path())}
+        env = launcher.game_environment(settings, graphics)
+        env.update(BB_GAME_DIR=str(game), BB_READ_ONLY_GAME='1', BB_PREPARED_OUT=str(staged),
+                   BB_CONFIG=str(launcher.ini_path().resolve()))
+        progress(0.10, 'Preparing your game files')
+        process = subprocess.Popen([*launcher.run_command(), '--prepare-only'],
+                                   cwd=launcher.PORT_DIR, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   creationflags=launcher.NO_WINDOW)
+        try:
+            for raw in iter(process.stdout.readline, b''):
+                print(raw.decode('utf-8', errors='replace').rstrip('\r\n'), flush=True)
+            code = process.wait()
+        except BaseException:
+            preserve = True
+            process.terminate()
+            process.wait()
+            # A script subprocess may still be finishing; its workspace stays until the next setup removes it.
+            raise
+        finally:
+            process.stdout.close()
+        if code:
+            raise ValueError(f'Game preparation failed (exit {code}). See the setup log above.')
+        for name in REQUIRED:
+            if not (staged / name).is_file() or not (staged / name).stat().st_size:
+                raise ValueError(f'Game preparation did not produce {name}.')
+        (staged / OWNER).write_text(json.dumps({'format': 1, 'owner': 'bbport-recomplauncher',
+                                               'game': str(game), 'image_sha256': digest,
+                                               'version': launcher.VERSION_TEXT}) + '\n',
+                                    encoding='utf-8')
+        if destination.exists():
+            if linked(destination) or not owned(destination):
+                raise ValueError('The destination changed during setup; its files were kept.')
+            destination.rename(transaction / 'old')
+            moved_old = True
+        staged.rename(destination)
+        published = True
+        progress(1, 'Ready to play')
+    finally:
+        if moved_old and not published:
+            try:
+                (transaction / 'old').rename(destination)
+            except OSError:
+                preserve = True
+                print(f'The previous preparation is preserved in {transaction / "old"}.', file=sys.stderr)
+        if not preserve:
+            try:
+                shutil.rmtree(transaction)
+            except OSError as error:
+                print(f'Preparation files remain in {transaction}: {error}', file=sys.stderr)
+
+
+@contextmanager
+def environment(values):
+    previous = {key: os.environ.get(key) for key in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def main(argv, launcher):
+    parser = argparse.ArgumentParser(description=__doc__)
+    roles = parser.add_mutually_exclusive_group(required=True)
+    roles.add_argument('--prepare-content', dest='mode', action='store_const', const='prepare')
+    roles.add_argument('--recomplauncher-play', dest='mode', action='store_const', const='play')
+    # Both need the player's game folder: the game plays from it every time, so RecompLauncher passes it
+    # to every run of the setup step too (no keeps_copy).
+    parser.add_argument('--game-dir', default='')
+    args = parser.parse_args(argv)
+    if not args.game_dir.strip():
+        flag = '--prepare-content' if args.mode == 'prepare' else '--recomplauncher-play'
+        parser.error(f'{flag} needs --game-dir=<your Bloodborne game folder>. '
+                     'Pick your Bloodborne game folder in RecompLauncher again.')
+    try:
+        source = Path(args.game_dir)
+        if args.mode == 'prepare':
+            progress(0, 'Checking your Bloodborne copy')
+            if already_prepared(launcher, source):
+                progress(1, 'Already prepared')
+                return 0
+        game, digest = validate_game(source)
+        if launcher.updater.underway():
+            raise ValueError('An update is being installed. Wait for it to finish before starting.')
+        if launcher.game_underway():
+            raise ValueError('Bloodborne is already running or being prepared. Close it before retrying.')
+        saved = launcher.load_settings()
+        settings = {**launcher.APP_DEFAULTS, **saved, 'game_dir': str(game)}
+        settings.update(launcher.settled_online(settings, saved))
+        if args.mode == 'prepare':
+            prepare(launcher, settings, game, digest)
+            return 0
+        destination = destination_for(launcher, game)
+        if not destination.exists():
+            raise ValueError('Run content preparation in RecompLauncher before starting Bloodborne.')
+        problem = launcher.start_problem(settings)
+        if problem:
+            raise ValueError(problem[0])
+        with environment({'BB_PREPARED_OUT': str(destination), 'BB_READ_ONLY_GAME': '1'}):
+            code = launcher.play_without_window(settings)
+        if code is None:
+            raise ValueError('The selected graphics configuration is unavailable. Review it in Bloodborne.')
+        return code
+    except (OSError, ValueError, KeyError, IndexError, struct.error, StopIteration,
+            subprocess.SubprocessError) as error:
+        print(str(error).replace('\r', ' ').replace('\n', ' '), file=sys.stderr, flush=True)
+        return 1
+    except KeyboardInterrupt:
+        return 130
