@@ -210,32 +210,38 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not there'):
             integration.validate_game(self.root / 'gone')
 
-    def test_setup_after_a_new_release_needs_no_copy_when_prepared(self):
+    def test_setup_again_with_the_same_copy_is_already_prepared(self):
         self.prepare()
         popen = mock.Mock(side_effect=AssertionError('prepared again'))
         with mock.patch.object(integration.subprocess, 'Popen', popen), \
                 mock.patch.object(integration, 'validate_game', side_effect=AssertionError('copy read')), \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
-            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 0)
             self.assertEqual(integration.main(['--prepare-content', f'--game-dir={self.game}'], self.launcher), 0)
         self.assertIn('progress 1.000 Already prepared', out.getvalue())
 
-    def test_setup_for_a_new_release_uses_the_recorded_game_folder(self):
+    def test_setup_for_a_new_release_prepares_again_from_the_given_copy(self):
         self.prepare()
         self.launcher.VERSION_TEXT = '9.9.9'
         with mock.patch.object(integration.subprocess, 'Popen', side_effect=self.process), \
                 mock.patch.object(integration, 'validate_game', return_value=(self.game, 'known hash')) as check, \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 0)
-        check.assert_called_once_with(str(self.game))
+            self.assertEqual(integration.main(['--prepare-content', f'--game-dir={self.game}'], self.launcher), 0)
+        check.assert_called_once_with(self.game)
         marker = json.loads((self.cache / integration.OWNER).read_text())
         self.assertEqual(marker['version'], '9.9.9')
 
-    def test_setup_without_copy_or_earlier_setup_is_an_error(self):
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 1)
-        self.assertIn('Pick your Bloodborne game folder', err.getvalue())
-        self.assertFalse(self.cache.exists())
+    def test_setup_and_play_without_the_copy_exit_with_a_clear_message(self):
+        self.prepare()
+        for mode in ('--prepare-content', '--recomplauncher-play'):
+            for args in ([mode], [mode, '--game-dir=']):
+                with mock.patch.object(integration, 'validate_game', side_effect=AssertionError('copy read')), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+                    with self.assertRaises(SystemExit) as exit:
+                        integration.main(args, self.launcher)
+                self.assertEqual(exit.exception.code, 2)
+                self.assertIn(f'{mode} needs --game-dir', err.getvalue())
+                self.assertIn('Pick your Bloodborne game folder', err.getvalue())
+        self.launcher.play_without_window.assert_not_called()
 
 
 class RunnerTests(unittest.TestCase):

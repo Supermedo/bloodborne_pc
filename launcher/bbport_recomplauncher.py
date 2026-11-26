@@ -52,13 +52,13 @@ def read_marker(path):
         return None
 
 
-def already_prepared(launcher, game=None):
-    """This release prepared the cache (from `game`, when given) and it is complete."""
+def already_prepared(launcher, game):
+    """This release prepared the cache from `game` and it is complete."""
     cache = cache_folder(launcher)
     marker = read_marker(cache)
     if not owned(cache) or marker.get('version') != launcher.VERSION_TEXT:
         return False
-    if game is not None and marker.get('game') != str(Path(game).resolve()):
+    if marker.get('game') != str(Path(game).resolve()):
         return False
     return all((cache / name).is_file() for name in REQUIRED)
 
@@ -178,23 +178,21 @@ def main(argv, launcher):
     roles = parser.add_mutually_exclusive_group(required=True)
     roles.add_argument('--prepare-content', dest='mode', action='store_const', const='prepare')
     roles.add_argument('--recomplauncher-play', dest='mode', action='store_const', const='play')
-    # Optional for setup: RecompLauncher runs it again after each release without the player's copy
-    # (keeps_copy), and the game folder recorded by the last setup is used.
-    parser.add_argument('--game-dir', type=Path)
+    # Both need the player's game folder: the game plays from it every time, so RecompLauncher passes it
+    # to every run of the setup step too (no keeps_copy).
+    parser.add_argument('--game-dir', default='')
     args = parser.parse_args(argv)
-    if args.mode == 'play' and args.game_dir is None:
-        parser.error('--recomplauncher-play needs --game-dir')
+    if not args.game_dir.strip():
+        flag = '--prepare-content' if args.mode == 'prepare' else '--recomplauncher-play'
+        parser.error(f'{flag} needs --game-dir=<your Bloodborne game folder>. '
+                     'Pick your Bloodborne game folder in RecompLauncher again.')
     try:
-        source = args.game_dir
+        source = Path(args.game_dir)
         if args.mode == 'prepare':
             progress(0, 'Checking your Bloodborne copy')
             if already_prepared(launcher, source):
                 progress(1, 'Already prepared')
                 return 0
-            if source is None:
-                source = (read_marker(cache_folder(launcher)) or {}).get('game')
-                if not source:
-                    raise ValueError('Pick your Bloodborne game folder to set it up.')
         game, digest = validate_game(source)
         if launcher.updater.underway():
             raise ValueError('An update is being installed. Wait for it to finish before starting.')
