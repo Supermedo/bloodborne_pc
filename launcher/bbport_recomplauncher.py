@@ -10,7 +10,7 @@ import struct
 import subprocess
 import sys
 
-OWNER = '.recomplauncher-prepared.json'
+OWNER = '.bbport-prepared.json'
 REQUIRED = ('boot.bin', 'boot-linked.bin', 'content.bin', 'patches.bin', 'link.json')
 
 

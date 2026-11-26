@@ -22,7 +22,7 @@
     "program": ["Bloodborne.exe"],
     "args": ["--prepare-content", "--game-dir={input:game}"],
     "label": "Checking and preparing Bloodborne",
-    "done": ["{install}/out/recomplauncher/.recomplauncher-prepared.json"]
+    "done": ["{install}/out/recomplauncher/.bbport-prepared.json"]
   },
   "system": { "windows": { "version": "10" } },
   "config": [
