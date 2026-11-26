@@ -3,21 +3,29 @@
   "format": 1,
   "name": "Bloodborne for Windows",
   "repo": "Supermedo/bloodborne_pc",
-  "game": {
-    "kind": "folder",
-    "label": "Your decrypted Bloodborne CUSA03173 game folder with the 1.09 update applied and an unmodified eboot.bin.",
-    "check": { "file": "eboot.bin" }
-  },
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your decrypted Bloodborne game folder (any retail edition, such as CUSA00900, CUSA00207 or CUSA03173) with the 1.09 update applied and an unmodified eboot.bin.",
+      "formats": [{ "type": "folder" }],
+      "check": {
+        "file": "eboot.bin",
+        "ids": ["CUSA00900", "CUSA00207", "CUSA00208", "CUSA00299", "CUSA01363", "CUSA03179", "CUSA03173", "CUSA03014", "CUSA03023"]
+      }
+    }
+  ],
   "start": {
     "program": ["Bloodborne.exe"],
-    "args": ["--recomplauncher-play", "--game-dir", "{game}"]
+    "args": ["--recomplauncher-play", "--game-dir={input:game}"]
   },
   "prepare": {
     "program": ["Bloodborne.exe"],
-    "args": ["--prepare-content", "--game-dir", "{game}"],
+    "args": ["--prepare-content", "--game-dir={input:game}"],
     "label": "Checking and preparing Bloodborne",
-    "timeout": 600
+    "done": ["{install}/out/recomplauncher/.recomplauncher-prepared.json"],
+    "keeps_copy": true
   },
+  "system": { "windows": { "version": "10" } },
   "config": [
     {
       "id": "main", "format": "ini",
@@ -30,10 +38,12 @@
     }
   ],
   "folders": {
+    "game": [{ "path": "{install}/out/recomplauncher" }],
     "saves": [{ "path": "{install}/user/savedata" }],
     "logs": [{ "path": "{install}/user" }]
   },
-  "saves": ["{install}/user/savedata", "{install}/user/trophies.log", "{install}/bbport.ini", "{install}/input.ini"],
+  "saves": ["{install}/user/savedata", "{install}/user/trophies.log", "{install}/bbport.ini", "{install}/input.ini",
+            "{install}/user/seamless-coop/savedata", "{install}/seamless/user/savedata"],
   "looks": { "graphics": "vulkan" },
   "exit_codes": {
     "1": "Bloodborne could not start. Check its log and your selected game folder.",
