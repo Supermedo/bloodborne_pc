@@ -26,20 +26,41 @@ def validate_game(game):
     """Accept the supported title/update, without searching for or repairing another dump."""
     from prepare import sfo, system_folder
     from clean_eboot import CLEAN_IMAGE, image_hash
+    if not Path(game).is_dir():
+        raise ValueError(f'The game folder {game} is not there. Pick your Bloodborne game folder again.')
     game = Path(game).resolve(strict=True)
     for item in ('eboot.bin', 'sce_module/libc.prx', 'dvdroot_ps4'):
         if not (game / item).exists():
             raise ValueError(f'The game folder is incomplete: missing {item}.')
+    from patches import BLOODBORNE_IDS
     metadata = sfo((system_folder(game) / 'param.sfo').read_bytes())
-    if metadata.get('TITLE_ID') != 'CUSA03173':
-        raise ValueError('This build needs the Bloodborne CUSA03173 game folder.')
-    if metadata.get('APP_VER') != '01.09':
-        raise ValueError('Apply the 1.09 update to your own dump before preparing it.')
+    if metadata.get('TITLE_ID') not in BLOODBORNE_IDS:
+        raise ValueError('This is not a retail release of Bloodborne. Pick your own Bloodborne game folder.')
+    # Every retail release runs the same 1.09 executable; Game of the Year dumps say APP_VER 01.00 over it.
     digest = image_hash(game / 'eboot.bin')
     if digest != CLEAN_IMAGE:
-        raise ValueError('The executable is not the clean 1.09 version. Restore it from your own dump; '
-                         'RecompLauncher preparation does not modify or repair the source.')
+        raise ValueError('The executable is not the clean 1.09 version. Apply the 1.09 update, or restore '
+                         'eboot.bin from your own dump; RecompLauncher setup does not modify or repair it.')
     return game, digest
+
+
+def read_marker(path):
+    try:
+        marker = json.loads((path / OWNER).read_text(encoding='utf-8'))
+        return marker if isinstance(marker, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def already_prepared(launcher, game=None):
+    """This release prepared the cache (from `game`, when given) and it is complete."""
+    cache = cache_folder(launcher)
+    marker = read_marker(cache)
+    if not owned(cache) or marker.get('version') != launcher.VERSION_TEXT:
+        return False
+    if game is not None and marker.get('game') != str(Path(game).resolve()):
+        return False
+    return all((cache / name).is_file() for name in REQUIRED)
 
 
 def owned(path):
@@ -113,7 +134,8 @@ def prepare(launcher, settings, game, digest):
             if not (staged / name).is_file() or not (staged / name).stat().st_size:
                 raise ValueError(f'Game preparation did not produce {name}.')
         (staged / OWNER).write_text(json.dumps({'format': 1, 'owner': 'bbport-recomplauncher',
-                                               'game': str(game), 'image_sha256': digest}) + '\n',
+                                               'game': str(game), 'image_sha256': digest,
+                                               'version': launcher.VERSION_TEXT}) + '\n',
                                     encoding='utf-8')
         if destination.exists():
             if linked(destination) or not owned(destination):
@@ -156,12 +178,24 @@ def main(argv, launcher):
     roles = parser.add_mutually_exclusive_group(required=True)
     roles.add_argument('--prepare-content', dest='mode', action='store_const', const='prepare')
     roles.add_argument('--recomplauncher-play', dest='mode', action='store_const', const='play')
-    parser.add_argument('--game-dir', required=True, type=Path)
+    # Optional for setup: RecompLauncher runs it again after each release without the player's copy
+    # (keeps_copy), and the game folder recorded by the last setup is used.
+    parser.add_argument('--game-dir', type=Path)
     args = parser.parse_args(argv)
+    if args.mode == 'play' and args.game_dir is None:
+        parser.error('--recomplauncher-play needs --game-dir')
     try:
+        source = args.game_dir
         if args.mode == 'prepare':
             progress(0, 'Checking your Bloodborne copy')
-        game, digest = validate_game(args.game_dir)
+            if already_prepared(launcher, source):
+                progress(1, 'Already prepared')
+                return 0
+            if source is None:
+                source = (read_marker(cache_folder(launcher)) or {}).get('game')
+                if not source:
+                    raise ValueError('Pick your Bloodborne game folder to set it up.')
+        game, digest = validate_game(source)
         if launcher.updater.underway():
             raise ValueError('An update is being installed. Wait for it to finish before starting.')
         if launcher.game_underway():

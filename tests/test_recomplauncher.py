@@ -22,7 +22,7 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.game = self.root / 'game dump'
         self.game.mkdir()
         (self.game / 'eboot.bin').write_bytes(b'original source')
@@ -31,7 +31,7 @@ class IntegrationTests(unittest.TestCase):
         self.saved = {'game_dir': 'another game', 'fullscreen': True, 'user_dir': 'custom saves',
                       'controller': 'automatic', 'custom_preference': {'keep': True}}
         self.launcher = SimpleNamespace(
-            DATA_DIR=self.data, PORT_DIR=self.data, NO_WINDOW=0,
+            DATA_DIR=self.data, PORT_DIR=self.data, NO_WINDOW=0, VERSION_TEXT='1.9.8.6',
             APP_DEFAULTS={'game_dir': '', 'user_dir': ''}, INI_DEFAULTS={'upscaler': 'fsr3'},
             load_settings=mock.Mock(side_effect=lambda: dict(self.saved)),
             settled_online=mock.Mock(return_value={}),
@@ -161,7 +161,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_invalid_cli_is_an_error(self):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
-            integration.main(['--prepare-content'], self.launcher)
+            integration.main(['--recomplauncher-play'], self.launcher)
         self.assertEqual(result.exception.code, 2)
 
     def test_overlap_and_case_aliases_are_rejected(self):
@@ -196,11 +196,46 @@ class IntegrationTests(unittest.TestCase):
                     integration.validate_game(self.game)
             restore.assert_not_called()
         with mock.patch('prepare.sfo', return_value={'TITLE_ID': 'CUSA99999', 'APP_VER': '01.09'}):
-            with self.assertRaisesRegex(ValueError, 'CUSA03173'):
+            with self.assertRaisesRegex(ValueError, 'not a retail release'):
                 integration.validate_game(self.game)
-        with mock.patch('prepare.sfo', return_value={'TITLE_ID': 'CUSA03173', 'APP_VER': '01.00'}):
+        # Every retail edition; a Game of the Year dump says APP_VER 01.00 over the 1.09 executable.
+        for title, version in (('CUSA00900', '01.09'), ('CUSA00207', '01.09'), ('CUSA03173', '01.00')):
+            with mock.patch('prepare.sfo', return_value={'TITLE_ID': title, 'APP_VER': version}), \
+                    mock.patch('clean_eboot.image_hash', return_value=CLEAN_IMAGE):
+                self.assertEqual(integration.validate_game(self.game), (self.game.resolve(), CLEAN_IMAGE))
+        with mock.patch('prepare.sfo', return_value={'TITLE_ID': 'CUSA00900', 'APP_VER': '01.00'}), \
+                mock.patch('clean_eboot.image_hash', return_value='1.00'):
             with self.assertRaisesRegex(ValueError, '1.09 update'):
                 integration.validate_game(self.game)
+        with self.assertRaisesRegex(ValueError, 'not there'):
+            integration.validate_game(self.root / 'gone')
+
+    def test_setup_after_a_new_release_needs_no_copy_when_prepared(self):
+        self.prepare()
+        popen = mock.Mock(side_effect=AssertionError('prepared again'))
+        with mock.patch.object(integration.subprocess, 'Popen', popen), \
+                mock.patch.object(integration, 'validate_game', side_effect=AssertionError('copy read')), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
+            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 0)
+            self.assertEqual(integration.main(['--prepare-content', f'--game-dir={self.game}'], self.launcher), 0)
+        self.assertIn('progress 1.000 Already prepared', out.getvalue())
+
+    def test_setup_for_a_new_release_uses_the_recorded_game_folder(self):
+        self.prepare()
+        self.launcher.VERSION_TEXT = '9.9.9'
+        with mock.patch.object(integration.subprocess, 'Popen', side_effect=self.process), \
+                mock.patch.object(integration, 'validate_game', return_value=(self.game, 'known hash')) as check, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 0)
+        check.assert_called_once_with(str(self.game))
+        marker = json.loads((self.cache / integration.OWNER).read_text())
+        self.assertEqual(marker['version'], '9.9.9')
+
+    def test_setup_without_copy_or_earlier_setup_is_an_error(self):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(integration.main(['--prepare-content'], self.launcher), 1)
+        self.assertIn('Pick your Bloodborne game folder', err.getvalue())
+        self.assertFalse(self.cache.exists())
 
 
 class RunnerTests(unittest.TestCase):
@@ -230,7 +265,7 @@ class RunnerTests(unittest.TestCase):
                     mock.patch.object(runner, 'PORT', root), mock.patch.object(runner.os, 'chdir'),
                     mock.patch.object(runner, 'hold_game_mutex', return_value=True),
                     mock.patch.object(runner, 'files_note', return_value=None),
-                    mock.patch.object(runner, 'prepare_driver_environment'),
+                    mock.patch.object(runner, 'vulkan_driver_note', return_value=None),
                     mock.patch.object(runner, 'image_sha256', return_value='modified'),
                     mock.patch.object(runner, 'remove_stale_views'),
                     mock.patch.object(runner, 'run_script', side_effect=script),
