@@ -87,6 +87,8 @@ def saves_user_dir(s):
     its own characters (run.py COOP_SAVES), apart from the normal ones it would change."""
     user = Path(s.get('user_dir') or DATA_DIR / 'user')
     return user / saves.COOP_SAVES if plays_seamless(s) else user
+# Started by RecompLauncher, which installs this port's releases itself: no update check or install of its own.
+MANAGED = os.environ.get('RECOMPLAUNCHER') == '1'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/bloodborne_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/bloodborne_pc/releases/latest'
 # The community site (install guide, FAQ, forum), linked from the side bar.
@@ -1598,7 +1600,7 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         root.after(300, self.poll_trophies)
         root.after(800, self.temporary_warning)
         threading.Thread(target=self.detect_gpu, daemon=True).start()
-        if self.app.get('check_updates', True) and not COOP_TEST:
+        if self.app.get('check_updates', True) and not COOP_TEST and not MANAGED:
             threading.Thread(target=self.check_update, daemon=True).start()
 
     def temporary_warning(self):
@@ -6184,7 +6186,13 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
     # ---- updates -------------------------------------------------------------------------------
     def check_update_now(self):
         """The Check for updates buttons (Help, Advanced): asked at once, the answer either way."""
+        if MANAGED:
+            self.managed_updates()
+            return
         threading.Thread(target=self.check_update, args=(True,), daemon=True).start()
+
+    def managed_updates(self):
+        self.messagebox.showinfo('Bloodborne', _('RecompLauncher installs the updates of this installation.'))
 
     def check_update(self, manual=False):
         """Helper thread: asks GitHub for the newest release (and a beta for the next beta) and offers it. Asked by
@@ -6254,6 +6262,9 @@ class Launcher(bbport_setup.SetupMixin, bbport_help.HelpMixin, bbport_search.Sea
         """Downloads release `version`, checks it and starts an installer that puts it in place of this installation
         once this launcher has closed (saves, settings and mods stay; bbport_update). say(text) shows how far it is,
         failed() puts the caller's view back. One update at a time; False when nothing was started."""
+        if MANAGED:
+            self.managed_updates()
+            return False
         if self.updating:
             return False
         if self.game_running():
