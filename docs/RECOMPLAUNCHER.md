@@ -31,12 +31,13 @@ only after the executable, module links, content profile and patches have been g
 It does not start the game or perform GPU capability discovery. Direct launch returns the
 native game's exit code; the existing `--play` behavior is unchanged.
 
-RecompLauncher runs preparation again after every new release, without `--game-dir`
-(`keeps_copy`). When this release already prepared the cache, it prints
-`progress 1 Already prepared` and exits 0 without reading the game folder. Otherwise it
-prepares again from the game folder the last preparation recorded; when that folder is gone,
-it fails and RecompLauncher asks for the game folder again. The game itself still reads your
-game folder while it plays.
+The game plays from your game folder every time, so keep it where you picked it: moving or
+deleting it means picking it again in RecompLauncher before you can play. Both commands need
+`--game-dir`; without it they exit 2 with a message saying so. RecompLauncher passes your
+game folder to every run of preparation, including the run after each new release. When
+this release already prepared the cache from that folder, it prints
+`progress 1 Already prepared` and exits 0 without reading the game folder; otherwise it
+checks the folder and prepares again.
 
 Generated files live in `out/recomplauncher` under the data directory (the installation
 folder by default). Setup uses a separate `out/recomplauncher.preparing` transaction and
@@ -92,7 +93,7 @@ python -m unittest discover -s tests -p test_recomplauncher.py
 ```
 
 These tests cover preparation transactions and rollback, the already-prepared check,
-setup without the game folder, source/preference preservation, title/hash validation,
+setup and play without the game folder, source/preference preservation, title/hash validation,
 direct launch, path handling and the runner's preparation-only boundary. They require no
 game files or graphics device. Windows packaging copies the manifest and this guide into
 the release; PyInstaller includes the integration module.
